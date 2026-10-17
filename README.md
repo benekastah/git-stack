@@ -36,8 +36,8 @@ git stack restack               # rebase use-api onto the new add-api
 git stack push
 ```
 
-Once PR 1 is squash-merged on GitHub (and its branch deleted; see
-[When does `sync` consider a branch merged?](#when-does-sync-consider-a-branch-merged)):
+Once PR 1 is merged, on GitHub or by merging it into `main` locally and pushing
+(see [When does `sync` consider a branch merged?](#when-does-sync-consider-a-branch-merged)):
 
 ```sh
 git stack sync                  # delete add-api, rebase use-api onto main
@@ -85,25 +85,37 @@ collide with the squashed version in `main`.
 | `git stack branch <name>` | Create `<name>` on top of the current branch and track it. |
 | `git stack track <parent> [--base <sha>]` | Track an existing branch. `--base` defaults to the merge-base with `<parent>`; pass the old parent tip explicitly if the parent was already squash-merged. |
 | `git stack rename [<old>] <new>` | Rename a branch (the current one by default) and move the branches stacked on it onto the new name. Unsets its upstream, since the remote branch isn't renamed; the next `git stack push` pushes it under the new name. |
-| `git stack info` | Show all tracked stacks as a tree, marking the current branch and branches that need a restack. |
-| `git stack restack [--onto <parent>] [--squash]` | Rebase every branch in the current stack onto its parent, bottom-up. `--onto` first retargets the current branch. On an untracked branch like `main`, restacks everything stacked on it. `--squash` first squashes each branch in the current stack into one commit (keeping all the messages), so a conflict is resolved once per branch instead of once per commit; it refuses to run outside a stack. |
-| `git stack sync [--remote origin]` | Fetch with `--prune`, fast-forward `main` (and any other stack root) to its upstream, delete branches that were merged, move their children down, restack all stacks, and pull in commits others pushed to tracked branches. |
+| `git stack info` | Show all tracked stacks as a tree, marking the current branch, branches that were merged, and branches that need a restack. |
+| `git stack restack [--onto <parent>] [--squash]` | Rebase every branch in the current stack onto its parent, bottom-up. `--onto` first retargets the current branch. On an untracked branch like `main`, restacks everything stacked on it. Branches that were merged are skipped and their children restacked onto their parent; `sync` deletes them. `--squash` first squashes each branch in the current stack into one commit (keeping all the messages), so a conflict is resolved once per branch instead of once per commit; it refuses to run outside a stack. |
+| `git stack sync [--remote origin] [--delete-merged-remotes]` | Fetch with `--prune`, fast-forward `main` (and any other stack root) to its upstream, delete branches that were merged, move their children down, restack all stacks, and pull in commits others pushed to tracked branches. `--delete-merged-remotes` also deletes merged branches' remote branches that still exist. |
 | `git stack push [--remote origin]` | Force-push (with lease) and `--set-upstream` every branch in the current stack. Refuses if a remote branch has commits the local one doesn't; run `sync` first. |
 | `git stack upgrade [--ref main]` | Replace the installed `git-stack` with the latest version from GitHub (or the given branch, tag or commit). |
 
 ### When does `sync` consider a branch merged?
 
-Both must hold:
+Its changes must already be in its parent (`main`, or the parent PR's branch if
+it was merged into that): merging it into the parent would change nothing. This
+holds however it was merged: squash, rebase or merge commit, on GitHub or
+locally. In addition, either:
 
-1. Its upstream branch is gone after `git fetch --prune` (enable "Automatically
-   delete head branches" on GitHub). Branches that were never pushed with an
-   upstream are never considered merged.
-2. Its changes are already in its parent (`main`, or the parent PR's branch if
-   it was merged into that): merging it into the parent would change nothing.
+- its upstream branch is gone after `git fetch --prune` (e.g. GitHub's
+  "Automatically delete head branches" deleted it), or
+- it has no upstream, or everything on its upstream is in the parent too, and
+  it changes something relative to the commit it was built on (so a new branch
+  with no commits isn't mistaken for a merged one).
 
-A branch whose remote was deleted without merging (a closed PR) fails the
-second check, so `sync` warns and leaves it and its children alone rather than
-silently dropping its commits from the stack.
+If its upstream branch still exists, `sync` says so; pass
+`--delete-merged-remotes` to delete it too. The deletion is leased to the
+fetched tip, so it fails rather than deleting commits pushed since.
+
+A branch whose remote was deleted without merging (a closed PR) fails the first
+check, so `sync` warns and leaves it in the stack rather than silently dropping
+its commits. A merged branch whose remote branch got new commits after the
+merge is skipped with a warning, along with the branches stacked on it, since
+restacking it would replay its merged commits.
+
+`restack` uses the same check but never deletes anything: it skips merged
+branches and restacks their children onto their parent.
 
 If a branch's metadata is broken (for example its parent was deleted by hand),
 `sync` warns and skips that branch and everything stacked on it, and carries on
