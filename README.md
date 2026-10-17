@@ -10,6 +10,40 @@ PR 2 is based on PR 1's branch. PR 1 is squash-merged into `main`. Now
 individual commits on top of a `main` that already contains them as one
 squashed commit.
 
+## Example workflow
+
+Build a stack of two PRs on `main`:
+
+```sh
+git switch main
+git stack branch add-api        # PR 1
+# ...commit...
+git stack branch use-api        # PR 2, stacked on add-api
+# ...commit...
+git stack push                  # push both; open PR 2 against add-api
+```
+
+Address review feedback on PR 1, then move PR 2 on top of it:
+
+```sh
+git switch add-api
+# ...commit...
+git stack info
+# main
+# └── add-api *
+#     └── use-api (needs restack)
+git stack restack               # rebase use-api onto the new add-api
+git stack push
+```
+
+Once PR 1 is squash-merged on GitHub (and its branch deleted; see
+[When does `sync` consider a branch merged?](#when-does-sync-consider-a-branch-merged)):
+
+```sh
+git stack sync                  # delete add-api, rebase use-api onto main
+git stack push
+```
+
 ## How it works
 
 When a branch is created (or tracked), git-stack records its parent branch and
