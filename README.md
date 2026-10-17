@@ -37,8 +37,8 @@ symlink it into `~/.local/bin`) and git will run it as `git stack`.
 | `git stack track <parent> [--base <sha>]` | Track an existing branch. `--base` defaults to the merge-base with `<parent>`; pass the old parent tip explicitly if the parent was already squash-merged. |
 | `git stack info` | Show all tracked stacks as a tree, marking the current branch and branches that need a restack. |
 | `git stack restack [--onto <parent>]` | Rebase every branch in the current stack onto its parent, bottom-up. `--onto` first retargets the current branch. On an untracked branch like `main`, restacks everything stacked on it. |
-| `git stack sync [--remote origin]` | Fetch with `--prune`, fast-forward `main` (and any other stack root) to its upstream, delete branches that were merged, move their children down, and restack all stacks. |
-| `git stack push [--remote origin]` | `git push --force-with-lease --set-upstream` every branch in the current stack. |
+| `git stack sync [--remote origin]` | Fetch with `--prune`, fast-forward `main` (and any other stack root) to its upstream, delete branches that were merged, move their children down, restack all stacks, and pull in commits others pushed to tracked branches. |
+| `git stack push [--remote origin]` | Force-push (with lease) and `--set-upstream` every branch in the current stack. Refuses if a remote branch has commits the local one doesn't; run `sync` first. |
 
 ### When does `sync` consider a branch merged?
 
@@ -47,23 +47,39 @@ Both must hold:
 1. Its upstream branch is gone after `git fetch --prune` (enable "Automatically
    delete head branches" on GitHub). Branches that were never pushed with an
    upstream are never considered merged.
-2. Its changes are already in the stack's root (e.g. `main`): merging it into
-   `main` would change nothing.
+2. Its changes are already in its parent (`main`, or the parent PR's branch if
+   it was merged into that): merging it into the parent would change nothing.
 
 A branch whose remote was deleted without merging (a closed PR) fails the
 second check, so `sync` warns and leaves it and its children alone rather than
 silently dropping its commits from the stack.
 
+If a branch's metadata is broken (for example its parent was deleted by hand),
+`sync` warns and skips that branch and everything stacked on it, and carries on
+with the other stacks.
+
 Note that `sync` restacks every tracked stack, including rebasing bottom
 branches onto the updated `main`. Nothing is pushed until you run
 `git stack push`.
 
+### Pulling commits others pushed
+
+After restacking a branch, `sync` cherry-picks onto it any commits on its
+upstream that it doesn't already have (fast-forwarding when it can). Commits
+that are older versions of your own rebased commits, merge commits (e.g.
+GitHub's "Update branch"), and changes already in the parent are skipped.
+
+`push` pins each lease to the remote-tracking ref it checked, so if someone
+pushes after your last fetch, the push fails instead of overwriting their
+work.
+
 ### Conflicts
 
-If a rebase stops on a conflict, resolve it and run `git rebase --continue`
-(or `git rebase --abort`) as usual, then rerun the git-stack command to finish
-the rest of the stack. The new base is recorded only if the rebase actually
-completed.
+If a rebase or cherry-pick stops on a conflict, resolve it and run
+`git rebase --continue` / `git cherry-pick --continue` (or `--abort`) as usual,
+then rerun the git-stack command to finish the rest of the stack. The new
+parent and base (and the pulled upstream commits) are recorded only if the
+operation actually completed.
 
 ## Tests
 
