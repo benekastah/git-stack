@@ -250,6 +250,41 @@ class RestackTest(StackTestCase):
         self.assertIn("would create a cycle", result.stderr)
         self.assertEqual(self.config("pr1", "stackParent"), "main")
 
+    def test_track_stacks_several_existing_branches(self):
+        self.git("switch", "--quiet", "-c", "pr1")
+        self.commit("a", "pr1\n", "pr1 c1")
+        self.git("switch", "--quiet", "-c", "pr2")
+        self.commit("b", "pr2\n", "pr2 c1")
+        self.git("switch", "--quiet", "-c", "pr3")
+        self.commit("c", "pr3\n", "pr3 c1")
+        self.git("switch", "--quiet", "main")
+
+        self.stack("track", "main", "pr1", "pr2", "pr3")
+
+        self.assert_stacked("pr1", "main", ["pr1 c1"])
+        self.assert_stacked("pr2", "pr1", ["pr2 c1"])
+        self.assert_stacked("pr3", "pr2", ["pr3 c1"])
+        self.assertEqual(self.git("branch", "--show-current"), "main")
+
+    def test_track_several_branches_writes_nothing_if_one_is_bad(self):
+        self.git("switch", "--quiet", "-c", "pr1")
+        self.commit("a", "pr1\n", "pr1 c1")
+        self.git("switch", "--quiet", "main")
+
+        result = self.stack("track", "main", "pr1", "missing", expect_success=False)
+
+        self.assertIn("missing isn't a local branch", result.stderr)
+        self.assert_untracked("pr1")
+
+    def test_track_several_branches_rejects_cycle(self):
+        self.make_stack()
+
+        result = self.stack("track", "pr2", "pr3", "pr1", expect_success=False)
+
+        self.assertIn("would create a cycle", result.stderr)
+        self.assertEqual(self.config("pr3", "stackParent"), "pr2")
+        self.assertEqual(self.config("pr1", "stackParent"), "main")
+
     def test_track_rejects_base_outside_branch_history(self):
         self.git("switch", "--quiet", "-c", "pr1")
         self.commit("a", "pr1\n", "pr1 c1")

@@ -338,20 +338,41 @@ def cmd_branch(args):
 
 
 def cmd_track(args):
-    branch = current_branch()
-    if branch is None:
-        raise StackError("not on a branch")
+    branches = args.branches
+    if not branches:
+        branch = current_branch()
+        if branch is None:
+            raise StackError("not on a branch")
+        branches = [branch]
     if rev(args.parent) is None:
         raise StackError(f"{args.parent} isn't a commit")
-    ensure_no_cycle(branch, args.parent, tracked_branches())
-    base = rev(args.base) if args.base else git("merge-base", args.parent, "HEAD")
-    if base is None:
-        raise StackError(f"{args.base} isn't a commit")
-    if not is_ancestor(base, "HEAD"):
-        raise StackError(f"{args.base} isn't in {branch}'s history")
-    config_set(branch, PARENT_KEY, args.parent)
-    config_set(branch, BASE_KEY, base)
-    print(f"tracking {branch} on top of {args.parent} (base {base[:12]})")
+    for branch in branches:
+        if not local_branch_exists(branch):
+            raise StackError(f"{branch} isn't a local branch")
+    if len(set(branches)) != len(branches) or args.parent in branches:
+        raise StackError("each branch can only appear once")
+
+    # Validate the whole chain before writing anything, so a bad argument
+    # doesn't leave the stack half-tracked.
+    parents = tracked_branches()
+    plan = []
+    parent, base_arg = args.parent, args.base
+    for branch in branches:
+        ensure_no_cycle(branch, parent, parents)
+        base = rev(base_arg) if base_arg else git("merge-base", parent, branch, check=False) or None
+        if base is None:
+            raise StackError(f"{base_arg} isn't a commit" if base_arg
+                             else f"{branch} has no history in common with {parent}")
+        if not is_ancestor(base, branch):
+            raise StackError(f"{base_arg} isn't in {branch}'s history")
+        parents[branch] = parent
+        plan.append((branch, parent, base))
+        parent, base_arg = branch, None
+
+    for branch, parent, base in plan:
+        config_set(branch, PARENT_KEY, parent)
+        config_set(branch, BASE_KEY, base)
+        print(f"tracking {branch} on top of {parent} (base {base[:12]})")
 
 
 def cmd_rename(args):
@@ -764,10 +785,14 @@ def main(argv=None):
     p.add_argument("name")
     p.set_defaults(func=cmd_branch)
 
-    p = sub.add_parser("track", help="track the current branch as stacked on PARENT")
+    p = sub.add_parser("track", help="track existing branches as a stack on PARENT, each on the "
+                                     "one before it (default: the current branch)")
     p.add_argument("parent")
-    p.add_argument("--base", help="commit the branch was built on (default: merge-base with PARENT). "
-                                  "Needed when PARENT has already been squash-merged or rewritten")
+    p.add_argument("branches", nargs="*", metavar="branch",
+                   help="branches to stack, bottom first (default: the current branch)")
+    p.add_argument("--base", help="commit the first branch was built on (default: merge-base with "
+                                  "PARENT). Needed when PARENT has already been squash-merged or "
+                                  "rewritten")
     p.set_defaults(func=cmd_track)
 
     p = sub.add_parser("rename", help="rename a branch (default: the current one), "
