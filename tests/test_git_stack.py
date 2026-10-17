@@ -309,6 +309,63 @@ class RestackTest(StackTestCase):
         self.assert_stacked("pr2", "main", ["pr2 c1"])
 
 
+class RenameTest(StackTestCase):
+    def test_rename_keeps_branch_and_children_in_stack(self):
+        self.make_stack()
+        self.git("switch", "--quiet", "pr2")
+        old_base = self.config("pr2", "stackBase")
+
+        self.stack("rename", "middle")
+
+        self.assertEqual(self.git("branch", "--show-current"), "middle")
+        self.assertEqual(self.config("middle", "stackParent"), "pr1")
+        self.assertEqual(self.config("middle", "stackBase"), old_base)
+        self.assertEqual(self.config("pr3", "stackParent"), "middle")
+        self.assertEqual(self.stack("info").stdout, (
+            "main\n"
+            "└── pr1\n"
+            "    └── middle *\n"
+            "        └── pr3\n"))
+
+    def test_rename_other_branch_by_name(self):
+        self.make_stack()
+        self.git("switch", "--quiet", "pr3")
+
+        self.stack("rename", "pr1", "first")
+
+        self.assertEqual(self.git("branch", "--show-current"), "pr3")
+        self.assertEqual(self.config("first", "stackParent"), "main")
+        self.assertEqual(self.config("pr2", "stackParent"), "first")
+
+    def test_rename_missing_branch_fails(self):
+        self.make_stack()
+
+        result = self.stack("rename", "nope", "other", expect_success=False)
+
+        self.assertIn("nope isn't a local branch", result.stderr)
+
+    def test_rename_pushed_branch_unsets_old_upstream(self):
+        self.make_stack()
+        self.stack("push")
+        self.git("switch", "--quiet", "pr1")
+
+        result = self.stack("rename", "first")
+
+        self.assertIn("origin/pr1 wasn't renamed", result.stdout)
+        self.assertFalse(self.config_exists("first", "merge"))
+        self.stack("push")
+        self.assertEqual(self.git("rev-parse", "--abbrev-ref", "first@{upstream}"), "origin/first")
+
+    def test_rename_to_existing_branch_changes_nothing(self):
+        self.make_stack()
+        self.git("switch", "--quiet", "pr1")
+
+        self.stack("rename", "pr3", expect_success=False)
+
+        self.assertEqual(self.config("pr2", "stackParent"), "pr1")
+        self.assertEqual(self.git("branch", "--show-current"), "pr1")
+
+
 class InfoTest(StackTestCase):
     def test_info_shows_every_stack_as_a_tree(self):
         self.stack("branch", "pr1")
