@@ -1,0 +1,418 @@
+#!/usr/bin/env python3
+"""git stack: manage stacked branches that survive squash merges.
+
+Each tracked branch records two things in git config:
+
+  branch.<name>.stackParent  the branch it is stacked on (e.g. pr1, or main)
+  branch.<name>.stackBase    the parent commit it was last rebased onto
+
+Knowing the base lets us replay only the branch's own commits with
+`git rebase --onto <parent> <base> <branch>`, so a parent that was squash-merged
+(and whose individual commits therefore never appear in main) doesn't cause
+conflicts.
+"""
+
+import argparse
+import os
+import subprocess
+import sys
+
+PARENT_KEY = "stackParent"
+BASE_KEY = "stackBase"
+# Written before a rebase starts and promoted to PARENT_KEY/BASE_KEY once the
+# rebase is known to have finished. This lets the user resolve conflicts with a
+# plain `git rebase --continue` (or back out with `git rebase --abort`).
+PENDING_PARENT_KEY = "stackPendingParent"
+PENDING_BASE_KEY = "stackPendingBase"
+
+
+class StackError(Exception):
+    pass
+
+
+def git(*args, check=True):
+    """Run git and return stripped stdout."""
+    result = subprocess.run(["git", *args], capture_output=True, text=True)
+    if check and result.returncode != 0:
+        raise StackError(f"git {' '.join(args)} failed:\n{result.stderr.strip()}")
+    return result.stdout.strip()
+
+
+def git_ok(*args):
+    """Run git and report whether it succeeded."""
+    return subprocess.run(["git", *args], capture_output=True).returncode == 0
+
+
+def git_passthrough(*args):
+    """Run git with output going straight to the terminal."""
+    return subprocess.run(["git", *args]).returncode == 0
+
+
+def config_get(branch, key):
+    value = git("config", "--get", f"branch.{branch}.{key}", check=False)
+    return value or None
+
+
+def config_set(branch, key, value):
+    git("config", f"branch.{branch}.{key}", value)
+
+
+def config_unset(branch, key):
+    git("config", "--unset", f"branch.{branch}.{key}", check=False)
+
+
+def rev(ref):
+    return git("rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}", check=False) or None
+
+
+def is_ancestor(ancestor, descendant):
+    return git_ok("merge-base", "--is-ancestor", ancestor, descendant)
+
+
+def current_branch():
+    return git("branch", "--show-current") or None
+
+
+def local_branch_exists(name):
+    return git_ok("show-ref", "--verify", "--quiet", f"refs/heads/{name}")
+
+
+def tracked_branches():
+    """Return {branch: parent} for every tracked branch that still exists."""
+    out = git("config", "--null", "--get-regexp", rf"^branch\..*\.{PARENT_KEY.lower()}$", check=False)
+    suffix = f".{PARENT_KEY.lower()}"
+    parents = {}
+    for entry in filter(None, out.split("\0")):
+        key, _, value = entry.partition("\n")
+        branch = key[len("branch."):-len(suffix)]
+        if local_branch_exists(branch):
+            parents[branch] = value
+    return parents
+
+
+def children_map(parents):
+    children = {}
+    for branch, parent in sorted(parents.items()):
+        children.setdefault(parent, []).append(branch)
+    return children
+
+
+def descendants(root, children):
+    """Return root's descendants in parent-before-child order (root excluded)."""
+    order = []
+    for child in children.get(root, []):
+        order.append(child)
+        order.extend(descendants(child, children))
+    return order
+
+
+def stack_root(branch, parents):
+    """Walk up from branch to the first untracked ancestor (usually main)."""
+    seen = set()
+    while branch in parents:
+        if branch in seen:
+            raise StackError(f"cycle in stack metadata involving {branch}")
+        seen.add(branch)
+        branch = parents[branch]
+    return branch
+
+
+def stack_of(branch, parents):
+    """Tracked branches in the stack containing branch, parent-before-child.
+
+    For a tracked branch this is everything stacked on the same root that
+    shares its bottom-most tracked ancestor. For an untracked branch (e.g.
+    main) it is everything stacked on top of it.
+    """
+    children = children_map(parents)
+    if branch not in parents:
+        return descendants(branch, children)
+    bottom = branch
+    while parents[bottom] in parents:
+        bottom = parents[bottom]
+    return [bottom, *descendants(bottom, children)]
+
+
+def ensure_no_rebase_in_progress():
+    for name in ("rebase-merge", "rebase-apply"):
+        if os.path.exists(git("rev-parse", "--git-path", name)):
+            raise StackError("a rebase is in progress; finish it with `git rebase --continue` "
+                             "(or `git rebase --abort`), then rerun this command")
+
+
+def ensure_clean_worktree():
+    if git("status", "--porcelain", "--untracked-files=no"):
+        raise StackError("you have uncommitted changes; commit or stash them first")
+
+
+def settle(branch):
+    """Record the result of an interrupted restack, if there was one.
+
+    If the rebase finished, the pending parent commit is now in the branch's
+    history and becomes the new base. If it was aborted, it isn't, and the
+    previous base is kept.
+    """
+    pending_parent = config_get(branch, PENDING_PARENT_KEY)
+    if pending_parent is None:
+        return
+    pending_base = config_get(branch, PENDING_BASE_KEY)
+    if pending_base and is_ancestor(pending_base, branch):
+        config_set(branch, PARENT_KEY, pending_parent)
+        config_set(branch, BASE_KEY, pending_base)
+    config_unset(branch, PENDING_PARENT_KEY)
+    config_unset(branch, PENDING_BASE_KEY)
+
+
+def settle_all():
+    for branch in tracked_branches():
+        settle(branch)
+
+
+def restack_branch(branch, parent):
+    """Rebase branch's own commits onto parent's current tip."""
+    parent_tip = rev(parent)
+    if parent_tip is None:
+        raise StackError(f"{branch}'s parent {parent} doesn't exist; "
+                         f"retarget it with `git stack track <parent> --base <sha>`")
+    base = config_get(branch, BASE_KEY)
+    if base is None or not is_ancestor(base, branch):
+        raise StackError(f"{branch}'s recorded base isn't in its history (was it rebased by hand?); "
+                         f"fix it with `git stack track {parent} --base <sha>`")
+    if base == parent_tip:
+        return
+    print(f"restacking {branch} onto {parent}")
+    config_set(branch, PENDING_PARENT_KEY, parent)
+    config_set(branch, PENDING_BASE_KEY, parent_tip)
+    if not git_passthrough("rebase", "--no-update-refs", "--onto", parent_tip, base, branch):
+        raise StackError(f"restacking {branch} stopped on a conflict. Resolve it, run "
+                         f"`git rebase --continue`, then rerun this command to finish the stack")
+    settle(branch)
+
+
+def restack_all(branches, parents):
+    original = current_branch()
+    for branch in branches:
+        restack_branch(branch, parents[branch])
+    if original and current_branch() != original:
+        git("switch", "--quiet", original)
+
+
+def cmd_branch(args):
+    parent = current_branch()
+    if parent is None:
+        raise StackError("not on a branch")
+    git("switch", "--quiet", "--create", args.name)
+    config_set(args.name, PARENT_KEY, parent)
+    config_set(args.name, BASE_KEY, rev("HEAD"))
+    print(f"created {args.name} on top of {parent}")
+
+
+def cmd_track(args):
+    branch = current_branch()
+    if branch is None:
+        raise StackError("not on a branch")
+    if rev(args.parent) is None:
+        raise StackError(f"{args.parent} isn't a commit")
+    if args.parent == branch or args.parent in descendants(branch, children_map(tracked_branches())):
+        raise StackError(f"{args.parent} is stacked on {branch}; that would create a cycle")
+    base = rev(args.base) if args.base else git("merge-base", args.parent, "HEAD")
+    if base is None:
+        raise StackError(f"{args.base} isn't a commit")
+    if not is_ancestor(base, "HEAD"):
+        raise StackError(f"{args.base} isn't in {branch}'s history")
+    config_set(branch, PARENT_KEY, args.parent)
+    config_set(branch, BASE_KEY, base)
+    print(f"tracking {branch} on top of {args.parent} (base {base[:12]})")
+
+
+def cmd_info(args):
+    parents = tracked_branches()
+    if not parents:
+        print("no tracked branches")
+        return
+    current = current_branch()
+    children = children_map(parents)
+    roots = sorted({stack_root(b, parents) for b in parents})
+
+    def label(branch):
+        notes = []
+        if branch == current:
+            notes.append("*")
+        if branch in parents:
+            parent = parents[branch]
+            parent_tip = rev(parent)
+            if parent_tip is None:
+                notes.append(f"(parent {parent} missing)")
+            elif config_get(branch, BASE_KEY) != parent_tip:
+                notes.append("(needs restack)")
+        return " ".join([branch, *notes])
+
+    def show(branch, prefix):
+        kids = children.get(branch, [])
+        for i, kid in enumerate(kids):
+            last = i == len(kids) - 1
+            print(f"{prefix}{'└── ' if last else '├── '}{label(kid)}")
+            show(kid, prefix + ("    " if last else "│   "))
+
+    for root in roots:
+        print(label(root))
+        show(root, "")
+
+
+def cmd_restack(args):
+    ensure_no_rebase_in_progress()
+    ensure_clean_worktree()
+    settle_all()
+    branch = current_branch()
+    if branch is None:
+        raise StackError("not on a branch")
+    if args.onto:
+        if rev(args.onto) is None:
+            raise StackError(f"{args.onto} isn't a commit")
+        if branch not in tracked_branches():
+            raise StackError(f"{branch} isn't tracked; use `git stack track` first")
+        config_set(branch, PARENT_KEY, args.onto)
+    parents = tracked_branches()
+    restack_all(stack_of(branch, parents), parents)
+
+
+def fast_forward_trunks(roots):
+    """Fast-forward untracked local parents (e.g. main) to their upstreams."""
+    current = current_branch()
+    for root in roots:
+        if not local_branch_exists(root):
+            continue
+        upstream = git("rev-parse", "--abbrev-ref", f"{root}@{{upstream}}", check=False)
+        if not upstream:
+            continue
+        old, new = rev(root), rev(upstream)
+        if old == new:
+            continue
+        if not is_ancestor(old, new):
+            print(f"warning: {root} has diverged from {upstream}; not updating it", file=sys.stderr)
+            continue
+        if root == current:
+            git("merge", "--ff-only", "--quiet", upstream)
+        else:
+            git("update-ref", f"refs/heads/{root}", new, old)
+        print(f"fast-forwarded {root} to {upstream}")
+
+
+def upstream_gone(branch):
+    return git("for-each-ref", "--format=%(upstream:track)", f"refs/heads/{branch}") == "[gone]"
+
+
+def contained_in(branch, target):
+    """Whether merging branch into target would change nothing.
+
+    This is true after a squash merge even though none of branch's commits are
+    in target's history.
+    """
+    result = subprocess.run(
+        ["git", "merge-tree", "--write-tree", target, branch], capture_output=True, text=True)
+    if result.returncode != 0:
+        return False
+    merged_tree = result.stdout.splitlines()[0]
+    return merged_tree == git("rev-parse", f"{target}^{{tree}}")
+
+
+def remove_merged(branch, parents):
+    """Reparent branch's children onto its parent and delete it."""
+    new_parent = parents[branch]
+    for child, parent in parents.items():
+        if parent == branch:
+            config_set(child, PARENT_KEY, new_parent)
+            parents[child] = new_parent
+    del parents[branch]
+    if current_branch() == branch:
+        if local_branch_exists(new_parent):
+            git("switch", "--quiet", new_parent)
+        else:
+            git("switch", "--quiet", "--detach", new_parent)
+    tip = rev(branch)
+    git("branch", "--quiet", "--delete", "--force", branch)
+    print(f"{branch} was merged; deleted it (was {tip[:12]}) and moved its children onto {new_parent}")
+
+
+def cmd_sync(args):
+    ensure_no_rebase_in_progress()
+    ensure_clean_worktree()
+    settle_all()
+    original = current_branch()
+    if not git_passthrough("fetch", "--prune", args.remote):
+        raise StackError(f"fetching {args.remote} failed")
+
+    parents = tracked_branches()
+    roots = sorted({stack_root(b, parents) for b in parents})
+    fast_forward_trunks(roots)
+
+    children = children_map(parents)
+    for branch in [b for root in roots for b in descendants(root, children)]:
+        if not upstream_gone(branch):
+            continue
+        root = stack_root(branch, parents)
+        if contained_in(branch, root):
+            remove_merged(branch, parents)
+        else:
+            print(f"warning: {branch}'s remote branch is gone but its changes aren't in {root}; "
+                  f"leaving it alone", file=sys.stderr)
+
+    order = [b for root in roots for b in descendants(root, children_map(parents))]
+    restack_all(order, parents)
+    if original and local_branch_exists(original) and current_branch() != original:
+        git("switch", "--quiet", original)
+
+
+def cmd_push(args):
+    ensure_no_rebase_in_progress()
+    settle_all()
+    branch = current_branch()
+    if branch is None:
+        raise StackError("not on a branch")
+    branches = stack_of(branch, tracked_branches())
+    if not branches:
+        raise StackError(f"no tracked branches in {branch}'s stack")
+    if not git_passthrough("push", "--force-with-lease", "--set-upstream", args.remote, *branches):
+        raise StackError("push failed")
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(prog="git stack", description=__doc__.splitlines()[0])
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    p = sub.add_parser("branch", help="create a new branch stacked on the current one")
+    p.add_argument("name")
+    p.set_defaults(func=cmd_branch)
+
+    p = sub.add_parser("track", help="track the current branch as stacked on PARENT")
+    p.add_argument("parent")
+    p.add_argument("--base", help="commit the branch was built on (default: merge-base with PARENT). "
+                                  "Needed when PARENT has already been squash-merged or rewritten")
+    p.set_defaults(func=cmd_track)
+
+    p = sub.add_parser("info", help="show all tracked stacks")
+    p.set_defaults(func=cmd_info)
+
+    p = sub.add_parser("restack", help="rebase every branch in the current stack onto its parent")
+    p.add_argument("--onto", help="first change the current branch's parent to ONTO")
+    p.set_defaults(func=cmd_restack)
+
+    p = sub.add_parser("sync", help="fetch, drop merged branches, and restack everything")
+    p.add_argument("--remote", default="origin")
+    p.set_defaults(func=cmd_sync)
+
+    p = sub.add_parser("push", help="force-push (with lease) every branch in the current stack")
+    p.add_argument("--remote", default="origin")
+    p.set_defaults(func=cmd_push)
+
+    args = parser.parse_args(argv)
+    try:
+        args.func(args)
+    except StackError as e:
+        print(f"git stack: {e}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
