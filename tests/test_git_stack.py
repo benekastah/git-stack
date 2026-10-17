@@ -1,5 +1,6 @@
 """End-to-end tests for git-stack, run against throwaway repositories."""
 
+import http.server
 import importlib.machinery
 import importlib.util
 import os
@@ -7,6 +8,7 @@ import pathlib
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 
 SCRIPT = pathlib.Path(__file__).resolve().parent.parent / "git-stack"
@@ -498,13 +500,34 @@ class UpgradeTest(unittest.TestCase):
         sha = "0123456789abcdef0123456789abcdef01234567"
         self.release.write_text(sha + "\n")
 
-        self.assertEqual(self.git_stack.resolve_commit(self.release.as_uri()), sha)
+        self.assertEqual(self.git_stack.resolve_commit(self.release.as_uri(), "main"), sha)
 
     def test_resolve_commit_rejects_non_sha_response(self):
         self.release.write_text('{"message": "Not Found"}')
 
         with self.assertRaisesRegex(self.git_stack.StackError, "didn't return a commit"):
-            self.git_stack.resolve_commit(self.release.as_uri())
+            self.git_stack.resolve_commit(self.release.as_uri(), "main")
+
+    def test_resolve_commit_reports_missing_ref(self):
+        for status in (404, 422):
+            with self.subTest(status=status), self.assertRaisesRegex(
+                    self.git_stack.StackError, "^couldn't find a branch, tag or commit named nope on GitHub$"):
+                self.git_stack.resolve_commit(self.serve_status(status), "nope")
+
+    def serve_status(self, status):
+        """Start a local HTTP server that answers every request with status; return its URL."""
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_error(status)
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        return f"http://127.0.0.1:{server.server_port}/"
 
 
 if __name__ == "__main__":
