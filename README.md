@@ -60,8 +60,9 @@ else, or `GIT_STACK_REF` to install a specific branch, tag or commit:
 curl -fsSL https://raw.githubusercontent.com/benekastah/git-stack/main/install.sh | GIT_STACK_DIR="$HOME/bin" sh
 ```
 
-Rerun the same command to update. To install by hand, put `git-stack` from
-this repo anywhere on your `PATH`.
+Run `git stack upgrade` to update to the latest version. To install by hand,
+put `git-stack` from this repo anywhere on your `PATH` (and update it with
+`git pull`).
 
 ## How it works
 
@@ -87,6 +88,7 @@ collide with the squashed version in `main`.
 | `git stack restack [--onto <parent>]` | Rebase every branch in the current stack onto its parent, bottom-up. `--onto` first retargets the current branch. On an untracked branch like `main`, restacks everything stacked on it. |
 | `git stack sync [--remote origin]` | Fetch with `--prune`, fast-forward `main` (and any other stack root) to its upstream, delete branches that were merged, move their children down, restack all stacks, and pull in commits others pushed to tracked branches. |
 | `git stack push [--remote origin]` | Force-push (with lease) and `--set-upstream` every branch in the current stack. Refuses if a remote branch has commits the local one doesn't; run `sync` first. |
+| `git stack upgrade [--ref main]` | Replace the installed `git-stack` with the latest version from GitHub (or the given branch, tag or commit). |
 
 ### When does `sync` consider a branch merged?
 

@@ -18,8 +18,13 @@ isn't repeated.
 
 import argparse
 import os
+import stat
 import subprocess
 import sys
+import tempfile
+import urllib.error
+import urllib.parse
+import urllib.request
 
 PARENT_KEY = "stackParent"
 BASE_KEY = "stackBase"
@@ -33,6 +38,8 @@ PENDING_BASE_KEY = "stackPendingBase"
 # before the pull, and the upstream tip being pulled.
 PENDING_PULL_FROM_KEY = "stackPendingPullFrom"
 PENDING_PULLED_KEY = "stackPendingPulled"
+
+UPGRADE_URL = "https://raw.githubusercontent.com/benekastah/git-stack/{ref}/git-stack"
 
 
 class StackError(Exception):
@@ -506,6 +513,51 @@ def cmd_push(args):
         raise StackError("push failed; if the remote has new commits, run `git stack sync` and try again")
 
 
+def upgrade_file(path, url):
+    """Replace the script at path with the one at url. Return whether it changed."""
+    directory, name = os.path.split(path)
+    if git_ok("-C", directory, "ls-files", "--error-unmatch", name):
+        raise StackError(f"{path} is tracked by git; update it with `git pull` instead")
+    try:
+        with urllib.request.urlopen(url, timeout=30) as response:
+            new = response.read()
+    except OSError as e:
+        raise StackError(f"couldn't download {url}: {e}")
+    # Guard against installing an error page or a truncated download.
+    try:
+        compile(new, url, "exec")
+    except (SyntaxError, ValueError):
+        raise StackError(f"{url} isn't a valid git-stack script; not installing it")
+    with open(path, "rb") as f:
+        if f.read() == new:
+            return False
+
+    # Write next to the original and rename over it, so an interrupted upgrade
+    # never leaves a broken git-stack behind.
+    try:
+        fd, tmp = tempfile.mkstemp(dir=directory, prefix=".git-stack.")
+    except PermissionError:
+        raise StackError(f"can't write to {directory}; rerun with permission to write there")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(new)
+        os.chmod(tmp, stat.S_IMODE(os.stat(path).st_mode))
+        os.replace(tmp, path)
+    except BaseException:
+        os.unlink(tmp)
+        raise
+    return True
+
+
+def cmd_upgrade(args):
+    path = os.path.realpath(__file__)
+    url = UPGRADE_URL.format(ref=urllib.parse.quote(args.ref, safe="/"))
+    if upgrade_file(path, url):
+        print(f"upgraded {path} to the latest {args.ref}")
+    else:
+        print(f"already up to date with {args.ref}")
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="git stack", description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
@@ -536,6 +588,10 @@ def main(argv=None):
                                     "refusing if that would drop commits on the remote")
     p.add_argument("--remote", default="origin")
     p.set_defaults(func=cmd_push)
+
+    p = sub.add_parser("upgrade", help="replace this script with the latest version from GitHub")
+    p.add_argument("--ref", default="main", help="branch, tag or commit to upgrade to (default: main)")
+    p.set_defaults(func=cmd_upgrade)
 
     args = parser.parse_args(argv)
     try:

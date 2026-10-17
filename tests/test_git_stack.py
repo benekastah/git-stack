@@ -1,5 +1,7 @@
 """End-to-end tests for git-stack, run against throwaway repositories."""
 
+import importlib.machinery
+import importlib.util
 import os
 import pathlib
 import subprocess
@@ -8,6 +10,14 @@ import tempfile
 import unittest
 
 SCRIPT = pathlib.Path(__file__).resolve().parent.parent / "git-stack"
+
+
+def load_git_stack():
+    """Import the git-stack script as a module."""
+    loader = importlib.machinery.SourceFileLoader("git_stack", str(SCRIPT))
+    module = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
+    loader.exec_module(module)
+    return module
 
 
 class StackTestCase(unittest.TestCase):
@@ -433,6 +443,55 @@ class SyncTest(StackTestCase):
             self.assertEqual(self.git("rev-parse", f"origin/{branch}"), self.git("rev-parse", branch))
             self.assertEqual(self.git("rev-parse", "--abbrev-ref", f"{branch}@{{upstream}}"),
                              f"origin/{branch}")
+
+
+class UpgradeTest(unittest.TestCase):
+    OLD = "#!/usr/bin/env python3\nprint('old')\n"
+    NEW = "#!/usr/bin/env python3\nprint('new')\n"
+
+    def setUp(self):
+        self.git_stack = load_git_stack()
+        self.tmp = tempfile.TemporaryDirectory()
+        tmp = pathlib.Path(self.tmp.name)
+        self.bin = tmp / "bin"
+        self.bin.mkdir()
+        self.installed = self.bin / "git-stack"
+        self.installed.write_text(self.OLD)
+        self.installed.chmod(0o755)
+        self.release = tmp / "release"
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def upgrade(self, release_content):
+        self.release.write_text(release_content)
+        return self.git_stack.upgrade_file(str(self.installed), self.release.as_uri())
+
+    def test_upgrade_replaces_script_and_keeps_it_executable(self):
+        self.assertTrue(self.upgrade(self.NEW))
+
+        self.assertEqual(self.installed.read_text(), self.NEW)
+        self.assertEqual(self.installed.stat().st_mode & 0o777, 0o755)
+        self.assertEqual(os.listdir(self.bin), ["git-stack"])
+
+    def test_upgrade_reports_when_already_up_to_date(self):
+        self.assertFalse(self.upgrade(self.OLD))
+
+    def test_upgrade_refuses_invalid_download(self):
+        with self.assertRaisesRegex(self.git_stack.StackError, "isn't a valid git-stack script"):
+            self.upgrade("<html>Service Unavailable</html>\n")
+
+        self.assertEqual(self.installed.read_text(), self.OLD)
+        self.assertEqual(os.listdir(self.bin), ["git-stack"])
+
+    def test_upgrade_refuses_script_tracked_by_git(self):
+        subprocess.run(["git", "init", "--quiet", self.bin], check=True)
+        subprocess.run(["git", "add", "git-stack"], cwd=self.bin, check=True)
+
+        with self.assertRaisesRegex(self.git_stack.StackError, "tracked by git"):
+            self.upgrade(self.NEW)
+
+        self.assertEqual(self.installed.read_text(), self.OLD)
 
 
 if __name__ == "__main__":
