@@ -131,6 +131,20 @@ then rerun the git-stack command to finish the rest of the stack. The new
 parent and base (and the pulled upstream commits) are recorded only if the
 operation actually completed.
 
+## Common issues
+
+### The same line conflicts on every commit during a restack
+
+If a parent branch and several of its child's commits all edit the same line
+(say, a function's argument list), restacking replays the child one commit at a
+time, so you resolve a conflict on that line for every commit. Git merges whole
+lines, so it can't tell that the edits touch different arguments.
+
+[Mergiraf](https://mergiraf.org) is a merge driver that merges by syntax tree
+instead of by line, so edits to different parts of the same line often merge
+cleanly. It can be enabled just for yourself (globally or for one repository)
+without committing anything, and git-stack's rebases pick it up automatically.
+
 ## Tests
 
 ```
