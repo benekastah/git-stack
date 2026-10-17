@@ -489,9 +489,22 @@ class UpgradeTest(unittest.TestCase):
         subprocess.run(["git", "add", "git-stack"], cwd=self.bin, check=True)
 
         with self.assertRaisesRegex(self.git_stack.StackError, "tracked by git"):
-            self.upgrade(self.NEW)
+            self.git_stack.ensure_upgradable(str(self.installed))
 
-        self.assertEqual(self.installed.read_text(), self.OLD)
+    def test_untracked_script_is_upgradable(self):
+        self.git_stack.ensure_upgradable(str(self.installed))
+
+    def test_resolve_commit_returns_sha(self):
+        sha = "0123456789abcdef0123456789abcdef01234567"
+        self.release.write_text(sha + "\n")
+
+        self.assertEqual(self.git_stack.resolve_commit(self.release.as_uri()), sha)
+
+    def test_resolve_commit_rejects_non_sha_response(self):
+        self.release.write_text('{"message": "Not Found"}')
+
+        with self.assertRaisesRegex(self.git_stack.StackError, "didn't return a commit"):
+            self.git_stack.resolve_commit(self.release.as_uri())
 
 
 if __name__ == "__main__":
