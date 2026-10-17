@@ -535,7 +535,8 @@ def skip_merged(branches, parents):
         parent = parents[branch]
         if is_merged(branch, parent):
             print(f"warning: {branch} looks merged into {parent}; skipping it and restacking its "
-                  f"children onto {parent}. Run `git stack sync` to delete it", file=sys.stderr)
+                  f"children onto {parent}. Run `git stack sync` to remove it from the stack",
+                  file=sys.stderr)
             drop_from_stack(branch, parents)
         else:
             remaining.append(branch)
@@ -557,11 +558,26 @@ def delete_remote_branch(remote, ref, tip):
     return git_passthrough("push", f"--force-with-lease={ref}:{tip}", remote, f":{ref}")
 
 
-def remove_merged(branch, parents):
-    """Reparent branch's children onto its parent and delete it."""
+def untrack(branch):
+    for key in (PARENT_KEY, BASE_KEY, PULLED_KEY, PENDING_PARENT_KEY, PENDING_BASE_KEY,
+                PENDING_PULL_FROM_KEY, PENDING_PULLED_KEY):
+        config_unset(branch, key)
+
+
+def remove_merged(branch, parents, delete):
+    """Move branch's children onto its parent, then stop tracking branch.
+
+    If delete is set, the branch itself is deleted too.
+    """
     new_parent = parents[branch]
-    for child in drop_from_stack(branch, parents):
+    children = drop_from_stack(branch, parents)
+    for child in children:
         config_set(child, PARENT_KEY, new_parent)
+    moved = f" and moved {', '.join(children)} onto {new_parent}" if children else ""
+    if not delete:
+        untrack(branch)
+        print(f"{branch} was merged into {new_parent}; stopped tracking it{moved}")
+        return
     if current_branch() == branch:
         if local_branch_exists(new_parent):
             git("switch", "--quiet", new_parent)
@@ -569,7 +585,7 @@ def remove_merged(branch, parents):
             git("switch", "--quiet", "--detach", new_parent)
     tip = rev(branch)
     git("branch", "--quiet", "--delete", "--force", branch)
-    print(f"{branch} was merged; deleted it (was {tip[:12]}) and moved its children onto {new_parent}")
+    print(f"{branch} was merged into {new_parent}; deleted it (was {tip[:12]}){moved}")
 
 
 def cmd_sync(args):
@@ -579,6 +595,8 @@ def cmd_sync(args):
     # Where to leave the user afterwards: their branch, or the commit they had
     # detached at.
     original = current_branch() or rev("HEAD")
+    delete_local = args.delete in ("local", "both")
+    delete_remote = args.delete in ("remote", "both")
     if not git_passthrough("fetch", "--prune", args.remote):
         raise StackError(f"fetching {args.remote} failed")
 
@@ -600,18 +618,18 @@ def cmd_sync(args):
         if is_merged(branch, parent):
             remote = remote_branch(branch)
             upstream = git("rev-parse", "--abbrev-ref", f"{branch}@{{upstream}}") if remote else None
-            if remote and args.delete_merged_remotes:
+            if remote and delete_remote:
                 if not delete_remote_branch(*remote):
                     print(f"warning: couldn't delete {upstream}; leaving {branch} alone",
                           file=sys.stderr)
                     skipped.add(branch)
                     continue
                 print(f"deleted {upstream}")
-            remove_merged(branch, parents)
-            if remote and not args.delete_merged_remotes:
+            remove_merged(branch, parents, delete_local)
+            if remote and not delete_remote:
                 print(f"note: {upstream} still exists; delete it with "
                       f"`git push {remote[0]} --delete {remote[1].removeprefix('refs/heads/')}`, "
-                      f"or pass --delete-merged-remotes")
+                      f"or pass `--delete remote`")
             if branch == original:
                 original = current_branch() or rev("HEAD")
             continue
@@ -767,11 +785,12 @@ def main(argv=None):
                    help="first squash each branch in the stack into a single commit")
     p.set_defaults(func=cmd_restack)
 
-    p = sub.add_parser("sync", help="fetch, drop merged branches, restack everything, "
+    p = sub.add_parser("sync", help="fetch, untrack merged branches, restack everything, "
                                     "and pull in commits others pushed")
     p.add_argument("--remote", default="origin")
-    p.add_argument("--delete-merged-remotes", action="store_true",
-                   help="also delete the remote branches of merged branches that still have one")
+    p.add_argument("-d", "--delete", choices=("local", "remote", "both"),
+                   help="besides untracking merged branches, delete their local branches, "
+                        "their remote branches, or both")
     p.set_defaults(func=cmd_sync)
 
     p = sub.add_parser("push", help="force-push (with lease) every branch in the current stack, "

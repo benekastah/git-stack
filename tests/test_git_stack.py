@@ -120,6 +120,12 @@ class StackTestCase(unittest.TestCase):
     def own_commits(self, branch, parent):
         return self.git("log", "--format=%s", f"{parent}..{branch}").splitlines()
 
+    def assert_untracked(self, branch):
+        """branch still exists but is no longer in a stack."""
+        self.assertTrue(self.git("branch", "--list", branch))
+        self.assertFalse(self.config_exists(branch, "stackParent"))
+        self.assertFalse(self.config_exists(branch, "stackBase"))
+
     def assert_stacked(self, branch, parent, subjects):
         """branch sits directly on parent's tip with exactly the given commits."""
         self.assertEqual(self.config(branch, "stackParent"), parent)
@@ -412,10 +418,22 @@ class SyncTest(StackTestCase):
 
         self.stack("sync")
 
-        self.assertEqual(self.git("branch", "--list", "pr1"), "")
+        self.assert_untracked("pr1")
         self.assertEqual(self.git("rev-parse", "main"), self.git("rev-parse", "origin/main"))
         self.assert_stacked("pr2", "main", ["pr2 c1"])
         self.assert_stacked("pr3", "pr2", ["pr3 c1"])
+        self.assertEqual(self.git("branch", "--show-current"), "pr1")
+
+    def test_sync_delete_local_deletes_merged_branch(self):
+        self.make_stack()
+        self.stack("push")
+        self.squash_merge_on_forge("pr1")
+        self.git("switch", "--quiet", "pr1")
+
+        self.stack("sync", "-d", "local")
+
+        self.assertEqual(self.git("branch", "--list", "pr1"), "")
+        self.assert_stacked("pr2", "main", ["pr2 c1"])
         # We were on pr1, which no longer exists, so we land on its parent.
         self.assertEqual(self.git("branch", "--show-current"), "main")
 
@@ -427,21 +445,32 @@ class SyncTest(StackTestCase):
         result = self.stack("sync")
 
         self.assertIn("origin/pr1 still exists", result.stdout)
-        self.assertEqual(self.git("branch", "--list", "pr1"), "")
+        self.assert_untracked("pr1")
         self.assertEqual(self.remote_subject("pr1"), "pr1 c2")
         self.assert_stacked("pr2", "main", ["pr2 c1"])
         self.assert_stacked("pr3", "pr2", ["pr3 c1"])
 
-    def test_sync_delete_merged_remotes_deletes_kept_remote_branch(self):
+    def test_sync_delete_remote_deletes_only_remote_branch(self):
         self.make_stack()
         self.stack("push")
         self.squash_merge_on_forge("pr1", delete_branch=False)
 
-        self.stack("sync", "--delete-merged-remotes")
+        self.stack("sync", "--delete", "remote")
+
+        self.assert_untracked("pr1")
+        self.assertEqual(self.git("branch", "--list", "pr1", cwd=self.origin), "")
+        self.assertEqual(self.git("branch", "--remotes", "--list", "origin/pr1"), "")
+        self.assert_stacked("pr2", "main", ["pr2 c1"])
+
+    def test_sync_delete_both_deletes_local_and_remote_branches(self):
+        self.make_stack()
+        self.stack("push")
+        self.squash_merge_on_forge("pr1", delete_branch=False)
+
+        self.stack("sync", "-d", "both")
 
         self.assertEqual(self.git("branch", "--list", "pr1"), "")
         self.assertEqual(self.git("branch", "--list", "pr1", cwd=self.origin), "")
-        self.assertEqual(self.git("branch", "--remotes", "--list", "origin/pr1"), "")
         self.assert_stacked("pr2", "main", ["pr2 c1"])
 
     def test_sync_after_local_squash_merge_pushed(self):
@@ -454,7 +483,7 @@ class SyncTest(StackTestCase):
 
         self.stack("sync")
 
-        self.assertEqual(self.git("branch", "--list", "pr1"), "")
+        self.assert_untracked("pr1")
         self.assert_stacked("pr2", "main", ["pr2 c1"])
         self.assert_stacked("pr3", "pr2", ["pr3 c1"])
 
@@ -466,7 +495,7 @@ class SyncTest(StackTestCase):
 
         self.stack("sync")
 
-        self.assertEqual(self.git("branch", "--list", "pr1"), "")
+        self.assert_untracked("pr1")
         self.assert_stacked("pr2", "main", ["pr2 c1"])
 
     def test_sync_skips_merged_branch_with_commits_pushed_after_merge(self):
@@ -505,7 +534,8 @@ class SyncTest(StackTestCase):
 
         self.stack("sync")
 
-        self.assertEqual(self.git("branch", "--list", "pr1", "pr2"), "")
+        self.assert_untracked("pr1")
+        self.assert_untracked("pr2")
         self.assert_stacked("pr3", "main", ["pr3 c1"])
         self.assertEqual(self.git("branch", "--show-current"), "pr3")
 
@@ -530,7 +560,7 @@ class SyncTest(StackTestCase):
 
         self.stack("sync")
 
-        self.assertEqual(self.git("branch", "--list", "pr2"), "")
+        self.assert_untracked("pr2")
         self.assertEqual(self.git("rev-parse", "pr1"), self.git("rev-parse", "origin/pr1"))
         self.assert_stacked("pr3", "pr1", ["pr3 c1"])
 
