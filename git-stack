@@ -354,6 +354,29 @@ def cmd_track(args):
     print(f"tracking {branch} on top of {args.parent} (base {base[:12]})")
 
 
+def cmd_rename(args):
+    ensure_no_operation_in_progress()
+    settle_all()
+    old = args.old or current_branch()
+    if old is None:
+        raise StackError("not on a branch; name the branch to rename")
+    if not local_branch_exists(old):
+        raise StackError(f"{old} isn't a local branch")
+    upstream = git("rev-parse", "--abbrev-ref", f"{old}@{{upstream}}", check=False)
+    children = [child for child, parent in tracked_branches().items() if parent == old]
+    git("branch", "--move", old, args.name)
+    for child in children:
+        config_set(child, PARENT_KEY, args.name)
+    print(f"renamed {old} to {args.name}" +
+          (f" and moved {', '.join(children)} onto it" if children else ""))
+    if upstream:
+        # Leaving the old upstream would make sync pull from it, and report it
+        # as gone once it's deleted.
+        git("branch", "--unset-upstream", args.name)
+        print(f"note: {upstream} wasn't renamed, and pull requests on it or based on it still point "
+              f"there. `git stack push` will push {args.name} as a new remote branch")
+
+
 def cmd_info(args):
     # Pick up the result of a rebase the user finished by hand, but leave the
     # pending state alone while it's still running.
@@ -637,6 +660,12 @@ def main(argv=None):
     p.add_argument("--base", help="commit the branch was built on (default: merge-base with PARENT). "
                                   "Needed when PARENT has already been squash-merged or rewritten")
     p.set_defaults(func=cmd_track)
+
+    p = sub.add_parser("rename", help="rename a branch (default: the current one), "
+                                      "keeping branches stacked on it")
+    p.add_argument("old", nargs="?", help="branch to rename (default: the current branch)")
+    p.add_argument("name", metavar="new", help="new name")
+    p.set_defaults(func=cmd_rename)
 
     p = sub.add_parser("info", help="show all tracked stacks")
     p.set_defaults(func=cmd_info)
