@@ -53,7 +53,7 @@ class StackTestCase(unittest.TestCase):
 
     def stack(self, *args, expect_success=True):
         result = subprocess.run([sys.executable, SCRIPT, *args], cwd=self.repo, env=self.env,
-                                capture_output=True, text=True)
+                                capture_output=True, text=True, timeout=60)
         if expect_success and result.returncode != 0:
             self.fail(f"git stack {' '.join(args)} failed:\n{result.stdout}{result.stderr}")
         if not expect_success and result.returncode == 0:
@@ -84,8 +84,25 @@ class StackTestCase(unittest.TestCase):
         self.git("commit", "--quiet", "-m", f"{branch} (squashed)", cwd=self.forge)
         self.git("push", "--quiet", "origin", "main", f":{branch}", cwd=self.forge)
 
+    def commit_on_forge(self, branch, name, content, message):
+        """Push a commit to origin/<branch>, as a collaborator would."""
+        self.git("fetch", "--quiet", cwd=self.forge)
+        self.git("switch", "--quiet", "-C", branch, f"origin/{branch}", cwd=self.forge)
+        (self.forge / name).write_text(content)
+        self.git("add", name, cwd=self.forge)
+        self.git("commit", "--quiet", "-m", message, cwd=self.forge)
+        self.git("push", "--quiet", "origin", branch, cwd=self.forge)
+
+    def remote_subject(self, branch):
+        """Subject of the commit at <branch> on the remote itself."""
+        return self.git("log", "-1", "--format=%s", branch, cwd=self.origin)
+
     def config(self, branch, key):
         return self.git("config", f"branch.{branch}.{key}")
+
+    def config_exists(self, branch, key):
+        return subprocess.run(["git", "config", f"branch.{branch}.{key}"], cwd=self.repo,
+                              env=self.env, capture_output=True).returncode == 0
 
     def own_commits(self, branch, parent):
         return self.git("log", "--format=%s", f"{parent}..{branch}").splitlines()
@@ -136,6 +153,7 @@ class RestackTest(StackTestCase):
         self.write("b", "resolved\n")
         self.git("add", "b")
         self.git("rebase", "--continue")
+        self.assertIn("pr2 *\n", self.stack("info").stdout)
         self.stack("restack")
 
         self.assert_stacked("pr1", "main", ["pr1 c2", "pr1 c1"])
@@ -155,6 +173,62 @@ class RestackTest(StackTestCase):
         self.assertIn("pr1 * (needs restack)", self.stack("info").stdout)
         self.assertEqual(self.config("pr1", "stackBase"), old_base)
 
+    def test_aborted_restack_onto_keeps_previous_parent(self):
+        self.make_stack()
+        old_base = self.config("pr2", "stackBase")
+        self.git("switch", "--quiet", "main")
+        self.commit("b", "main change\n", "main touches b")
+        self.git("switch", "--quiet", "pr2")
+
+        self.stack("restack", "--onto", "main", expect_success=False)
+        self.git("rebase", "--abort")
+
+        self.assertEqual(self.config("pr2", "stackParent"), "pr1")
+        self.assertEqual(self.config("pr2", "stackBase"), old_base)
+
+    def test_restack_onto_rejects_cycle(self):
+        self.make_stack()
+        self.git("switch", "--quiet", "pr1")
+
+        for target in ("pr3", "pr1"):
+            with self.subTest(target=target):
+                result = self.stack("restack", "--onto", target, expect_success=False)
+                self.assertIn("would create a cycle", result.stderr)
+                self.assertEqual(self.config("pr1", "stackParent"), "main")
+
+    def test_restack_failure_without_conflict_is_not_reported_as_conflict(self):
+        self.make_stack()
+        self.git("worktree", "add", "--quiet", pathlib.Path(self.tmp.name) / "wt", "pr2")
+        self.git("switch", "--quiet", "pr1")
+        self.commit("a", "pr1 review fix\n", "pr1 review fix")
+
+        result = self.stack("restack", expect_success=False)
+
+        self.assertIn("restacking pr2 onto pr1 failed", result.stderr)
+        self.assertNotIn("conflict", result.stderr)
+        self.assertFalse(self.config_exists("pr2", "stackPendingParent"))
+
+    def test_track_rejects_cycle(self):
+        self.make_stack()
+        self.git("switch", "--quiet", "pr1")
+
+        result = self.stack("track", "pr3", expect_success=False)
+
+        self.assertIn("would create a cycle", result.stderr)
+        self.assertEqual(self.config("pr1", "stackParent"), "main")
+
+    def test_track_rejects_base_outside_branch_history(self):
+        self.git("switch", "--quiet", "-c", "pr1")
+        self.commit("a", "pr1\n", "pr1 c1")
+        self.git("switch", "--quiet", "main")
+        self.commit("b", "main change\n", "main touches b")
+        self.git("switch", "--quiet", "pr1")
+
+        result = self.stack("track", "main", "--base", "main", expect_success=False)
+
+        self.assertIn("isn't in pr1's history", result.stderr)
+        self.assertFalse(self.config_exists("pr1", "stackParent"))
+
     def test_track_existing_branch_after_parent_was_squash_merged(self):
         self.git("switch", "--quiet", "-c", "pr1")
         self.commit("a", "pr1 first\n", "pr1 c1")
@@ -172,6 +246,28 @@ class RestackTest(StackTestCase):
         self.stack("restack")
 
         self.assert_stacked("pr2", "main", ["pr2 c1"])
+
+
+class InfoTest(StackTestCase):
+    def test_info_shows_every_stack_as_a_tree(self):
+        self.stack("branch", "pr1")
+        self.commit("a", "pr1\n", "pr1 c1")
+        self.stack("branch", "pr2")
+        self.commit("b", "pr2\n", "pr2 c1")
+        self.git("switch", "--quiet", "pr1")
+        self.stack("branch", "pr2b")
+        self.commit("c", "pr2b\n", "pr2b c1")
+        self.git("switch", "--quiet", "pr1")
+        self.commit("a", "pr1 more\n", "pr1 c2")
+        self.git("switch", "--quiet", "main")
+        self.stack("branch", "solo")
+
+        self.assertEqual(self.stack("info").stdout, (
+            "main\n"
+            "├── pr1\n"
+            "│   ├── pr2 (needs restack)\n"
+            "│   └── pr2b (needs restack)\n"
+            "└── solo *\n"))
 
 
 class SyncTest(StackTestCase):
@@ -217,6 +313,115 @@ class SyncTest(StackTestCase):
 
         self.assertIn("pr1's remote branch is gone but its changes aren't in main", result.stderr)
         self.assert_stacked("pr2", "pr1", ["pr2 c1"])
+
+    def test_sync_after_child_squash_merged_into_parent(self):
+        self.make_stack()
+        self.stack("push")
+        self.git("fetch", "--quiet", cwd=self.forge)
+        self.git("switch", "--quiet", "-c", "pr1", "origin/pr1", cwd=self.forge)
+        self.git("merge", "--quiet", "--squash", "origin/pr2", cwd=self.forge)
+        self.git("commit", "--quiet", "-m", "pr2 (squashed)", cwd=self.forge)
+        self.git("push", "--quiet", "origin", "pr1", ":pr2", cwd=self.forge)
+
+        self.stack("sync")
+
+        self.assertEqual(self.git("branch", "--list", "pr2"), "")
+        self.assertEqual(self.git("rev-parse", "pr1"), self.git("rev-parse", "origin/pr1"))
+        self.assert_stacked("pr3", "pr1", ["pr3 c1"])
+
+    def test_sync_fast_forwards_branch_to_commits_pushed_by_others(self):
+        self.make_stack()
+        self.stack("push")
+        self.commit_on_forge("pr1", "d", "collab\n", "collab")
+
+        self.stack("sync")
+
+        self.assertEqual(self.git("rev-parse", "pr1"), self.git("rev-parse", "origin/pr1"))
+        self.assert_stacked("pr2", "pr1", ["pr2 c1"])
+        self.assert_stacked("pr3", "pr2", ["pr3 c1"])
+
+    def test_sync_pulls_commits_pushed_by_others_into_diverged_branch(self):
+        self.make_stack()
+        self.stack("push")
+        self.commit_on_forge("pr1", "d", "collab\n", "collab")
+        self.git("switch", "--quiet", "pr1")
+        self.commit("a", "pr1 third\n", "pr1 c3")
+
+        self.stack("sync")
+        self.stack("sync")
+
+        self.assertEqual(self.own_commits("pr1", "main"), ["collab", "pr1 c3", "pr1 c2", "pr1 c1"])
+        self.assert_stacked("pr2", "pr1", ["pr2 c1"])
+        self.stack("push")
+        self.assertEqual(self.remote_subject("pr1"), "collab")
+
+    def test_sync_pull_conflict_resolved_with_cherry_pick_continue(self):
+        self.make_stack()
+        self.stack("push")
+        self.commit_on_forge("pr1", "a", "collab\n", "collab")
+        self.git("switch", "--quiet", "pr1")
+        self.commit("a", "pr1 third\n", "pr1 c3")
+
+        result = self.stack("sync", expect_success=False)
+        self.assertIn("pulling upstream commits into pr1 stopped on a conflict", result.stderr)
+        self.write("a", "resolved\n")
+        self.git("add", "a")
+        self.git("cherry-pick", "--continue")
+        self.stack("sync")
+
+        self.assertEqual(self.own_commits("pr1", "main"), ["collab", "pr1 c3", "pr1 c2", "pr1 c1"])
+        self.assertEqual((self.repo / "a").read_text(), "resolved\n")
+        self.assert_stacked("pr2", "pr1", ["pr2 c1"])
+
+    def test_sync_skips_broken_stack_but_syncs_the_rest(self):
+        self.make_stack()
+        self.git("switch", "--quiet", "main")
+        self.stack("branch", "solo")
+        self.commit("a", "solo\n", "solo c1")
+        self.git("switch", "--quiet", "main")
+        self.git("branch", "--quiet", "-D", "pr1")
+        self.commit_on_forge("main", "d", "upstream\n", "main moved")
+
+        result = self.stack("sync")
+
+        self.assertIn("skipping pr2: pr2's parent pr1 doesn't exist", result.stderr)
+        self.assertIn("skipping pr3 because its parent pr2 was skipped", result.stderr)
+        self.assert_stacked("solo", "main", ["solo c1"])
+
+    def test_sync_leaves_diverged_trunk_alone(self):
+        self.commit_on_forge("main", "d", "upstream\n", "upstream change")
+        self.commit("a", "local\n", "local change")
+        self.stack("branch", "pr1")
+        local_main = self.git("rev-parse", "main")
+
+        result = self.stack("sync")
+
+        self.assertIn("main has diverged from origin/main", result.stderr)
+        self.assertEqual(self.git("rev-parse", "main"), local_main)
+
+    def test_push_refuses_to_drop_unpulled_commits(self):
+        self.make_stack()
+        self.stack("push")
+        self.commit_on_forge("pr1", "d", "collab\n", "collab")
+        self.git("switch", "--quiet", "pr1")
+        self.commit("a", "pr1 third\n", "pr1 c3")
+        self.git("fetch", "--quiet")
+
+        result = self.stack("push", expect_success=False)
+
+        self.assertIn("origin/pr1 has commits that pr1 doesn't", result.stderr)
+        self.assertEqual(self.remote_subject("pr1"), "collab")
+
+    def test_push_refuses_when_remote_moved_since_last_fetch(self):
+        self.make_stack()
+        self.stack("push")
+        self.commit_on_forge("pr1", "d", "collab\n", "collab")
+        self.git("switch", "--quiet", "pr1")
+        self.commit("a", "pr1 third\n", "pr1 c3")
+
+        self.stack("push", expect_success=False)
+
+        self.assertEqual(self.remote_subject("pr1"), "collab")
 
     def test_push_pushes_every_branch_in_stack(self):
         self.make_stack()
