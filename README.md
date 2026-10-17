@@ -44,6 +44,25 @@ git stack sync                  # delete add-api, rebase use-api onto main
 git stack push
 ```
 
+## Install
+
+Requires Python 3.9+ and git 2.38+.
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/benekastah/git-stack/main/install.sh | sh
+```
+
+This installs `git-stack` into `~/.local/bin`, which must be on your `PATH`
+for git to run it as `git stack`. Set `GIT_STACK_DIR` to install somewhere
+else, or `GIT_STACK_REF` to install a specific branch, tag or commit:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/benekastah/git-stack/main/install.sh | GIT_STACK_DIR="$HOME/bin" sh
+```
+
+Rerun the same command to update. To install by hand, put `git-stack` from
+this repo anywhere on your `PATH`.
+
 ## How it works
 
 When a branch is created (or tracked), git-stack records its parent branch and
@@ -57,11 +76,6 @@ branch.<name>.stackBase     the pr1 commit pr2 was last rebased onto
 Restacking runs `git rebase --onto <parent> <stackBase> <branch>`, which
 replays only the branch's own commits, so PR 1's original commits never
 collide with the squashed version in `main`.
-
-## Install
-
-Requires Python 3.9+ and git 2.38+. Put `git-stack` on your `PATH` (e.g.
-symlink it into `~/.local/bin`) and git will run it as `git stack`.
 
 ## Commands
 
