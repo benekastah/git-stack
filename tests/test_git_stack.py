@@ -89,12 +89,13 @@ class StackTestCase(unittest.TestCase):
         self.stack("branch", "pr3")
         self.commit("c", "pr3\n", "pr3 c1")
 
-    def squash_merge_on_forge(self, branch):
-        """Squash-merge origin/<branch> into origin/main and delete the branch."""
+    def squash_merge_on_forge(self, branch, delete_branch=True):
+        """Squash-merge origin/<branch> into origin/main and (by default) delete the branch."""
         self.git("pull", "--quiet", cwd=self.forge)
         self.git("merge", "--quiet", "--squash", f"origin/{branch}", cwd=self.forge)
         self.git("commit", "--quiet", "-m", f"{branch} (squashed)", cwd=self.forge)
-        self.git("push", "--quiet", "origin", "main", f":{branch}", cwd=self.forge)
+        self.git("push", "--quiet", "origin", "main", *([f":{branch}"] if delete_branch else []),
+                 cwd=self.forge)
 
     def commit_on_forge(self, branch, name, content, message):
         """Push a commit to origin/<branch>, as a collaborator would."""
@@ -149,6 +150,20 @@ class RestackTest(StackTestCase):
 
         self.stack("restack", "--onto", "main")
 
+        self.assert_stacked("pr2", "main", ["pr2 c1"])
+        self.assert_stacked("pr3", "pr2", ["pr3 c1"])
+
+    def test_restack_skips_branch_merged_locally(self):
+        self.make_stack()
+        self.git("switch", "--quiet", "main")
+        self.git("merge", "--quiet", "--squash", "pr1")
+        self.git("commit", "--quiet", "-m", "pr1 (squashed)")
+
+        self.assertIn("pr1 (merged)", self.stack("info").stdout)
+        result = self.stack("restack")
+
+        self.assertIn("pr1 looks merged into main", result.stderr)
+        self.assertEqual(self.git("branch", "--list", "pr1"), "pr1")
         self.assert_stacked("pr2", "main", ["pr2 c1"])
         self.assert_stacked("pr3", "pr2", ["pr3 c1"])
 
@@ -403,6 +418,78 @@ class SyncTest(StackTestCase):
         self.assert_stacked("pr3", "pr2", ["pr3 c1"])
         # We were on pr1, which no longer exists, so we land on its parent.
         self.assertEqual(self.git("branch", "--show-current"), "main")
+
+    def test_sync_after_parent_squash_merged_with_remote_branch_kept(self):
+        self.make_stack()
+        self.stack("push")
+        self.squash_merge_on_forge("pr1", delete_branch=False)
+
+        result = self.stack("sync")
+
+        self.assertIn("origin/pr1 still exists", result.stdout)
+        self.assertEqual(self.git("branch", "--list", "pr1"), "")
+        self.assertEqual(self.remote_subject("pr1"), "pr1 c2")
+        self.assert_stacked("pr2", "main", ["pr2 c1"])
+        self.assert_stacked("pr3", "pr2", ["pr3 c1"])
+
+    def test_sync_delete_merged_remotes_deletes_kept_remote_branch(self):
+        self.make_stack()
+        self.stack("push")
+        self.squash_merge_on_forge("pr1", delete_branch=False)
+
+        self.stack("sync", "--delete-merged-remotes")
+
+        self.assertEqual(self.git("branch", "--list", "pr1"), "")
+        self.assertEqual(self.git("branch", "--list", "pr1", cwd=self.origin), "")
+        self.assertEqual(self.git("branch", "--remotes", "--list", "origin/pr1"), "")
+        self.assert_stacked("pr2", "main", ["pr2 c1"])
+
+    def test_sync_after_local_squash_merge_pushed(self):
+        self.make_stack()
+        self.stack("push")
+        self.git("switch", "--quiet", "main")
+        self.git("merge", "--quiet", "--squash", "pr1")
+        self.git("commit", "--quiet", "-m", "pr1 (squashed)")
+        self.git("push", "--quiet")
+
+        self.stack("sync")
+
+        self.assertEqual(self.git("branch", "--list", "pr1"), "")
+        self.assert_stacked("pr2", "main", ["pr2 c1"])
+        self.assert_stacked("pr3", "pr2", ["pr3 c1"])
+
+    def test_sync_after_local_fast_forward_merge_of_unpushed_branch(self):
+        self.make_stack()
+        self.git("switch", "--quiet", "main")
+        self.git("merge", "--quiet", "--ff-only", "pr1")
+        self.git("push", "--quiet")
+
+        self.stack("sync")
+
+        self.assertEqual(self.git("branch", "--list", "pr1"), "")
+        self.assert_stacked("pr2", "main", ["pr2 c1"])
+
+    def test_sync_skips_merged_branch_with_commits_pushed_after_merge(self):
+        self.make_stack()
+        self.stack("push")
+        self.squash_merge_on_forge("pr1", delete_branch=False)
+        self.commit_on_forge("pr1", "d", "late\n", "pushed after merge")
+
+        result = self.stack("sync")
+
+        self.assertIn("skipping pr1: it was merged into main, but its remote branch has commits",
+                      result.stderr)
+        self.assertIn("skipping pr2 because its parent pr1 was skipped", result.stderr)
+        self.assertEqual(self.config("pr2", "stackParent"), "pr1")
+
+    def test_sync_keeps_new_branch_without_commits(self):
+        self.stack("branch", "pr1")
+        self.stack("push")
+
+        self.stack("sync")
+
+        self.assertEqual(self.git("branch", "--list", "pr1"), "* pr1")
+        self.assertEqual(self.config("pr1", "stackParent"), "main")
 
     def test_sync_after_two_levels_squash_merged(self):
         self.make_stack()

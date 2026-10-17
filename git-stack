@@ -399,6 +399,8 @@ def cmd_info(args):
             parent_tip = rev(parent)
             if parent_tip is None:
                 notes.append(f"(parent {parent} missing)")
+            elif is_merged(branch, parent):
+                notes.append("(merged)")
             elif config_get(branch, BASE_KEY) != parent_tip:
                 notes.append("(needs restack)")
         return " ".join([branch, *notes])
@@ -430,11 +432,11 @@ def cmd_restack(args):
             raise StackError(f"{branch} isn't tracked; use `git stack track` first")
         ensure_no_cycle(branch, args.onto, parents)
         parents[branch] = args.onto
-    branches = stack_of(branch, parents)
+    if args.squash and branch not in parents:
+        raise StackError(f"{branch} isn't in a stack; run `restack --squash` from a stacked branch "
+                         f"to squash only that stack")
+    branches = skip_merged(stack_of(branch, parents), parents)
     if args.squash:
-        if branch not in parents:
-            raise StackError(f"{branch} isn't in a stack; run `restack --squash` from a stacked branch "
-                             f"to squash only that stack")
         original = current_branch()
         for b in branches:
             squash_branch(b, parents[b])
@@ -483,14 +485,83 @@ def contained_in(branch, target):
     return merged_tree == git("rev-parse", f"{target}^{{tree}}")
 
 
+def changes_something(branch):
+    """Whether branch's tree differs from its recorded base's.
+
+    False for a branch with no commits of its own yet, and when the base is
+    missing or not in its history.
+    """
+    base = config_get(branch, BASE_KEY)
+    if base is None or not is_ancestor(base, branch):
+        return False
+    return not git_ok("diff", "--quiet", base, f"refs/heads/{branch}")
+
+
+def is_merged(branch, parent):
+    """Whether branch has landed in parent, so dropping it loses nothing.
+
+    Its changes must be in parent. Unless its remote branch was deleted (which
+    is all the evidence of a merge we need), the branch must also change
+    something, so a new branch with no commits isn't mistaken for a merged
+    one, and if it has a remote branch, everything on that must be in parent
+    too, so commits pushed after the merge aren't dropped.
+    """
+    if not contained_in(branch, parent):
+        return False
+    if upstream_gone(branch):
+        return True
+    upstream_tip = rev(f"{branch}@{{upstream}}")
+    if upstream_tip and not contained_in(upstream_tip, parent):
+        return False
+    return changes_something(branch)
+
+
+def drop_from_stack(branch, parents):
+    """Move branch's children onto its parent in parents and remove branch.
+
+    Returns the moved children. Only parents is changed, not the config.
+    """
+    new_parent = parents.pop(branch)
+    children = [child for child, parent in parents.items() if parent == branch]
+    for child in children:
+        parents[child] = new_parent
+    return children
+
+
+def skip_merged(branches, parents):
+    """Leave merged branches out of branches, moving their children down in parents."""
+    remaining = []
+    for branch in branches:
+        parent = parents[branch]
+        if is_merged(branch, parent):
+            print(f"warning: {branch} looks merged into {parent}; skipping it and restacking its "
+                  f"children onto {parent}. Run `git stack sync` to delete it", file=sys.stderr)
+            drop_from_stack(branch, parents)
+        else:
+            remaining.append(branch)
+    return remaining
+
+
+def remote_branch(branch):
+    """Return (remote, ref, tip) for branch's upstream on a remote, or None."""
+    remote = config_get(branch, "remote")
+    ref = config_get(branch, "merge")
+    tip = rev(f"{branch}@{{upstream}}")
+    if not remote or remote == "." or not ref or tip is None:
+        return None
+    return remote, ref, tip
+
+
+def delete_remote_branch(remote, ref, tip):
+    """Delete ref on remote, failing if it no longer points at tip."""
+    return git_passthrough("push", f"--force-with-lease={ref}:{tip}", remote, f":{ref}")
+
+
 def remove_merged(branch, parents):
     """Reparent branch's children onto its parent and delete it."""
     new_parent = parents[branch]
-    for child, parent in parents.items():
-        if parent == branch:
-            config_set(child, PARENT_KEY, new_parent)
-            parents[child] = new_parent
-    del parents[branch]
+    for child in drop_from_stack(branch, parents):
+        config_set(child, PARENT_KEY, new_parent)
     if current_branch() == branch:
         if local_branch_exists(new_parent):
             git("switch", "--quiet", new_parent)
@@ -526,14 +597,34 @@ def cmd_sync(args):
             print(f"warning: skipping {branch} because its parent {parent} was skipped", file=sys.stderr)
             skipped.add(branch)
             continue
+        if is_merged(branch, parent):
+            remote = remote_branch(branch)
+            upstream = git("rev-parse", "--abbrev-ref", f"{branch}@{{upstream}}") if remote else None
+            if remote and args.delete_merged_remotes:
+                if not delete_remote_branch(*remote):
+                    print(f"warning: couldn't delete {upstream}; leaving {branch} alone",
+                          file=sys.stderr)
+                    skipped.add(branch)
+                    continue
+                print(f"deleted {upstream}")
+            remove_merged(branch, parents)
+            if remote and not args.delete_merged_remotes:
+                print(f"note: {upstream} still exists; delete it with "
+                      f"`git push {remote[0]} --delete {remote[1].removeprefix('refs/heads/')}`, "
+                      f"or pass --delete-merged-remotes")
+            if branch == original:
+                original = current_branch() or rev("HEAD")
+            continue
         if upstream_gone(branch):
-            if contained_in(branch, parent):
-                remove_merged(branch, parents)
-                if branch == original:
-                    original = current_branch() or rev("HEAD")
-                continue
             print(f"warning: {branch}'s remote branch is gone but its changes aren't in {parent}; "
                   f"leaving it alone", file=sys.stderr)
+        elif contained_in(branch, parent) and changes_something(branch):
+            # Merged, but someone pushed to its remote branch afterwards.
+            # Restacking would replay the merged commits onto parent.
+            print(f"warning: skipping {branch}: it was merged into {parent}, but its remote branch "
+                  f"has commits that {parent} doesn't", file=sys.stderr)
+            skipped.add(branch)
+            continue
         try:
             restack_branch(branch, parent)
         except BrokenStackError as e:
@@ -679,6 +770,8 @@ def main(argv=None):
     p = sub.add_parser("sync", help="fetch, drop merged branches, restack everything, "
                                     "and pull in commits others pushed")
     p.add_argument("--remote", default="origin")
+    p.add_argument("--delete-merged-remotes", action="store_true",
+                   help="also delete the remote branches of merged branches that still have one")
     p.set_defaults(func=cmd_sync)
 
     p = sub.add_parser("push", help="force-push (with lease) every branch in the current stack, "
