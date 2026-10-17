@@ -54,9 +54,9 @@ class BrokenStackError(StackError):
     """A branch's metadata doesn't match the repository, so it can't be restacked."""
 
 
-def git(*args, check=True):
+def git(*args, check=True, input=None):
     """Run git and return stripped stdout."""
-    result = subprocess.run(["git", *args], capture_output=True, text=True)
+    result = subprocess.run(["git", *args], capture_output=True, text=True, input=input)
     if check and result.returncode != 0:
         raise StackError(f"git {' '.join(args)} failed:\n{result.stderr.strip()}")
     return result.stdout.strip()
@@ -219,6 +219,34 @@ def settle_all():
         settle(branch)
 
 
+def recorded_base(branch, parent):
+    """Return branch's base, checking that it is still in the branch's history."""
+    base = config_get(branch, BASE_KEY)
+    if base is None or not is_ancestor(base, branch):
+        raise BrokenStackError(f"{branch}'s recorded base isn't in its history (was it rebased by hand?); "
+                               f"fix it with `git stack track {parent} --base <sha>`")
+    return base
+
+
+def squash_branch(branch, parent):
+    """Squash branch's own commits into one, keeping its base.
+
+    The commit gets every squashed commit's message, oldest first, and the
+    oldest commit's author and date.
+    """
+    base = recorded_base(branch, parent)
+    commits = git("rev-list", "--reverse", f"{base}..refs/heads/{branch}").split()
+    if len(commits) < 2:
+        return
+    print(f"squashing {len(commits)} commits on {branch}")
+    message = "\n\n".join(git("show", "--no-patch", "--format=%B", c) for c in commits)
+    author, date = git("show", "--no-patch", "--format=%an <%ae>%x00%aI", commits[0]).split("\0")
+    git("switch", "--quiet", branch)
+    git("reset", "--quiet", "--soft", base)
+    git("commit", "--quiet", "--no-verify", "--cleanup=whitespace",
+        f"--author={author}", f"--date={date}", "--file=-", input=message)
+
+
 def restack_branch(branch, parent):
     """Rebase branch's own commits onto parent's current tip.
 
@@ -229,10 +257,7 @@ def restack_branch(branch, parent):
     if parent_tip is None:
         raise BrokenStackError(f"{branch}'s parent {parent} doesn't exist; "
                                f"retarget it with `git stack track <parent> --base <sha>`")
-    base = config_get(branch, BASE_KEY)
-    if base is None or not is_ancestor(base, branch):
-        raise BrokenStackError(f"{branch}'s recorded base isn't in its history (was it rebased by hand?); "
-                               f"fix it with `git stack track {parent} --base <sha>`")
+    base = recorded_base(branch, parent)
     if base == parent_tip:
         # Nothing to replay, so there's no rebase to wait for.
         config_set(branch, PARENT_KEY, parent)
@@ -382,7 +407,17 @@ def cmd_restack(args):
             raise StackError(f"{branch} isn't tracked; use `git stack track` first")
         ensure_no_cycle(branch, args.onto, parents)
         parents[branch] = args.onto
-    restack_all(stack_of(branch, parents), parents)
+    branches = stack_of(branch, parents)
+    if args.squash:
+        if branch not in parents:
+            raise StackError(f"{branch} isn't in a stack; run `restack --squash` from a stacked branch "
+                             f"to squash only that stack")
+        original = current_branch()
+        for b in branches:
+            squash_branch(b, parents[b])
+        if current_branch() != original:
+            git("switch", "--quiet", original)
+    restack_all(branches, parents)
 
 
 def fast_forward_trunks(roots):
@@ -524,6 +559,7 @@ def download(url, headers=None, not_found=None):
         with urllib.request.urlopen(request, timeout=30) as response:
             return response.read()
     except urllib.error.HTTPError as e:
+        e.close()
         # GitHub's commits API answers 422 for a ref that doesn't exist.
         if not_found and e.code in (404, 422):
             raise StackError(not_found)
@@ -607,6 +643,8 @@ def main(argv=None):
 
     p = sub.add_parser("restack", help="rebase every branch in the current stack onto its parent")
     p.add_argument("--onto", help="first change the current branch's parent to ONTO")
+    p.add_argument("--squash", action="store_true",
+                   help="first squash each branch in the stack into a single commit")
     p.set_defaults(func=cmd_restack)
 
     p = sub.add_parser("sync", help="fetch, drop merged branches, restack everything, "

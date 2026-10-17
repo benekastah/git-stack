@@ -241,6 +241,55 @@ class RestackTest(StackTestCase):
         self.assertIn("isn't in pr1's history", result.stderr)
         self.assertFalse(self.config_exists("pr1", "stackParent"))
 
+    def test_restack_squash_squashes_each_branch_in_stack(self):
+        self.make_stack()
+        self.git("switch", "--quiet", "pr2")
+        self.commit("b", "pr2 second\n", "pr2 c2")
+        self.git("switch", "--quiet", "pr1")
+        self.commit("a", "pr1 third\n", "pr1 c3")
+        self.git("switch", "--quiet", "pr2")
+
+        self.stack("restack", "--squash")
+
+        self.assert_stacked("pr1", "main", ["pr1 c1"])
+        self.assert_stacked("pr2", "pr1", ["pr2 c1"])
+        self.assert_stacked("pr3", "pr2", ["pr3 c1"])
+        self.assertEqual(self.git("log", "-1", "--format=%B", "pr1"), "pr1 c1\n\npr1 c2\n\npr1 c3")
+        self.assertEqual(self.git("log", "-1", "--format=%B", "pr2"), "pr2 c1\n\npr2 c2")
+        self.assertEqual([self.git("show", f"pr3:{name}") for name in "abc"],
+                         ["pr1 third", "pr2 second", "pr3"])
+        self.assertEqual(self.git("branch", "--show-current"), "pr2")
+
+    def test_restack_squash_resolves_a_line_edited_by_every_commit_once(self):
+        self.stack("branch", "pr1")
+        self.commit("a", "function(A, B)\n", "pr1 c1")
+        self.stack("branch", "pr2")
+        self.commit("a", "function(A, B, D)\n", "pr2 c1")
+        self.commit("a", "function(A, B, E)\n", "pr2 c2")
+        self.git("switch", "--quiet", "pr1")
+        self.commit("a", "function(A, F)\n", "pr1 c2")
+        self.git("switch", "--quiet", "pr2")
+
+        result = self.stack("restack", "--squash", expect_success=False)
+        self.assertIn("restacking pr2 stopped on a conflict", result.stderr)
+        self.write("a", "function(A, F, E)\n")
+        self.git("add", "a")
+        # The only conflict: continuing finishes the rebase.
+        self.git("rebase", "--continue")
+        self.stack("restack")
+
+        self.assert_stacked("pr2", "pr1", ["pr2 c1"])
+        self.assertEqual(self.git("show", "pr2:a"), "function(A, F, E)")
+
+    def test_restack_squash_refuses_outside_a_stack(self):
+        self.make_stack()
+        self.git("switch", "--quiet", "main")
+
+        result = self.stack("restack", "--squash", expect_success=False)
+
+        self.assertIn("main isn't in a stack", result.stderr)
+        self.assertEqual(self.own_commits("pr1", "main"), ["pr1 c2", "pr1 c1"])
+
     def test_track_existing_branch_after_parent_was_squash_merged(self):
         self.git("switch", "--quiet", "-c", "pr1")
         self.commit("a", "pr1 first\n", "pr1 c1")

@@ -85,7 +85,7 @@ collide with the squashed version in `main`.
 | `git stack branch <name>` | Create `<name>` on top of the current branch and track it. |
 | `git stack track <parent> [--base <sha>]` | Track an existing branch. `--base` defaults to the merge-base with `<parent>`; pass the old parent tip explicitly if the parent was already squash-merged. |
 | `git stack info` | Show all tracked stacks as a tree, marking the current branch and branches that need a restack. |
-| `git stack restack [--onto <parent>]` | Rebase every branch in the current stack onto its parent, bottom-up. `--onto` first retargets the current branch. On an untracked branch like `main`, restacks everything stacked on it. |
+| `git stack restack [--onto <parent>] [--squash]` | Rebase every branch in the current stack onto its parent, bottom-up. `--onto` first retargets the current branch. On an untracked branch like `main`, restacks everything stacked on it. `--squash` first squashes each branch in the current stack into one commit (keeping all the messages), so a conflict is resolved once per branch instead of once per commit; it refuses to run outside a stack. |
 | `git stack sync [--remote origin]` | Fetch with `--prune`, fast-forward `main` (and any other stack root) to its upstream, delete branches that were merged, move their children down, restack all stacks, and pull in commits others pushed to tracked branches. |
 | `git stack push [--remote origin]` | Force-push (with lease) and `--set-upstream` every branch in the current stack. Refuses if a remote branch has commits the local one doesn't; run `sync` first. |
 | `git stack upgrade [--ref main]` | Replace the installed `git-stack` with the latest version from GitHub (or the given branch, tag or commit). |
@@ -130,6 +130,20 @@ If a rebase or cherry-pick stops on a conflict, resolve it and run
 then rerun the git-stack command to finish the rest of the stack. The new
 parent and base (and the pulled upstream commits) are recorded only if the
 operation actually completed.
+
+## Common issues
+
+### The same line conflicts on every commit during a restack
+
+If a parent branch and several of its child's commits all edit the same line
+(say, a function's argument list), restacking replays the child one commit at a
+time, so you resolve a conflict on that line for every commit. Git merges whole
+lines, so it can't tell that the edits touch different arguments.
+
+[Mergiraf](https://mergiraf.org) is a merge driver that merges by syntax tree
+instead of by line, so edits to different parts of the same line often merge
+cleanly. It can be enabled just for yourself (globally or for one repository)
+without committing anything, and git-stack's rebases pick it up automatically.
 
 ## Tests
 
