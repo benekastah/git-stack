@@ -168,17 +168,25 @@ def ensure_no_cycle(branch, new_parent, parents):
 
 
 def stack_of(branch, parents):
-    """Tracked branches in the stack containing branch, parent-before-child.
-
-    For a tracked branch this is everything stacked on the same root that
-    shares its bottom-most tracked ancestor. For an untracked branch (e.g.
-    main) it is everything stacked on top of it.
+    """Tracked branches in the stack containing tracked branch, parent-before-child:
+    everything stacked on its bottom-most tracked ancestor, and that ancestor.
     """
-    children = children_map(parents)
-    if branch not in parents:
-        return descendants(branch, children)
     bottom = ancestry(branch, parents)[-2]
-    return [bottom, *descendants(bottom, children)]
+    return [bottom, *descendants(bottom, children_map(parents))]
+
+
+def current_stacked_branch(parents, command, hint=None):
+    """Return the current branch, refusing unless it's in a stack.
+
+    hint, if given, replaces the suggestion to switch to a stacked branch.
+    """
+    branch = current_branch()
+    if branch is None:
+        raise StackError("not on a branch")
+    if branch not in parents:
+        hint = hint or f"switch to a stacked branch to {command} its stack"
+        raise StackError(f"{branch} isn't in a stack; {hint}")
+    return branch
 
 
 def operation_in_progress():
@@ -463,20 +471,14 @@ def cmd_restack(args):
     ensure_no_operation_in_progress()
     ensure_clean_worktree()
     settle_all()
-    branch = current_branch()
-    if branch is None:
-        raise StackError("not on a branch")
     parents = tracked_branches()
+    branch = current_stacked_branch(
+        parents, "restack", hint="use `git stack track` first" if args.onto else None)
     if args.onto:
         if rev(args.onto) is None:
             raise StackError(f"{args.onto} isn't a commit")
-        if branch not in parents:
-            raise StackError(f"{branch} isn't tracked; use `git stack track` first")
         ensure_no_cycle(branch, args.onto, parents)
         parents[branch] = args.onto
-    if args.squash and branch not in parents:
-        raise StackError(f"{branch} isn't in a stack; run `restack --squash` from a stacked branch "
-                         f"to squash only that stack")
     branches = skip_merged(stack_of(branch, parents), parents, make_adapter(DEFAULT_REMOTE))
     if args.squash:
         original = current_branch()
@@ -795,7 +797,9 @@ def untrack(branch):
 def remove_merged(branch, parents, delete):
     """Move branch's children onto its parent, then stop tracking branch.
 
-    If delete is set, the branch itself is deleted too.
+    If delete is set, the branch itself is deleted too, and if it was checked
+    out, its first child (or, without children, its parent) is checked out
+    instead.
     """
     new_parent = parents[branch]
     children = drop_from_stack(branch, parents)
@@ -807,7 +811,9 @@ def remove_merged(branch, parents, delete):
         print(f"{branch} was merged into {new_parent}; stopped tracking it{moved}")
         return
     if current_branch() == branch:
-        if local_branch_exists(new_parent):
+        if children:
+            git("switch", "--quiet", sorted(children)[0])
+        elif local_branch_exists(new_parent):
             git("switch", "--quiet", new_parent)
         else:
             git("switch", "--quiet", "--detach", new_parent)
@@ -816,27 +822,57 @@ def remove_merged(branch, parents, delete):
     print(f"{branch} was merged into {new_parent}; deleted it (was {tip[:12]}){moved}")
 
 
+def untrack_merged(branch, parents, delete):
+    """Stop tracking merged branch, deleting what delete ("local", "remote" or
+    "both") says. Returns False, leaving branch alone, if its remote branch
+    couldn't be deleted.
+    """
+    remote = remote_branch(branch)
+    upstream = git("rev-parse", "--abbrev-ref", f"{branch}@{{upstream}}") if remote else None
+    delete_remote = delete in ("remote", "both")
+    if remote and delete_remote:
+        if not delete_remote_branch(*remote):
+            print(f"warning: couldn't delete {upstream}; leaving {branch} alone", file=sys.stderr)
+            return False
+        print(f"deleted {upstream}")
+    remove_merged(branch, parents, delete in ("local", "both"))
+    if remote and not delete_remote:
+        print(f"note: {upstream} still exists; delete it with "
+              f"`git push {remote[0]} --delete {remote[1].removeprefix('refs/heads/')}`, "
+              f"or pass `--delete remote`")
+    return True
+
+
+def fetch(remote):
+    if not git_passthrough("fetch", "--prune", remote):
+        raise StackError(f"fetching {remote} failed")
+
+
+def restore_checkout(original):
+    """Switch back to original, a branch or (if it was deleted) a commit."""
+    if local_branch_exists(original):
+        if current_branch() != original:
+            git("switch", "--quiet", original)
+    elif rev("HEAD") != original or current_branch():
+        git("switch", "--quiet", "--detach", original)
+
+
 def cmd_sync(args):
     ensure_no_operation_in_progress()
     ensure_clean_worktree()
     settle_all()
-    # Where to leave the user afterwards: their branch, or the commit they had
-    # detached at.
-    original = current_branch() or rev("HEAD")
-    delete_local = args.delete in ("local", "both")
-    delete_remote = args.delete in ("remote", "both")
-    adapter = make_adapter(args.remote)
-    if not git_passthrough("fetch", "--prune", args.remote):
-        raise StackError(f"fetching {args.remote} failed")
-
     parents = tracked_branches()
-    roots = sorted({stack_root(b, parents) for b in parents})
-    fast_forward_trunks(roots)
+    # Where to leave the user afterwards: their branch, or wherever deleting
+    # it left them.
+    original = current_stacked_branch(parents, "sync")
+    adapter = make_adapter(args.remote)
+    fetch(args.remote)
+    fast_forward_trunks([stack_root(original, parents)])
 
     # Parent-before-child, so by the time we reach a branch its parent is
     # final: merged branches have been removed (and their children reparented
     # in `parents`), and the rest have been restacked and pulled.
-    order = [b for root in roots for b in descendants(root, children_map(parents))]
+    order = stack_of(original, parents)
     skipped = set()
     # Branches that differ from their remote branch once restacked and pulled.
     unpushed = []
@@ -848,21 +884,9 @@ def cmd_sync(args):
             continue
         state = adapter.merge_state(branch, parent)
         if state is MergeState.MERGED:
-            remote = remote_branch(branch)
-            upstream = git("rev-parse", "--abbrev-ref", f"{branch}@{{upstream}}") if remote else None
-            if remote and delete_remote:
-                if not delete_remote_branch(*remote):
-                    print(f"warning: couldn't delete {upstream}; leaving {branch} alone",
-                          file=sys.stderr)
-                    skipped.add(branch)
-                    continue
-                print(f"deleted {upstream}")
-            remove_merged(branch, parents, delete_local)
-            if remote and not delete_remote:
-                print(f"note: {upstream} still exists; delete it with "
-                      f"`git push {remote[0]} --delete {remote[1].removeprefix('refs/heads/')}`, "
-                      f"or pass `--delete remote`")
-            if branch == original:
+            if not untrack_merged(branch, parents, args.delete):
+                skipped.add(branch)
+            elif branch == original:
                 original = current_branch() or rev("HEAD")
             continue
         if state is MergeState.MERGED_WITH_NEW_COMMITS:
@@ -885,27 +909,49 @@ def cmd_sync(args):
         if upstream_tip and upstream_tip != rev(branch):
             unpushed.append(branch)
 
-    if local_branch_exists(original):
-        if current_branch() != original:
-            git("switch", "--quiet", original)
-    elif rev("HEAD") != original or current_branch():
-        git("switch", "--quiet", "--detach", original)
+    restore_checkout(original)
     if unpushed:
-        print("note: run `git stack push` from each stack to update the remote branches and pull "
-              "requests of:")
+        print("note: run `git stack push` to update the remote branches and pull requests of:")
         for branch in unpushed:
             print(f"  {branch}")
+
+
+def cmd_clean(args):
+    ensure_no_operation_in_progress()
+    ensure_clean_worktree()
+    settle_all()
+    # Where to leave the user afterwards: their branch (or the commit they had
+    # detached at), or wherever deleting their branch left them.
+    original = current_branch() or rev("HEAD")
+    adapter = make_adapter(args.remote)
+    fetch(args.remote)
+    parents = tracked_branches()
+    roots = sorted({stack_root(b, parents) for b in parents})
+    fast_forward_trunks(roots)
+
+    # Parent-before-child, so a branch whose parent was merged is checked
+    # against its new parent.
+    order = [b for root in roots for b in descendants(root, children_map(parents))]
+    for branch in order:
+        parent = parents[branch]
+        if rev(parent) is None:
+            print(f"warning: skipping {branch}: its parent {parent} doesn't exist", file=sys.stderr)
+            continue
+        state = adapter.merge_state(branch, parent)
+        if state is MergeState.MERGED:
+            if untrack_merged(branch, parents, args.delete) and branch == original:
+                original = current_branch() or rev("HEAD")
+        elif state is MergeState.MERGED_WITH_NEW_COMMITS:
+            print(f"warning: leaving {branch} alone: it was merged into {parent}, but it or its "
+                  f"remote branch has commits that {parent} doesn't", file=sys.stderr)
+    restore_checkout(original)
 
 
 def cmd_push(args):
     ensure_no_operation_in_progress()
     settle_all()
-    branch = current_branch()
-    if branch is None:
-        raise StackError("not on a branch")
     parents = tracked_branches()
-    if branch not in parents:
-        raise StackError(f"{branch} isn't in a stack; switch to a stacked branch to push its stack")
+    branch = current_stacked_branch(parents, "push")
     adapter = make_adapter(args.remote)
     branches = skip_merged(stack_of(branch, parents), parents, adapter)
     if not branches:
@@ -1044,13 +1090,19 @@ def main(argv=None):
                    help="first squash each branch in the stack into a single commit")
     p.set_defaults(func=cmd_restack)
 
-    p = sub.add_parser("sync", help="fetch, untrack merged branches, restack everything, "
+    delete_help = ("besides untracking merged branches, delete their local branches, their remote "
+                   "branches, or both")
+    p = sub.add_parser("sync", help="fetch, untrack the current stack's merged branches, restack it, "
                                     "and pull in commits others pushed")
     p.add_argument("--remote", default=DEFAULT_REMOTE)
-    p.add_argument("-d", "--delete", choices=("local", "remote", "both"),
-                   help="besides untracking merged branches, delete their local branches, "
-                        "their remote branches, or both")
+    p.add_argument("-d", "--delete", choices=("local", "remote", "both"), help=delete_help)
     p.set_defaults(func=cmd_sync)
+
+    p = sub.add_parser("clean", help="fetch and untrack merged branches in every stack, "
+                                     "without restacking")
+    p.add_argument("--remote", default=DEFAULT_REMOTE)
+    p.add_argument("-d", "--delete", choices=("local", "remote", "both"), help=delete_help)
+    p.set_defaults(func=cmd_clean)
 
     p = sub.add_parser("push", help="force-push (with lease) every branch in the current stack, "
                                     "refusing if that would drop commits on the remote")
