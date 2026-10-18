@@ -162,7 +162,7 @@ relative to the one before.
 | `git stack restack [--onto <parent>] [--squash]` | Rebase every branch in the current stack onto its parent, bottom-up. `--onto` first retargets the current branch. Branches that were merged are skipped and their children restacked onto their parent; `sync` or `clean` removes them from the stack. `--squash` first squashes each branch in the current stack into one commit (keeping all the messages), so a conflict is resolved once per branch instead of once per commit. Refuses to run outside a stack. |
 | `git stack sync [--remote origin] [-d local\|remote\|both]` | Fetch with `--prune`, fast-forward the current stack's root (e.g. `main`) to its upstream, stop tracking the stack's branches that were merged, move their children down, restack the stack, and pull in commits others pushed to its branches. Other stacks are left alone. Refuses to run outside a stack. Merged branches are kept unless `-d`/`--delete` says to delete their local branches, their remote branches, or both. |
 | `git stack clean [--remote origin] [-d local\|remote\|both]` | Fetch with `--prune`, fast-forward every stack root, and stop tracking merged branches in every stack, moving their children down. Nothing is restacked, so there are no conflicts; the children are rebased the next time you `sync` or `restack` their stack. `-d` works as for `sync`. Runs from any branch. |
-| `git stack push [<branch> \| --all] [--remote origin]` | Force-push (with lease) and `--set-upstream` every branch in the current stack, or `<branch>`'s. Skips merged branches. Refuses to run outside a stack, or if a remote branch was deleted or has commits the local one doesn't; run `sync` first. With the [GitHub adapter](#github), opens a draft pull request for the current branch (or `<branch>`, or with `--all`, the bottom of the stack) and each branch above it that has none, and updates the base of the stack's pull requests. |
+| `git stack push [<branch> \| --all] [--remote origin] [--force]` | Force-push (with lease) and `--set-upstream` every branch in the current stack, or `<branch>`'s. Skips merged branches. Refuses to run outside a stack, or if a remote branch was deleted or has commits the local one doesn't; run `sync` first, or pass `--force` to drop those commits. With the [GitHub adapter](#github), opens a draft pull request for the current branch (or `<branch>`, or with `--all`, the bottom of the stack) and each branch above it that has none, and updates the base of the stack's pull requests. |
 
 ### When does `sync` consider a branch merged?
 
@@ -221,9 +221,14 @@ upstream that it doesn't already have (fast-forwarding when it can). Commits
 that are older versions of your own rebased commits, merge commits (e.g.
 GitHub's "Update branch"), and changes already in the parent are skipped.
 
+If a pull stops on a conflict and you abort it (or skip some of the commits),
+the commits you didn't take aren't counted as pulled: the next `sync` offers
+them again, and `push` refuses to drop them. To drop them anyway, run
+`git stack push --force`.
+
 `push` pins each lease to the remote-tracking ref it checked, so if someone
 pushes after your last fetch, the push fails instead of overwriting their
-work.
+work, even with `--force`.
 
 ### Conflicts
 

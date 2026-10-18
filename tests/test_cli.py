@@ -41,9 +41,11 @@ def stack() -> Any:
     (["sync", "--remote", "upstream", "-d", "local"], "sync", (), {"remote": "upstream", "delete": "local"}),
     (["clean"], "clean", (), {"remote": "origin", "delete": None}),
     (["clean", "--delete", "both"], "clean", (), {"remote": "origin", "delete": "both"}),
-    (["push"], "push", (None,), {"remote": "origin", "whole_stack": False}),
-    (["push", "pr1", "--remote", "upstream"], "push", ("pr1",), {"remote": "upstream", "whole_stack": False}),
-    (["push", "--all"], "push", (None,), {"remote": "origin", "whole_stack": True}),
+    (["push"], "push", (None,), {"remote": "origin", "whole_stack": False, "force": False}),
+    (["push", "pr1", "--remote", "upstream"], "push", ("pr1",),
+     {"remote": "upstream", "whole_stack": False, "force": False}),
+    (["push", "--all"], "push", (None,), {"remote": "origin", "whole_stack": True, "force": False}),
+    (["push", "--force"], "push", (None,), {"remote": "origin", "whole_stack": False, "force": True}),
 ])
 def test_command_calls_its_client_method(
         stack: Any, argv: list[str], method: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> None:

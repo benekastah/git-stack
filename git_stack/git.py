@@ -107,3 +107,8 @@ class GitClient:
         patches = self.run("--literal-pathspecs", command, "--no-color", "--no-ext-diff", *rest)
         return {line.split()[0]
                 for line in self.run("patch-id", "--stable", input=patches + "\n").splitlines()}
+
+    def authorships(self, *args: str) -> set[str]:
+        """The author and author date of each commit `git log <args>` lists, e.g.
+        "Jane Doe <jane@example.com> 1700000000 +0100"."""
+        return set(self.run("log", "--format=%an <%ae> %ad", "--date=raw", *args).splitlines())

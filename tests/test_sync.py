@@ -287,6 +287,23 @@ def test_sync_pull_conflict_resolved_with_cherry_pick_continue(repo: Repo, clien
     repo.assert_stacked("pr2", "pr1", ["pr2 c1"])
 
 
+def test_sync_pull_aborted_then_committed_over_is_not_pulled(repo: Repo, client: StackClient) -> None:
+    repo.make_stack()
+    client.push()
+    repo.commit_on_forge("pr1", "a", "collab\n", "collab")
+    repo.git("switch", "--quiet", "pr1")
+    repo.commit("a", "pr1 third\n", "pr1 c3")
+    with pytest.raises(StackError, match="pulling upstream commits into pr1 stopped on a conflict"):
+        client.sync()
+    repo.git("cherry-pick", "--abort")
+    repo.commit("b", "more\n", "pr1 c4")
+
+    with pytest.raises(StackError, match="origin/pr1 has commits that pr1 doesn't"):
+        client.push()
+
+    assert repo.remote_subject("pr1") == "collab"
+
+
 def test_sync_skips_branches_above_a_missing_parent(
         repo: Repo, client: StackClient, emitted: list[events.Event]) -> None:
     repo.make_stack()

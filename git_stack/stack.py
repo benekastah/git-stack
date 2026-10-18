@@ -294,12 +294,16 @@ class StackClient(StackCore):
         self.restore_checkout(original)
 
     def push(self, branch: str | None = None, remote: str = DEFAULT_REMOTE,
-             whole_stack: bool = False) -> list[str]:
+             whole_stack: bool = False, force: bool = False) -> list[str]:
         """Force-push (with lease) every unmerged branch in branch's stack (default:
         the current branch's), then let the adapter update pull requests and open
         them for branch and the branches above it, or with whole_stack, for the
         whole stack. Returns the pushed branches, which is empty if every branch
         looks merged.
+
+        Refuses if a remote branch has commits the local one doesn't, unless
+        force is set. Either way, the push fails if a remote branch changed
+        since it was last fetched.
         """
         git = self.git
         self.ensure_no_operation_in_progress()
@@ -326,15 +330,15 @@ class StackClient(StackCore):
                                  f"again")
 
         # Force-pushing is only safe if we've seen everything on the remote branch.
-        # Refuse if we know of commits we haven't pulled, and pin each lease to the
-        # remote-tracking ref we checked, so a push that raced with someone else's
-        # fails instead of overwriting it.
+        # Refuse if we know of commits we haven't pulled (unless told to drop
+        # them), and pin each lease to the remote-tracking ref we checked, so a
+        # push that raced with someone else's fails instead of overwriting it.
         leases = []
         for b in branches:
             remote_tip = git.rev(f"refs/remotes/{remote}/{b}")
-            if remote_tip and self.unpulled_commits(b, parents[b], remote_tip):
-                raise StackError(f"{remote}/{b} has commits that {b} doesn't; "
-                                 f"run `git stack sync` to pull them in first")
+            if remote_tip and not force and self.unpulled_commits(b, parents[b], remote_tip):
+                raise StackError(f"{remote}/{b} has commits that {b} doesn't; run `git stack sync` "
+                                 f"to pull them in first, or push with --force to drop them")
             leases.append(f"--force-with-lease={b}:{remote_tip or ''}")
         if not git.passthrough("push", *leases, "--set-upstream", remote, *branches):
             raise StackError("push failed; if the remote has new commits, run `git stack sync` and try again")
