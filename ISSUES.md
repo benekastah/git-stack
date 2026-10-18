@@ -4,13 +4,15 @@ Most severe first.
 
 ## A reverted change can look merged
 
-The git adapter's patch-id check (`landed_as_patches`) counts a branch as merged
-if its parent has a commit with the same changes, even if a later commit on the
-parent reverted it. `sync` then untracks the branch (or deletes it with
-`-d local`) and restacks its children onto a parent without its changes. The
-GitHub adapter falls back to this check for branches without a merged pull
-request, except those stacked directly on the default branch that have an open
-pull request.
+A branch that was merged and then reverted on its parent still counts as
+merged: the GitHub adapter trusts the merged pull request, and the git
+adapter's patch-id check (`landed_as_patches`) finds a commit on the parent with
+the same changes, ignoring the later revert. `sync` then untracks the branch (or
+deletes it with `-d local`) and restacks its children onto a parent without its
+changes, without any warning that the branch was reverted.
+
+The README's "A merged branch was reverted" describes recovering by recreating
+the branch and moving its children back with `restack --onto`.
 
 ## Old copies of rebased commits can be pulled back in
 
