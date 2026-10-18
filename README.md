@@ -126,7 +126,7 @@ With the GitHub adapter:
 | `git stack info` | Show all tracked stacks as a tree, marking the current branch, branches that were merged, and branches that need a restack. |
 | `git stack restack [--onto <parent>] [--squash]` | Rebase every branch in the current stack onto its parent, bottom-up. `--onto` first retargets the current branch. On an untracked branch like `main`, restacks everything stacked on it. Branches that were merged are skipped and their children restacked onto their parent; `sync` removes them from the stack. `--squash` first squashes each branch in the current stack into one commit (keeping all the messages), so a conflict is resolved once per branch instead of once per commit; it refuses to run outside a stack. |
 | `git stack sync [--remote origin] [-d local\|remote\|both]` | Fetch with `--prune`, fast-forward `main` (and any other stack root) to its upstream, stop tracking branches that were merged, move their children down, restack all stacks, and pull in commits others pushed to tracked branches. Merged branches are kept unless `-d`/`--delete` says to delete their local branches, their remote branches, or both. |
-| `git stack push [--remote origin]` | Force-push (with lease) and `--set-upstream` every branch in the current stack. Refuses if a remote branch has commits the local one doesn't; run `sync` first. With the [GitHub adapter](#github), opens a draft pull request for the current branch if it has none, and updates the base of the stack's pull requests. |
+| `git stack push [--remote origin]` | Force-push (with lease) and `--set-upstream` every branch in the current stack. Skips merged branches. Refuses to run outside a stack, or if a remote branch was deleted or has commits the local one doesn't; run `sync` first. With the [GitHub adapter](#github), opens a draft pull request for the current branch if it has none, and updates the base of the stack's pull requests. |
 | `git stack upgrade [--ref main]` | Replace the installed `git-stack` with the latest version from GitHub (or the given branch, tag or commit). |
 
 ### When does `sync` consider a branch merged?
@@ -164,7 +164,10 @@ merge is skipped with a warning, along with the branches stacked on it, since
 restacking it would replay its merged commits.
 
 `restack` uses the same check but changes nothing about them: it skips merged
-branches and restacks their children onto their parent.
+branches and restacks their children onto their parent. `push` skips them too,
+and points their children's pull requests at their parent. It also refuses to
+push a branch whose remote branch was deleted, since that's usually a merged
+pull request `sync` hasn't seen yet.
 
 If a branch's metadata is broken (for example its parent was deleted by hand),
 `sync` warns and skips that branch and everything stacked on it, and carries on
@@ -172,7 +175,8 @@ with the other stacks.
 
 Note that `sync` restacks every tracked stack, including rebasing bottom
 branches onto the updated `main`. Nothing is pushed until you run
-`git stack push`.
+`git stack push`, so until then pull requests still show the old commits.
+`sync` ends by listing the branches whose remote branch is out of date.
 
 ### Pulling commits others pushed
 

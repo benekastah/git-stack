@@ -1,16 +1,5 @@
 # Known issues
 
-## `push` on an untracked branch pushes every stack
-
-`stack_of` on an untracked branch such as `main` returns everything stacked on
-it, so `git stack push` from `main` force-pushes every tracked branch in every
-stack. The README says it pushes "every branch in the current stack". This also
-recreates remote branches for merged branches that are still tracked, which
-can reopen PR branches and trigger CI.
-
-Possible fix: refuse to push from an untracked branch, as `restack --squash`
-does.
-
 ## A reverted change can look merged
 
 The git adapter's patch-id check (`landed_as_patches`) counts a branch as merged
