@@ -45,6 +45,13 @@ def test_push_refuses_outside_a_stack(repo: Repo, client: StackClient) -> None:
     assert repo.git("branch", "--list", cwd=repo.origin) == "* main"
 
 
+def test_push_refuses_untracked_branch(repo: Repo, client: StackClient) -> None:
+    repo.make_stack()
+
+    with pytest.raises(StackError, match="main isn't in a stack"):
+        client.push("main")
+
+
 def test_push_skips_branch_merged_locally(
         repo: Repo, client: StackClient, emitted: list[events.Event]) -> None:
     repo.make_stack()

@@ -152,13 +152,15 @@ class GitHubAdapter(GitAdapter):
         return (set(unmatched.split())
                 & set(self.git.run("rev-list", "--no-merges", ref, "--not", parent).split()))
 
-    def after_push(self, branch: str, branches: list[str], parents: Parents) -> None:
-        """Open a draft pull request for branch if it has none, and point the
-        open pull requests of the pushed branches at their stack parents."""
-        if branch in branches and not self.git.config_get(branch, PR_KEY):
-            self.record_pull_request(branch, parents[branch])
+    def after_push(self, pushed: list[str], parents: Parents, submitted: list[str]) -> None:
+        """Open a draft pull request for each submitted branch that has none, and
+        point the open pull requests of all pushed branches at their stack
+        parents."""
+        for branch in submitted:
+            if not self.git.config_get(branch, PR_KEY):
+                self.record_pull_request(branch, parents[branch])
         prs = self.pull_requests()
-        for b in branches:
+        for b in pushed:
             pr = prs.get(b)
             if pr and pr.state == "OPEN" and pr.base != parents[b]:
                 self.gh("pr", "edit", str(pr.number), "--repo", self.repo, "--base", parents[b])
