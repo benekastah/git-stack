@@ -6,7 +6,7 @@ from git_stack import events
 from git_stack.adapters import ADAPTER_SETTING, make_adapter
 from git_stack.adapters.git import GitAdapter
 from git_stack.adapters.merge_state import MergeState
-from git_stack.core import (BASE_KEY, PARENT_KEY, PR_KEY, Parents, StackCore, children_map, descendants,
+from git_stack.core import (BASE_KEY, PARENT_KEY, Parents, StackCore, children_map, descendants,
                             drop_from_stack, ensure_no_cycle, stack_of, stack_root)
 from git_stack.errors import BrokenStackError, StackError
 from git_stack.git import DEFAULT_REMOTE
@@ -122,9 +122,6 @@ class StackClient(StackCore):
         upstream = git.run("rev-parse", "--abbrev-ref", f"{old}@{{upstream}}", check=False) or None
         children = tuple(child for child, parent in self.tracked_branches().items() if parent == old)
         git.run("branch", "--move", old, new)
-        # Its pull request stays on the old remote branch, so the next push opens
-        # a new one.
-        git.config_unset(new, PR_KEY)
         for child in children:
             git.config_set(child, PARENT_KEY, new)
         if upstream:

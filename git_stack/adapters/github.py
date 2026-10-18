@@ -7,14 +7,17 @@ from typing import Self, TypeVar
 from git_stack import events
 from git_stack.adapters.git import GitAdapter
 from git_stack.adapters.merge_state import MergeState
-from git_stack.core import PR_KEY, Parents, StackCore
+from git_stack.core import BASE_KEY, Parents, StackCore
 from git_stack.errors import StackError
 from git_stack.git import GitClient
 
 # Matches https://host/owner/repo, ssh://user@host:port/owner/repo and
 # user@host:owner/repo, with or without .git.
 REMOTE_URL = re.compile(r"^(?:[a-z+]+://)?(?:[^@/]+@)?([^:/]+)(?::\d+)?[:/]([^/]+)/([^/]+?)(?:\.git)?/?$")
-PR_FIELDS = "number state headRefOid baseRefName mergeCommit { oid }"
+PR_FIELDS = "number state isCrossRepository headRefOid baseRefName mergeCommit { oid }"
+# How many of a branch's pull requests to look at, newest first. More than one
+# only if its name was reused, or a pull request was closed and replaced.
+PRS_PER_BRANCH = 10
 
 
 T = TypeVar("T")
@@ -49,6 +52,7 @@ class PullRequest:
     """A pull request, with the fields in PR_FIELDS."""
     number: int
     state: str
+    cross_repository: bool
     head_oid: str
     base: str
     merge_oid: str | None
@@ -59,6 +63,7 @@ class PullRequest:
         return cls(
             number=field(data, "number", int),
             state=field(data, "state", str),
+            cross_repository=field(data, "isCrossRepository", bool),
             head_oid=field(data, "headRefOid", str),
             base=field(data, "baseRefName", str),
             merge_oid=field(merge_commit, "oid", str) if merge_commit is not None else None,
@@ -81,6 +86,7 @@ class GitHubAdapter(GitAdapter):
         self.repo = f"{host}/{owner}/{name}"
         self._pull_requests: dict[str, PullRequest] | None = None
         self._default_branch: str | None = None
+        self._lookup_error: str | None = None
 
     def gh(self, *args: str) -> str:
         # In the repository, since `gh pr create --fill` reads its commits.
@@ -90,7 +96,7 @@ class GitHubAdapter(GitAdapter):
         return result.stdout.strip()
 
     def pull_requests(self) -> dict[str, PullRequest]:
-        """{branch: pull request} for tracked branches with a recorded pull request.
+        """{branch: pull request} for tracked branches with a pull request.
 
         Looked up with one API call per command. If that fails, or GitHub's
         answer isn't what we asked for, emits PullRequestLookupFailed and
@@ -98,33 +104,55 @@ class GitHubAdapter(GitAdapter):
         """
         if self._pull_requests is None:
             self._pull_requests = {}
-            numbers: dict[str, int] = {}
-            for branch in self.core.tracked_branches():
-                number = self.git.config_get(branch, PR_KEY)
-                if number and number.isdigit():
-                    numbers[branch] = int(number)
-            if not numbers:
-                return self._pull_requests
-            fields = " ".join(f"pr{n}: pullRequest(number: {n}) {{ {PR_FIELDS} }}"
-                              for n in sorted(set(numbers.values())))
-            query = (f"query($owner: String!, $name: String!) {{ repository(owner: $owner, name: $name) "
-                     f"{{ defaultBranchRef {{ name }} {fields} }} }}")
             try:
-                out = self.gh("api", "graphql", "--hostname", self.host, "-f", f"owner={self.owner}",
-                              "-f", f"name={self.name}", "-f", f"query={query}")
-                repository = field(field(parse_json(out), "data", dict), "repository", dict)
-                default_branch = optional_field(repository, "defaultBranchRef", dict)
-                pull_requests = {}
-                for branch, n in numbers.items():
-                    # null if there's no such pull request.
-                    data = optional_field(repository, f"pr{n}", dict)
-                    if data is not None:
-                        pull_requests[branch] = PullRequest.from_json(data)
-                self._pull_requests = pull_requests
-                self._default_branch = field(default_branch, "name", str) if default_branch else None
+                self._pull_requests = self.look_up_pull_requests()
             except StackError as e:
+                self._lookup_error = str(e)
                 self.core.emit(events.PullRequestLookupFailed(str(e)))
         return self._pull_requests
+
+    def look_up_pull_requests(self) -> dict[str, PullRequest]:
+        branches = list(self.core.tracked_branches())
+        if not branches:
+            return {}
+        # Branch names are passed as variables, so they needn't be escaped.
+        fields = " ".join(f"b{i}: pullRequests(headRefName: $b{i}, first: {PRS_PER_BRANCH}, "
+                          f"orderBy: {{field: CREATED_AT, direction: DESC}}) {{ nodes {{ {PR_FIELDS} }} }}"
+                          for i in range(len(branches)))
+        variables = "".join(f", $b{i}: String!" for i in range(len(branches)))
+        query = (f"query($owner: String!, $name: String!{variables}) {{ repository(owner: $owner, name: $name) "
+                 f"{{ defaultBranchRef {{ name }} {fields} }} }}")
+        args = ["api", "graphql", "--hostname", self.host, "-f", f"owner={self.owner}",
+                "-f", f"name={self.name}", "-f", f"query={query}"]
+        for i, branch in enumerate(branches):
+            args += ["-f", f"b{i}={branch}"]
+        repository = field(field(parse_json(self.gh(*args)), "data", dict), "repository", dict)
+        default_branch = optional_field(repository, "defaultBranchRef", dict)
+        pull_requests = {}
+        for i, branch in enumerate(branches):
+            nodes = field(field(repository, f"b{i}", dict), "nodes", list)
+            pr = self.pick_pull_request(branch, [PullRequest.from_json(node) for node in nodes])
+            if pr is not None:
+                pull_requests[branch] = pr
+        self._default_branch = field(default_branch, "name", str) if default_branch else None
+        return pull_requests
+
+    def pick_pull_request(self, branch: str, prs: list[PullRequest]) -> PullRequest | None:
+        """branch's pull request among prs (newest first): its open one, or else
+        its newest merged one.
+
+        Closed pull requests don't count, nor do ones from forks, which only
+        share the branch's name. Nor do merged ones whose head doesn't descend
+        from the branch's base, which are most likely for an earlier branch of
+        the same name.
+        """
+        prs = [pr for pr in prs if not pr.cross_repository]
+        open_pr = next((pr for pr in prs if pr.state == "OPEN"), None)
+        if open_pr is not None:
+            return open_pr
+        base = self.git.config_get(branch, BASE_KEY)
+        return next((pr for pr in prs if pr.state == "MERGED" and base is not None
+                     and self.git.rev(pr.head_oid) and self.git.is_ancestor(base, pr.head_oid)), None)
 
     def merge_state(self, branch: str, parent: str) -> MergeState:
         git = self.git
@@ -156,34 +184,26 @@ class GitHubAdapter(GitAdapter):
         """Open a draft pull request for each submitted branch that has none, and
         point the open pull requests of all pushed branches at their stack
         parents."""
-        for branch in submitted:
-            if not self.git.config_get(branch, PR_KEY):
-                self.record_pull_request(branch, parents[branch])
         prs = self.pull_requests()
+        if self._lookup_error is not None:
+            # Without the lookup, we can't tell which branches have a pull request.
+            raise StackError(f"couldn't look up pull requests: {self._lookup_error}")
+        for branch in submitted:
+            if branch not in prs:
+                self.open_pull_request(branch, parents[branch])
         for b in pushed:
             pr = prs.get(b)
             if pr and pr.state == "OPEN" and pr.base != parents[b]:
                 self.gh("pr", "edit", str(pr.number), "--repo", self.repo, "--base", parents[b])
                 self.core.emit(events.PullRequestRetargeted(b, pr.number, parents[b]))
 
-    def record_pull_request(self, branch: str, parent: str) -> None:
-        """Record branch's open pull request, opening a draft one if there is none."""
-        found = parse_json(self.gh("pr", "list", "--repo", self.repo, "--head", branch,
-                                   "--state", "open", "--json", "number"))
-        if not isinstance(found, list):
-            raise StackError(f"unexpected response from GitHub: expected a list of pull requests, not {found!r}")
-        if found:
-            number = field(found[0], "number", int)
-            self.core.emit(events.PullRequestFound(branch, number))
-        else:
-            url = self.gh("pr", "create", "--repo", self.repo, "--draft", "--base", parent,
-                          "--head", branch, "--fill").splitlines()[-1]
-            match = re.search(r"/pull/(\d+)$", url)
-            if not match:
-                raise StackError(f"couldn't tell which pull request gh opened for {branch} from {url!r}")
-            number = int(match.group(1))
-            self.core.emit(events.PullRequestOpened(branch, number, url))
-        self.git.config_set(branch, PR_KEY, str(number))
+    def open_pull_request(self, branch: str, parent: str) -> None:
+        url = self.gh("pr", "create", "--repo", self.repo, "--draft", "--base", parent,
+                      "--head", branch, "--fill").splitlines()[-1]
+        match = re.search(r"/pull/(\d+)$", url)
+        if not match:
+            raise StackError(f"couldn't tell which pull request gh opened for {branch} from {url!r}")
+        self.core.emit(events.PullRequestOpened(branch, int(match.group(1)), url))
 
 
 def github_repo(git: GitClient, remote: str) -> tuple[str, str, str] | None:

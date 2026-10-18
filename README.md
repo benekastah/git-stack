@@ -128,19 +128,24 @@ git config stack.adapter git
 
 With the GitHub adapter:
 
+- A branch's pull request is the one whose head is a remote branch of the same
+  name in the same repository, whether `git stack push` opened it or you did.
+  An open one wins; otherwise the newest merged one counts, if its head
+  descends from the commit the branch is stacked on (so one merged from an
+  earlier branch of the same name doesn't). Closed pull requests are ignored.
 - `git stack push` opens a draft pull request for the current branch and each
-  branch stacked above it, based on its stack parent, if it doesn't have an
-  open one yet. Push from the bottom of a stack to open pull requests for all
-  of it, or from higher up to leave the branches below without one (they're
-  still pushed, since a pull request's base branch has to exist). Each pull
-  request's number is recorded in `branch.<name>.stackPr`.
+  branch stacked above it, based on its stack parent, if it doesn't have one
+  yet. Push from the bottom of a stack to open pull requests for all of it, or
+  from higher up to leave the branches below without one (they're still
+  pushed, since a pull request's base branch has to exist).
 - `push` also changes the base of the stack's open pull requests to match their
   stack parents, e.g. to `main` once the parent PR was merged.
 - A pull request that GitHub says was merged counts as merged once its merge
   commit is in the local parent branch (`sync` fetches it), even if the parent
   changed the merged lines since, or the merge changed them.
 - If GitHub can't be reached, git-stack warns and detects merges like the `git`
-  adapter does.
+  adapter does. `push` still pushes, but then fails without opening or
+  retargeting pull requests.
 
 ## Commands
 
@@ -152,7 +157,7 @@ relative to the one before.
 | --- | --- |
 | `git stack branch <name>` | Create `<name>` on top of the current branch and track it. |
 | `git stack track <parent> [<branch>...] [--base <sha>]` | Track existing branches (default: the current branch) as a stack on `<parent>`, each stacked on the one before it, e.g. `git stack track main pr1 pr2 pr3`. `--base` is where the first branch starts and defaults to the merge-base with `<parent>`; pass the old parent tip explicitly if the parent was already squash-merged. Later branches use the merge-base with the branch before them. |
-| `git stack rename [<old>] <new>` | Rename a branch (the current one by default) and move the branches stacked on it onto the new name. Unsets its upstream and forgets its pull request, since the remote branch isn't renamed; the next `git stack push` pushes it under the new name (and opens a new draft pull request with the GitHub adapter). |
+| `git stack rename [<old>] <new>` | Rename a branch (the current one by default) and move the branches stacked on it onto the new name. Unsets its upstream, since the remote branch isn't renamed (its pull request stays with the old name); the next `git stack push` pushes it under the new name (and opens a new draft pull request with the GitHub adapter). |
 | `git stack info` | Show all tracked stacks as a tree, marking the current branch, branches that were merged, and branches that need a restack. |
 | `git stack restack [--onto <parent>] [--squash]` | Rebase every branch in the current stack onto its parent, bottom-up. `--onto` first retargets the current branch. Branches that were merged are skipped and their children restacked onto their parent; `sync` or `clean` removes them from the stack. `--squash` first squashes each branch in the current stack into one commit (keeping all the messages), so a conflict is resolved once per branch instead of once per commit. Refuses to run outside a stack. |
 | `git stack sync [--remote origin] [-d local\|remote\|both]` | Fetch with `--prune`, fast-forward the current stack's root (e.g. `main`) to its upstream, stop tracking the stack's branches that were merged, move their children down, restack the stack, and pull in commits others pushed to its branches. Other stacks are left alone. Refuses to run outside a stack. Merged branches are kept unless `-d`/`--delete` says to delete their local branches, their remote branches, or both. |

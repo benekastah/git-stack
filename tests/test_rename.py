@@ -58,15 +58,6 @@ def test_rename_pushed_branch_unsets_old_upstream(repo: Repo, client: StackClien
     assert repo.git("rev-parse", "--abbrev-ref", "first@{upstream}") == "origin/first"
 
 
-def test_rename_forgets_pull_request(repo: Repo, client: StackClient) -> None:
-    repo.make_stack()
-    repo.git("config", "branch.pr1.stackPr", "3")
-
-    client.rename("first", old="pr1")
-
-    assert not repo.config_exists("first", "stackPr")
-
-
 def test_rename_to_existing_branch_changes_nothing(repo: Repo, client: StackClient) -> None:
     repo.make_stack()
     repo.git("switch", "--quiet", "pr1")

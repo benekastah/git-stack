@@ -122,12 +122,6 @@ class PullRequestLookupFailed:
 
 
 @dataclass(frozen=True)
-class PullRequestFound:
-    branch: str
-    number: int
-
-
-@dataclass(frozen=True)
 class PullRequestOpened:
     branch: str
     number: int
@@ -159,7 +153,6 @@ Event: TypeAlias = (
     | BrokenBranch
     | ParentMissing
     | PullRequestLookupFailed
-    | PullRequestFound
     | PullRequestOpened
     | PullRequestRetargeted
 )
