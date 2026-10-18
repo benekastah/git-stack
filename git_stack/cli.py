@@ -5,6 +5,7 @@ import git_stack
 from git_stack.commands import branch, clean, info, push, rename, restack, sync, track
 from git_stack.errors import StackError
 from git_stack.git import GitClient
+from git_stack.output import print_event
 from git_stack.stack import StackClient
 
 # In the order `git stack -h` lists them.
@@ -19,7 +20,7 @@ def main(argv=None):
 
     args = parser.parse_args(argv)
     try:
-        args.func(StackClient(GitClient()), args)
+        args.func(StackClient(GitClient(), on_event=print_event), args)
     except StackError as e:
         print(f"git stack: {e}", file=sys.stderr)
         return 1

@@ -1,5 +1,7 @@
 """End-to-end tests for git-stack, run against throwaway repositories."""
 
+import contextlib
+import io
 import json
 import os
 import pathlib
@@ -7,6 +9,11 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
+
+from git_stack import events
+from git_stack.git import GitClient
+from git_stack.stack import BranchInfo, BranchStatus, StackClient
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 FAKE_GH = pathlib.Path(__file__).resolve().parent / "fake_gh.py"
@@ -1058,6 +1065,47 @@ class GitHubTest(StackTestCase):
 
         self.assertEqual(self.load_gh_state()["calls"], [])
         self.assertFalse(self.config_exists("pr3", "stackPr"))
+
+class ClientTest(StackTestCase):
+    """Calls StackClient directly, as a script would."""
+
+    def client(self):
+        self.events = []
+        cwd = os.getcwd()
+        os.chdir(self.repo)
+        self.addCleanup(os.chdir, cwd)
+        env = mock.patch.dict(os.environ, self.env, clear=True)
+        env.start()
+        self.addCleanup(env.stop)
+        return StackClient(GitClient(), on_event=self.events.append)
+
+    def test_sync_reports_through_events_and_return_value(self):
+        self.make_stack()
+        self.stack("push")
+        self.squash_merge_on_forge("pr1")
+        stack = self.client()
+
+        with contextlib.redirect_stdout(io.StringIO()) as stdout:
+            unpushed = stack.sync()
+
+        self.assertEqual(unpushed, ["pr2", "pr3"])
+        self.assertIn(events.Untracked("pr1", "main", ("pr2",), deleted_tip=None), self.events)
+        self.assertEqual(stdout.getvalue(), "")
+
+    def test_info_returns_each_branch_with_its_status(self):
+        self.make_stack()
+        self.git("switch", "--quiet", "pr1")
+        self.commit("a", "pr1 review fix\n", "pr1 review fix")
+
+        branches = self.client().info()
+
+        self.assertEqual(branches, [
+            BranchInfo("main", None, None, current=False),
+            BranchInfo("pr1", "main", BranchStatus.UP_TO_DATE, current=True),
+            BranchInfo("pr2", "pr1", BranchStatus.NEEDS_RESTACK, current=False),
+            BranchInfo("pr3", "pr2", BranchStatus.UP_TO_DATE, current=False),
+        ])
+
 
 
 if __name__ == "__main__":
