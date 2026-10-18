@@ -3,6 +3,7 @@
 import http.server
 import importlib.machinery
 import importlib.util
+import json
 import os
 import pathlib
 import subprocess
@@ -12,6 +13,7 @@ import threading
 import unittest
 
 SCRIPT = pathlib.Path(__file__).resolve().parent.parent / "git-stack"
+FAKE_GH = pathlib.Path(__file__).resolve().parent / "fake_gh.py"
 
 
 def load_git_stack():
@@ -412,6 +414,14 @@ class RenameTest(StackTestCase):
         self.stack("push")
         self.assertEqual(self.git("rev-parse", "--abbrev-ref", "first@{upstream}"), "origin/first")
 
+    def test_rename_forgets_pull_request(self):
+        self.make_stack()
+        self.git("config", "branch.pr1.stackPr", "3")
+
+        self.stack("rename", "pr1", "first")
+
+        self.assertFalse(self.config_exists("first", "stackPr"))
+
     def test_rename_to_existing_branch_changes_nothing(self):
         self.make_stack()
         self.git("switch", "--quiet", "pr1")
@@ -533,6 +543,43 @@ class SyncTest(StackTestCase):
         self.assert_untracked("pr1")
         self.assert_stacked("pr2", "main", ["pr2 c1"])
 
+    def check_sync_after_squash_merge_followed_by_edit_to_same_lines(self, delete_branch):
+        self.make_stack()
+        self.stack("push")
+        self.squash_merge_on_forge("pr1", delete_branch=delete_branch)
+        self.commit_on_forge("main", "a", "later\n", "main edits a again")
+
+        self.stack("sync")
+
+        self.assert_untracked("pr1")
+        self.assert_stacked("pr2", "main", ["pr2 c1"])
+        self.assert_stacked("pr3", "pr2", ["pr3 c1"])
+
+    def test_sync_after_squash_merge_followed_by_edit_to_same_lines(self):
+        self.check_sync_after_squash_merge_followed_by_edit_to_same_lines(delete_branch=True)
+
+    def test_sync_after_squash_merge_with_remote_branch_kept_followed_by_edit_to_same_lines(self):
+        self.check_sync_after_squash_merge_followed_by_edit_to_same_lines(delete_branch=False)
+
+    def test_sync_after_rebase_merge_followed_by_edit_to_same_lines(self):
+        self.make_stack()
+        self.stack("push")
+        self.commit_on_forge("main", "d", "main\n", "main moves on")
+        # Rebase-merge pr1, so main gets copies of its commits, then edit
+        # the same line again.
+        self.git("switch", "--quiet", "-C", "pr1", "origin/pr1", cwd=self.forge)
+        self.git("rebase", "--quiet", "main", cwd=self.forge)
+        self.git("switch", "--quiet", "main", cwd=self.forge)
+        self.git("merge", "--quiet", "--ff-only", "pr1", cwd=self.forge)
+        (self.forge / "a").write_text("later\n")
+        self.git("commit", "--quiet", "-am", "main edits a again", cwd=self.forge)
+        self.git("push", "--quiet", "origin", "main", ":pr1", cwd=self.forge)
+
+        self.stack("sync")
+
+        self.assert_untracked("pr1")
+        self.assert_stacked("pr2", "main", ["pr2 c1"])
+
     def test_sync_skips_merged_branch_with_commits_pushed_after_merge(self):
         self.make_stack()
         self.stack("push")
@@ -541,7 +588,7 @@ class SyncTest(StackTestCase):
 
         result = self.stack("sync")
 
-        self.assertIn("skipping pr1: it was merged into main, but its remote branch has commits",
+        self.assertIn("skipping pr1: it was merged into main, but it or its remote branch has commits",
                       result.stderr)
         self.assertIn("skipping pr2 because its parent pr1 was skipped", result.stderr)
         self.assertEqual(self.config("pr2", "stackParent"), "pr1")
@@ -703,6 +750,180 @@ class SyncTest(StackTestCase):
             self.assertEqual(self.git("rev-parse", f"origin/{branch}"), self.git("rev-parse", branch))
             self.assertEqual(self.git("rev-parse", "--abbrev-ref", f"{branch}@{{upstream}}"),
                              f"origin/{branch}")
+
+
+class GitHubTest(StackTestCase):
+    def setUp(self):
+        super().setUp()
+        tmp = pathlib.Path(self.tmp.name)
+        bin_dir = tmp / "bin"
+        bin_dir.mkdir()
+        (bin_dir / "gh").symlink_to(FAKE_GH)
+        self.gh_state = tmp / "gh-state.json"
+        self.save_gh_state({"prs": [], "calls": [], "fail": []})
+        self.env["PATH"] = f"{bin_dir}{os.pathsep}{self.env['PATH']}"
+        self.env["FAKE_GH_STATE"] = str(self.gh_state)
+        # Look like a GitHub repository while still using the local origin.
+        url = "https://github.com/acme/widgets.git"
+        self.git("config", f"url.{self.origin}.insteadOf", url)
+        self.git("config", "remote.origin.url", url)
+
+    def load_gh_state(self):
+        return json.loads(self.gh_state.read_text())
+
+    def save_gh_state(self, state):
+        self.gh_state.write_text(json.dumps(state))
+
+    def add_pr(self, **pr):
+        state = self.load_gh_state()
+        state["prs"].append(pr)
+        self.save_gh_state(state)
+
+    def gh_calls(self, *prefix):
+        return [call for call in self.load_gh_state()["calls"] if call[:len(prefix)] == list(prefix)]
+
+    def merge_pr1_on_forge_with_a_tweak(self):
+        """Squash-merge pr1 with an extra change, so the merge doesn't match pr1's changes."""
+        self.stack("push")
+        self.git("pull", "--quiet", cwd=self.forge)
+        self.git("merge", "--quiet", "--squash", "origin/pr1", cwd=self.forge)
+        (self.forge / "a").write_text("tweaked by the maintainer\n")
+        self.git("commit", "--quiet", "-am", "pr1 (squashed)", cwd=self.forge)
+        self.git("push", "--quiet", "origin", "main", ":pr1", cwd=self.forge)
+        self.git("config", "branch.pr1.stackPr", "5")
+        self.add_pr(number=5, state="MERGED", headRefName="pr1", headRefOid=self.git("rev-parse", "pr1"),
+                    baseRefName="main", mergeCommit={"oid": self.git("rev-parse", "HEAD", cwd=self.forge)})
+        state = self.load_gh_state()
+        state["calls"] = []
+        self.save_gh_state(state)
+
+    def test_push_opens_draft_pr_for_current_branch_only(self):
+        self.make_stack()
+        self.git("switch", "--quiet", "pr2")
+
+        self.stack("push")
+        self.stack("push")
+
+        prs = self.load_gh_state()["prs"]
+        self.assertEqual([(p["headRefName"], p["baseRefName"], p["isDraft"]) for p in prs],
+                         [("pr2", "pr1", True)])
+        self.assertEqual(self.config("pr2", "stackPr"), "1")
+        self.assertFalse(self.config_exists("pr1", "stackPr"))
+        self.assertFalse(self.config_exists("pr3", "stackPr"))
+        self.assertEqual(len(self.gh_calls("pr", "create")), 1)
+        self.assertTrue(all("github.com/acme/widgets" in call for call in self.gh_calls("pr")))
+
+    def test_push_records_existing_pr(self):
+        self.make_stack()
+        self.add_pr(number=7, state="OPEN", headRefName="pr1", headRefOid=None, baseRefName="main",
+                    mergeCommit=None)
+        self.git("switch", "--quiet", "pr1")
+
+        self.stack("push")
+
+        self.assertEqual(self.config("pr1", "stackPr"), "7")
+        self.assertEqual(self.gh_calls("pr", "create"), [])
+
+    def test_push_retargets_pr_whose_parent_changed(self):
+        self.make_stack()
+        self.git("switch", "--quiet", "pr2")
+        self.stack("push")
+        self.squash_merge_on_forge("pr1")
+        self.stack("sync")
+
+        result = self.stack("push")
+
+        self.assertIn("changed the base of pr2's pull request #1 to main", result.stdout)
+        self.assertEqual(self.load_gh_state()["prs"][0]["baseRefName"], "main")
+
+    def test_sync_trusts_merged_pr_whose_merge_differs_from_branch(self):
+        self.make_stack()
+        self.merge_pr1_on_forge_with_a_tweak()
+
+        self.stack("sync")
+
+        self.assert_untracked("pr1")
+        self.assert_stacked("pr2", "main", ["pr2 c1"])
+        self.assert_stacked("pr3", "pr2", ["pr3 c1"])
+        self.assertEqual(len(self.gh_calls("api", "graphql")), 1)
+
+    def test_restack_ignores_merged_pr_until_parent_has_the_merge(self):
+        self.make_stack()
+        self.merge_pr1_on_forge_with_a_tweak()
+        self.git("fetch", "--quiet")
+        self.git("switch", "--quiet", "pr2")
+
+        result = self.stack("restack")
+
+        self.assertNotIn("looks merged", result.stderr)
+        self.assertEqual(self.config("pr1", "stackParent"), "main")
+        self.assertEqual(self.config("pr2", "stackParent"), "pr1")
+
+    def test_sync_skips_merged_pr_with_local_commits_after_merge(self):
+        self.make_stack()
+        self.merge_pr1_on_forge_with_a_tweak()
+        self.git("switch", "--quiet", "pr1")
+        self.commit("a", "after merge\n", "pr1 after merge")
+
+        result = self.stack("sync")
+
+        self.assertIn("skipping pr1: it was merged into main, but it or its remote branch has commits",
+                      result.stderr)
+        self.assertEqual(self.config("pr1", "stackParent"), "main")
+
+    def test_open_pr_on_default_branch_overrides_local_detection(self):
+        self.make_stack()
+        self.stack("push")
+        self.git("config", "branch.pr1.stackPr", "5")
+        self.add_pr(number=5, state="OPEN", headRefName="pr1", headRefOid=self.git("rev-parse", "pr1"),
+                    baseRefName="main", mergeCommit=None)
+        self.git("switch", "--quiet", "main")
+        self.git("merge", "--quiet", "--squash", "pr1")
+        self.git("commit", "--quiet", "-m", "pr1 (squashed)")
+        self.git("push", "--quiet")
+
+        self.assertIn("└── pr1 (needs restack)\n", self.stack("info").stdout)
+
+    def test_open_pr_on_stacked_parent_falls_back_to_local_detection(self):
+        self.make_stack()
+        self.stack("push")
+        self.git("config", "branch.pr2.stackPr", "6")
+        self.add_pr(number=6, state="OPEN", headRefName="pr2", headRefOid=self.git("rev-parse", "pr2"),
+                    baseRefName="pr1", mergeCommit=None)
+        self.git("switch", "--quiet", "pr1")
+        self.git("merge", "--quiet", "--squash", "pr2")
+        self.git("commit", "--quiet", "-m", "pr2 (squashed)")
+        self.git("push", "--quiet")
+
+        self.stack("sync")
+
+        self.assert_untracked("pr2")
+        self.assert_stacked("pr3", "pr1", ["pr3 c1"])
+
+    def test_failed_pr_lookup_falls_back_to_local_detection(self):
+        self.make_stack()
+        self.stack("push")
+        self.git("config", "branch.pr1.stackPr", "5")
+        self.squash_merge_on_forge("pr1")
+        state = self.load_gh_state()
+        state["fail"] = ["api"]
+        self.save_gh_state(state)
+
+        result = self.stack("sync")
+
+        self.assertIn("couldn't look up pull requests on GitHub", result.stderr)
+        self.assert_untracked("pr1")
+        self.assert_stacked("pr2", "main", ["pr2 c1"])
+
+    def test_git_adapter_setting_leaves_github_alone(self):
+        self.make_stack()
+        self.git("config", "stack.adapter", "git")
+
+        self.stack("push")
+        self.stack("sync")
+
+        self.assertEqual(self.load_gh_state()["calls"], [])
+        self.assertFalse(self.config_exists("pr3", "stackPr"))
 
 
 class UpgradeTest(unittest.TestCase):
