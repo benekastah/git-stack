@@ -601,7 +601,8 @@ class GitAdapter:
         return MergeState.MERGED
 
     def after_push(self, branch, branches, parents):
-        """Called once branches, the stack containing branch, were pushed."""
+        """Called once branches were pushed: the stack containing branch, less the
+        branches that were merged (possibly including branch itself)."""
 
 
 def unmerged_commits(ref, merged_head, parent):
@@ -683,7 +684,7 @@ class GitHubAdapter(GitAdapter):
     def after_push(self, branch, branches, parents):
         """Open a draft pull request for branch if it has none, and point the
         open pull requests of the pushed branches at their stack parents."""
-        if branch in parents and not config_get(branch, PR_KEY):
+        if branch in branches and not config_get(branch, PR_KEY):
             self.record_pull_request(branch, parents[branch])
         prs = self.pull_requests()
         for b in branches:
@@ -761,7 +762,7 @@ def skip_merged(branches, parents, adapter):
     for branch in branches:
         parent = parents[branch]
         if adapter.merge_state(branch, parent) is MergeState.MERGED:
-            print(f"warning: {branch} looks merged into {parent}; skipping it and restacking its "
+            print(f"warning: {branch} looks merged into {parent}; skipping it and moving its "
                   f"children onto {parent}. Run `git stack sync` to remove it from the stack",
                   file=sys.stderr)
             drop_from_stack(branch, parents)
@@ -893,10 +894,20 @@ def cmd_push(args):
     if branch is None:
         raise StackError("not on a branch")
     parents = tracked_branches()
-    branches = stack_of(branch, parents)
-    if not branches:
-        raise StackError(f"no tracked branches in {branch}'s stack")
+    if branch not in parents:
+        raise StackError(f"{branch} isn't in a stack; switch to a stacked branch to push its stack")
     adapter = make_adapter(args.remote)
+    branches = skip_merged(stack_of(branch, parents), parents, adapter)
+    if not branches:
+        print(f"nothing to push: every branch in {branch}'s stack looks merged")
+        return
+    # A remote branch deleted since we pushed it was most likely deleted when
+    # its pull request was merged, so pushing it again would recreate it.
+    for b in branches:
+        if upstream_gone(b):
+            raise StackError(f"{b}'s remote branch was deleted; run `git stack sync` to stop tracking "
+                             f"it if it was merged, or `git branch --unset-upstream {b}` to push it "
+                             f"again")
 
     # Force-pushing is only safe if we've seen everything on the remote branch.
     # Refuse if we know of commits we haven't pulled, and pin each lease to the

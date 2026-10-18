@@ -740,6 +740,42 @@ class SyncTest(StackTestCase):
 
         self.assertEqual(self.remote_subject("pr1"), "collab")
 
+    def test_push_refuses_outside_a_stack(self):
+        self.make_stack()
+        self.git("switch", "--quiet", "main")
+
+        result = self.stack("push", expect_success=False)
+
+        self.assertIn("main isn't in a stack", result.stderr)
+        self.assertEqual(self.git("branch", "--list", cwd=self.origin), "* main")
+
+    def test_push_skips_branch_merged_locally(self):
+        self.make_stack()
+        self.git("switch", "--quiet", "main")
+        self.git("merge", "--quiet", "--squash", "pr1")
+        self.git("commit", "--quiet", "-m", "pr1 (squashed)")
+        self.git("switch", "--quiet", "pr2")
+
+        result = self.stack("push")
+
+        self.assertIn("pr1 looks merged into main", result.stderr)
+        self.assertEqual(self.git("branch", "--list", "--format=%(refname:short)", cwd=self.origin),
+                         "main\npr2\npr3")
+
+    def test_push_refuses_to_recreate_deleted_remote_branch(self):
+        self.make_stack()
+        self.stack("push")
+        self.squash_merge_on_forge("pr1")
+        self.git("fetch", "--quiet", "--prune")
+        self.git("switch", "--quiet", "pr2")
+        self.commit("b", "pr2 again\n", "pr2 c2")
+
+        result = self.stack("push", expect_success=False)
+
+        self.assertIn("pr1's remote branch was deleted", result.stderr)
+        self.assertEqual(self.git("branch", "--list", "pr1", cwd=self.origin), "")
+        self.assertEqual(self.remote_subject("pr2"), "pr2 c1")
+
     def test_push_pushes_every_branch_in_stack(self):
         self.make_stack()
         self.git("switch", "--quiet", "pr2")
@@ -812,6 +848,18 @@ class GitHubTest(StackTestCase):
         self.assertFalse(self.config_exists("pr3", "stackPr"))
         self.assertEqual(len(self.gh_calls("pr", "create")), 1)
         self.assertTrue(all("github.com/acme/widgets" in call for call in self.gh_calls("pr")))
+
+    def test_push_from_merged_branch_opens_no_pr(self):
+        self.make_stack()
+        self.git("switch", "--quiet", "main")
+        self.git("merge", "--quiet", "--squash", "pr1")
+        self.git("commit", "--quiet", "-m", "pr1 (squashed)")
+        self.git("switch", "--quiet", "pr1")
+
+        self.stack("push")
+
+        self.assertEqual(self.gh_calls("pr", "create"), [])
+        self.assertEqual(self.git("branch", "--list", "pr1", cwd=self.origin), "")
 
     def test_push_records_existing_pr(self):
         self.make_stack()
