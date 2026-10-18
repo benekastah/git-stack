@@ -151,6 +151,35 @@ def test_sync_trusts_merged_pr_whose_merge_differs_from_branch(
     assert len(gh.calls("api", "graphql")) == 1
 
 
+def test_sync_fetches_head_of_merged_pr_whose_branch_was_deleted(
+        repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+    repo.make_stack()
+    client.push()
+    # On GitHub: "Update branch" merges a new main into pr1, then pr1 is
+    # squash-merged with a tweak (so its changes don't match pr1's) and its
+    # branch deleted, all before we fetch the updated pr1.
+    repo.git("pull", "--quiet", cwd=repo.forge)
+    repo.commit_on_forge("main", "d", "main moved\n", "main moved")
+    repo.git("fetch", "--quiet", cwd=repo.forge)
+    repo.git("switch", "--quiet", "-C", "pr1", "origin/pr1", cwd=repo.forge)
+    repo.git("merge", "--quiet", "--no-edit", "origin/main", cwd=repo.forge)
+    repo.git("push", "--quiet", "origin", "pr1", cwd=repo.forge)
+    updated_head = repo.git("rev-parse", "HEAD", cwd=repo.forge)
+    repo.git("switch", "--quiet", "-C", "main", "origin/main", cwd=repo.forge)
+    repo.git("merge", "--quiet", "--squash", "pr1", cwd=repo.forge)
+    (repo.forge / "a").write_text("tweaked by the maintainer\n")
+    repo.git("commit", "--quiet", "-am", "pr1 (squashed)", cwd=repo.forge)
+    repo.git("push", "--quiet", "origin", "main", ":pr1", cwd=repo.forge)
+    repo.git("update-ref", "refs/pull/5/head", updated_head, cwd=repo.origin)
+    gh.add_pr(number=5, state="MERGED", headRefName="pr1", headRefOid=updated_head, baseRefName="main",
+              mergeCommit={"oid": repo.git("rev-parse", "HEAD", cwd=repo.forge)})
+
+    client.sync()
+
+    repo.assert_untracked("pr1")
+    repo.assert_stacked("pr2", "main", ["pr2 c1"])
+
+
 def test_restack_ignores_merged_pr_until_parent_has_the_merge(
         repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event]) -> None:
     repo.make_stack()

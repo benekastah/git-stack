@@ -82,8 +82,9 @@ class GitHubAdapter(GitAdapter):
     locally.
     """
 
-    def __init__(self, core: StackCore, host: str, owner: str, name: str) -> None:
+    def __init__(self, core: StackCore, remote: str, host: str, owner: str, name: str) -> None:
         super().__init__(core)
+        self.remote = remote
         self.host, self.owner, self.name = host, owner, name
         self.repo = f"{host}/{owner}/{name}"
         self._pull_requests: dict[str, PullRequest] | None = None
@@ -152,8 +153,25 @@ class GitHubAdapter(GitAdapter):
         if open_pr is not None:
             return open_pr
         base = self.git.config_get(branch, BASE_KEY)
-        return next((pr for pr in prs if pr.state == "MERGED" and base is not None
-                     and self.git.rev(pr.head_oid) and self.git.is_ancestor(base, pr.head_oid)), None)
+        if base is None:
+            return None
+        merged = [pr for pr in prs if pr.state == "MERGED"]
+        self.fetch_missing_heads(merged)
+        return next((pr for pr in merged if self.git.rev(pr.head_oid) and self.git.is_ancestor(base, pr.head_oid)),
+                    None)
+
+    def fetch_missing_heads(self, prs: list[PullRequest]) -> None:
+        """Fetch the head commits of prs that we don't have, which GitHub keeps
+        after their branches are deleted.
+
+        A pull request's last commit can be made on GitHub (e.g. by "Update
+        branch") right before it's merged and its branch deleted, so we never
+        fetch it. Without it, we can't tell the pull request is the branch's.
+        If the fetch fails, those pull requests are just ignored.
+        """
+        refs = [f"refs/pull/{pr.number}/head" for pr in prs if not self.git.rev(pr.head_oid)]
+        if refs:
+            self.git.run("fetch", "--quiet", "--no-write-fetch-head", self.remote, *refs, check=False)
 
     def merge_state(self, branch: str, parent: str) -> MergeState:
         git = self.git

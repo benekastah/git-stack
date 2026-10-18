@@ -134,7 +134,10 @@ With the GitHub adapter:
   name in the same repository, however it was opened. An open one wins;
   otherwise the newest merged one counts, if its head descends from the commit
   the branch is stacked on (so one merged from an earlier branch of the same
-  name doesn't). Closed pull requests are ignored.
+  name doesn't). Closed pull requests are ignored. If a merged pull request's
+  last commit was never fetched (say GitHub's "Update branch" made it right
+  before the merge, and the branch was deleted on merge), git-stack fetches it
+  from the pull request.
 - `git stack push` changes the base of the stack's open pull requests to match
   their stack parents, e.g. to `main` once the parent PR was merged.
 - git-stack doesn't open pull requests. For each pushed branch without one,

@@ -28,7 +28,7 @@ def make_adapter(core: StackCore, remote: str) -> GitAdapter:
             raise StackError(f"{ADAPTER_SETTING} is github, but {remote}'s URL isn't a GitHub repository")
         if not shutil.which("gh"):
             raise StackError(f"{ADAPTER_SETTING} is github, which needs the gh CLI on your PATH")
-        return GitHubAdapter(core, *repo)
+        return GitHubAdapter(core, remote, *repo)
     if repo and repo[0] == "github.com" and shutil.which("gh"):
-        return GitHubAdapter(core, *repo)
+        return GitHubAdapter(core, remote, *repo)
     return GitAdapter(core)
