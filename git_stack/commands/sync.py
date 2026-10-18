@@ -1,8 +1,17 @@
-from git_stack.commands import add_delete_argument
+import argparse
+
+from git_stack.commands import Subparsers, add_delete_argument
 from git_stack.git import DEFAULT_REMOTE
+from git_stack.stack import StackClient
 
 
-def register(subparsers):
+class Args(argparse.Namespace):
+    """The arguments register's parser produces."""
+    remote: str
+    delete: str | None
+
+
+def register(subparsers: Subparsers) -> None:
     p = subparsers.add_parser("sync", help="fetch, untrack the current stack's merged branches, "
                                            "restack it, and pull in commits others pushed")
     p.add_argument("--remote", default=DEFAULT_REMOTE)
@@ -10,7 +19,7 @@ def register(subparsers):
     p.set_defaults(func=run)
 
 
-def run(stack, args):
+def run(stack: StackClient, args: Args) -> None:
     unpushed = stack.sync(remote=args.remote, delete=args.delete)
     if unpushed:
         print("note: run `git stack push` to update the remote branches and pull requests of:")

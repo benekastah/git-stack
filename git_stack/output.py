@@ -1,47 +1,9 @@
 """Turns events into the messages the CLI prints."""
 
 import sys
+from typing import assert_never
 
 from git_stack import events
-
-
-def _untracked(e):
-    moved = f" and moved {', '.join(e.children)} onto {e.parent}" if e.children else ""
-    if e.deleted_tip is None:
-        return f"{e.branch} was merged into {e.parent}; stopped tracking it{moved}"
-    return f"{e.branch} was merged into {e.parent}; deleted it (was {e.deleted_tip[:12]}){moved}"
-
-
-MESSAGES = {
-    events.Squashing: lambda e: f"squashing {e.count} commits on {e.branch}",
-    events.Restacking: lambda e: f"restacking {e.branch} onto {e.parent}",
-    events.PullingUpstream: lambda e: f"pulling {e.count} new commit(s) from {e.branch}'s upstream",
-    events.FastForwarded: lambda e: f"fast-forwarded {e.branch} to {e.upstream}",
-    events.TrunkDiverged: lambda e: f"{e.branch} has diverged from {e.upstream}; not updating it",
-    events.SkippedMerged: lambda e: (
-        f"{e.branch} looks merged into {e.parent}; skipping it and moving its children onto "
-        f"{e.parent}. Run `git stack sync` to remove it from the stack"),
-    events.Untracked: _untracked,
-    events.RemoteBranchDeleted: lambda e: f"deleted {e.upstream}",
-    events.RemoteBranchDeleteFailed: lambda e: f"couldn't delete {e.upstream}; leaving {e.branch} alone",
-    events.RemoteBranchKept: lambda e: (
-        f"note: {e.upstream} still exists; delete it with `git push {e.remote} --delete {e.name}`, "
-        f"or pass `--delete remote`"),
-    events.ParentSkipped: lambda e: f"skipping {e.branch} because its parent {e.parent} was skipped",
-    events.MergedWithNewCommits: lambda e: (
-        f"skipping {e.branch}: it was merged into {e.parent}, but it or its remote branch has "
-        f"commits that {e.parent} doesn't"),
-    events.UpstreamGone: lambda e: (
-        f"{e.branch}'s remote branch is gone but its changes aren't in {e.parent}; leaving it alone"),
-    events.BrokenBranch: lambda e: f"skipping {e.branch}: {e.reason}",
-    events.ParentMissing: lambda e: f"skipping {e.branch}: its parent {e.parent} doesn't exist",
-    events.PullRequestLookupFailed: lambda e: (
-        f"couldn't look up pull requests on GitHub, so only checking for merges locally: {e.error}"),
-    events.PullRequestFound: lambda e: f"found pull request #{e.number} for {e.branch}",
-    events.PullRequestOpened: lambda e: f"opened draft pull request #{e.number} for {e.branch}: {e.url}",
-    events.PullRequestRetargeted: lambda e: (
-        f"changed the base of {e.branch}'s pull request #{e.number} to {e.base}"),
-}
 
 WARNINGS = (
     events.TrunkDiverged,
@@ -56,9 +18,60 @@ WARNINGS = (
 )
 
 
-def print_event(event):
-    message = MESSAGES[type(event)](event)
+def message(event: events.Event) -> str:
+    match event:
+        case events.Squashing():
+            return f"squashing {event.count} commits on {event.branch}"
+        case events.Restacking():
+            return f"restacking {event.branch} onto {event.parent}"
+        case events.PullingUpstream():
+            return f"pulling {event.count} new commit(s) from {event.branch}'s upstream"
+        case events.FastForwarded():
+            return f"fast-forwarded {event.branch} to {event.upstream}"
+        case events.TrunkDiverged():
+            return f"{event.branch} has diverged from {event.upstream}; not updating it"
+        case events.SkippedMerged():
+            return (f"{event.branch} looks merged into {event.parent}; skipping it and moving its "
+                    f"children onto {event.parent}. Run `git stack sync` to remove it from the stack")
+        case events.Untracked():
+            moved = f" and moved {', '.join(event.children)} onto {event.parent}" if event.children else ""
+            if event.deleted_tip is None:
+                return f"{event.branch} was merged into {event.parent}; stopped tracking it{moved}"
+            return (f"{event.branch} was merged into {event.parent}; "
+                    f"deleted it (was {event.deleted_tip[:12]}){moved}")
+        case events.RemoteBranchDeleted():
+            return f"deleted {event.upstream}"
+        case events.RemoteBranchDeleteFailed():
+            return f"couldn't delete {event.upstream}; leaving {event.branch} alone"
+        case events.RemoteBranchKept():
+            return (f"note: {event.upstream} still exists; delete it with "
+                    f"`git push {event.remote} --delete {event.name}`, or pass `--delete remote`")
+        case events.ParentSkipped():
+            return f"skipping {event.branch} because its parent {event.parent} was skipped"
+        case events.MergedWithNewCommits():
+            return (f"skipping {event.branch}: it was merged into {event.parent}, but it or its "
+                    f"remote branch has commits that {event.parent} doesn't")
+        case events.UpstreamGone():
+            return (f"{event.branch}'s remote branch is gone but its changes aren't in "
+                    f"{event.parent}; leaving it alone")
+        case events.BrokenBranch():
+            return f"skipping {event.branch}: {event.reason}"
+        case events.ParentMissing():
+            return f"skipping {event.branch}: its parent {event.parent} doesn't exist"
+        case events.PullRequestLookupFailed():
+            return f"couldn't look up pull requests on GitHub, so only checking for merges locally: {event.error}"
+        case events.PullRequestFound():
+            return f"found pull request #{event.number} for {event.branch}"
+        case events.PullRequestOpened():
+            return f"opened draft pull request #{event.number} for {event.branch}: {event.url}"
+        case events.PullRequestRetargeted():
+            return f"changed the base of {event.branch}'s pull request #{event.number} to {event.base}"
+        case _:
+            assert_never(event)
+
+
+def print_event(event: events.Event) -> None:
     if isinstance(event, WARNINGS):
-        print(f"warning: {message}", file=sys.stderr)
+        print(f"warning: {message(event)}", file=sys.stderr)
     else:
-        print(message)
+        print(message(event))

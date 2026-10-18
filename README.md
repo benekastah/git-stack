@@ -51,7 +51,7 @@ in every stack without restacking anything, run `git stack clean`.
 
 ## Install
 
-Requires Python 3.9+ and git 2.38+. The GitHub integration also needs
+Requires Python 3.11+ and git 2.38+. The GitHub integration also needs
 [`gh`](https://cli.github.com), logged in with `gh auth login`.
 
 Install it with [pipx](https://pipx.pypa.io) or
@@ -236,8 +236,17 @@ instead of by line, so edits to different parts of the same line often merge
 cleanly. It can be enabled just for yourself (globally or for one repository)
 without committing anything, and git-stack's rebases pick it up automatically.
 
-## Tests
+## Development
 
+Run every check (mypy in strict mode, then the tests) with:
+
+```sh
+./check.sh
 ```
-python3 -m unittest discover -s tests
-```
+
+The first run creates a virtualenv in `.venv` and installs the `dev`
+dependency group from `pyproject.toml` into it (with `pip install --group dev`,
+which needs pip 25.1+). Later runs reinstall it whenever `pyproject.toml`
+changes. Arguments are passed to `unittest`, so `./check.sh -k sync` runs only
+the tests whose names contain `sync`. git-stack itself still has no runtime
+dependencies.
