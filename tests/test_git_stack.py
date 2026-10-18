@@ -13,54 +13,7 @@ import threading
 import unittest
 
 SCRIPT = pathlib.Path(__file__).resolve().parent.parent / "git-stack"
-
-# Stands in for the gh CLI. Keeps pull requests and the calls it got in the
-# JSON file at $FAKE_GH_STATE, and fails for commands listed in its "fail" key.
-FAKE_GH = r"""#!/usr/bin/env python3
-import json, os, re, sys
-
-path = os.environ["FAKE_GH_STATE"]
-with open(path) as f:
-    state = json.load(f)
-args = sys.argv[1:]
-state["calls"].append(args)
-prs = state["prs"]
-out = None
-
-def opt(name):
-    return args[args.index(name) + 1]
-
-if args[0] in state["fail"]:
-    pass
-elif args[:2] == ["api", "graphql"]:
-    query = next(a for a in args if a.startswith("query="))
-    found = {}
-    for n in map(int, re.findall(r"pullRequest\(number: (\d+)\)", query)):
-        pr = next((p for p in prs if p["number"] == n), None)
-        found[f"pr{n}"] = pr and {k: pr[k] for k in
-                                  ("number", "state", "headRefOid", "baseRefName", "mergeCommit")}
-    found["defaultBranchRef"] = {"name": "main"}
-    out = json.dumps({"data": {"repository": found}})
-elif args[:2] == ["pr", "list"]:
-    out = json.dumps([{"number": p["number"]} for p in prs
-                      if p["headRefName"] == opt("--head") and p["state"] == "OPEN"])
-elif args[:2] == ["pr", "create"]:
-    number = max((p["number"] for p in prs), default=0) + 1
-    prs.append({"number": number, "state": "OPEN", "isDraft": "--draft" in args,
-                "headRefName": opt("--head"), "headRefOid": None, "baseRefName": opt("--base"),
-                "mergeCommit": None})
-    out = f"https://github.com/acme/widgets/pull/{number}"
-elif args[:2] == ["pr", "edit"]:
-    next(p for p in prs if p["number"] == int(args[2]))["baseRefName"] = opt("--base")
-else:
-    sys.exit(f"fake gh: unexpected {args}")
-with open(path, "w") as f:
-    json.dump(state, f)
-if args[0] in state["fail"]:
-    sys.exit("fake gh: failing as asked")
-if out is not None:
-    print(out)
-"""
+FAKE_GH = pathlib.Path(__file__).resolve().parent / "fake_gh.py"
 
 
 def load_git_stack():
@@ -805,8 +758,7 @@ class GitHubTest(StackTestCase):
         tmp = pathlib.Path(self.tmp.name)
         bin_dir = tmp / "bin"
         bin_dir.mkdir()
-        (bin_dir / "gh").write_text(FAKE_GH)
-        (bin_dir / "gh").chmod(0o755)
+        (bin_dir / "gh").symlink_to(FAKE_GH)
         self.gh_state = tmp / "gh-state.json"
         self.save_gh_state({"prs": [], "calls": [], "fail": []})
         self.env["PATH"] = f"{bin_dir}{os.pathsep}{self.env['PATH']}"
