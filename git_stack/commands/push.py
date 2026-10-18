@@ -10,6 +10,7 @@ class Args(argparse.Namespace):
     branch: str | None
     remote: str
     whole_stack: bool
+    force: bool
 
 
 def register(subparsers: Subparsers) -> None:
@@ -22,10 +23,13 @@ def register(subparsers: Subparsers) -> None:
     start.add_argument("--all", dest="whole_stack", action="store_true",
                        help="push from the bottom of the stack, opening pull requests for all of it")
     p.add_argument("--remote", default=DEFAULT_REMOTE)
+    p.add_argument("--force", action="store_true",
+                   help="push even if that drops commits on a remote branch that the local one doesn't "
+                        "have. Still fails if a remote branch changed since the last fetch")
     p.set_defaults(func=run)
 
 
 def run(stack: StackClient, args: Args) -> None:
-    if not stack.push(args.branch, remote=args.remote, whole_stack=args.whole_stack):
+    if not stack.push(args.branch, remote=args.remote, whole_stack=args.whole_stack, force=args.force):
         branch = args.branch or stack.git.current_branch()
         print(f"nothing to push: every branch in {branch}'s stack looks merged")
