@@ -206,12 +206,30 @@ class GitHubAdapter(GitAdapter):
 def github_repo(git: GitClient, remote: str) -> tuple[str, str, str] | None:
     """Return (host, owner, name) of remote's repository, or None if its URL isn't one.
 
-    Tries the URL as configured, then with url.<base>.insteadOf applied.
+    Tries the URL as configured, then with url.<base>.insteadOf applied. For an
+    SSH URL, host is the one ssh connects to, so a Host alias in ~/.ssh/config
+    (e.g. github-work for github.com) is resolved.
     """
     for url in (git.run("config", "--get", f"remote.{remote}.url", check=False),
                 git.run("remote", "get-url", remote, check=False)):
         match = REMOTE_URL.match(url)
         if match:
             host, owner, name = match.groups()
+            if "://" not in url or url.startswith(("ssh://", "git+ssh://", "ssh+git://")):
+                host = ssh_hostname(host)
             return host, owner, name
     return None
+
+
+def ssh_hostname(host: str) -> str:
+    """The host ssh connects to for host, after ~/.ssh/config's Host aliases, or
+    host itself if ssh can't tell."""
+    try:
+        result = subprocess.run(["ssh", "-G", host], capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    except OSError:
+        return host
+    for line in result.stdout.splitlines() if result.returncode == 0 else ():
+        key, _, value = line.partition(" ")
+        if key == "hostname" and value:
+            return value
+    return host
