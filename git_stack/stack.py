@@ -67,8 +67,9 @@ class StackClient(StackCore):
 
     def track(self, parent: str, branches: Iterable[str] = (), base: str | None = None) -> list[Tracked]:
         """Track branches (default: the current branch) as a stack on parent, each
-        on the one before it. base is where the first branch starts (default: its
-        merge-base with parent). Returns a Tracked for each branch.
+        on the one before it. base is where the first branch starts (default:
+        where it forked from parent, see fork_point). Returns a Tracked for each
+        branch.
         """
         git = self.git
         branches = list(branches)
@@ -92,7 +93,7 @@ class StackClient(StackCore):
         base_arg = base
         for branch in branches:
             ensure_no_cycle(branch, parent, parents)
-            base = git.rev(base_arg) if base_arg else git.run("merge-base", parent, branch, check=False) or None
+            base = git.rev(base_arg) if base_arg else self.fork_point(parent, branch)
             if base is None:
                 raise StackError(f"{base_arg} isn't a commit" if base_arg
                                  else f"{branch} has no history in common with {parent}")
@@ -106,6 +107,17 @@ class StackClient(StackCore):
             git.config_set(tracked.branch, PARENT_KEY, tracked.parent)
             git.config_set(tracked.branch, BASE_KEY, tracked.base)
         return plan
+
+    def fork_point(self, parent: str, branch: str) -> str | None:
+        """Where branch forked from parent, or None if they share no history.
+
+        Like `git rebase`, uses parent's reflog, so if parent was rewritten after
+        branch was created from it, this is the old parent commit branch was
+        built on rather than their (older) merge-base.
+        """
+        git = self.git
+        return (git.run("merge-base", "--fork-point", parent, branch, check=False)
+                or git.run("merge-base", parent, branch, check=False) or None)
 
     def rename(self, new: str, old: str | None = None) -> Renamed:
         """Rename old (default: the current branch) to new, keeping the branches

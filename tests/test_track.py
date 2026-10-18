@@ -85,3 +85,21 @@ def test_track_existing_branch_after_parent_was_squash_merged(repo: Repo, client
     client.restack()
 
     repo.assert_stacked("pr2", "main", ["pr2 c1"])
+
+
+def test_track_later_branch_uses_where_it_forked_from_rewritten_parent(repo: Repo, client: StackClient) -> None:
+    repo.git("switch", "--quiet", "-c", "pr1")
+    repo.commit("a", "pr1 v1\n", "pr1 c1")
+    old_pr1_tip = repo.git("rev-parse", "HEAD")
+    repo.git("switch", "--quiet", "-c", "pr2")
+    repo.commit("b", "pr2\n", "pr2 c1")
+    repo.git("switch", "--quiet", "pr1")
+    repo.write("a", "pr1 v2\n")
+    repo.git("commit", "--quiet", "--amend", "-am", "pr1 c1 (amended)")
+    repo.git("switch", "--quiet", "pr2")
+
+    tracked = client.track("main", ["pr1", "pr2"])
+    client.restack()
+
+    assert tracked[1].base == old_pr1_tip
+    repo.assert_stacked("pr2", "pr1", ["pr2 c1"])

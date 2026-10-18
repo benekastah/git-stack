@@ -17,9 +17,9 @@ def register(subparsers: Subparsers) -> None:
     p.add_argument("parent")
     p.add_argument("branches", nargs="*", metavar="branch",
                    help="branches to stack, bottom first (default: the current branch)")
-    p.add_argument("--base", help="commit the first branch was built on (default: merge-base with "
-                                  "PARENT). Needed when PARENT has already been squash-merged or "
-                                  "rewritten")
+    p.add_argument("--base", help="commit the first branch was built on (default: where it forked "
+                                  "from PARENT, found from PARENT's reflog like `git rebase` does). "
+                                  "Needed when PARENT has already been squash-merged")
     p.set_defaults(func=run)
 
 
