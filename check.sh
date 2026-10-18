@@ -18,4 +18,4 @@ if [ ! -f .venv/installed ] || [ pyproject.toml -nt .venv/installed ]; then
 fi
 
 .venv/bin/python -m mypy
-.venv/bin/python -m unittest discover -s tests "$@"
+.venv/bin/python -m pytest "$@"
