@@ -1,51 +1,17 @@
 import json
 import re
-import shutil
 import subprocess
-import sys
 
+from git_stack import events
+from git_stack.adapters.git import GitAdapter
+from git_stack.adapters.merge_state import MergeState
+from git_stack.core import PR_KEY
 from git_stack.errors import StackError
-from git_stack.stack import PR_KEY, MergeState
 
-ADAPTER_SETTING = "stack.adapter"
 # Matches https://host/owner/repo, ssh://user@host:port/owner/repo and
 # user@host:owner/repo, with or without .git.
 REMOTE_URL = re.compile(r"^(?:[a-z+]+://)?(?:[^@/]+@)?([^:/]+)(?::\d+)?[:/]([^/]+)/([^/]+?)(?:\.git)?/?$")
 PR_FIELDS = "number state headRefOid baseRefName mergeCommit { oid }"
-
-
-class GitAdapter:
-    """Works out whether branches were merged from the repository alone."""
-
-    def __init__(self, stack):
-        self.stack = stack
-        self.git = stack.git
-
-    def merge_state(self, branch, parent):
-        """Whether branch has landed in parent, so dropping it loses nothing.
-
-        Its changes must be in parent. Unless its remote branch was deleted
-        (which is all the evidence of a merge we need), the branch must also
-        change something, so a new branch with no commits isn't mistaken for a
-        merged one, and if it has a remote branch, commits pushed there after
-        the merge make it MERGED_WITH_NEW_COMMITS, so they aren't dropped.
-        """
-        git, stack = self.git, self.stack
-        if not (git.contained_in(branch, parent) or stack.landed_as_patches(branch, parent)):
-            return MergeState.NOT_MERGED
-        if git.upstream_gone(branch):
-            return MergeState.MERGED
-        if not stack.changes_something(branch):
-            return MergeState.NOT_MERGED
-        upstream_tip = git.rev(f"{branch}@{{upstream}}")
-        if (upstream_tip and not git.contained_in(upstream_tip, parent)
-                and stack.unpulled_commits(branch, parent, upstream_tip)):
-            return MergeState.MERGED_WITH_NEW_COMMITS
-        return MergeState.MERGED
-
-    def after_push(self, branch, branches, parents):
-        """Called once branches were pushed: the stack containing branch, less the
-        branches that were merged (possibly including branch itself)."""
 
 
 class GitHubAdapter(GitAdapter):
@@ -58,8 +24,8 @@ class GitHubAdapter(GitAdapter):
     locally.
     """
 
-    def __init__(self, stack, host, owner, name):
-        super().__init__(stack)
+    def __init__(self, core, host, owner, name):
+        super().__init__(core)
         self.host, self.owner, self.name = host, owner, name
         self.repo = f"{host}/{owner}/{name}"
         self._pull_requests = None
@@ -74,13 +40,14 @@ class GitHubAdapter(GitAdapter):
     def pull_requests(self):
         """{branch: pull request} for tracked branches with a recorded pull request.
 
-        Looked up with one API call per command. If that fails, warns and
-        returns {}, so merges are only detected locally.
+        Looked up with one API call per command. If that fails, emits
+        PullRequestLookupFailed and returns {}, so merges are only detected
+        locally.
         """
         if self._pull_requests is None:
             self._pull_requests = {}
             numbers = {}
-            for branch in self.stack.tracked_branches():
+            for branch in self.core.tracked_branches():
                 number = self.git.config_get(branch, PR_KEY)
                 if number and number.isdigit():
                     numbers[branch] = int(number)
@@ -98,8 +65,7 @@ class GitHubAdapter(GitAdapter):
                                        if found.get(f"pr{n}")}
                 self._default_branch = (found.get("defaultBranchRef") or {}).get("name")
             except (StackError, ValueError, KeyError, TypeError) as e:
-                print(f"warning: couldn't look up pull requests on GitHub, so only checking for merges "
-                      f"locally: {e}", file=sys.stderr)
+                self.core.emit(events.PullRequestLookupFailed(str(e)))
         return self._pull_requests
 
     def merge_state(self, branch, parent):
@@ -137,7 +103,7 @@ class GitHubAdapter(GitAdapter):
             pr = prs.get(b)
             if pr and pr["state"] == "OPEN" and pr["baseRefName"] != parents[b]:
                 self.gh("pr", "edit", str(pr["number"]), "--repo", self.repo, "--base", parents[b])
-                print(f"changed the base of {b}'s pull request #{pr['number']} to {parents[b]}")
+                self.core.emit(events.PullRequestRetargeted(b, pr["number"], parents[b]))
 
     def record_pull_request(self, branch, parent):
         """Record branch's open pull request, opening a draft one if there is none."""
@@ -145,7 +111,7 @@ class GitHubAdapter(GitAdapter):
                                    "--state", "open", "--json", "number"))
         if found:
             number = found[0]["number"]
-            print(f"found pull request #{number} for {branch}")
+            self.core.emit(events.PullRequestFound(branch, number))
         else:
             url = self.gh("pr", "create", "--repo", self.repo, "--draft", "--base", parent,
                           "--head", branch, "--fill").splitlines()[-1]
@@ -153,7 +119,7 @@ class GitHubAdapter(GitAdapter):
             if not match:
                 raise StackError(f"couldn't tell which pull request gh opened for {branch} from {url!r}")
             number = int(match.group(1))
-            print(f"opened draft pull request #{number} for {branch}: {url}")
+            self.core.emit(events.PullRequestOpened(branch, number, url))
         self.git.config_set(branch, PR_KEY, str(number))
 
 
@@ -168,23 +134,3 @@ def github_repo(git, remote):
         if match:
             return match.groups()
     return None
-
-
-def make_adapter(stack, remote):
-    """The adapter stack.adapter asks for. If unset, GitHub's when remote is on
-    github.com and gh is installed, and git's otherwise."""
-    setting = stack.git.run("config", "--get", ADAPTER_SETTING, check=False)
-    if setting not in ("", "git", "github"):
-        raise StackError(f"{ADAPTER_SETTING} must be git or github, not {setting}")
-    if setting == "git":
-        return GitAdapter(stack)
-    repo = github_repo(stack.git, remote)
-    if setting == "github":
-        if repo is None:
-            raise StackError(f"{ADAPTER_SETTING} is github, but {remote}'s URL isn't a GitHub repository")
-        if not shutil.which("gh"):
-            raise StackError(f"{ADAPTER_SETTING} is github, which needs the gh CLI on your PATH")
-        return GitHubAdapter(stack, *repo)
-    if repo and repo[0] == "github.com" and shutil.which("gh"):
-        return GitHubAdapter(stack, *repo)
-    return GitAdapter(stack)
