@@ -73,13 +73,6 @@ pull requests to it, and never matches it against the default branch.
   and `push` from `--remote`, which for a fork is the fork, not the repository its
   pull requests are on.
 
-## SSH host aliases aren't recognized as GitHub
-
-`github_repo` takes the host from the remote URL, so a remote like
-`git@github-work:org/repo.git` (a `Host` alias in `~/.ssh/config`) gets the git
-adapter. Setting `stack.adapter github` doesn't help: `gh` is called with
-`--hostname github-work`, the lookup fails, and `push` fails after pushing.
-
 ## Branch and parent names are resolved like any revision
 
 Most git calls pass bare names (`git rev-parse <parent>`,

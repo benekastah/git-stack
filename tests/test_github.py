@@ -1,9 +1,14 @@
 """The GitHub adapter, with tests/fake_gh.py standing in for gh."""
 
+import os
+import pathlib
+
 import pytest
 
 from git_stack import events
+from git_stack.adapters.github import github_repo
 from git_stack.errors import StackError
+from git_stack.git import GitClient
 from git_stack.stack import BranchStatus, StackClient
 from tests.helpers import FakeGitHub, Repo
 
@@ -242,3 +247,28 @@ def test_git_adapter_setting_leaves_github_alone(repo: Repo, gh: FakeGitHub, cli
     client.sync()
 
     assert gh.load()["calls"] == []
+
+
+@pytest.fixture
+def fake_ssh(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """An ssh whose config has `Host github-work` with `HostName github.com`."""
+    bin_dir = tmp_path / "ssh-bin"
+    bin_dir.mkdir()
+    ssh = bin_dir / "ssh"
+    ssh.write_text('#!/bin/sh\n[ "$1" = -G ] || exit 255\n'
+                   'if [ "$2" = github-work ]; then echo "hostname github.com"; else echo "hostname $2"; fi\n')
+    ssh.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
+
+
+@pytest.mark.parametrize("url", ["git@github-work:acme/widgets.git", "ssh://git@github-work/acme/widgets.git"])
+def test_github_repo_resolves_ssh_host_alias(repo: Repo, fake_ssh: None, url: str) -> None:
+    repo.git("config", "remote.origin.url", url)
+
+    assert github_repo(GitClient(repo.path), "origin") == ("github.com", "acme", "widgets")
+
+
+def test_github_repo_leaves_https_host_alone(repo: Repo, fake_ssh: None) -> None:
+    repo.git("config", "remote.origin.url", "https://github-work/acme/widgets.git")
+
+    assert github_repo(GitClient(repo.path), "origin") == ("github-work", "acme", "widgets")

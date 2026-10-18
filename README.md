@@ -120,7 +120,8 @@ setting:
   default branch locally.
 
 If `stack.adapter` isn't set, git-stack uses `github` when the remote's URL is
-on github.com and `gh` is installed, and `git` otherwise. Set it to `github` for
+on github.com (including through a `Host` alias in `~/.ssh/config`, e.g.
+`git@github-work:org/repo.git`) and `gh` is installed, and `git` otherwise. Set it to `github` for
 a GitHub Enterprise host, or to `git` to turn the GitHub integration off:
 
 ```sh
