@@ -73,13 +73,16 @@ class Repo:
         self.git("push", "--quiet", "origin", "main", *([f":{branch}"] if delete_branch else []),
                  cwd=self.forge)
 
-    def commit_on_forge(self, branch: str, name: str, content: str, message: str) -> None:
-        """Push a commit to origin/<branch>, as a collaborator would."""
+    def commit_on_forge(self, branch: str, name: str, content: str, message: str,
+                        author: str = "Collaborator <collaborator@example.com>") -> None:
+        """Push a commit to origin/<branch>, as a collaborator (or author, from
+        another machine) would."""
         self.git("fetch", "--quiet", cwd=self.forge)
         self.git("switch", "--quiet", "-C", branch, f"origin/{branch}", cwd=self.forge)
         (self.forge / name).write_text(content)
         self.git("add", name, cwd=self.forge)
-        self.git("commit", "--quiet", "-m", message, cwd=self.forge)
+        self.git("commit", "--quiet", f"--author={author}", "-m", message,
+                 cwd=self.forge)
         self.git("push", "--quiet", "origin", branch, cwd=self.forge)
 
     def remote_subject(self, branch: str) -> str:

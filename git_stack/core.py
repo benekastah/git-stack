@@ -14,11 +14,11 @@ PULLED_KEY = "stackPulled"
 PENDING_PARENT_KEY = "stackPendingParent"
 PENDING_BASE_KEY = "stackPendingBase"
 # Same idea for pulling upstream commits with `git cherry-pick`: the branch tip
-# before the pull, the upstream tip being pulled, and the authorship (see
-# GitClient.authorships) of each commit being cherry-picked, one per line.
+# before the pull, the upstream tip being pulled, and the identity (see
+# GitClient.identities) of each commit being cherry-picked, one per line.
 PENDING_PULL_FROM_KEY = "stackPendingPullFrom"
 PENDING_PULLED_KEY = "stackPendingPulled"
-PENDING_PULL_AUTHORSHIPS_KEY = "stackPendingPullAuthorships"
+PENDING_PULL_IDENTITIES_KEY = "stackPendingPullIdentities"
 
 # {branch: the branch it is stacked on}
 Parents: TypeAlias = dict[str, str]
@@ -166,15 +166,15 @@ class StackCore:
         pending_pulled = git.config_get(branch, PENDING_PULLED_KEY)
         if pending_pulled is not None:
             pull_from = git.config_get(branch, PENDING_PULL_FROM_KEY)
-            picked = set((git.config_get(branch, PENDING_PULL_AUTHORSHIPS_KEY) or "").splitlines())
-            # Cherry-picking keeps each commit's author and date, even when the
-            # user resolves a conflict or edits the message.
+            picked = set((git.config_get(branch, PENDING_PULL_IDENTITIES_KEY) or "").splitlines())
+            # Cherry-picking keeps each commit's author, date and subject, even
+            # when the user resolves a conflict.
             if (pull_from and picked and git.is_ancestor(pull_from, branch)
-                    and picked <= git.authorships(f"{pull_from}..refs/heads/{branch}")):
+                    and picked <= git.identities(f"{pull_from}..refs/heads/{branch}")):
                 git.config_set(branch, PULLED_KEY, pending_pulled)
             git.config_unset(branch, PENDING_PULLED_KEY)
             git.config_unset(branch, PENDING_PULL_FROM_KEY)
-            git.config_unset(branch, PENDING_PULL_AUTHORSHIPS_KEY)
+            git.config_unset(branch, PENDING_PULL_IDENTITIES_KEY)
 
     def settle_all(self) -> None:
         for branch in self.tracked_branches():
@@ -276,8 +276,8 @@ class StackCore:
         self.emit(events.PullingUpstream(branch, len(commits)))
         git.config_set(branch, PENDING_PULL_FROM_KEY, git.tip(branch))
         git.config_set(branch, PENDING_PULLED_KEY, upstream_tip)
-        git.config_set(branch, PENDING_PULL_AUTHORSHIPS_KEY,
-                       "\n".join(sorted(git.authorships("--no-walk", *commits))))
+        git.config_set(branch, PENDING_PULL_IDENTITIES_KEY,
+                       "\n".join(sorted(git.identities("--no-walk", *commits))))
         git.switch(branch)
         if not git.passthrough("cherry-pick", "--ff", *commits):
             raise StackError(f"pulling upstream commits into {branch} stopped on a conflict. Resolve it, "
@@ -308,7 +308,7 @@ class StackCore:
 
     def untrack(self, branch: str) -> None:
         for key in (PARENT_KEY, BASE_KEY, PULLED_KEY, PENDING_PARENT_KEY, PENDING_BASE_KEY,
-                    PENDING_PULL_FROM_KEY, PENDING_PULLED_KEY, PENDING_PULL_AUTHORSHIPS_KEY):
+                    PENDING_PULL_FROM_KEY, PENDING_PULLED_KEY, PENDING_PULL_IDENTITIES_KEY):
             self.git.config_unset(branch, key)
 
     def remove_merged(self, branch: str, parents: Parents, delete: bool) -> None:
