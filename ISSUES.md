@@ -37,15 +37,6 @@ worktree fails partway through a `sync`, `clean` or `restack`. (A stack's root,
 e.g. `main`, checked out elsewhere is left alone with a warning rather than
 fast-forwarded.)
 
-## `git stack branch` can give the new branch its parent's upstream
-
-`branch` runs `git switch --create` without `--no-track`. With
-`branch.autoSetupMerge=inherit`, a branch created on a pushed `pr1` gets
-`origin/pr1` as its upstream (with `always`, local `pr1`). Until the first
-`push` resets it, `sync` lists it as unpushed, merge detection looks at the
-parent's remote branch, and if `origin/pr1` is deleted the new branch counts as
-"upstream gone" and can be untracked (or deleted with `-d local`).
-
 ## A parent that isn't a local branch breaks pull requests
 
 `track` and `restack --onto` accept any commit as the parent, e.g.
