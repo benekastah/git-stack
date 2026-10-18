@@ -55,8 +55,3 @@ wins over the branch.
 `squash_branch` skips commit-msg hooks (e.g. ones that add a ticket ID or
 Change-Id), and because stdin/stdout are captured, GPG signing that prompts on
 the terminal fails.
-
-## No `untrack` command
-
-The only way to drop a branch from a stack without deleting it is
-`git config --unset branch.<name>.stackParent` (plus the other `stack*` keys).

@@ -3,14 +3,14 @@ import os
 import sys
 
 import git_stack
-from git_stack.commands import branch, clean, info, push, rename, restack, sync, track
+from git_stack.commands import branch, clean, info, push, rename, restack, sync, track, untrack
 from git_stack.errors import StackError
 from git_stack.git import GitClient
 from git_stack.output import print_event
 from git_stack.stack import StackClient
 
 # In the order `git stack -h` lists them.
-COMMANDS = (branch, track, rename, info, restack, sync, clean, push)
+COMMANDS = (branch, track, untrack, rename, info, restack, sync, clean, push)
 
 
 def main(argv: list[str] | None = None, stack: StackClient | None = None) -> int:

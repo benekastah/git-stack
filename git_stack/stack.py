@@ -38,6 +38,14 @@ class Tracked:
 
 
 @dataclass(frozen=True)
+class Untracked:
+    """children are the branches still stacked on branch, which is now the
+    bottom of their stack."""
+    branch: str
+    children: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class Renamed:
     """upstream is the remote branch old was pushed to, if any. It isn't
     renamed, and new no longer tracks it."""
@@ -131,6 +139,20 @@ class StackClient(StackCore):
         if not self.git.local_branch_exists(parent):
             raise StackError(f"{parent} isn't a local branch; branches can only be stacked on local "
                              f"branches (e.g. branch, not origin/branch)")
+
+    def untrack(self, branch: str | None = None) -> Untracked:
+        """Stop tracking branch (default: the current branch), leaving the branch
+        itself alone. Branches stacked on it stay on it. Returns an Untracked.
+        """
+        self.ensure_no_operation_in_progress()
+        self.settle_all()
+        parents = self.tracked_branches()
+        if branch is None:
+            branch = self.current_stacked_branch(parents, "untrack", hint="name the branch to untrack")
+        elif branch not in parents:
+            raise StackError(f"{branch} isn't in a stack")
+        self.forget(branch)
+        return Untracked(branch, tuple(child for child, parent in sorted(parents.items()) if parent == branch))
 
     def rename(self, new: str, old: str | None = None) -> Renamed:
         """Rename old (default: the current branch) to new, keeping the branches
