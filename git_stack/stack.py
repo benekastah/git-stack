@@ -80,8 +80,7 @@ class StackClient(StackCore):
             if branch is None:
                 raise StackError("not on a branch")
             branches = [branch]
-        if git.rev(parent) is None:
-            raise StackError(f"{parent} isn't a commit")
+        self.ensure_local_branch_parent(parent)
         for branch in branches:
             if not git.local_branch_exists(branch):
                 raise StackError(f"{branch} isn't a local branch")
@@ -120,6 +119,14 @@ class StackClient(StackCore):
         git = self.git
         return (git.run("merge-base", "--fork-point", parent, branch, check=False)
                 or git.run("merge-base", parent, branch, check=False) or None)
+
+    def ensure_local_branch_parent(self, parent: str) -> None:
+        """Refuse a parent that isn't a local branch: sync fast-forwards a stack's
+        root, and pull requests are based on the parent, which both need a
+        branch."""
+        if not self.git.local_branch_exists(parent):
+            raise StackError(f"{parent} isn't a local branch; branches can only be stacked on local "
+                             f"branches (e.g. main, not origin/main)")
 
     def rename(self, new: str, old: str | None = None) -> Renamed:
         """Rename old (default: the current branch) to new, keeping the branches
@@ -204,8 +211,7 @@ class StackClient(StackCore):
         branch = self.current_stacked_branch(
             parents, "restack", hint="use `git stack track` first" if onto else None)
         if onto:
-            if git.rev(onto) is None:
-                raise StackError(f"{onto} isn't a commit")
+            self.ensure_local_branch_parent(onto)
             ensure_no_cycle(branch, onto, parents)
             parents[branch] = onto
         branches = self.skip_merged(stack_of(branch, parents), parents, make_adapter(self, DEFAULT_REMOTE))

@@ -37,13 +37,6 @@ worktree fails partway through a `sync`, `clean` or `restack`. (A stack's root,
 e.g. `main`, checked out elsewhere is left alone with a warning rather than
 fast-forwarded.)
 
-## A parent that isn't a local branch breaks pull requests
-
-`track` and `restack --onto` accept any commit as the parent, e.g.
-`origin/main` or a SHA. With the GitHub adapter, `push` passes it as the pull
-request's base (`gh pr create --base origin/main` fails), retargets existing
-pull requests to it, and never matches it against the default branch.
-
 ## Fork workflows aren't supported
 
 - `sync` and `clean` fetch only `--remote` (default `origin`). If `main` tracks

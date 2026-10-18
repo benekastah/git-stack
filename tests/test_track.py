@@ -103,3 +103,14 @@ def test_track_later_branch_uses_where_it_forked_from_rewritten_parent(repo: Rep
 
     assert tracked[1].base == old_pr1_tip
     repo.assert_stacked("pr2", "pr1", ["pr2 c1"])
+
+
+@pytest.mark.parametrize("parent", ["origin/main", "HEAD~1"])
+def test_track_refuses_parent_that_isnt_a_local_branch(repo: Repo, client: StackClient, parent: str) -> None:
+    repo.git("switch", "--quiet", "-c", "pr1")
+    repo.commit("a", "pr1\n", "pr1 c1")
+
+    with pytest.raises(StackError, match=f"{parent} isn't a local branch"):
+        client.track(parent)
+
+    repo.assert_untracked("pr1")
