@@ -130,3 +130,14 @@ def test_track_refuses_while_a_rebase_is_in_progress(repo: Repo, client: StackCl
 
     with pytest.raises(StackError, match="in progress"):
         client.track("main", ["pr2"])
+
+
+@pytest.mark.parametrize("parent", ["origin/main", "HEAD~1"])
+def test_track_refuses_parent_that_isnt_a_local_branch(repo: Repo, client: StackClient, parent: str) -> None:
+    repo.git("switch", "--quiet", "-c", "pr1")
+    repo.commit("a", "pr1\n", "pr1 c1")
+
+    with pytest.raises(StackError, match=f"{parent} isn't a local branch"):
+        client.track(parent)
+
+    repo.assert_untracked("pr1")
