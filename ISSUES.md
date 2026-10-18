@@ -96,8 +96,3 @@ the terminal fails.
 
 The only way to drop a branch from a stack without deleting it is
 `git config --unset branch.<name>.stackParent` (plus the other `stack*` keys).
-
-## Opened pull requests skip the repository's template
-
-`gh pr create --fill` builds the body from the commits, so the repository's
-pull request template isn't used.

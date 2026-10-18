@@ -8,17 +8,10 @@ and fails for commands whose first argument is listed in its "fail" key.
 import json
 import os
 import re
-import subprocess
 import sys
 from typing import Any
 
 PR_FIELDS = ("number", "state", "isCrossRepository", "headRefOid", "baseRefName", "mergeCommit")
-
-
-def pushed_tip(branch: str) -> str:
-    """The commit branch was pushed at, as the repository gh runs in last saw it."""
-    return subprocess.run(["git", "rev-parse", "--verify", f"refs/remotes/origin/{branch}"],
-                          capture_output=True, text=True, check=True).stdout.strip()
 
 
 def respond(args: list[str], prs: list[dict[str, Any]]) -> str | None:
@@ -40,12 +33,6 @@ def respond(args: list[str], prs: list[dict[str, Any]]) -> str | None:
                               key=lambda p: p["number"], reverse=True)
             found[alias] = {"nodes": [{k: p[k] for k in PR_FIELDS} for p in matching]}
         return json.dumps({"data": {"repository": found}})
-    if args[:2] == ["pr", "create"]:
-        number = max((p["number"] for p in prs), default=0) + 1
-        prs.append({"number": number, "state": "OPEN", "isDraft": "--draft" in args, "isCrossRepository": False,
-                    "headRefName": opt("--head"), "headRefOid": pushed_tip(opt("--head")),
-                    "baseRefName": opt("--base"), "mergeCommit": None})
-        return f"https://github.com/acme/widgets/pull/{number}"
     if args[:2] == ["pr", "edit"]:
         next(p for p in prs if p["number"] == int(args[2]))["baseRefName"] = opt("--base")
         return None

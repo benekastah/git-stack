@@ -304,6 +304,25 @@ def test_sync_pull_aborted_then_committed_over_is_not_pulled(repo: Repo, client:
     assert repo.remote_subject("pr1") == "collab"
 
 
+def test_sync_pull_aborted_then_committed_over_in_same_second_by_same_author_is_not_pulled(
+        repo: Repo, client: StackClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo.make_stack()
+    client.push()
+    monkeypatch.setenv("GIT_AUTHOR_DATE", "1700000000 +0000")
+    repo.commit_on_forge("pr1", "a", "other machine\n", "from my other machine", author="Test <test@example.com>")
+    repo.git("switch", "--quiet", "pr1")
+    repo.commit("a", "pr1 third\n", "pr1 c3")
+    with pytest.raises(StackError, match="pulling upstream commits into pr1 stopped on a conflict"):
+        client.sync()
+    repo.git("cherry-pick", "--abort")
+    repo.commit("b", "more\n", "pr1 c4")
+
+    with pytest.raises(StackError, match="origin/pr1 has commits that pr1 doesn't"):
+        client.push()
+
+    assert repo.remote_subject("pr1") == "from my other machine"
+
+
 def test_sync_skips_branches_above_a_missing_parent(
         repo: Repo, client: StackClient, emitted: list[events.Event]) -> None:
     repo.make_stack()

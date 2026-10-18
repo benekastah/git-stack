@@ -122,9 +122,9 @@ class PullRequestLookupFailed:
 
 
 @dataclass(frozen=True)
-class PullRequestOpened:
+class NoPullRequest:
+    """branch was pushed but has no pull request; url opens one."""
     branch: str
-    number: int
     url: str
 
 
@@ -153,6 +153,6 @@ Event: TypeAlias = (
     | BrokenBranch
     | ParentMissing
     | PullRequestLookupFailed
-    | PullRequestOpened
+    | NoPullRequest
     | PullRequestRetargeted
 )

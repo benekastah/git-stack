@@ -22,99 +22,68 @@ def merge_pr1_on_forge_with_a_tweak(repo: Repo, gh: FakeGitHub) -> None:
     gh.clear_calls()
 
 
-def test_push_opens_draft_prs_for_current_branch_and_those_above(
-        repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+def compare_url(base: str, head: str) -> str:
+    return f"https://github.com/acme/widgets/compare/{base}...{head}?expand=1"
+
+
+def test_push_links_to_opening_prs_for_branches_without_one(
+        repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event]) -> None:
     repo.make_stack()
     repo.git("switch", "--quiet", "pr2")
 
     client.push()
-    client.push()
 
-    prs = gh.load()["prs"]
-    assert [(p["headRefName"], p["baseRefName"], p["isDraft"]) for p in prs] == [
-        ("pr2", "pr1", True), ("pr3", "pr2", True)]
-    assert len(gh.calls("pr", "create")) == 2
-    assert repo.git("branch", "--list", "pr1", cwd=repo.origin) == "pr1"
-    assert all("github.com/acme/widgets" in call for call in gh.calls("pr"))
+    assert [e for e in emitted if isinstance(e, events.NoPullRequest)] == [
+        events.NoPullRequest("pr1", compare_url("main", "pr1")),
+        events.NoPullRequest("pr2", compare_url("pr1", "pr2")),
+        events.NoPullRequest("pr3", compare_url("pr2", "pr3"))]
+    assert gh.calls("pr") == []
 
 
-def test_push_from_bottom_opens_prs_for_whole_stack(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
-    repo.make_stack()
-    repo.git("switch", "--quiet", "pr1")
-
-    client.push()
-
-    assert [(p["number"], p["headRefName"], p["baseRefName"]) for p in gh.load()["prs"]] == [
-        (1, "pr1", "main"), (2, "pr2", "pr1"), (3, "pr3", "pr2")]
-
-
-def test_push_named_branch_opens_prs_from_it_up(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
-    repo.make_stack()
-
-    client.push("pr2")
-
-    assert [p["headRefName"] for p in gh.load()["prs"]] == ["pr2", "pr3"]
-    assert repo.git("branch", "--show-current") == "pr3"
-
-
-def test_push_whole_stack_opens_prs_from_its_bottom(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
-    repo.make_stack()
-
-    client.push(whole_stack=True)
-
-    assert [p["headRefName"] for p in gh.load()["prs"]] == ["pr1", "pr2", "pr3"]
-
-
-def test_push_from_merged_branch_opens_prs_only_above_it(
-        repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
-    repo.make_stack()
-    repo.git("switch", "--quiet", "main")
-    repo.git("merge", "--quiet", "--squash", "pr1")
-    repo.git("commit", "--quiet", "-m", "pr1 (squashed)")
-    repo.git("switch", "--quiet", "pr1")
+def test_push_link_quotes_branch_names(
+        repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event]) -> None:
+    client.branch("feature/50%")
+    repo.commit("a", "feature\n", "feature c1")
 
     client.push()
 
-    assert [(p["headRefName"], p["baseRefName"]) for p in gh.load()["prs"]] == [
-        ("pr2", "main"), ("pr3", "pr2")]
-    assert repo.git("branch", "--list", "pr1", cwd=repo.origin) == ""
+    assert events.NoPullRequest("feature/50%", compare_url("main", "feature/50%25")) in emitted
 
 
-def test_push_uses_pr_opened_elsewhere(
+def test_push_retargets_pr_opened_elsewhere_instead_of_linking(
         repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event]) -> None:
     repo.make_stack()
     gh.add_pr(number=7, state="OPEN", headRefName="pr2", headRefOid=repo.git("rev-parse", "main"), baseRefName="main",
               mergeCommit=None)
-    repo.git("switch", "--quiet", "pr2")
 
     client.push()
 
-    assert [(p["number"], p["headRefName"]) for p in gh.load()["prs"]] == [(7, "pr2"), (8, "pr3")]
     assert events.PullRequestRetargeted("pr2", 7, "pr1") in emitted
+    assert gh.load()["prs"][0]["baseRefName"] == "pr1"
+    assert [e.branch for e in emitted if isinstance(e, events.NoPullRequest)] == ["pr1", "pr3"]
 
 
-def test_push_opens_new_pr_for_branch_whose_pr_was_closed(
-        repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+def test_push_links_to_new_pr_for_branch_whose_pr_was_closed(
+        repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event]) -> None:
     repo.make_stack()
     gh.add_pr(number=7, state="CLOSED", headRefName="pr3", headRefOid=repo.git("rev-parse", "main"), baseRefName="pr2",
               mergeCommit=None)
-    repo.git("switch", "--quiet", "pr3")
 
     client.push()
 
-    assert [(p["number"], p["headRefName"]) for p in gh.load()["prs"]] == [(7, "pr3"), (8, "pr3")]
+    assert events.NoPullRequest("pr3", compare_url("pr2", "pr3")) in emitted
+    assert gh.calls("pr", "edit") == []
 
 
 def test_push_ignores_pr_from_fork_with_same_branch_name(
-        repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+        repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event]) -> None:
     repo.make_stack()
     gh.add_pr(number=7, state="OPEN", isCrossRepository=True, headRefName="pr3", headRefOid=repo.git("rev-parse", "main"),
               baseRefName="main", mergeCommit=None)
-    repo.git("switch", "--quiet", "pr3")
 
     client.push()
 
-    assert len(gh.calls("pr", "create")) == 1
+    assert events.NoPullRequest("pr3", compare_url("pr2", "pr3")) in emitted
     assert gh.calls("pr", "edit") == []
 
 
@@ -134,8 +103,7 @@ def test_merged_pr_of_earlier_branch_with_same_name_is_ignored(
 
     assert not any(isinstance(event, events.MergedWithNewCommits) for event in emitted)
     repo.assert_stacked("pr1", "main", ["pr1 c2", "pr1 c1"])
-    assert [(p["number"], p["headRefName"], p["state"]) for p in gh.load()["prs"]] == [
-        (3, "pr1", "MERGED"), (4, "pr1", "OPEN"), (5, "pr2", "OPEN"), (6, "pr3", "OPEN")]
+    assert events.NoPullRequest("pr1", compare_url("main", "pr1")) in emitted
 
 
 def test_push_after_failed_pr_lookup_leaves_prs_alone(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
@@ -154,6 +122,8 @@ def test_push_retargets_pr_whose_parent_changed(
     repo.make_stack()
     repo.git("switch", "--quiet", "pr2")
     client.push()
+    gh.add_pr(number=1, state="OPEN", headRefName="pr2", headRefOid=repo.git("rev-parse", "pr2"),
+              baseRefName="pr1", mergeCommit=None)
     repo.squash_merge_on_forge("pr1")
     client.sync()
 

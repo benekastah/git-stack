@@ -108,7 +108,7 @@ class GitClient:
         return {line.split()[0]
                 for line in self.run("patch-id", "--stable", input=patches + "\n").splitlines()}
 
-    def authorships(self, *args: str) -> set[str]:
-        """The author and author date of each commit `git log <args>` lists, e.g.
-        "Jane Doe <jane@example.com> 1700000000 +0100"."""
-        return set(self.run("log", "--format=%an <%ae> %ad", "--date=raw", *args).splitlines())
+    def identities(self, *args: str) -> set[str]:
+        """The author, author date and subject of each commit `git log <args>`
+        lists, e.g. "Jane Doe <jane@example.com> 1700000000 +0100 Fix the parser"."""
+        return set(self.run("log", "--format=%an <%ae> %ad %s", "--date=raw", *args).splitlines())

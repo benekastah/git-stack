@@ -41,11 +41,9 @@ def stack() -> Any:
     (["sync", "--remote", "upstream", "-d", "local"], "sync", (), {"remote": "upstream", "delete": "local"}),
     (["clean"], "clean", (), {"remote": "origin", "delete": None}),
     (["clean", "--delete", "both"], "clean", (), {"remote": "origin", "delete": "both"}),
-    (["push"], "push", (None,), {"remote": "origin", "whole_stack": False, "force": False}),
-    (["push", "pr1", "--remote", "upstream"], "push", ("pr1",),
-     {"remote": "upstream", "whole_stack": False, "force": False}),
-    (["push", "--all"], "push", (None,), {"remote": "origin", "whole_stack": True, "force": False}),
-    (["push", "--force"], "push", (None,), {"remote": "origin", "whole_stack": False, "force": True}),
+    (["push"], "push", (None,), {"remote": "origin", "force": False}),
+    (["push", "pr1", "--remote", "upstream"], "push", ("pr1",), {"remote": "upstream", "force": False}),
+    (["push", "--force"], "push", (None,), {"remote": "origin", "force": True}),
 ])
 def test_command_calls_its_client_method(
         stack: Any, argv: list[str], method: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> None:
@@ -133,13 +131,6 @@ def test_sync_with_nothing_to_push_prints_nothing(stack: Any, capsys: pytest.Cap
     main(["sync"], stack=stack)
 
     assert capsys.readouterr().out == ""
-
-
-def test_push_refuses_branch_with_all(stack: Any) -> None:
-    with pytest.raises(SystemExit):
-        main(["push", "pr1", "--all"], stack=stack)
-
-    stack.push.assert_not_called()
 
 
 def test_push_says_when_everything_looks_merged(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:

@@ -2,8 +2,9 @@
 
 A small, dependency-free tool for stacked branches/PRs that survive squash
 merges. No hosted service; everything lives in your local git config. On
-GitHub, it can also use the [`gh` CLI](https://cli.github.com) to open draft
-pull requests and to tell which ones were merged (see [GitHub](#github)).
+GitHub, it can also use the [`gh` CLI](https://cli.github.com) to tell which
+pull requests were merged and to keep their base branches in step with the
+stack (see [GitHub](#github)).
 
 ## The problem
 
@@ -22,7 +23,7 @@ git stack branch add-api        # PR 1
 # ...commit...
 git stack branch use-api        # PR 2, stacked on add-api
 # ...commit...
-git stack push                  # push both; open a draft PR for use-api against add-api
+git stack push                  # push both, printing links to open their PRs
 ```
 
 Address review feedback on PR 1, then move PR 2 on top of it:
@@ -129,23 +130,24 @@ git config stack.adapter git
 With the GitHub adapter:
 
 - A branch's pull request is the one whose head is a remote branch of the same
-  name in the same repository, whether `git stack push` opened it or you did.
-  An open one wins; otherwise the newest merged one counts, if its head
-  descends from the commit the branch is stacked on (so one merged from an
-  earlier branch of the same name doesn't). Closed pull requests are ignored.
-- `git stack push` opens a draft pull request for the current branch and each
-  branch stacked above it, based on its stack parent, if it doesn't have one
-  yet. Push from the bottom of a stack to open pull requests for all of it, or
-  from higher up to leave the branches below without one (they're still
-  pushed, since a pull request's base branch has to exist).
-- `push` also changes the base of the stack's open pull requests to match their
-  stack parents, e.g. to `main` once the parent PR was merged.
+  name in the same repository, however it was opened. An open one wins;
+  otherwise the newest merged one counts, if its head descends from the commit
+  the branch is stacked on (so one merged from an earlier branch of the same
+  name doesn't). Closed pull requests are ignored.
+- `git stack push` changes the base of the stack's open pull requests to match
+  their stack parents, e.g. to `main` once the parent PR was merged.
+- git-stack doesn't open pull requests. For each pushed branch without one,
+  `push` prints a link to GitHub's page for opening one against its stack
+  parent, with the repository's pull request template filled in. (The link
+  GitHub prints when a branch is first pushed targets the default branch
+  instead; `push` retargets a pull request opened from it the next time it
+  runs.)
 - A pull request that GitHub says was merged counts as merged once its merge
   commit is in the local parent branch (`sync` fetches it), even if the parent
   changed the merged lines since, or the merge changed them.
 - If GitHub can't be reached, git-stack warns and detects merges like the `git`
-  adapter does. `push` still pushes, but then fails without opening or
-  retargeting pull requests.
+  adapter does. `push` still pushes, but then fails without retargeting pull
+  requests or printing links.
 
 ## Commands
 
@@ -157,12 +159,12 @@ relative to the one before.
 | --- | --- |
 | `git stack branch <name>` | Create `<name>` on top of the current branch and track it. |
 | `git stack track <parent> [<branch>...] [--base <sha>]` | Track existing branches (default: the current branch) as a stack on `<parent>`, each stacked on the one before it, e.g. `git stack track main pr1 pr2 pr3`. `--base` is where the first branch starts and defaults to the merge-base with `<parent>`; pass the old parent tip explicitly if the parent was already squash-merged. Later branches use the merge-base with the branch before them. |
-| `git stack rename [<old>] <new>` | Rename a branch (the current one by default) and move the branches stacked on it onto the new name. Unsets its upstream, since the remote branch isn't renamed (its pull request stays with the old name); the next `git stack push` pushes it under the new name (and opens a new draft pull request with the GitHub adapter). |
+| `git stack rename [<old>] <new>` | Rename a branch (the current one by default) and move the branches stacked on it onto the new name. Unsets its upstream, since the remote branch isn't renamed (its pull request stays with the old name); the next `git stack push` pushes it under the new name, and its pull request has to be opened again. |
 | `git stack info` | Show all tracked stacks as a tree, marking the current branch, branches that were merged, and branches that need a restack. |
 | `git stack restack [--onto <parent>] [--squash]` | Rebase every branch in the current stack onto its parent, bottom-up. `--onto` first retargets the current branch. Branches that were merged are skipped and their children restacked onto their parent; `sync` or `clean` removes them from the stack. `--squash` first squashes each branch in the current stack into one commit (keeping all the messages), so a conflict is resolved once per branch instead of once per commit. Refuses to run outside a stack. |
 | `git stack sync [--remote origin] [-d local\|remote\|both]` | Fetch with `--prune`, fast-forward the current stack's root (e.g. `main`) to its upstream, stop tracking the stack's branches that were merged, move their children down, restack the stack, and pull in commits others pushed to its branches. Other stacks are left alone. Refuses to run outside a stack. Merged branches are kept unless `-d`/`--delete` says to delete their local branches, their remote branches, or both. |
 | `git stack clean [--remote origin] [-d local\|remote\|both]` | Fetch with `--prune`, fast-forward every stack root, and stop tracking merged branches in every stack, moving their children down. Nothing is restacked, so there are no conflicts; the children are rebased the next time you `sync` or `restack` their stack. `-d` works as for `sync`. Runs from any branch. |
-| `git stack push [<branch> \| --all] [--remote origin] [--force]` | Force-push (with lease) and `--set-upstream` every branch in the current stack, or `<branch>`'s. Skips merged branches. Refuses to run outside a stack, or if a remote branch was deleted or has commits the local one doesn't; run `sync` first, or pass `--force` to drop those commits. With the [GitHub adapter](#github), opens a draft pull request for the current branch (or `<branch>`, or with `--all`, the bottom of the stack) and each branch above it that has none, and updates the base of the stack's pull requests. |
+| `git stack push [<branch>] [--remote origin] [--force]` | Force-push (with lease) and `--set-upstream` every branch in the current stack, or `<branch>`'s. Skips merged branches. Refuses to run outside a stack, or if a remote branch was deleted or has commits the local one doesn't; run `sync` first, or pass `--force` to drop those commits. With the [GitHub adapter](#github), updates the base of the stack's pull requests, and prints a link to open one for each branch that has none. |
 
 ### When does `sync` consider a branch merged?
 
@@ -269,7 +271,7 @@ git stack branch pr1-again
 git revert <the revert commit>     # or cherry-pick pr1's commits
 git switch pr2
 git stack restack --onto pr1-again
-git stack push                     # open a pull request for pr1-again, and point pr2's at it
+git stack push                     # point pr2's pull request at pr1-again, and link to open one for it
 ```
 
 `restack --onto` moves only the current branch, so if `pr1` had several

@@ -293,13 +293,10 @@ class StackClient(StackCore):
                 self.emit(events.MergedWithNewCommits(branch, parent))
         self.restore_checkout(original)
 
-    def push(self, branch: str | None = None, remote: str = DEFAULT_REMOTE,
-             whole_stack: bool = False, force: bool = False) -> list[str]:
+    def push(self, branch: str | None = None, remote: str = DEFAULT_REMOTE, force: bool = False) -> list[str]:
         """Force-push (with lease) every unmerged branch in branch's stack (default:
-        the current branch's), then let the adapter update pull requests and open
-        them for branch and the branches above it, or with whole_stack, for the
-        whole stack. Returns the pushed branches, which is empty if every branch
-        looks merged.
+        the current branch's), then let the adapter update their pull requests.
+        Returns the pushed branches, which is empty if every branch looks merged.
 
         Refuses if a remote branch has commits the local one doesn't, unless
         force is set. Either way, the push fails if a remote branch changed
@@ -313,12 +310,8 @@ class StackClient(StackCore):
             branch = self.current_stacked_branch(parents, "push")
         elif branch not in parents:
             raise StackError(f"{branch} isn't in a stack")
-        stack = stack_of(branch, parents)
-        start = stack[0] if whole_stack else branch
-        # Before skip_merged moves them, in case start itself was merged.
-        upstack = {start, *descendants(start, children_map(parents))}
         adapter = make_adapter(self, remote)
-        branches = self.skip_merged(stack, parents, adapter)
+        branches = self.skip_merged(stack_of(branch, parents), parents, adapter)
         if not branches:
             return []
         # A remote branch deleted since we pushed it was most likely deleted when
@@ -343,7 +336,7 @@ class StackClient(StackCore):
         if not git.passthrough("push", *leases, "--set-upstream", remote, *branches):
             raise StackError("push failed; if the remote has new commits, run `git stack sync` and try again")
         try:
-            adapter.after_push(branches, parents, [b for b in branches if b in upstack])
+            adapter.after_push(branches, parents)
         except StackError as e:
             raise StackError(f"pushed, but updating pull requests failed (set {ADAPTER_SETTING} to git "
                              f"to stop using GitHub): {e}")
