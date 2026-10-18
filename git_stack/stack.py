@@ -126,7 +126,7 @@ class StackClient(StackCore):
         branch."""
         if not self.git.local_branch_exists(parent):
             raise StackError(f"{parent} isn't a local branch; branches can only be stacked on local "
-                             f"branches (e.g. main, not origin/main)")
+                             f"branches (e.g. branch, not origin/branch)")
 
     def rename(self, new: str, old: str | None = None) -> Renamed:
         """Rename old (default: the current branch) to new, keeping the branches
