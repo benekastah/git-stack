@@ -54,21 +54,42 @@ in every stack without restacking anything, run `git stack clean`.
 Requires Python 3.9+ and git 2.38+. The GitHub integration also needs
 [`gh`](https://cli.github.com), logged in with `gh auth login`.
 
-```sh
-curl -fsSL https://raw.githubusercontent.com/benekastah/git-stack/main/install.sh | sh
-```
-
-This installs `git-stack` into `~/.local/bin`, which must be on your `PATH`
-for git to run it as `git stack`. Set `GIT_STACK_DIR` to install somewhere
-else, or `GIT_STACK_REF` to install a specific branch, tag or commit:
+Install it with [pipx](https://pipx.pypa.io) or
+[uv](https://docs.astral.sh/uv/):
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/benekastah/git-stack/main/install.sh | GIT_STACK_DIR="$HOME/bin" sh
+pipx install git+https://github.com/benekastah/git-stack
+# or
+uv tool install git+https://github.com/benekastah/git-stack
 ```
 
-Run `git stack upgrade` to update to the latest version. To install by hand,
-put `git-stack` from this repo anywhere on your `PATH` (and update it with
-`git pull`).
+Either one puts `git-stack` on your `PATH` (run `pipx ensurepath` or
+`uv tool update-shell` if it isn't), so git runs it as `git stack`. To install
+a specific branch, tag or commit, add `@<ref>` to the URL. To update to the
+latest version, run `pipx upgrade git-stack` or `uv tool upgrade git-stack`.
+
+### From a local clone
+
+To run git-stack from a clone of this repository, install it in editable mode,
+so changes to the clone take effect without reinstalling:
+
+```sh
+pipx install --editable /path/to/git-stack
+# or
+uv tool install --editable /path/to/git-stack
+```
+
+Without pipx or uv, install it into a virtualenv and link its `git-stack`
+into a directory on your `PATH`:
+
+```sh
+python3 -m venv ~/.local/share/git-stack/venv
+~/.local/share/git-stack/venv/bin/pip install --editable /path/to/git-stack
+ln -s ~/.local/share/git-stack/venv/bin/git-stack ~/.local/bin/git-stack
+```
+
+Reinstall only when `pyproject.toml` changes, for example when a command-line
+entry point is added.
 
 ## How it works
 
@@ -131,7 +152,6 @@ With the GitHub adapter:
 | `git stack sync [--remote origin] [-d local\|remote\|both]` | Fetch with `--prune`, fast-forward the current stack's root (e.g. `main`) to its upstream, stop tracking the stack's branches that were merged, move their children down, restack the stack, and pull in commits others pushed to its branches. Other stacks are left alone. Refuses to run outside a stack. Merged branches are kept unless `-d`/`--delete` says to delete their local branches, their remote branches, or both. |
 | `git stack clean [--remote origin] [-d local\|remote\|both]` | Fetch with `--prune`, fast-forward every stack root, and stop tracking merged branches in every stack, moving their children down. Nothing is restacked, so there are no conflicts; the children are rebased the next time you `sync` or `restack` their stack. `-d` works as for `sync`. Runs from any branch. |
 | `git stack push [--remote origin]` | Force-push (with lease) and `--set-upstream` every branch in the current stack. Skips merged branches. Refuses to run outside a stack, or if a remote branch was deleted or has commits the local one doesn't; run `sync` first. With the [GitHub adapter](#github), opens a draft pull request for the current branch if it has none, and updates the base of the stack's pull requests. |
-| `git stack upgrade [--ref main]` | Replace the installed `git-stack` with the latest version from GitHub (or the given branch, tag or commit). |
 
 ### When does `sync` consider a branch merged?
 

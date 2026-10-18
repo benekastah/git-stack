@@ -1,27 +1,22 @@
 """End-to-end tests for git-stack, run against throwaway repositories."""
 
-import http.server
-import importlib.machinery
-import importlib.util
+import contextlib
+import io
 import json
 import os
 import pathlib
 import subprocess
 import sys
 import tempfile
-import threading
 import unittest
+from unittest import mock
 
-SCRIPT = pathlib.Path(__file__).resolve().parent.parent / "git-stack"
+from git_stack import events
+from git_stack.git import GitClient
+from git_stack.stack import BranchInfo, BranchStatus, StackClient
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
 FAKE_GH = pathlib.Path(__file__).resolve().parent / "fake_gh.py"
-
-
-def load_git_stack():
-    """Import the git-stack script as a module."""
-    loader = importlib.machinery.SourceFileLoader("git_stack", str(SCRIPT))
-    module = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
-    loader.exec_module(module)
-    return module
 
 
 class StackTestCase(unittest.TestCase):
@@ -39,6 +34,7 @@ class StackTestCase(unittest.TestCase):
             "GIT_COMMITTER_NAME": "Test",
             "GIT_COMMITTER_EMAIL": "test@example.com",
             "GIT_EDITOR": "true",
+            "PYTHONPATH": str(ROOT),
         }
         self.origin = tmp / "origin.git"
         self.repo = tmp / "local"
@@ -66,7 +62,7 @@ class StackTestCase(unittest.TestCase):
         return result.stdout.strip()
 
     def stack(self, *args, expect_success=True):
-        result = subprocess.run([sys.executable, SCRIPT, *args], cwd=self.repo, env=self.env,
+        result = subprocess.run([sys.executable, "-m", "git_stack", *args], cwd=self.repo, env=self.env,
                                 capture_output=True, text=True, timeout=60)
         if expect_success and result.returncode != 0:
             self.fail(f"git stack {' '.join(args)} failed:\n{result.stdout}{result.stderr}")
@@ -1070,88 +1066,46 @@ class GitHubTest(StackTestCase):
         self.assertEqual(self.load_gh_state()["calls"], [])
         self.assertFalse(self.config_exists("pr3", "stackPr"))
 
+class ClientTest(StackTestCase):
+    """Calls StackClient directly, as a script would."""
 
-class UpgradeTest(unittest.TestCase):
-    OLD = "#!/usr/bin/env python3\nprint('old')\n"
-    NEW = "#!/usr/bin/env python3\nprint('new')\n"
+    def client(self):
+        self.events = []
+        cwd = os.getcwd()
+        os.chdir(self.repo)
+        self.addCleanup(os.chdir, cwd)
+        env = mock.patch.dict(os.environ, self.env, clear=True)
+        env.start()
+        self.addCleanup(env.stop)
+        return StackClient(GitClient(), on_event=self.events.append)
 
-    def setUp(self):
-        self.git_stack = load_git_stack()
-        self.tmp = tempfile.TemporaryDirectory()
-        tmp = pathlib.Path(self.tmp.name)
-        self.bin = tmp / "bin"
-        self.bin.mkdir()
-        self.installed = self.bin / "git-stack"
-        self.installed.write_text(self.OLD)
-        self.installed.chmod(0o755)
-        self.release = tmp / "release"
+    def test_sync_reports_through_events_and_return_value(self):
+        self.make_stack()
+        self.stack("push")
+        self.squash_merge_on_forge("pr1")
+        stack = self.client()
 
-    def tearDown(self):
-        self.tmp.cleanup()
+        with contextlib.redirect_stdout(io.StringIO()) as stdout:
+            unpushed = stack.sync()
 
-    def upgrade(self, release_content):
-        self.release.write_text(release_content)
-        return self.git_stack.upgrade_file(str(self.installed), self.release.as_uri())
+        self.assertEqual(unpushed, ["pr2", "pr3"])
+        self.assertIn(events.Untracked("pr1", "main", ("pr2",), deleted_tip=None), self.events)
+        self.assertEqual(stdout.getvalue(), "")
 
-    def test_upgrade_replaces_script_and_keeps_it_executable(self):
-        self.assertTrue(self.upgrade(self.NEW))
+    def test_info_returns_each_branch_with_its_status(self):
+        self.make_stack()
+        self.git("switch", "--quiet", "pr1")
+        self.commit("a", "pr1 review fix\n", "pr1 review fix")
 
-        self.assertEqual(self.installed.read_text(), self.NEW)
-        self.assertEqual(self.installed.stat().st_mode & 0o777, 0o755)
-        self.assertEqual(os.listdir(self.bin), ["git-stack"])
+        branches = self.client().info()
 
-    def test_upgrade_reports_when_already_up_to_date(self):
-        self.assertFalse(self.upgrade(self.OLD))
+        self.assertEqual(branches, [
+            BranchInfo("main", None, None, current=False),
+            BranchInfo("pr1", "main", BranchStatus.UP_TO_DATE, current=True),
+            BranchInfo("pr2", "pr1", BranchStatus.NEEDS_RESTACK, current=False),
+            BranchInfo("pr3", "pr2", BranchStatus.UP_TO_DATE, current=False),
+        ])
 
-    def test_upgrade_refuses_invalid_download(self):
-        with self.assertRaisesRegex(self.git_stack.StackError, "isn't a valid git-stack script"):
-            self.upgrade("<html>Service Unavailable</html>\n")
-
-        self.assertEqual(self.installed.read_text(), self.OLD)
-        self.assertEqual(os.listdir(self.bin), ["git-stack"])
-
-    def test_upgrade_refuses_script_tracked_by_git(self):
-        subprocess.run(["git", "init", "--quiet", self.bin], check=True)
-        subprocess.run(["git", "add", "git-stack"], cwd=self.bin, check=True)
-
-        with self.assertRaisesRegex(self.git_stack.StackError, "tracked by git"):
-            self.git_stack.ensure_upgradable(str(self.installed))
-
-    def test_untracked_script_is_upgradable(self):
-        self.git_stack.ensure_upgradable(str(self.installed))
-
-    def test_resolve_commit_returns_sha(self):
-        sha = "0123456789abcdef0123456789abcdef01234567"
-        self.release.write_text(sha + "\n")
-
-        self.assertEqual(self.git_stack.resolve_commit(self.release.as_uri(), "main"), sha)
-
-    def test_resolve_commit_rejects_non_sha_response(self):
-        self.release.write_text('{"message": "Not Found"}')
-
-        with self.assertRaisesRegex(self.git_stack.StackError, "didn't return a commit"):
-            self.git_stack.resolve_commit(self.release.as_uri(), "main")
-
-    def test_resolve_commit_reports_missing_ref(self):
-        for status in (404, 422):
-            with self.subTest(status=status), self.assertRaisesRegex(
-                    self.git_stack.StackError, "^couldn't find a branch, tag or commit named nope on GitHub$"):
-                self.git_stack.resolve_commit(self.serve_status(status), "nope")
-
-    def serve_status(self, status):
-        """Start a local HTTP server that answers every request with status; return its URL."""
-        class Handler(http.server.BaseHTTPRequestHandler):
-            def do_GET(self):
-                self.send_error(status)
-
-            def log_message(self, *args):
-                pass
-
-        server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
-        threading.Thread(target=server.serve_forever, daemon=True).start()
-        self.addCleanup(server.server_close)
-        self.addCleanup(server.shutdown)
-        return f"http://127.0.0.1:{server.server_port}/"
 
 
 if __name__ == "__main__":
