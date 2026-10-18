@@ -168,6 +168,7 @@ class RestackTest(StackTestCase):
         self.git("commit", "--quiet", "-m", "pr1 (squashed)")
 
         self.assertIn("pr1 (merged)", self.stack("info").stdout)
+        self.git("switch", "--quiet", "pr2")
         result = self.stack("restack")
 
         self.assertIn("pr1 looks merged into main", result.stderr)
@@ -339,13 +340,22 @@ class RestackTest(StackTestCase):
         self.assert_stacked("pr2", "pr1", ["pr2 c1"])
         self.assertEqual(self.git("show", "pr2:a"), "function(A, F, E)")
 
-    def test_restack_squash_refuses_outside_a_stack(self):
+    def test_restack_onto_suggests_tracking_untracked_branch(self):
+        self.git("switch", "--quiet", "-c", "loose")
+
+        result = self.stack("restack", "--onto", "main", expect_success=False)
+
+        self.assertIn("loose isn't in a stack; use `git stack track` first", result.stderr)
+
+    def test_restack_refuses_outside_a_stack(self):
         self.make_stack()
         self.git("switch", "--quiet", "main")
+        self.commit("c", "main\n", "main moved")
 
-        result = self.stack("restack", "--squash", expect_success=False)
+        result = self.stack("restack", expect_success=False)
 
         self.assertIn("main isn't in a stack", result.stderr)
+        self.assertEqual(self.config("pr1", "stackBase"), self.git("rev-parse", "main~"))
         self.assertEqual(self.own_commits("pr1", "main"), ["pr1 c2", "pr1 c1"])
 
     def test_track_existing_branch_after_parent_was_squash_merged(self):
@@ -496,7 +506,18 @@ class SyncTest(StackTestCase):
 
         self.assertEqual(self.git("branch", "--list", "pr1"), "")
         self.assert_stacked("pr2", "main", ["pr2 c1"])
-        # We were on pr1, which no longer exists, so we land on its parent.
+        # We were on pr1, which no longer exists, so we land on its child.
+        self.assertEqual(self.git("branch", "--show-current"), "pr2")
+
+    def test_sync_delete_local_lands_on_parent_of_childless_branch(self):
+        self.stack("branch", "pr1")
+        self.commit("a", "pr1\n", "pr1 c1")
+        self.stack("push")
+        self.squash_merge_on_forge("pr1")
+
+        self.stack("sync", "-d", "local")
+
+        self.assertEqual(self.git("branch", "--list", "pr1"), "")
         self.assertEqual(self.git("branch", "--show-current"), "main")
 
     def test_sync_after_parent_squash_merged_with_remote_branch_kept(self):
@@ -542,6 +563,7 @@ class SyncTest(StackTestCase):
         self.git("merge", "--quiet", "--squash", "pr1")
         self.git("commit", "--quiet", "-m", "pr1 (squashed)")
         self.git("push", "--quiet")
+        self.git("switch", "--quiet", "pr2")
 
         self.stack("sync")
 
@@ -554,6 +576,7 @@ class SyncTest(StackTestCase):
         self.git("switch", "--quiet", "main")
         self.git("merge", "--quiet", "--ff-only", "pr1")
         self.git("push", "--quiet")
+        self.git("switch", "--quiet", "pr2")
 
         self.stack("sync")
 
@@ -707,20 +730,77 @@ class SyncTest(StackTestCase):
         self.assertEqual((self.repo / "a").read_text(), "resolved\n")
         self.assert_stacked("pr2", "pr1", ["pr2 c1"])
 
-    def test_sync_skips_broken_stack_but_syncs_the_rest(self):
+    def test_sync_skips_branches_above_a_missing_parent(self):
         self.make_stack()
         self.git("switch", "--quiet", "main")
-        self.stack("branch", "solo")
-        self.commit("a", "solo\n", "solo c1")
-        self.git("switch", "--quiet", "main")
         self.git("branch", "--quiet", "-D", "pr1")
-        self.commit_on_forge("main", "d", "upstream\n", "main moved")
+        self.git("switch", "--quiet", "pr3")
 
         result = self.stack("sync")
 
         self.assertIn("skipping pr2: pr2's parent pr1 doesn't exist", result.stderr)
         self.assertIn("skipping pr3 because its parent pr2 was skipped", result.stderr)
+
+    def test_sync_leaves_other_stacks_alone(self):
+        self.make_stack()
+        self.git("switch", "--quiet", "main")
+        self.stack("branch", "solo")
+        self.commit("c", "solo\n", "solo c1")
+        self.stack("push")
+        self.git("switch", "--quiet", "pr1")
+        self.stack("push")
+        self.squash_merge_on_forge("pr1")
+        pr2 = self.git("rev-parse", "pr2")
+        self.git("switch", "--quiet", "solo")
+
+        self.stack("sync")
+
         self.assert_stacked("solo", "main", ["solo c1"])
+        self.assertEqual(self.config("pr1", "stackParent"), "main")
+        self.assertEqual(self.git("rev-parse", "pr2"), pr2)
+
+    def test_sync_refuses_outside_a_stack(self):
+        self.make_stack()
+        self.git("switch", "--quiet", "main")
+        self.commit_on_forge("main", "d", "upstream\n", "main moved")
+
+        result = self.stack("sync", expect_success=False)
+
+        self.assertIn("main isn't in a stack", result.stderr)
+        self.assertNotEqual(self.git("rev-parse", "main"), self.git("rev-parse", "main", cwd=self.origin))
+
+    def test_clean_untracks_merged_branches_in_every_stack_without_restacking(self):
+        self.make_stack()
+        self.stack("push")
+        self.git("switch", "--quiet", "main")
+        self.stack("branch", "solo")
+        self.commit("c", "solo\n", "solo c1")
+        self.stack("push")
+        self.squash_merge_on_forge("pr1")
+        self.squash_merge_on_forge("solo")
+        self.git("switch", "--quiet", "main")
+        pr2 = self.git("rev-parse", "pr2")
+
+        result = self.stack("clean")
+
+        self.assertIn("moved pr2 onto main", result.stdout)
+        self.assert_untracked("pr1")
+        self.assert_untracked("solo")
+        self.assertEqual(self.config("pr2", "stackParent"), "main")
+        self.assertEqual(self.git("rev-parse", "pr2"), pr2)
+        self.assertEqual(self.git("rev-parse", "main"), self.git("rev-parse", "origin/main"))
+
+    def test_clean_delete_both_deletes_merged_branch(self):
+        self.make_stack()
+        self.stack("push")
+        self.squash_merge_on_forge("pr1", delete_branch=False)
+        self.git("switch", "--quiet", "pr1")
+
+        self.stack("clean", "--delete", "both")
+
+        self.assertEqual(self.git("branch", "--list", "pr1"), "")
+        self.assertEqual(self.git("branch", "--list", "pr1", cwd=self.origin), "")
+        self.assertEqual(self.git("branch", "--show-current"), "pr2")
 
     def test_sync_leaves_diverged_trunk_alone(self):
         self.commit_on_forge("main", "d", "upstream\n", "upstream change")

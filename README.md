@@ -42,9 +42,12 @@ Once PR 1 is merged, on GitHub or by merging it into `main` locally and pushing
 (see [When does `sync` consider a branch merged?](#when-does-sync-consider-a-branch-merged)):
 
 ```sh
-git stack sync -d local         # delete add-api, rebase use-api onto main
+git stack sync -d local         # delete add-api, rebase use-api onto main, switch to it
 git stack push
 ```
+
+`sync` only touches the current stack. To untrack (or delete) merged branches
+in every stack without restacking anything, run `git stack clean`.
 
 ## Install
 
@@ -124,8 +127,9 @@ With the GitHub adapter:
 | `git stack track <parent> [<branch>...] [--base <sha>]` | Track existing branches (default: the current branch) as a stack on `<parent>`, each stacked on the one before it, e.g. `git stack track main pr1 pr2 pr3`. `--base` is where the first branch starts and defaults to the merge-base with `<parent>`; pass the old parent tip explicitly if the parent was already squash-merged. Later branches use the merge-base with the branch before them. |
 | `git stack rename [<old>] <new>` | Rename a branch (the current one by default) and move the branches stacked on it onto the new name. Unsets its upstream and forgets its pull request, since the remote branch isn't renamed; the next `git stack push` pushes it under the new name (and opens a new draft pull request with the GitHub adapter). |
 | `git stack info` | Show all tracked stacks as a tree, marking the current branch, branches that were merged, and branches that need a restack. |
-| `git stack restack [--onto <parent>] [--squash]` | Rebase every branch in the current stack onto its parent, bottom-up. `--onto` first retargets the current branch. On an untracked branch like `main`, restacks everything stacked on it. Branches that were merged are skipped and their children restacked onto their parent; `sync` removes them from the stack. `--squash` first squashes each branch in the current stack into one commit (keeping all the messages), so a conflict is resolved once per branch instead of once per commit; it refuses to run outside a stack. |
-| `git stack sync [--remote origin] [-d local\|remote\|both]` | Fetch with `--prune`, fast-forward `main` (and any other stack root) to its upstream, stop tracking branches that were merged, move their children down, restack all stacks, and pull in commits others pushed to tracked branches. Merged branches are kept unless `-d`/`--delete` says to delete their local branches, their remote branches, or both. |
+| `git stack restack [--onto <parent>] [--squash]` | Rebase every branch in the current stack onto its parent, bottom-up. `--onto` first retargets the current branch. Branches that were merged are skipped and their children restacked onto their parent; `sync` or `clean` removes them from the stack. `--squash` first squashes each branch in the current stack into one commit (keeping all the messages), so a conflict is resolved once per branch instead of once per commit. Refuses to run outside a stack. |
+| `git stack sync [--remote origin] [-d local\|remote\|both]` | Fetch with `--prune`, fast-forward the current stack's root (e.g. `main`) to its upstream, stop tracking the stack's branches that were merged, move their children down, restack the stack, and pull in commits others pushed to its branches. Other stacks are left alone. Refuses to run outside a stack. Merged branches are kept unless `-d`/`--delete` says to delete their local branches, their remote branches, or both. |
+| `git stack clean [--remote origin] [-d local\|remote\|both]` | Fetch with `--prune`, fast-forward every stack root, and stop tracking merged branches in every stack, moving their children down. Nothing is restacked, so there are no conflicts; the children are rebased the next time you `sync` or `restack` their stack. `-d` works as for `sync`. Runs from any branch. |
 | `git stack push [--remote origin]` | Force-push (with lease) and `--set-upstream` every branch in the current stack. Skips merged branches. Refuses to run outside a stack, or if a remote branch was deleted or has commits the local one doesn't; run `sync` first. With the [GitHub adapter](#github), opens a draft pull request for the current branch if it has none, and updates the base of the stack's pull requests. |
 | `git stack upgrade [--ref main]` | Replace the installed `git-stack` with the latest version from GitHub (or the given branch, tag or commit). |
 
@@ -149,13 +153,14 @@ locally. In addition, either:
   it changes something relative to the commit it was built on (so a new branch
   with no commits isn't mistaken for a merged one).
 
-A merged branch is no longer tracked, but `sync` keeps it unless you pass
-`--delete local` (or `-d local`) to delete it. If its upstream branch still
-exists, `sync` says so; `--delete remote` deletes it, and `--delete both`
+A merged branch is no longer tracked, but `sync` and `clean` keep it unless you
+pass `--delete local` (or `-d local`) to delete it. If its upstream branch
+still exists, they say so; `--delete remote` deletes it, and `--delete both`
 deletes the local and remote branches. Deleting a remote branch is leased to
 the fetched tip, so it fails rather than deleting commits pushed since. Since a
-branch is untracked by the first `sync` that sees it merged, pass `--delete` on
-that run if you want it deleted.
+branch is untracked by the first `sync` or `clean` that sees it merged, pass
+`--delete` on that run if you want it deleted. Deleting the branch you're on
+switches to its first child, or to its parent if it has none.
 
 A branch whose remote was deleted without merging (a closed PR) fails the first
 check, so `sync` warns and leaves it in the stack rather than silently dropping
@@ -171,12 +176,12 @@ pull request `sync` hasn't seen yet.
 
 If a branch's metadata is broken (for example its parent was deleted by hand),
 `sync` warns and skips that branch and everything stacked on it, and carries on
-with the other stacks.
+with the rest of the stack.
 
-Note that `sync` restacks every tracked stack, including rebasing bottom
-branches onto the updated `main`. Nothing is pushed until you run
-`git stack push`, so until then pull requests still show the old commits.
-`sync` ends by listing the branches whose remote branch is out of date.
+`sync` rebases the stack's bottom branch onto the updated `main`, but nothing is
+pushed until you run `git stack push`, so until then pull requests still show
+the old commits. `sync` ends by listing the branches whose remote branch is out
+of date.
 
 ### Pulling commits others pushed
 

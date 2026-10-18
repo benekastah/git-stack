@@ -26,15 +26,15 @@ cherry-picked back in as if a collaborator pushed them when:
 
 ## Fork workflows aren't supported
 
-- `sync` fetches only `--remote` (default `origin`). If `main` tracks
+- `sync` and `clean` fetch only `--remote` (default `origin`). If `main` tracks
   `upstream/main`, it's never fetched, so `main` isn't fast-forwarded and merges
   aren't detected.
 - `push` checks the lease against `refs/remotes/<remote>/<branch>` and pushes to
   a remote branch of the same name, ignoring the configured upstream. A branch
   whose remote branch has a different name gets a new remote branch, and
   `--set-upstream` switches its upstream to that.
-- `info` and `restack` take the GitHub repository from `origin`, and `sync` and
-  `push` from `--remote`, which for a fork is the fork, not the repository its
+- `info` and `restack` take the GitHub repository from `origin`, and `sync`, `clean`
+  and `push` from `--remote`, which for a fork is the fork, not the repository its
   pull requests are on.
 
 ## `restack --squash` commits with `--no-verify` and captured stdio
@@ -54,8 +54,3 @@ next restack replays pr1's old commits onto pr2.
 `cmd_track` doesn't call `settle` or clear `stackPending*` keys. Leftover keys
 from an interrupted restack could later overwrite the parent and base `track`
 just wrote.
-
-## `sync` rewrites every tracked stack
-
-Documented, but surprising: `sync` restacks and pulls into every tracked stack,
-not only the current one.
