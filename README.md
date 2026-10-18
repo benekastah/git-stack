@@ -1,7 +1,9 @@
 # git-stack
 
 A small, dependency-free tool for stacked branches/PRs that survive squash
-merges. No hosted service; everything lives in your local git config.
+merges. No hosted service; everything lives in your local git config. On
+GitHub, it can also use the [`gh` CLI](https://cli.github.com) to open draft
+pull requests and to tell which ones were merged (see [GitHub](#github)).
 
 ## The problem
 
@@ -20,7 +22,7 @@ git stack branch add-api        # PR 1
 # ...commit...
 git stack branch use-api        # PR 2, stacked on add-api
 # ...commit...
-git stack push                  # push both; open PR 2 against add-api
+git stack push                  # push both; open a draft PR for use-api against add-api
 ```
 
 Address review feedback on PR 1, then move PR 2 on top of it:
@@ -46,7 +48,8 @@ git stack push
 
 ## Install
 
-Requires Python 3.9+ and git 2.38+.
+Requires Python 3.9+ and git 2.38+. The GitHub integration also needs
+[`gh`](https://cli.github.com), logged in with `gh auth login`.
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/benekastah/git-stack/main/install.sh | sh
@@ -78,23 +81,62 @@ Restacking runs `git rebase --onto <parent> <stackBase> <branch>`, which
 replays only the branch's own commits, so PR 1's original commits never
 collide with the squashed version in `main`.
 
+## GitHub
+
+git-stack works out merges through an adapter, chosen by the `stack.adapter`
+setting:
+
+- `git`: looks only at the repository.
+- `github`: asks GitHub, through `gh`, about each branch's pull request, and
+  falls back to the `git` adapter for branches merged without one (for
+  example, merged into their parent locally).
+
+If `stack.adapter` isn't set, git-stack uses `github` when the remote's URL is
+on github.com and `gh` is installed, and `git` otherwise. Set it to `github` for
+a GitHub Enterprise host, or to `git` to turn the GitHub integration off:
+
+```sh
+git config stack.adapter git
+```
+
+With the GitHub adapter:
+
+- `git stack push` opens a draft pull request for the current branch, based on
+  its stack parent, if it doesn't have an open one yet. Other branches in the
+  stack don't get one until you push from them. The pull request's number is
+  recorded in `branch.<name>.stackPr`.
+- `push` also changes the base of the stack's open pull requests to match their
+  stack parents, e.g. to `main` once the parent PR was merged.
+- A pull request that GitHub says was merged counts as merged once its merge
+  commit is in the local parent branch (`sync` fetches it), even if the parent
+  changed the merged lines since, or the merge changed them.
+- If GitHub can't be reached, git-stack warns and detects merges like the `git`
+  adapter does.
+
 ## Commands
 
 | Command | What it does |
 | --- | --- |
 | `git stack branch <name>` | Create `<name>` on top of the current branch and track it. |
 | `git stack track <parent> [<branch>...] [--base <sha>]` | Track existing branches (default: the current branch) as a stack on `<parent>`, each stacked on the one before it, e.g. `git stack track main pr1 pr2 pr3`. `--base` is where the first branch starts and defaults to the merge-base with `<parent>`; pass the old parent tip explicitly if the parent was already squash-merged. Later branches use the merge-base with the branch before them. |
-| `git stack rename [<old>] <new>` | Rename a branch (the current one by default) and move the branches stacked on it onto the new name. Unsets its upstream, since the remote branch isn't renamed; the next `git stack push` pushes it under the new name. |
+| `git stack rename [<old>] <new>` | Rename a branch (the current one by default) and move the branches stacked on it onto the new name. Unsets its upstream and forgets its pull request, since the remote branch isn't renamed; the next `git stack push` pushes it under the new name (and opens a new draft pull request with the GitHub adapter). |
 | `git stack info` | Show all tracked stacks as a tree, marking the current branch, branches that were merged, and branches that need a restack. |
 | `git stack restack [--onto <parent>] [--squash]` | Rebase every branch in the current stack onto its parent, bottom-up. `--onto` first retargets the current branch. On an untracked branch like `main`, restacks everything stacked on it. Branches that were merged are skipped and their children restacked onto their parent; `sync` removes them from the stack. `--squash` first squashes each branch in the current stack into one commit (keeping all the messages), so a conflict is resolved once per branch instead of once per commit; it refuses to run outside a stack. |
 | `git stack sync [--remote origin] [-d local\|remote\|both]` | Fetch with `--prune`, fast-forward `main` (and any other stack root) to its upstream, stop tracking branches that were merged, move their children down, restack all stacks, and pull in commits others pushed to tracked branches. Merged branches are kept unless `-d`/`--delete` says to delete their local branches, their remote branches, or both. |
-| `git stack push [--remote origin]` | Force-push (with lease) and `--set-upstream` every branch in the current stack. Refuses if a remote branch has commits the local one doesn't; run `sync` first. |
+| `git stack push [--remote origin]` | Force-push (with lease) and `--set-upstream` every branch in the current stack. Refuses if a remote branch has commits the local one doesn't; run `sync` first. With the [GitHub adapter](#github), opens a draft pull request for the current branch if it has none, and updates the base of the stack's pull requests. |
 | `git stack upgrade [--ref main]` | Replace the installed `git-stack` with the latest version from GitHub (or the given branch, tag or commit). |
 
 ### When does `sync` consider a branch merged?
 
+With the [GitHub adapter](#github), a branch whose pull request GitHub says was
+merged counts as merged once the merge is in its local parent, unless the branch
+or its remote branch has commits that weren't merged. Otherwise:
+
 Its changes must already be in its parent (`main`, or the parent PR's branch if
-it was merged into that): merging it into the parent would change nothing. This
+it was merged into that): either merging it into the parent would change
+nothing, or the parent has a commit with the same changes as the whole branch
+(a squash merge) or commits with the same changes as each of its commits (a
+rebase merge), even if the parent edited the same lines again afterwards. This
 holds however it was merged: squash, rebase or merge commit, on GitHub or
 locally. In addition, either:
 
