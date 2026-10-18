@@ -1,6 +1,9 @@
-from git_stack.stack import BranchStatus
+import argparse
 
-NOTES = {
+from git_stack.commands import Subparsers
+from git_stack.stack import BranchInfo, BranchStatus, StackClient
+
+NOTES: dict[BranchStatus, str | None] = {
     BranchStatus.UP_TO_DATE: None,
     BranchStatus.NEEDS_RESTACK: "(needs restack)",
     BranchStatus.MERGED: "(merged)",
@@ -8,33 +11,35 @@ NOTES = {
 }
 
 
-def register(subparsers):
+def register(subparsers: Subparsers) -> None:
     p = subparsers.add_parser("info", help="show all tracked stacks")
     p.set_defaults(func=run)
 
 
-def label(branch):
+def label(branch: BranchInfo) -> str:
     notes = []
     if branch.current:
         notes.append("*")
     if branch.status is BranchStatus.PARENT_MISSING:
         notes.append(f"(parent {branch.parent} missing)")
-    elif branch.status is not None and NOTES[branch.status]:
-        notes.append(NOTES[branch.status])
+    elif branch.status is not None:
+        note = NOTES[branch.status]
+        if note:
+            notes.append(note)
     return " ".join([branch.name, *notes])
 
 
-def run(stack, args):
+def run(stack: StackClient, args: argparse.Namespace) -> None:
     branches = stack.info()
     if not branches:
         print("no tracked branches")
         return
-    children = {}
+    children: dict[str, list[BranchInfo]] = {}
     for branch in branches:
         if branch.parent is not None:
             children.setdefault(branch.parent, []).append(branch)
 
-    def show(branch, prefix):
+    def show(branch: BranchInfo, prefix: str) -> None:
         kids = children.get(branch.name, [])
         for i, kid in enumerate(kids):
             last = i == len(kids) - 1

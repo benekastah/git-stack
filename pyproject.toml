@@ -7,10 +7,18 @@ name = "git-stack"
 version = "0.1.0"
 description = "Stacked branches that survive squash merges"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.11"
+
+[dependency-groups]
+dev = ["mypy>=2.4.0"]
 
 [project.scripts]
 git-stack = "git_stack.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["git_stack*"]
+
+[tool.mypy]
+strict = true
+python_version = "3.11"
+files = ["git_stack", "tests"]

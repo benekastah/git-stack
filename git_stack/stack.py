@@ -1,11 +1,12 @@
 import enum
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Optional, Tuple
 
 from git_stack import events
 from git_stack.adapters import ADAPTER_SETTING, make_adapter
+from git_stack.adapters.git import GitAdapter
 from git_stack.adapters.merge_state import MergeState
-from git_stack.core import (BASE_KEY, PARENT_KEY, PR_KEY, StackCore, children_map, descendants,
+from git_stack.core import (BASE_KEY, PARENT_KEY, PR_KEY, Parents, StackCore, children_map, descendants,
                             drop_from_stack, ensure_no_cycle, stack_of, stack_root)
 from git_stack.errors import BrokenStackError, StackError
 from git_stack.git import DEFAULT_REMOTE
@@ -24,8 +25,8 @@ class BranchInfo:
     """A branch in info()'s listing. parent and status are None for a stack's
     root (e.g. main), which isn't tracked."""
     name: str
-    parent: Optional[str]
-    status: Optional[BranchStatus]
+    parent: str | None
+    status: BranchStatus | None
     current: bool
 
 
@@ -42,8 +43,8 @@ class Renamed:
     renamed, and new no longer tracks it."""
     old: str
     new: str
-    children: Tuple[str, ...]
-    upstream: Optional[str]
+    children: tuple[str, ...]
+    upstream: str | None
 
 
 class StackClient(StackCore):
@@ -53,7 +54,7 @@ class StackClient(StackCore):
     and warnings through on_event, and raise StackError when they fail.
     """
 
-    def branch(self, name):
+    def branch(self, name: str) -> str:
         """Create name on top of the current branch and track it. Returns the parent."""
         git = self.git
         parent = git.current_branch()
@@ -61,10 +62,10 @@ class StackClient(StackCore):
             raise StackError("not on a branch")
         git.run("switch", "--quiet", "--create", name)
         git.config_set(name, PARENT_KEY, parent)
-        git.config_set(name, BASE_KEY, git.rev("HEAD"))
+        git.config_set(name, BASE_KEY, git.tip(name))
         return parent
 
-    def track(self, parent, branches=(), base=None):
+    def track(self, parent: str, branches: Iterable[str] = (), base: str | None = None) -> list[Tracked]:
         """Track branches (default: the current branch) as a stack on parent, each
         on the one before it. base is where the first branch starts (default: its
         merge-base with parent). Returns a Tracked for each branch.
@@ -106,7 +107,7 @@ class StackClient(StackCore):
             git.config_set(tracked.branch, BASE_KEY, tracked.base)
         return plan
 
-    def rename(self, new, old=None):
+    def rename(self, new: str, old: str | None = None) -> Renamed:
         """Rename old (default: the current branch) to new, keeping the branches
         stacked on it. Returns a Renamed.
         """
@@ -132,7 +133,7 @@ class StackClient(StackCore):
             git.run("branch", "--unset-upstream", new)
         return Renamed(old, new, children, upstream)
 
-    def info(self):
+    def info(self) -> list[BranchInfo]:
         """Every tracked stack, as a list of BranchInfo: each stack's root, then
         its branches, parent-before-child."""
         git = self.git
@@ -145,7 +146,7 @@ class StackClient(StackCore):
         children = children_map(parents)
         adapter = make_adapter(self, DEFAULT_REMOTE)
 
-        def status(branch):
+        def status(branch: str) -> BranchStatus:
             parent = parents[branch]
             parent_tip = git.rev(parent)
             if parent_tip is None:
@@ -166,7 +167,7 @@ class StackClient(StackCore):
                           for b in descendants(root, children))
         return result
 
-    def skip_merged(self, branches, parents, adapter):
+    def skip_merged(self, branches: Iterable[str], parents: Parents, adapter: GitAdapter) -> list[str]:
         """Leave merged branches out of branches, moving their children down in parents."""
         remaining = []
         for branch in branches:
@@ -178,7 +179,7 @@ class StackClient(StackCore):
                 remaining.append(branch)
         return remaining
 
-    def restack(self, onto=None, squash=False):
+    def restack(self, onto: str | None = None, squash: bool = False) -> None:
         """Rebase every branch in the current stack onto its parent, bottom-up.
 
         onto first retargets the current branch; squash first squashes each
@@ -198,14 +199,13 @@ class StackClient(StackCore):
             parents[branch] = onto
         branches = self.skip_merged(stack_of(branch, parents), parents, make_adapter(self, DEFAULT_REMOTE))
         if squash:
-            original = git.current_branch()
             for b in branches:
                 self.squash_branch(b, parents[b])
-            if git.current_branch() != original:
-                git.switch(original)
+            if git.current_branch() != branch:
+                git.switch(branch)
         self.restack_all(branches, parents)
 
-    def sync(self, remote=DEFAULT_REMOTE, delete=None):
+    def sync(self, remote: str = DEFAULT_REMOTE, delete: str | None = None) -> list[str]:
         """Fetch, untrack the current stack's merged branches (deleting what
         delete, "local", "remote" or "both", says), restack it, and pull in
         commits others pushed.
@@ -241,7 +241,7 @@ class StackClient(StackCore):
                 if not self.untrack_merged(branch, parents, delete):
                     skipped.add(branch)
                 elif branch == original:
-                    original = git.current_branch() or git.rev("HEAD")
+                    original = self.current_checkout()
                 continue
             if state is MergeState.MERGED_WITH_NEW_COMMITS:
                 # Restacking would replay the merged commits onto parent.
@@ -264,7 +264,7 @@ class StackClient(StackCore):
         self.restore_checkout(original)
         return unpushed
 
-    def clean(self, remote=DEFAULT_REMOTE, delete=None):
+    def clean(self, remote: str = DEFAULT_REMOTE, delete: str | None = None) -> None:
         """Fetch and untrack merged branches in every stack, deleting what delete
         says, without restacking anything."""
         git = self.git
@@ -273,7 +273,7 @@ class StackClient(StackCore):
         self.settle_all()
         # Where to leave the user afterwards: their branch (or the commit they had
         # detached at), or wherever deleting their branch left them.
-        original = git.current_branch() or git.rev("HEAD")
+        original = self.current_checkout()
         adapter = make_adapter(self, remote)
         git.fetch(remote)
         parents = self.tracked_branches()
@@ -291,12 +291,12 @@ class StackClient(StackCore):
             state = adapter.merge_state(branch, parent)
             if state is MergeState.MERGED:
                 if self.untrack_merged(branch, parents, delete) and branch == original:
-                    original = git.current_branch() or git.rev("HEAD")
+                    original = self.current_checkout()
             elif state is MergeState.MERGED_WITH_NEW_COMMITS:
                 self.emit(events.MergedWithNewCommits(branch, parent))
         self.restore_checkout(original)
 
-    def push(self, remote=DEFAULT_REMOTE):
+    def push(self, remote: str = DEFAULT_REMOTE) -> list[str]:
         """Force-push (with lease) every unmerged branch in the current stack, then
         let the adapter update pull requests. Returns the pushed branches, which
         is empty if every branch looks merged.

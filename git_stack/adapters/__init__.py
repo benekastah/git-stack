@@ -8,12 +8,13 @@ import shutil
 
 from git_stack.adapters.git import GitAdapter
 from git_stack.adapters.github import GitHubAdapter, github_repo
+from git_stack.core import StackCore
 from git_stack.errors import StackError
 
 ADAPTER_SETTING = "stack.adapter"
 
 
-def make_adapter(core, remote):
+def make_adapter(core: StackCore, remote: str) -> GitAdapter:
     """The adapter stack.adapter asks for. If unset, GitHub's when remote is on
     github.com and gh is installed, and git's otherwise."""
     setting = core.git.run("config", "--get", ADAPTER_SETTING, check=False)

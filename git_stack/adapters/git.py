@@ -1,15 +1,15 @@
 from git_stack.adapters.merge_state import MergeState
-from git_stack.core import BASE_KEY
+from git_stack.core import BASE_KEY, Parents, StackCore
 
 
 class GitAdapter:
     """Works out whether branches were merged from the repository alone."""
 
-    def __init__(self, core):
+    def __init__(self, core: StackCore) -> None:
         self.core = core
         self.git = core.git
 
-    def merge_state(self, branch, parent):
+    def merge_state(self, branch: str, parent: str) -> MergeState:
         """Whether branch has landed in parent, so dropping it loses nothing.
 
         Its changes must be in parent. Unless its remote branch was deleted
@@ -31,7 +31,7 @@ class GitAdapter:
             return MergeState.MERGED_WITH_NEW_COMMITS
         return MergeState.MERGED
 
-    def changes_something(self, branch):
+    def changes_something(self, branch: str) -> bool:
         """Whether branch's tree differs from its recorded base's.
 
         False for a branch with no commits of its own yet, and when the base is
@@ -42,7 +42,7 @@ class GitAdapter:
             return False
         return not self.git.ok("diff", "--quiet", base, f"refs/heads/{branch}")
 
-    def landed_as_patches(self, branch, parent):
+    def landed_as_patches(self, branch: str, parent: str) -> bool:
         """Whether parent has branch's changes as one squashed commit, or as
         commits with the same changes as each of branch's.
 
@@ -65,6 +65,6 @@ class GitAdapter:
         own = git.patch_ids("log", "-p", "--no-merges", f"{base}..refs/heads/{branch}")
         return bool(own) and own <= landed
 
-    def after_push(self, branch, branches, parents):
+    def after_push(self, branch: str, branches: list[str], parents: Parents) -> None:
         """Called once branches were pushed: the stack containing branch, less the
         branches that were merged (possibly including branch itself)."""

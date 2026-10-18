@@ -5,7 +5,7 @@ were created with; git_stack.output turns them into messages for the CLI.
 """
 
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import TypeAlias
 
 
 @dataclass(frozen=True)
@@ -56,8 +56,8 @@ class Untracked:
     """
     branch: str
     parent: str
-    children: Tuple[str, ...]
-    deleted_tip: Optional[str]
+    children: tuple[str, ...]
+    deleted_tip: str | None
 
 
 @dataclass(frozen=True)
@@ -139,3 +139,27 @@ class PullRequestRetargeted:
     branch: str
     number: int
     base: str
+
+
+# Every event, so code that handles them can check it handles each one.
+Event: TypeAlias = (
+    Squashing
+    | Restacking
+    | PullingUpstream
+    | FastForwarded
+    | TrunkDiverged
+    | SkippedMerged
+    | Untracked
+    | RemoteBranchDeleted
+    | RemoteBranchDeleteFailed
+    | RemoteBranchKept
+    | ParentSkipped
+    | MergedWithNewCommits
+    | UpstreamGone
+    | BrokenBranch
+    | ParentMissing
+    | PullRequestLookupFailed
+    | PullRequestFound
+    | PullRequestOpened
+    | PullRequestRetargeted
+)
