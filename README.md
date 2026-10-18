@@ -68,6 +68,29 @@ Either one puts `git-stack` on your `PATH` (run `pipx ensurepath` or
 a specific branch, tag or commit, add `@<ref>` to the URL. To update to the
 latest version, run `pipx upgrade git-stack` or `uv tool upgrade git-stack`.
 
+### From a local clone
+
+To run git-stack from a clone of this repository, install it in editable mode,
+so changes to the clone take effect without reinstalling:
+
+```sh
+pipx install --editable /path/to/git-stack
+# or
+uv tool install --editable /path/to/git-stack
+```
+
+Without pipx or uv, install it into a virtualenv and link its `git-stack`
+into a directory on your `PATH`:
+
+```sh
+python3 -m venv ~/.local/share/git-stack/venv
+~/.local/share/git-stack/venv/bin/pip install --editable /path/to/git-stack
+ln -s ~/.local/share/git-stack/venv/bin/git-stack ~/.local/bin/git-stack
+```
+
+Reinstall only when `pyproject.toml` changes, for example when a command-line
+entry point is added.
+
 ## How it works
 
 When a branch is created (or tracked), git-stack records its parent branch and
