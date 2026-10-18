@@ -12,7 +12,10 @@ from git_stack.stack import StackClient
 COMMANDS = (branch, track, rename, info, restack, sync, clean, push)
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, stack: StackClient | None = None) -> int:
+    """Run the `git stack` command in argv (default: sys.argv) with stack (default:
+    a StackClient working in the current directory, printing what it reports).
+    Returns the exit status."""
     parser = argparse.ArgumentParser(prog="git stack", description=git_stack.__doc__.splitlines()[0])
     subparsers = parser.add_subparsers(dest="command", required=True)
     for command in COMMANDS:
@@ -20,7 +23,7 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
     try:
-        args.func(StackClient(GitClient(), on_event=print_event), args)
+        args.func(stack or StackClient(GitClient(), on_event=print_event), args)
     except StackError as e:
         print(f"git stack: {e}", file=sys.stderr)
         return 1

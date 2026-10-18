@@ -1,19 +1,23 @@
 """git stack track."""
 
+import pytest
+
+from git_stack.errors import StackError
+from git_stack.stack import StackClient
 from tests.helpers import Repo
 
 
-def test_track_rejects_cycle(repo: Repo) -> None:
+def test_track_rejects_cycle(repo: Repo, client: StackClient) -> None:
     repo.make_stack()
     repo.git("switch", "--quiet", "pr1")
 
-    result = repo.stack("track", "pr3", expect_success=False)
+    with pytest.raises(StackError, match="would create a cycle"):
+        client.track("pr3")
 
-    assert "would create a cycle" in result.stderr
     assert repo.config("pr1", "stackParent") == "main"
 
 
-def test_track_stacks_several_existing_branches(repo: Repo) -> None:
+def test_track_stacks_several_existing_branches(repo: Repo, client: StackClient) -> None:
     repo.git("switch", "--quiet", "-c", "pr1")
     repo.commit("a", "pr1\n", "pr1 c1")
     repo.git("switch", "--quiet", "-c", "pr2")
@@ -22,7 +26,7 @@ def test_track_stacks_several_existing_branches(repo: Repo) -> None:
     repo.commit("c", "pr3\n", "pr3 c1")
     repo.git("switch", "--quiet", "main")
 
-    repo.stack("track", "main", "pr1", "pr2", "pr3")
+    client.track("main", ["pr1", "pr2", "pr3"])
 
     repo.assert_stacked("pr1", "main", ["pr1 c1"])
     repo.assert_stacked("pr2", "pr1", ["pr2 c1"])
@@ -30,41 +34,41 @@ def test_track_stacks_several_existing_branches(repo: Repo) -> None:
     assert repo.git("branch", "--show-current") == "main"
 
 
-def test_track_several_branches_writes_nothing_if_one_is_bad(repo: Repo) -> None:
+def test_track_several_branches_writes_nothing_if_one_is_bad(repo: Repo, client: StackClient) -> None:
     repo.git("switch", "--quiet", "-c", "pr1")
     repo.commit("a", "pr1\n", "pr1 c1")
     repo.git("switch", "--quiet", "main")
 
-    result = repo.stack("track", "main", "pr1", "missing", expect_success=False)
+    with pytest.raises(StackError, match="missing isn't a local branch"):
+        client.track("main", ["pr1", "missing"])
 
-    assert "missing isn't a local branch" in result.stderr
     repo.assert_untracked("pr1")
 
 
-def test_track_several_branches_rejects_cycle(repo: Repo) -> None:
+def test_track_several_branches_rejects_cycle(repo: Repo, client: StackClient) -> None:
     repo.make_stack()
 
-    result = repo.stack("track", "pr2", "pr3", "pr1", expect_success=False)
+    with pytest.raises(StackError, match="would create a cycle"):
+        client.track("pr2", ["pr3", "pr1"])
 
-    assert "would create a cycle" in result.stderr
     assert repo.config("pr3", "stackParent") == "pr2"
     assert repo.config("pr1", "stackParent") == "main"
 
 
-def test_track_rejects_base_outside_branch_history(repo: Repo) -> None:
+def test_track_rejects_base_outside_branch_history(repo: Repo, client: StackClient) -> None:
     repo.git("switch", "--quiet", "-c", "pr1")
     repo.commit("a", "pr1\n", "pr1 c1")
     repo.git("switch", "--quiet", "main")
     repo.commit("b", "main change\n", "main touches b")
     repo.git("switch", "--quiet", "pr1")
 
-    result = repo.stack("track", "main", "--base", "main", expect_success=False)
+    with pytest.raises(StackError, match="isn't in pr1's history"):
+        client.track("main", base="main")
 
-    assert "isn't in pr1's history" in result.stderr
     assert not repo.config_exists("pr1", "stackParent")
 
 
-def test_track_existing_branch_after_parent_was_squash_merged(repo: Repo) -> None:
+def test_track_existing_branch_after_parent_was_squash_merged(repo: Repo, client: StackClient) -> None:
     repo.git("switch", "--quiet", "-c", "pr1")
     repo.commit("a", "pr1 first\n", "pr1 c1")
     repo.commit("a", "pr1 second\n", "pr1 c2")
@@ -77,7 +81,7 @@ def test_track_existing_branch_after_parent_was_squash_merged(repo: Repo) -> Non
     repo.git("branch", "--quiet", "-D", "pr1")
     repo.git("switch", "--quiet", "pr2")
 
-    repo.stack("track", "main", "--base", old_pr1_tip)
-    repo.stack("restack")
+    client.track("main", base=old_pr1_tip)
+    client.restack()
 
     repo.assert_stacked("pr2", "main", ["pr2 c1"])

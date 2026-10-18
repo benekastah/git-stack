@@ -1,24 +1,26 @@
 """git stack info."""
 
+from git_stack.stack import BranchInfo, BranchStatus, StackClient
 from tests.helpers import Repo
 
 
-def test_info_shows_every_stack_as_a_tree(repo: Repo) -> None:
-    repo.stack("branch", "pr1")
+def test_info_lists_every_stack_parent_before_child(repo: Repo, client: StackClient) -> None:
+    client.branch("pr1")
     repo.commit("a", "pr1\n", "pr1 c1")
-    repo.stack("branch", "pr2")
+    client.branch("pr2")
     repo.commit("b", "pr2\n", "pr2 c1")
     repo.git("switch", "--quiet", "pr1")
-    repo.stack("branch", "pr2b")
+    client.branch("pr2b")
     repo.commit("c", "pr2b\n", "pr2b c1")
     repo.git("switch", "--quiet", "pr1")
     repo.commit("a", "pr1 more\n", "pr1 c2")
     repo.git("switch", "--quiet", "main")
-    repo.stack("branch", "solo")
+    client.branch("solo")
 
-    assert repo.stack("info").stdout == (
-        "main\n"
-        "├── pr1\n"
-        "│   ├── pr2 (needs restack)\n"
-        "│   └── pr2b (needs restack)\n"
-        "└── solo *\n")
+    assert client.info() == [
+        BranchInfo("main", None, None, current=False),
+        BranchInfo("pr1", "main", BranchStatus.UP_TO_DATE, current=False),
+        BranchInfo("pr2", "pr1", BranchStatus.NEEDS_RESTACK, current=False),
+        BranchInfo("pr2b", "pr1", BranchStatus.NEEDS_RESTACK, current=False),
+        BranchInfo("solo", "main", BranchStatus.UP_TO_DATE, current=True),
+    ]

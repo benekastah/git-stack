@@ -4,10 +4,14 @@ import json
 import pathlib
 import subprocess
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import pytest
+
+from git_stack import events
+from git_stack.git import GitClient
+from git_stack.stack import BranchInfo, StackClient
 
 
 @dataclass
@@ -15,12 +19,18 @@ class Repo:
     """A clone (path) of a bare repository (origin), plus a second clone of it
     (forge) standing in for GitHub's merge button.
 
-    git and git stack run with the isolated environment the repo fixture sets.
+    git, git stack and client run with the isolated environment the repo
+    fixture sets, and client in path, which the fixture makes the current
+    directory. emitted collects client's events.
     """
     path: pathlib.Path
     origin: pathlib.Path
     forge: pathlib.Path
     tmp: pathlib.Path
+    emitted: list[events.Event] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        self.client = StackClient(GitClient(), on_event=self.emitted.append)
 
     def git(self, *args: str, cwd: pathlib.Path | None = None) -> str:
         result = subprocess.run(["git", *args], cwd=cwd or self.path, capture_output=True, text=True)
@@ -48,12 +58,12 @@ class Repo:
 
     def make_stack(self) -> None:
         """main <- pr1 (two commits to a) <- pr2 (b) <- pr3 (c)."""
-        self.stack("branch", "pr1")
+        self.client.branch("pr1")
         self.commit("a", "pr1 first\n", "pr1 c1")
         self.commit("a", "pr1 second\n", "pr1 c2")
-        self.stack("branch", "pr2")
+        self.client.branch("pr2")
         self.commit("b", "pr2\n", "pr2 c1")
-        self.stack("branch", "pr3")
+        self.client.branch("pr3")
         self.commit("c", "pr3\n", "pr3 c1")
 
     def squash_merge_on_forge(self, branch: str, delete_branch: bool = True) -> None:
@@ -86,6 +96,10 @@ class Repo:
 
     def own_commits(self, branch: str, parent: str) -> list[str]:
         return self.git("log", "--format=%s", f"{parent}..{branch}").splitlines()
+
+    def branch_info(self, name: str) -> BranchInfo:
+        """name's entry in client.info()."""
+        return next(branch for branch in self.client.info() if branch.name == name)
 
     def assert_untracked(self, branch: str) -> None:
         """branch still exists but is no longer in a stack."""
