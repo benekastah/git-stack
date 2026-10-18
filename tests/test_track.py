@@ -105,6 +105,33 @@ def test_track_later_branch_uses_where_it_forked_from_rewritten_parent(repo: Rep
     repo.assert_stacked("pr2", "pr1", ["pr2 c1"])
 
 
+def test_track_isnt_undone_by_an_earlier_interrupted_restack(repo: Repo, client: StackClient) -> None:
+    repo.make_stack()
+    pr1_tip = repo.git("rev-parse", "pr1")
+    # As if a restack of pr2 onto pr1 stopped on a conflict and the user then
+    # finished the rebase by hand.
+    repo.git("config", "branch.pr2.stackPendingParent", "pr1")
+    repo.git("config", "branch.pr2.stackPendingBase", pr1_tip)
+
+    client.track("main", ["pr2"], base=pr1_tip)
+    client.info()
+
+    assert repo.config("pr2", "stackParent") == "main"
+    assert repo.config("pr2", "stackBase") == pr1_tip
+
+
+def test_track_refuses_while_a_rebase_is_in_progress(repo: Repo, client: StackClient) -> None:
+    repo.make_stack()
+    repo.git("switch", "--quiet", "main")
+    repo.commit("a", "conflicting\n", "main touches a")
+    repo.git("switch", "--quiet", "pr1")
+    with pytest.raises(StackError, match="stopped on a conflict"):
+        client.restack()
+
+    with pytest.raises(StackError, match="in progress"):
+        client.track("main", ["pr2"])
+
+
 @pytest.mark.parametrize("parent", ["origin/main", "HEAD~1"])
 def test_track_refuses_parent_that_isnt_a_local_branch(repo: Repo, client: StackClient, parent: str) -> None:
     repo.git("switch", "--quiet", "-c", "pr1")

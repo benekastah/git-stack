@@ -74,6 +74,10 @@ class StackClient(StackCore):
         branch.
         """
         git = self.git
+        # Settle first, so a restack the user finished by hand can't overwrite
+        # the parent and base written here later.
+        self.ensure_no_operation_in_progress()
+        self.settle_all()
         branches = list(branches)
         if not branches:
             branch = git.current_branch()

@@ -24,12 +24,6 @@ cherry-picked back in as if a collaborator pushed them when:
 - the reflog entry has expired, or
 - the rebase changed the patch (e.g. resolved conflicts), so patch-ids differ.
 
-## `track` leaves pending keys alone
-
-`cmd_track` doesn't call `settle` or clear `stackPending*` keys. Leftover keys
-from an interrupted restack could later overwrite the parent and base `track`
-just wrote.
-
 ## Branches checked out in other worktrees
 
 Restacking, switching to or deleting a branch that's checked out in another
