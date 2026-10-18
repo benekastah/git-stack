@@ -7,6 +7,9 @@ from git_stack.git import GitClient
 
 PARENT_KEY = "stackParent"
 BASE_KEY = "stackBase"
+# The last upstream tip the branch caught up with, by pulling it or pushing it.
+# Commits it contains aren't new to the branch, even if the branch has since
+# rebased them and its reflog no longer has them.
 PULLED_KEY = "stackPulled"
 # Written before a rebase starts and promoted to PARENT_KEY/BASE_KEY once the
 # rebase is known to have finished. This lets the user resolve conflicts with a
@@ -247,9 +250,9 @@ class StackCore:
         """Non-merge commits on upstream_tip that branch doesn't have, oldest first.
 
         A commit counts as already present if branch (or parent) contains it or an
-        equivalent patch, if branch ever pointed at it or a descendant of it (so the
-        old copies of commits we have since rebased don't count), or if an earlier
-        pull already took it.
+        equivalent patch, if branch ever pointed at it or a descendant of it, or if
+        an earlier pull or push already took it (so the old copies of commits we
+        have since rebased don't count).
         """
         git = self.git
         known = [f"refs/heads/{branch}", *git.reflog_tips(branch)]

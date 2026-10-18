@@ -393,3 +393,17 @@ def test_sync_leaves_trunk_checked_out_in_another_worktree_alone(
     assert any(isinstance(e, events.TrunkInOtherWorktree) and e.branch == "main" for e in emitted)
     assert repo.git("rev-parse", "main") == local_main
     assert repo.git("status", "--porcelain", cwd=worktree) == ""
+
+
+def test_sync_ignores_old_copies_of_rebased_commits_missing_from_reflog(repo: Repo, client: StackClient) -> None:
+    repo.make_stack()
+    client.push()
+    repo.git("switch", "--quiet", "pr1")
+    repo.git("reset", "--quiet", "--hard", "pr1~")
+    repo.commit("a", "pr1 second, reworked\n", "pr1 c2")
+    repo.git("reflog", "expire", "--expire=now", "--all")
+
+    client.sync()
+
+    assert repo.own_commits("pr1", "main") == ["pr1 c2", "pr1 c1"]
+    assert (repo.path / "a").read_text() == "pr1 second, reworked\n"
