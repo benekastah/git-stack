@@ -103,6 +103,16 @@ def test_aborted_restack_onto_keeps_previous_parent(repo: Repo, client: StackCli
     assert repo.config("pr2", "stackBase") == old_base
 
 
+def test_restack_onto_refuses_parent_that_isnt_a_local_branch(repo: Repo, client: StackClient) -> None:
+    repo.make_stack()
+    repo.git("switch", "--quiet", "pr2")
+
+    with pytest.raises(StackError, match="origin/main isn't a local branch"):
+        client.restack(onto="origin/main")
+
+    assert repo.config("pr2", "stackParent") == "pr1"
+
+
 @pytest.mark.parametrize("target", ["pr3", "pr1"])
 def test_restack_onto_rejects_cycle(repo: Repo, target: str, client: StackClient) -> None:
     repo.make_stack()
