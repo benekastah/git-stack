@@ -12,10 +12,9 @@ conflicts.
 
 A third key, branch.<name>.stackPulled, records the last upstream tip whose
 commits were pulled into the branch, so a pull whose conflicts the user resolved
-isn't repeated, and branch.<name>.stackPr records the number of the branch's
-pull request when the GitHub adapter opened or found one.
+isn't repeated.
 
 How a merge is detected depends on the adapter (the stack.adapter setting): the
 git adapter only looks at the repository, and the GitHub adapter asks GitHub
-about each branch's pull request first.
+about each branch's pull request first, finding it by the branch's name.
 """

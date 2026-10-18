@@ -8,7 +8,6 @@ from git_stack.git import GitClient
 PARENT_KEY = "stackParent"
 BASE_KEY = "stackBase"
 PULLED_KEY = "stackPulled"
-PR_KEY = "stackPr"
 # Written before a rebase starts and promoted to PARENT_KEY/BASE_KEY once the
 # rebase is known to have finished. This lets the user resolve conflicts with a
 # plain `git rebase --continue` (or back out with `git rebase --abort`).
@@ -299,7 +298,7 @@ class StackCore:
             self.emit(events.FastForwarded(root, upstream))
 
     def untrack(self, branch: str) -> None:
-        for key in (PARENT_KEY, BASE_KEY, PULLED_KEY, PR_KEY, PENDING_PARENT_KEY, PENDING_BASE_KEY,
+        for key in (PARENT_KEY, BASE_KEY, PULLED_KEY, PENDING_PARENT_KEY, PENDING_BASE_KEY,
                     PENDING_PULL_FROM_KEY, PENDING_PULLED_KEY):
             self.git.config_unset(branch, key)
 

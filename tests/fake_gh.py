@@ -12,7 +12,7 @@ import subprocess
 import sys
 from typing import Any
 
-PR_FIELDS = ("number", "state", "headRefOid", "baseRefName", "mergeCommit")
+PR_FIELDS = ("number", "state", "isCrossRepository", "headRefOid", "baseRefName", "mergeCommit")
 
 
 def pushed_tip(branch: str) -> str:
@@ -27,19 +27,22 @@ def respond(args: list[str], prs: list[dict[str, Any]]) -> str | None:
     def opt(name: str) -> str:
         return args[args.index(name) + 1]
 
+    def opt_value(key: str) -> str:
+        """The value of the -f key=value argument."""
+        return next(a for a in args if a.startswith(f"{key}=")).removeprefix(f"{key}=")
+
     if args[:2] == ["api", "graphql"]:
-        query = next(a for a in args if a.startswith("query="))
+        query = opt_value("query")
         found: dict[str, Any] = {"defaultBranchRef": {"name": "main"}}
-        for n in map(int, re.findall(r"pullRequest\(number: (\d+)\)", query)):
-            pr = next((p for p in prs if p["number"] == n), None)
-            found[f"pr{n}"] = pr and {k: pr[k] for k in PR_FIELDS}
+        for alias, variable in re.findall(r"(\w+): pullRequests\(headRefName: \$(\w+)", query):
+            # Newest first, taking higher numbers as newer.
+            matching = sorted((p for p in prs if p["headRefName"] == opt_value(variable)),
+                              key=lambda p: p["number"], reverse=True)
+            found[alias] = {"nodes": [{k: p[k] for k in PR_FIELDS} for p in matching]}
         return json.dumps({"data": {"repository": found}})
-    if args[:2] == ["pr", "list"]:
-        return json.dumps([{"number": p["number"]} for p in prs
-                           if p["headRefName"] == opt("--head") and p["state"] == "OPEN"])
     if args[:2] == ["pr", "create"]:
         number = max((p["number"] for p in prs), default=0) + 1
-        prs.append({"number": number, "state": "OPEN", "isDraft": "--draft" in args,
+        prs.append({"number": number, "state": "OPEN", "isDraft": "--draft" in args, "isCrossRepository": False,
                     "headRefName": opt("--head"), "headRefOid": pushed_tip(opt("--head")),
                     "baseRefName": opt("--base"), "mergeCommit": None})
         return f"https://github.com/acme/widgets/pull/{number}"

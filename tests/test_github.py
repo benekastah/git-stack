@@ -1,6 +1,9 @@
 """The GitHub adapter, with tests/fake_gh.py standing in for gh."""
 
+import pytest
+
 from git_stack import events
+from git_stack.errors import StackError
 from git_stack.stack import BranchStatus, StackClient
 from tests.helpers import FakeGitHub, Repo
 
@@ -14,7 +17,6 @@ def merge_pr1_on_forge_with_a_tweak(repo: Repo, gh: FakeGitHub) -> None:
     (repo.forge / "a").write_text("tweaked by the maintainer\n")
     repo.git("commit", "--quiet", "-am", "pr1 (squashed)", cwd=repo.forge)
     repo.git("push", "--quiet", "origin", "main", ":pr1", cwd=repo.forge)
-    repo.git("config", "branch.pr1.stackPr", "5")
     gh.add_pr(number=5, state="MERGED", headRefName="pr1", headRefOid=repo.git("rev-parse", "pr1"),
               baseRefName="main", mergeCommit={"oid": repo.git("rev-parse", "HEAD", cwd=repo.forge)})
     gh.clear_calls()
@@ -31,9 +33,7 @@ def test_push_opens_draft_prs_for_current_branch_and_those_above(
     prs = gh.load()["prs"]
     assert [(p["headRefName"], p["baseRefName"], p["isDraft"]) for p in prs] == [
         ("pr2", "pr1", True), ("pr3", "pr2", True)]
-    assert repo.config("pr2", "stackPr") == "1"
-    assert repo.config("pr3", "stackPr") == "2"
-    assert not repo.config_exists("pr1", "stackPr")
+    assert len(gh.calls("pr", "create")) == 2
     assert repo.git("branch", "--list", "pr1", cwd=repo.origin) == "pr1"
     assert all("github.com/acme/widgets" in call for call in gh.calls("pr"))
 
@@ -80,16 +80,73 @@ def test_push_from_merged_branch_opens_prs_only_above_it(
     assert repo.git("branch", "--list", "pr1", cwd=repo.origin) == ""
 
 
-def test_push_records_existing_pr(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+def test_push_uses_pr_opened_elsewhere(
+        repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event]) -> None:
     repo.make_stack()
-    gh.add_pr(number=7, state="OPEN", headRefName="pr3", headRefOid=None, baseRefName="pr2",
+    gh.add_pr(number=7, state="OPEN", headRefName="pr2", headRefOid=repo.git("rev-parse", "main"), baseRefName="main",
+              mergeCommit=None)
+    repo.git("switch", "--quiet", "pr2")
+
+    client.push()
+
+    assert [(p["number"], p["headRefName"]) for p in gh.load()["prs"]] == [(7, "pr2"), (8, "pr3")]
+    assert events.PullRequestRetargeted("pr2", 7, "pr1") in emitted
+
+
+def test_push_opens_new_pr_for_branch_whose_pr_was_closed(
+        repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+    repo.make_stack()
+    gh.add_pr(number=7, state="CLOSED", headRefName="pr3", headRefOid=repo.git("rev-parse", "main"), baseRefName="pr2",
               mergeCommit=None)
     repo.git("switch", "--quiet", "pr3")
 
     client.push()
 
-    assert repo.config("pr3", "stackPr") == "7"
-    assert gh.calls("pr", "create") == []
+    assert [(p["number"], p["headRefName"]) for p in gh.load()["prs"]] == [(7, "pr3"), (8, "pr3")]
+
+
+def test_push_ignores_pr_from_fork_with_same_branch_name(
+        repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+    repo.make_stack()
+    gh.add_pr(number=7, state="OPEN", isCrossRepository=True, headRefName="pr3", headRefOid=repo.git("rev-parse", "main"),
+              baseRefName="main", mergeCommit=None)
+    repo.git("switch", "--quiet", "pr3")
+
+    client.push()
+
+    assert len(gh.calls("pr", "create")) == 1
+    assert gh.calls("pr", "edit") == []
+
+
+def test_merged_pr_of_earlier_branch_with_same_name_is_ignored(
+        repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event]) -> None:
+    repo.commit("a", "old pr1\n", "old pr1")
+    old_pr1 = repo.git("rev-parse", "HEAD")
+    repo.commit("a", "later\n", "later")
+    repo.git("push", "--quiet")
+    gh.add_pr(number=3, state="MERGED", headRefName="pr1", headRefOid=old_pr1, baseRefName="main",
+              mergeCommit={"oid": old_pr1})
+    repo.make_stack()
+    repo.git("switch", "--quiet", "pr1")
+
+    client.sync()
+    client.push()
+
+    assert not any(isinstance(event, events.MergedWithNewCommits) for event in emitted)
+    repo.assert_stacked("pr1", "main", ["pr1 c2", "pr1 c1"])
+    assert [(p["number"], p["headRefName"], p["state"]) for p in gh.load()["prs"]] == [
+        (3, "pr1", "MERGED"), (4, "pr1", "OPEN"), (5, "pr2", "OPEN"), (6, "pr3", "OPEN")]
+
+
+def test_push_after_failed_pr_lookup_leaves_prs_alone(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+    repo.make_stack()
+    gh.fail("api")
+
+    with pytest.raises(StackError, match="couldn't look up pull requests"):
+        client.push()
+
+    assert repo.git("branch", "--list", "pr3", cwd=repo.origin) != ""
+    assert gh.calls("pr") == []
 
 
 def test_push_retargets_pr_whose_parent_changed(
@@ -150,7 +207,6 @@ def test_open_pr_on_default_branch_overrides_local_detection(
         repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
     repo.make_stack()
     client.push()
-    repo.git("config", "branch.pr1.stackPr", "5")
     gh.add_pr(number=5, state="OPEN", headRefName="pr1", headRefOid=repo.git("rev-parse", "pr1"),
               baseRefName="main", mergeCommit=None)
     repo.git("switch", "--quiet", "main")
@@ -165,7 +221,6 @@ def test_open_pr_on_stacked_parent_falls_back_to_local_detection(
         repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
     repo.make_stack()
     client.push()
-    repo.git("config", "branch.pr2.stackPr", "6")
     gh.add_pr(number=6, state="OPEN", headRefName="pr2", headRefOid=repo.git("rev-parse", "pr2"),
               baseRefName="pr1", mergeCommit=None)
     repo.git("switch", "--quiet", "pr1")
@@ -183,7 +238,6 @@ def test_failed_pr_lookup_falls_back_to_local_detection(
         repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event]) -> None:
     repo.make_stack()
     client.push()
-    repo.git("config", "branch.pr1.stackPr", "5")
     repo.squash_merge_on_forge("pr1")
     gh.fail("api")
 
@@ -198,7 +252,6 @@ def test_malformed_pr_falls_back_to_local_detection(
         repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event]) -> None:
     repo.make_stack()
     client.push()
-    repo.git("config", "branch.pr1.stackPr", "5")
     repo.squash_merge_on_forge("pr1")
     gh.add_pr(number=5, state="MERGED", headRefName="pr1", headRefOid=None, baseRefName="main",
               mergeCommit=None)
@@ -219,4 +272,3 @@ def test_git_adapter_setting_leaves_github_alone(repo: Repo, gh: FakeGitHub, cli
     client.sync()
 
     assert gh.load()["calls"] == []
-    assert not repo.config_exists("pr3", "stackPr")

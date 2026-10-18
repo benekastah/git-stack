@@ -127,7 +127,7 @@ class FakeGitHub:
 
     def add_pr(self, **pr: Any) -> None:
         state = self.load()
-        state["prs"].append(pr)
+        state["prs"].append({"isCrossRepository": False, **pr})
         self.save(state)
 
     def calls(self, *prefix: str) -> list[list[str]]:
