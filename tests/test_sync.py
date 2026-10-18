@@ -378,3 +378,18 @@ def test_sync_leaves_diverged_trunk_alone(
 
     assert events.TrunkDiverged("main", "origin/main") in emitted
     assert repo.git("rev-parse", "main") == local_main
+
+
+def test_sync_leaves_trunk_checked_out_in_another_worktree_alone(
+        repo: Repo, client: StackClient, emitted: list[events.Event]) -> None:
+    repo.make_stack()
+    worktree = repo.tmp / "main-worktree"
+    repo.git("worktree", "add", "--quiet", str(worktree), "main")
+    repo.commit_on_forge("main", "d", "upstream\n", "main moved")
+    local_main = repo.git("rev-parse", "main")
+
+    client.sync()
+
+    assert any(isinstance(e, events.TrunkInOtherWorktree) and e.branch == "main" for e in emitted)
+    assert repo.git("rev-parse", "main") == local_main
+    assert repo.git("status", "--porcelain", cwd=worktree) == ""

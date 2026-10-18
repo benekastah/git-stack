@@ -40,6 +40,15 @@ class TrunkDiverged:
 
 
 @dataclass(frozen=True)
+class TrunkInOtherWorktree:
+    """branch wasn't fast-forwarded to upstream because it's checked out in the
+    worktree at path."""
+    branch: str
+    upstream: str
+    path: str
+
+
+@dataclass(frozen=True)
 class SkippedMerged:
     """branch looks merged, so it was left out and its children moved onto parent,
     without changing the stack's metadata."""
@@ -142,6 +151,7 @@ Event: TypeAlias = (
     | PullingUpstream
     | FastForwarded
     | TrunkDiverged
+    | TrunkInOtherWorktree
     | SkippedMerged
     | Untracked
     | RemoteBranchDeleted
