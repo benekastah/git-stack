@@ -65,7 +65,5 @@ class GitAdapter:
         own = git.patch_ids("log", "-p", "--no-merges", f"{base}..refs/heads/{branch}")
         return bool(own) and own <= landed
 
-    def after_push(self, pushed: list[str], parents: Parents, submitted: list[str]) -> None:
-        """Called once pushed, a stack's unmerged branches, were pushed. submitted
-        are the ones to open pull requests for: the branch push ran from and
-        those above it."""
+    def after_push(self, pushed: list[str], parents: Parents) -> None:
+        """Called once pushed, a stack's unmerged branches, were pushed."""

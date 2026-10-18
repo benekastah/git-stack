@@ -60,8 +60,8 @@ def message(event: events.Event) -> str:
             return f"skipping {event.branch}: its parent {event.parent} doesn't exist"
         case events.PullRequestLookupFailed():
             return f"couldn't look up pull requests on GitHub, so only checking for merges locally: {event.error}"
-        case events.PullRequestOpened():
-            return f"opened draft pull request #{event.number} for {event.branch}: {event.url}"
+        case events.NoPullRequest():
+            return f"open a pull request for {event.branch}: {event.url}"
         case events.PullRequestRetargeted():
             return f"changed the base of {event.branch}'s pull request #{event.number} to {event.base}"
         case _:

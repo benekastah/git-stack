@@ -44,13 +44,14 @@ def test_failure_exits_nonzero_with_message(repo: Repo) -> None:
     assert result.stderr == "git stack: main isn't in a stack; switch to a stacked branch to restack its stack\n"
 
 
-def test_push_opens_draft_pull_request(repo: Repo, gh: FakeGitHub) -> None:
+def test_push_prints_link_to_open_pull_request(repo: Repo, gh: FakeGitHub) -> None:
     repo.stack("branch", "pr1")
     repo.commit("a", "pr1\n", "pr1 c1")
 
     result = repo.stack("push")
 
-    assert "opened draft pull request #1 for pr1: https://github.com/acme/widgets/pull/1" in result.stdout
+    assert ("open a pull request for pr1: https://github.com/acme/widgets/compare/main...pr1?expand=1"
+            in result.stdout)
 
 
 def test_each_directory_is_relative_to_the_one_before(repo: Repo) -> None:

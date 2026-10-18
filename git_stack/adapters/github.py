@@ -1,6 +1,7 @@
 import json
 import re
 import subprocess
+import urllib.parse
 from dataclasses import dataclass
 from typing import Self, TypeVar
 
@@ -72,7 +73,8 @@ class PullRequest:
 
 class GitHubAdapter(GitAdapter):
     """Asks GitHub, through the gh CLI, whether each branch's pull request was
-    merged, and opens draft pull requests when branches are pushed.
+    merged, and keeps pull requests' bases in step with the stack when
+    branches are pushed.
 
     Branches without a merged pull request (for example, one merged into its
     parent locally) are checked like GitAdapter does, unless their parent is
@@ -89,8 +91,7 @@ class GitHubAdapter(GitAdapter):
         self._lookup_error: str | None = None
 
     def gh(self, *args: str) -> str:
-        # In the repository, since `gh pr create --fill` reads its commits.
-        result = subprocess.run(["gh", *args], capture_output=True, text=True, cwd=self.git.directory)
+        result = subprocess.run(["gh", *args], capture_output=True, text=True)
         if result.returncode != 0:
             raise StackError(f"gh {' '.join(args)} failed:\n{result.stderr.strip()}")
         return result.stdout.strip()
@@ -180,30 +181,26 @@ class GitHubAdapter(GitAdapter):
         return (set(unmatched.split())
                 & set(self.git.run("rev-list", "--no-merges", ref, "--not", parent).split()))
 
-    def after_push(self, pushed: list[str], parents: Parents, submitted: list[str]) -> None:
-        """Open a draft pull request for each submitted branch that has none, and
-        point the open pull requests of all pushed branches at their stack
-        parents."""
+    def after_push(self, pushed: list[str], parents: Parents) -> None:
+        """Point the open pull requests of pushed branches at their stack parents,
+        and give a link to open one for each pushed branch that has none."""
         prs = self.pull_requests()
         if self._lookup_error is not None:
             # Without the lookup, we can't tell which branches have a pull request.
             raise StackError(f"couldn't look up pull requests: {self._lookup_error}")
-        for branch in submitted:
-            if branch not in prs:
-                self.open_pull_request(branch, parents[branch])
         for b in pushed:
             pr = prs.get(b)
-            if pr and pr.state == "OPEN" and pr.base != parents[b]:
+            if pr is None:
+                self.core.emit(events.NoPullRequest(b, self.compare_url(parents[b], b)))
+            elif pr.state == "OPEN" and pr.base != parents[b]:
                 self.gh("pr", "edit", str(pr.number), "--repo", self.repo, "--base", parents[b])
                 self.core.emit(events.PullRequestRetargeted(b, pr.number, parents[b]))
 
-    def open_pull_request(self, branch: str, parent: str) -> None:
-        url = self.gh("pr", "create", "--repo", self.repo, "--draft", "--base", parent,
-                      "--head", branch, "--fill").splitlines()[-1]
-        match = re.search(r"/pull/(\d+)$", url)
-        if not match:
-            raise StackError(f"couldn't tell which pull request gh opened for {branch} from {url!r}")
-        self.core.emit(events.PullRequestOpened(branch, int(match.group(1)), url))
+    def compare_url(self, base: str, head: str) -> str:
+        """The page for opening a pull request of head into base, with the
+        repository's pull request template filled in."""
+        base, head = (urllib.parse.quote(ref, safe="/") for ref in (base, head))
+        return f"https://{self.host}/{self.owner}/{self.name}/compare/{base}...{head}?expand=1"
 
 
 def github_repo(git: GitClient, remote: str) -> tuple[str, str, str] | None:

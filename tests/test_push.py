@@ -116,3 +116,14 @@ def test_push_pushes_every_branch_in_stack(repo: Repo, client: StackClient) -> N
     for branch in ("pr1", "pr2", "pr3"):
         assert repo.git("rev-parse", f"origin/{branch}") == repo.git("rev-parse", branch)
         assert repo.git("rev-parse", "--abbrev-ref", f"{branch}@{{upstream}}") == f"origin/{branch}"
+
+
+def test_push_named_branch_pushes_its_stack(repo: Repo, client: StackClient) -> None:
+    repo.make_stack()
+    repo.git("switch", "--quiet", "main")
+
+    client.push("pr2")
+
+    for branch in ("pr1", "pr2", "pr3"):
+        assert repo.git("rev-parse", f"origin/{branch}") == repo.git("rev-parse", branch)
+    assert repo.git("branch", "--show-current") == "main"
