@@ -60,7 +60,9 @@ class StackClient(StackCore):
         parent = git.current_branch()
         if parent is None:
             raise StackError("not on a branch")
-        git.run("switch", "--quiet", "--create", name)
+        # Without --no-track, branch.autoSetupMerge=inherit (or always) would give
+        # name its parent's upstream, which sync and push take as its own.
+        git.run("switch", "--quiet", "--no-track", "--create", name)
         git.config_set(name, PARENT_KEY, parent)
         git.config_set(name, BASE_KEY, git.tip(name))
         return parent
