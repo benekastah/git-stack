@@ -24,12 +24,6 @@ cherry-picked back in as if a collaborator pushed them when:
 - the reflog entry has expired, or
 - the rebase changed the patch (e.g. resolved conflicts), so patch-ids differ.
 
-## `track` can pick a stale base for later branches
-
-For `git stack track main pr1 pr2`, pr2's base is `merge-base pr1 pr2`. If pr1
-was rebased after pr2 branched from it, that merge-base is too old, and the
-next restack replays pr1's old commits onto pr2.
-
 ## `track` leaves pending keys alone
 
 `cmd_track` doesn't call `settle` or clear `stackPending*` keys. Leftover keys
