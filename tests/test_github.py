@@ -20,7 +20,8 @@ def merge_pr1_on_forge_with_a_tweak(repo: Repo, gh: FakeGitHub) -> None:
     gh.clear_calls()
 
 
-def test_push_opens_draft_pr_for_current_branch_only(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+def test_push_opens_draft_prs_for_current_branch_and_those_above(
+        repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
     repo.make_stack()
     repo.git("switch", "--quiet", "pr2")
 
@@ -28,15 +29,44 @@ def test_push_opens_draft_pr_for_current_branch_only(repo: Repo, gh: FakeGitHub,
     client.push()
 
     prs = gh.load()["prs"]
-    assert [(p["headRefName"], p["baseRefName"], p["isDraft"]) for p in prs] == [("pr2", "pr1", True)]
+    assert [(p["headRefName"], p["baseRefName"], p["isDraft"]) for p in prs] == [
+        ("pr2", "pr1", True), ("pr3", "pr2", True)]
     assert repo.config("pr2", "stackPr") == "1"
+    assert repo.config("pr3", "stackPr") == "2"
     assert not repo.config_exists("pr1", "stackPr")
-    assert not repo.config_exists("pr3", "stackPr")
-    assert len(gh.calls("pr", "create")) == 1
+    assert repo.git("branch", "--list", "pr1", cwd=repo.origin) == "pr1"
     assert all("github.com/acme/widgets" in call for call in gh.calls("pr"))
 
 
-def test_push_from_merged_branch_opens_no_pr(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+def test_push_from_bottom_opens_prs_for_whole_stack(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+    repo.make_stack()
+    repo.git("switch", "--quiet", "pr1")
+
+    client.push()
+
+    assert [(p["number"], p["headRefName"], p["baseRefName"]) for p in gh.load()["prs"]] == [
+        (1, "pr1", "main"), (2, "pr2", "pr1"), (3, "pr3", "pr2")]
+
+
+def test_push_named_branch_opens_prs_from_it_up(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+    repo.make_stack()
+
+    client.push("pr2")
+
+    assert [p["headRefName"] for p in gh.load()["prs"]] == ["pr2", "pr3"]
+    assert repo.git("branch", "--show-current") == "pr3"
+
+
+def test_push_whole_stack_opens_prs_from_its_bottom(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+    repo.make_stack()
+
+    client.push(whole_stack=True)
+
+    assert [p["headRefName"] for p in gh.load()["prs"]] == ["pr1", "pr2", "pr3"]
+
+
+def test_push_from_merged_branch_opens_prs_only_above_it(
+        repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
     repo.make_stack()
     repo.git("switch", "--quiet", "main")
     repo.git("merge", "--quiet", "--squash", "pr1")
@@ -45,19 +75,20 @@ def test_push_from_merged_branch_opens_no_pr(repo: Repo, gh: FakeGitHub, client:
 
     client.push()
 
-    assert gh.calls("pr", "create") == []
+    assert [(p["headRefName"], p["baseRefName"]) for p in gh.load()["prs"]] == [
+        ("pr2", "main"), ("pr3", "pr2")]
     assert repo.git("branch", "--list", "pr1", cwd=repo.origin) == ""
 
 
 def test_push_records_existing_pr(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
     repo.make_stack()
-    gh.add_pr(number=7, state="OPEN", headRefName="pr1", headRefOid=None, baseRefName="main",
+    gh.add_pr(number=7, state="OPEN", headRefName="pr3", headRefOid=None, baseRefName="pr2",
               mergeCommit=None)
-    repo.git("switch", "--quiet", "pr1")
+    repo.git("switch", "--quiet", "pr3")
 
     client.push()
 
-    assert repo.config("pr1", "stackPr") == "7"
+    assert repo.config("pr3", "stackPr") == "7"
     assert gh.calls("pr", "create") == []
 
 
