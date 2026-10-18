@@ -175,7 +175,8 @@ with the other stacks.
 
 Note that `sync` restacks every tracked stack, including rebasing bottom
 branches onto the updated `main`. Nothing is pushed until you run
-`git stack push`.
+`git stack push`, so until then pull requests still show the old commits.
+`sync` ends by listing the branches whose remote branch is out of date.
 
 ### Pulling commits others pushed
 

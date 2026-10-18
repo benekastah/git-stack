@@ -838,6 +838,8 @@ def cmd_sync(args):
     # in `parents`), and the rest have been restacked and pulled.
     order = [b for root in roots for b in descendants(root, children_map(parents))]
     skipped = set()
+    # Branches that differ from their remote branch once restacked and pulled.
+    unpushed = []
     for branch in order:
         parent = parents[branch]
         if parent in skipped:
@@ -879,12 +881,20 @@ def cmd_sync(args):
             skipped.add(branch)
             continue
         pull_upstream(branch, parent)
+        upstream_tip = rev(f"{branch}@{{upstream}}")
+        if upstream_tip and upstream_tip != rev(branch):
+            unpushed.append(branch)
 
     if local_branch_exists(original):
         if current_branch() != original:
             git("switch", "--quiet", original)
     elif rev("HEAD") != original or current_branch():
         git("switch", "--quiet", "--detach", original)
+    if unpushed:
+        print("note: run `git stack push` from each stack to update the remote branches and pull "
+              "requests of:")
+        for branch in unpushed:
+            print(f"  {branch}")
 
 
 def cmd_push(args):

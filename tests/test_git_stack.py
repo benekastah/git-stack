@@ -469,6 +469,23 @@ class SyncTest(StackTestCase):
         self.assert_stacked("pr3", "pr2", ["pr3 c1"])
         self.assertEqual(self.git("branch", "--show-current"), "pr1")
 
+    def test_sync_lists_restacked_branches_to_push(self):
+        self.make_stack()
+        self.stack("push")
+        self.squash_merge_on_forge("pr1")
+
+        result = self.stack("sync")
+
+        self.assertTrue(result.stdout.endswith("pull requests of:\n  pr2\n  pr3\n"), result.stdout)
+
+    def test_sync_lists_nothing_to_push_when_up_to_date(self):
+        self.make_stack()
+        self.stack("push")
+
+        result = self.stack("sync")
+
+        self.assertNotIn("git stack push", result.stdout)
+
     def test_sync_delete_local_deletes_merged_branch(self):
         self.make_stack()
         self.stack("push")
