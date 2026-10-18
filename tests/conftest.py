@@ -5,7 +5,6 @@ import subprocess
 import pytest
 
 from git_stack import events
-from git_stack.git import GitClient
 from git_stack.stack import StackClient
 from tests.helpers import FakeGitHub, Repo
 
@@ -15,10 +14,11 @@ FAKE_GH = pathlib.Path(__file__).resolve().parent / "fake_gh.py"
 
 @pytest.fixture
 def repo(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> Repo:
-    """A repository with a, b and c committed to main and pushed to origin.
+    """A repository with a, b and c committed to main and pushed to origin,
+    and the current directory for the rest of the test.
 
-    git, and git stack run as a separate process, see an isolated git config
-    and identity for the rest of the test.
+    git, git stack run as a separate process, and repo.client see an isolated
+    git config and identity for the rest of the test.
     """
     global_config = tmp_path / "gitconfig"
     global_config.write_text("[init]\n\tdefaultBranch = main\n")
@@ -44,6 +44,7 @@ def repo(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> Repo:
     repo.git("commit", "--quiet", "-m", "init")
     repo.git("push", "--quiet", "--set-upstream", "origin", "main")
     subprocess.run(["git", "clone", "--quiet", repo.origin, repo.forge], check=True, capture_output=True)
+    monkeypatch.chdir(repo.path)
     return repo
 
 
@@ -65,13 +66,12 @@ def gh(repo: Repo, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> F
 
 
 @pytest.fixture
-def emitted() -> list[events.Event]:
-    """The events client has emitted."""
-    return []
+def client(repo: Repo) -> StackClient:
+    """A StackClient working in repo, as a script would use one."""
+    return repo.client
 
 
 @pytest.fixture
-def client(repo: Repo, emitted: list[events.Event], monkeypatch: pytest.MonkeyPatch) -> StackClient:
-    """A StackClient working in repo, as a script would use one."""
-    monkeypatch.chdir(repo.path)
-    return StackClient(GitClient(), on_event=emitted.append)
+def emitted(repo: Repo) -> list[events.Event]:
+    """The events client has emitted."""
+    return repo.emitted
