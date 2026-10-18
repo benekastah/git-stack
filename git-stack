@@ -615,13 +615,16 @@ class GitHubAdapter(GitAdapter):
     merged, and opens draft pull requests when branches are pushed.
 
     Branches without a merged pull request (for example, one merged into its
-    parent locally) are checked like GitAdapter does.
+    parent locally) are checked like GitAdapter does, unless their parent is
+    the repository's default branch, which we assume nobody merges into
+    locally.
     """
 
     def __init__(self, host, owner, name):
         self.host, self.owner, self.name = host, owner, name
         self.repo = f"{host}/{owner}/{name}"
         self._pull_requests = None
+        self._default_branch = None
 
     def gh(self, *args):
         result = subprocess.run(["gh", *args], capture_output=True, text=True)
@@ -646,14 +649,15 @@ class GitHubAdapter(GitAdapter):
                 return self._pull_requests
             fields = " ".join(f"pr{n}: pullRequest(number: {n}) {{ {PR_FIELDS} }}"
                               for n in sorted(set(numbers.values())))
-            query = (f"query($owner: String!, $name: String!) "
-                     f"{{ repository(owner: $owner, name: $name) {{ {fields} }} }}")
+            query = (f"query($owner: String!, $name: String!) {{ repository(owner: $owner, name: $name) "
+                     f"{{ defaultBranchRef {{ name }} {fields} }} }}")
             try:
                 out = self.gh("api", "graphql", "--hostname", self.host, "-f", f"owner={self.owner}",
                               "-f", f"name={self.name}", "-f", f"query={query}")
                 found = json.loads(out)["data"]["repository"]
                 self._pull_requests = {branch: found[f"pr{n}"] for branch, n in numbers.items()
                                        if found.get(f"pr{n}")}
+                self._default_branch = (found.get("defaultBranchRef") or {}).get("name")
             except (StackError, ValueError, KeyError, TypeError) as e:
                 print(f"warning: couldn't look up pull requests on GitHub, so only checking for merges "
                       f"locally: {e}", file=sys.stderr)
@@ -661,6 +665,8 @@ class GitHubAdapter(GitAdapter):
 
     def merge_state(self, branch, parent):
         pr = self.pull_requests().get(branch)
+        if pr and pr["state"] != "MERGED" and parent == self._default_branch:
+            return MergeState.NOT_MERGED
         merge = pr and pr["state"] == "MERGED" and (pr.get("mergeCommit") or {}).get("oid")
         # Trust GitHub only once the merge is in the local parent, so children
         # aren't restacked onto a parent that lacks it, and only if we have the

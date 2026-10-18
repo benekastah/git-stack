@@ -39,6 +39,7 @@ elif args[:2] == ["api", "graphql"]:
         pr = next((p for p in prs if p["number"] == n), None)
         found[f"pr{n}"] = pr and {k: pr[k] for k in
                                   ("number", "state", "headRefOid", "baseRefName", "mergeCommit")}
+    found["defaultBranchRef"] = {"name": "main"}
     out = json.dumps({"data": {"repository": found}})
 elif args[:2] == ["pr", "list"]:
     out = json.dumps([{"number": p["number"]} for p in prs
@@ -917,6 +918,35 @@ class GitHubTest(StackTestCase):
         self.assertIn("skipping pr1: it was merged into main, but it or its remote branch has commits",
                       result.stderr)
         self.assertEqual(self.config("pr1", "stackParent"), "main")
+
+    def test_open_pr_on_default_branch_overrides_local_detection(self):
+        self.make_stack()
+        self.stack("push")
+        self.git("config", "branch.pr1.stackPr", "5")
+        self.add_pr(number=5, state="OPEN", headRefName="pr1", headRefOid=self.git("rev-parse", "pr1"),
+                    baseRefName="main", mergeCommit=None)
+        self.git("switch", "--quiet", "main")
+        self.git("merge", "--quiet", "--squash", "pr1")
+        self.git("commit", "--quiet", "-m", "pr1 (squashed)")
+        self.git("push", "--quiet")
+
+        self.assertIn("└── pr1 (needs restack)\n", self.stack("info").stdout)
+
+    def test_open_pr_on_stacked_parent_falls_back_to_local_detection(self):
+        self.make_stack()
+        self.stack("push")
+        self.git("config", "branch.pr2.stackPr", "6")
+        self.add_pr(number=6, state="OPEN", headRefName="pr2", headRefOid=self.git("rev-parse", "pr2"),
+                    baseRefName="pr1", mergeCommit=None)
+        self.git("switch", "--quiet", "pr1")
+        self.git("merge", "--quiet", "--squash", "pr2")
+        self.git("commit", "--quiet", "-m", "pr2 (squashed)")
+        self.git("push", "--quiet")
+
+        self.stack("sync")
+
+        self.assert_untracked("pr2")
+        self.assert_stacked("pr3", "pr1", ["pr3 c1"])
 
     def test_failed_pr_lookup_falls_back_to_local_detection(self):
         self.make_stack()

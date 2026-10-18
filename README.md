@@ -89,7 +89,10 @@ setting:
 - `git`: looks only at the repository.
 - `github`: asks GitHub, through `gh`, about each branch's pull request, and
   falls back to the `git` adapter for branches merged without one (for
-  example, merged into their parent locally).
+  example, merged into their parent locally). It doesn't fall back for a
+  branch whose parent is the repository's default branch (e.g. `main`) and
+  whose pull request isn't merged, since it assumes nobody merges into the
+  default branch locally.
 
 If `stack.adapter` isn't set, git-stack uses `github` when the remote's URL is
 on github.com and `gh` is installed, and `git` otherwise. Set it to `github` for

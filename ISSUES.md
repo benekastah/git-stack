@@ -17,8 +17,8 @@ The git adapter's patch-id check (`landed_as_patches`) counts a branch as merged
 if its parent has a commit with the same changes, even if a later commit on the
 parent reverted it. `sync` then untracks the branch (or deletes it with
 `-d local`) and restacks its children onto a parent without its changes. The
-GitHub adapter falls back to this check for branches whose pull request isn't
-merged.
+GitHub adapter falls back to this check for branches without a merged pull
+request, except those stacked directly on the default branch.
 
 ## No `untrack` command
 
