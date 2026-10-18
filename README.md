@@ -252,6 +252,29 @@ instead of by line, so edits to different parts of the same line often merge
 cleanly. It can be enabled just for yourself (globally or for one repository)
 without committing anything, and git-stack's rebases pick it up automatically.
 
+### A merged branch was reverted
+
+If `pr1` is merged and then reverted on `main`, git-stack still considers it
+merged: its pull request was merged, and `main` has a commit with its changes.
+`sync` stops tracking `pr1` (and deletes it with `-d local`) and restacks
+`pr2` onto `main`, which no longer has `pr1`'s changes. Tracking the old `pr1`
+again doesn't help, since it still looks merged.
+
+Instead, recreate `pr1` with new commits on top of `main`, then move `pr2` back
+onto it:
+
+```sh
+git switch main
+git stack branch pr1-again
+git revert <the revert commit>     # or cherry-pick pr1's commits
+git switch pr2
+git stack restack --onto pr1-again
+git stack push                     # open a pull request for pr1-again, and point pr2's at it
+```
+
+`restack --onto` moves only the current branch, so if `pr1` had several
+children, run it from each one.
+
 ## Development
 
 Run every check (mypy in strict mode, then the tests) with:
