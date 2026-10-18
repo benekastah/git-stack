@@ -38,11 +38,10 @@ just wrote.
 
 ## Branches checked out in other worktrees
 
-`fast_forward_trunks` moves a root with `git update-ref` unless it's checked out
-in the current worktree, so a `main` checked out in another worktree is moved
-under it, and that worktree then shows the difference as staged changes.
-Restacking, switching to or deleting a branch checked out elsewhere fails
-partway through a `sync` or `clean`.
+Restacking, switching to or deleting a branch that's checked out in another
+worktree fails partway through a `sync`, `clean` or `restack`. (A stack's root,
+e.g. `main`, checked out elsewhere is left alone with a warning rather than
+fast-forwarded.)
 
 ## `git stack branch` can give the new branch its parent's upstream
 

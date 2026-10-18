@@ -7,6 +7,7 @@ from git_stack import events
 
 WARNINGS = (
     events.TrunkDiverged,
+    events.TrunkInOtherWorktree,
     events.SkippedMerged,
     events.RemoteBranchDeleteFailed,
     events.ParentSkipped,
@@ -30,6 +31,9 @@ def message(event: events.Event) -> str:
             return f"fast-forwarded {event.branch} to {event.upstream}"
         case events.TrunkDiverged():
             return f"{event.branch} has diverged from {event.upstream}; not updating it"
+        case events.TrunkInOtherWorktree():
+            return (f"{event.branch} is checked out in {event.path}; not fast-forwarding it to "
+                    f"{event.upstream}. Run `git -C {event.path} merge --ff-only` to update it")
         case events.SkippedMerged():
             return (f"{event.branch} looks merged into {event.parent}; skipping it and moving its "
                     f"children onto {event.parent}. Run `git stack sync` to remove it from the stack")

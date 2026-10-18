@@ -302,6 +302,10 @@ class StackCore:
                 continue
             if root == current:
                 git.run("merge", "--ff-only", "--quiet", upstream)
+            elif (worktree := git.worktree_of(root)) is not None:
+                # Moving the branch would leave that worktree's files behind.
+                self.emit(events.TrunkInOtherWorktree(root, upstream, worktree))
+                continue
             else:
                 git.run("update-ref", f"refs/heads/{root}", new, old)
             self.emit(events.FastForwarded(root, upstream))

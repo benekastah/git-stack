@@ -64,6 +64,16 @@ class GitClient:
         return any(os.path.exists(self.run("rev-parse", "--path-format=absolute", "--git-path", name))
                    for name in ("rebase-merge", "rebase-apply", "CHERRY_PICK_HEAD", "MERGE_HEAD"))
 
+    def worktree_of(self, branch: str) -> str | None:
+        """The path of the worktree branch is checked out in, if any."""
+        path = None
+        for line in self.run("worktree", "list", "--porcelain").splitlines():
+            if line.startswith("worktree "):
+                path = line.removeprefix("worktree ")
+            elif line == f"branch refs/heads/{branch}":
+                return path
+        return None
+
     def upstream_gone(self, branch: str) -> bool:
         return self.run("for-each-ref", "--format=%(upstream:track)", f"refs/heads/{branch}") == "[gone]"
 
