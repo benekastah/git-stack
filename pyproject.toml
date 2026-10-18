@@ -10,13 +10,16 @@ readme = "README.md"
 requires-python = ">=3.11"
 
 [dependency-groups]
-dev = ["mypy>=2.4.0"]
+dev = ["mypy>=2.4.0", "pytest>=9.1.1"]
 
 [project.scripts]
 git-stack = "git_stack.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["git_stack*"]
+
+[tool.pytest]
+testpaths = ["tests"]
 
 [tool.mypy]
 strict = true

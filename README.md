@@ -247,6 +247,6 @@ Run every check (mypy in strict mode, then the tests) with:
 The first run creates a virtualenv in `.venv` and installs the `dev`
 dependency group from `pyproject.toml` into it (with `pip install --group dev`,
 which needs pip 25.1+). Later runs reinstall it whenever `pyproject.toml`
-changes. Arguments are passed to `unittest`, so `./check.sh -k sync` runs only
-the tests whose names contain `sync`. git-stack itself still has no runtime
+changes. Arguments are passed to pytest, so `./check.sh -k sync` runs only the
+tests whose names contain `sync`. git-stack itself still has no runtime
 dependencies.
