@@ -310,7 +310,8 @@ class StackCore:
                 git.run("update-ref", f"refs/heads/{root}", new, old)
             self.emit(events.FastForwarded(root, upstream))
 
-    def untrack(self, branch: str) -> None:
+    def forget(self, branch: str) -> None:
+        """Remove all of branch's stack metadata."""
         for key in (PARENT_KEY, BASE_KEY, PULLED_KEY, PENDING_PARENT_KEY, PENDING_BASE_KEY,
                     PENDING_PULL_FROM_KEY, PENDING_PULLED_KEY, PENDING_PULL_IDENTITIES_KEY):
             self.git.config_unset(branch, key)
@@ -328,7 +329,7 @@ class StackCore:
         for child in children:
             git.config_set(child, PARENT_KEY, new_parent)
         if not delete:
-            self.untrack(branch)
+            self.forget(branch)
             self.emit(events.Untracked(branch, new_parent, children, deleted_tip=None))
             return
         if git.current_branch() == branch:

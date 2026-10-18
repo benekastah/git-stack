@@ -10,7 +10,7 @@ import pytest
 from git_stack.cli import main
 from git_stack.errors import StackError
 from git_stack.git import GitClient
-from git_stack.stack import BranchInfo, BranchStatus, Renamed, StackClient, Tracked
+from git_stack.stack import BranchInfo, BranchStatus, Renamed, StackClient, Tracked, Untracked
 
 
 @pytest.fixture
@@ -20,6 +20,7 @@ def stack() -> Any:
     stack.git = create_autospec(GitClient, instance=True)
     stack.branch.return_value = "main"
     stack.track.return_value = []
+    stack.untrack.return_value = Untracked("pr1", children=())
     stack.rename.return_value = Renamed("old", "new", children=(), upstream=None)
     stack.info.return_value = []
     stack.sync.return_value = []
@@ -32,6 +33,8 @@ def stack() -> Any:
     (["track", "main"], "track", ("main", []), {"base": None}),
     (["track", "main", "pr1", "pr2", "--base", "abc123"], "track", ("main", ["pr1", "pr2"]),
      {"base": "abc123"}),
+    (["untrack"], "untrack", (None,), {}),
+    (["untrack", "pr1"], "untrack", ("pr1",), {}),
     (["rename", "new"], "rename", ("new",), {"old": None}),
     (["rename", "old", "new"], "rename", ("new",), {"old": "old"}),
     (["info"], "info", (), {}),
@@ -140,3 +143,14 @@ def test_push_says_when_everything_looks_merged(stack: Any, capsys: pytest.Captu
     main(["push"], stack=stack)
 
     assert capsys.readouterr().out == "nothing to push: every branch in pr1's stack looks merged\n"
+
+
+def test_untrack_prints_branches_left_on_it(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
+    stack.untrack.return_value = Untracked("pr1", children=("pr2", "pr2b"))
+
+    main(["untrack", "pr1"], stack=stack)
+
+    assert capsys.readouterr().out == (
+        "stopped tracking pr1\n"
+        "note: pr2, pr2b still stacked on pr1, which is now the bottom of their stack. "
+        "Move them with `git stack restack --onto <parent>`\n")
