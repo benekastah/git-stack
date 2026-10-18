@@ -83,7 +83,8 @@ class GitHubAdapter(GitAdapter):
         self._default_branch: str | None = None
 
     def gh(self, *args: str) -> str:
-        result = subprocess.run(["gh", *args], capture_output=True, text=True)
+        # In the repository, since `gh pr create --fill` reads its commits.
+        result = subprocess.run(["gh", *args], capture_output=True, text=True, cwd=self.git.directory)
         if result.returncode != 0:
             raise StackError(f"gh {' '.join(args)} failed:\n{result.stderr.strip()}")
         return result.stdout.strip()

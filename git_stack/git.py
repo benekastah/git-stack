@@ -7,22 +7,28 @@ DEFAULT_REMOTE = "origin"
 
 
 class GitClient:
-    """Runs git in the current directory."""
+    """Runs git in directory, as `git -C <directory>` does."""
+
+    def __init__(self, directory: str | os.PathLike[str] = ".") -> None:
+        self.directory = os.fspath(directory)
+
+    def _command(self, *args: str) -> list[str]:
+        return ["git", "-C", self.directory, *args]
 
     def run(self, *args: str, check: bool = True, input: str | None = None) -> str:
         """Run git and return stripped stdout."""
-        result = subprocess.run(["git", *args], capture_output=True, text=True, input=input)
+        result = subprocess.run(self._command(*args), capture_output=True, text=True, input=input)
         if check and result.returncode != 0:
             raise StackError(f"git {' '.join(args)} failed:\n{result.stderr.strip()}")
         return result.stdout.strip()
 
     def ok(self, *args: str) -> bool:
         """Run git and report whether it succeeded."""
-        return subprocess.run(["git", *args], capture_output=True).returncode == 0
+        return subprocess.run(self._command(*args), capture_output=True).returncode == 0
 
     def passthrough(self, *args: str) -> bool:
         """Run git with output going straight to the terminal."""
-        return subprocess.run(["git", *args]).returncode == 0
+        return subprocess.run(self._command(*args)).returncode == 0
 
     def config_get(self, branch: str, key: str) -> str | None:
         value = self.run("config", "--get", f"branch.{branch}.{key}", check=False)
@@ -55,7 +61,7 @@ class GitClient:
 
     def operation_in_progress(self) -> bool:
         """Whether a rebase, cherry-pick or merge has stopped and is waiting for the user."""
-        return any(os.path.exists(self.run("rev-parse", "--git-path", name))
+        return any(os.path.exists(self.run("rev-parse", "--path-format=absolute", "--git-path", name))
                    for name in ("rebase-merge", "rebase-apply", "CHERRY_PICK_HEAD", "MERGE_HEAD"))
 
     def upstream_gone(self, branch: str) -> bool:
@@ -89,7 +95,7 @@ class GitClient:
         in target's history.
         """
         result = subprocess.run(
-            ["git", "merge-tree", "--write-tree", target, branch], capture_output=True, text=True)
+            self._command("merge-tree", "--write-tree", target, branch), capture_output=True, text=True)
         if result.returncode != 0:
             return False
         merged_tree = result.stdout.splitlines()[0]

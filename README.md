@@ -142,6 +142,10 @@ With the GitHub adapter:
 
 ## Commands
 
+Like git, every command accepts `-C <path>` before it to run as if started in
+`<path>`, e.g. `git stack -C ~/src/app info`. Each `-C` after the first is
+relative to the one before.
+
 | Command | What it does |
 | --- | --- |
 | `git stack branch <name>` | Create `<name>` on top of the current branch and track it. |

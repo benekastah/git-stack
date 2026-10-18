@@ -19,9 +19,8 @@ class Repo:
     """A clone (path) of a bare repository (origin), plus a second clone of it
     (forge) standing in for GitHub's merge button.
 
-    git, git stack and client run with the isolated environment the repo
-    fixture sets, and client in path, which the fixture makes the current
-    directory. emitted collects client's events.
+    git, git stack and client run in path, with the isolated environment the
+    repo fixture sets. emitted collects client's events.
     """
     path: pathlib.Path
     origin: pathlib.Path
@@ -30,7 +29,7 @@ class Repo:
     emitted: list[events.Event] = field(default_factory=list)
 
     def __post_init__(self) -> None:
-        self.client = StackClient(GitClient(), on_event=self.emitted.append)
+        self.client = StackClient(GitClient(self.path), on_event=self.emitted.append)
 
     def git(self, *args: str, cwd: pathlib.Path | None = None) -> str:
         result = subprocess.run(["git", *args], cwd=cwd or self.path, capture_output=True, text=True)
@@ -41,8 +40,8 @@ class Repo:
     def stack(self, *args: str, expect_success: bool = True) -> subprocess.CompletedProcess[str]:
         """Run `git stack <args>` as a separate process, failing the test unless it
         succeeds (or, with expect_success=False, fails)."""
-        result = subprocess.run([sys.executable, "-m", "git_stack", *args], cwd=self.path,
-                                capture_output=True, text=True, timeout=60)
+        result = subprocess.run([sys.executable, "-m", "git_stack", "-C", str(self.path), *args],
+                                cwd=self.tmp, capture_output=True, text=True, timeout=60)
         if expect_success and result.returncode != 0:
             pytest.fail(f"git stack {' '.join(args)} failed:\n{result.stdout}{result.stderr}")
         if not expect_success and result.returncode == 0:

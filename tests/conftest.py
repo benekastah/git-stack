@@ -14,8 +14,7 @@ FAKE_GH = pathlib.Path(__file__).resolve().parent / "fake_gh.py"
 
 @pytest.fixture
 def repo(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> Repo:
-    """A repository with a, b and c committed to main and pushed to origin,
-    and the current directory for the rest of the test.
+    """A repository with a, b and c committed to main and pushed to origin.
 
     git, git stack run as a separate process, and repo.client see an isolated
     git config and identity for the rest of the test.
@@ -44,7 +43,10 @@ def repo(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> Repo:
     repo.git("commit", "--quiet", "-m", "init")
     repo.git("push", "--quiet", "--set-upstream", "origin", "main")
     subprocess.run(["git", "clone", "--quiet", repo.origin, repo.forge], check=True, capture_output=True)
-    monkeypatch.chdir(repo.path)
+    # Everything should target repo.path explicitly. Run from a directory
+    # that isn't a repository, so anything that doesn't fails instead of
+    # touching the repository the tests were started in.
+    monkeypatch.chdir(tmp_path)
     return repo
 
 

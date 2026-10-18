@@ -2,6 +2,9 @@
 the mocked CLI tests can't: the entry point, and printing what StackClient
 reports."""
 
+import subprocess
+import sys
+
 from tests.helpers import FakeGitHub, Repo
 
 
@@ -48,3 +51,15 @@ def test_push_opens_draft_pull_request(repo: Repo, gh: FakeGitHub) -> None:
     result = repo.stack("push")
 
     assert "opened draft pull request #1 for pr1: https://github.com/acme/widgets/pull/1" in result.stdout
+
+
+def test_each_directory_is_relative_to_the_one_before(repo: Repo) -> None:
+    (repo.tmp / "elsewhere").mkdir()
+    repo.git("switch", "--quiet", "-c", "pr1")
+
+    result = subprocess.run(
+        [sys.executable, "-m", "git_stack", "-C", "elsewhere", "-C", "../local", "track", "main"],
+        cwd=repo.tmp, capture_output=True, text=True)
+
+    assert result.returncode == 0, result.stderr
+    assert repo.config("pr1", "stackParent") == "main"
