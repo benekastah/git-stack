@@ -245,8 +245,26 @@ class StackCore:
             git.run("reset", "--quiet", "--soft", tip)
             raise StackError(f"squashing {branch} failed, so it was left as it was; see git's output above")
 
-    def restack_branch(self, branch: str, parent: str) -> bool:
-        """Rebase branch's own commits onto parent's current tip.
+    def needs_restack(self, branch: str, parent: str, base: str | None, parent_tip: str, latest: bool) -> bool:
+        """Whether branch, last rebased onto base, has to be rebased onto
+        parent_tip, its parent's tip.
+
+        It does if its parent moved since, except when the parent is a stack's
+        root (e.g. main) and branch is still on the root's history: then it
+        stays where it is unless it conflicts with the root's tip, or latest
+        is set, so its pull request isn't rewritten (rerunning CI and maybe
+        dismissing reviews) every time main moves.
+        """
+        if base == parent_tip:
+            return False
+        if base is None or latest or self.git.config_get(parent, PARENT_KEY) is not None:
+            return True
+        return (not self.git.is_ancestor(base, parent_tip)
+                or self.git.conflicts(f"refs/heads/{branch}", parent_tip))
+
+    def restack_branch(self, branch: str, parent: str, latest: bool = False) -> bool:
+        """Rebase branch's own commits onto parent's current tip, if it needs it
+        (see needs_restack).
 
         parent may differ from the recorded one (restack --onto); it is recorded
         only once the rebase has finished.
@@ -260,8 +278,8 @@ class StackCore:
             raise BrokenStackError(f"{branch}'s parent {parent} doesn't exist; "
                                    f"retarget it with `git stack track <parent> --base <sha>`")
         base = self.recorded_base(branch, parent)
-        if base == parent_tip:
-            # Nothing to replay, so there's no rebase to wait for.
+        if not self.needs_restack(branch, parent, base, parent_tip, latest):
+            # There's no rebase to wait for.
             git.config_set(branch, PARENT_KEY, parent)
             return True
         if (worktree := git.other_worktree_of(branch)) is not None:
@@ -280,7 +298,7 @@ class StackCore:
         git.config_unset(branch, PENDING_BASE_KEY)
         raise StackError(f"restacking {branch} onto {parent} failed; see git's output above")
 
-    def restack_all(self, branches: Iterable[str], parents: Parents) -> None:
+    def restack_all(self, branches: Iterable[str], parents: Parents, latest: bool = False) -> None:
         """Restack branches, parent-before-child, skipping those stacked on a
         branch that couldn't be restacked."""
         original = self.git.current_branch()
@@ -290,7 +308,7 @@ class StackCore:
             if parent in skipped:
                 self.emit(events.ParentSkipped(branch, parent))
                 skipped.add(branch)
-            elif not self.restack_branch(branch, parent):
+            elif not self.restack_branch(branch, parent, latest):
                 skipped.add(branch)
         if original and self.git.current_branch() != original:
             self.git.switch(original)

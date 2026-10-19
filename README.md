@@ -106,6 +106,14 @@ Restacking runs `git rebase --onto <parent> <stackBase> <branch>`, which
 replays only the branch's own commits, so PR 1's original commits never
 collide with the squashed version in `main`.
 
+A branch stacked directly on a stack's root (e.g. `main`) is only restacked
+when it conflicts with the root's latest commit (or with `--latest`), not
+every time the root moves. A pull request only shows the branch's own
+changes either way, and leaving it alone means its CI doesn't rerun and its
+reviews aren't dismissed just because `main` moved on. Branches stacked on
+other branches are restacked whenever their parent changes, since they need
+its new commits.
+
 ## GitHub
 
 git-stack works out merges through an adapter, chosen by the `stack.adapter`
@@ -300,8 +308,9 @@ git stack info
 ```
 
 - `*` marks the current branch.
-- `(needs restack)`: its parent moved since it was last rebased; run
-  `git stack restack` or `git stack sync`.
+- `(needs restack)`: its parent moved since it was last rebased (for a branch
+  on the stack's root, e.g. `main`: and it conflicts with the root's latest
+  commit); run `git stack restack` or `git stack sync`.
 - `(merged)`: it was merged into its parent (see
   [When does `sync` consider a branch merged?](#when-does-sync-consider-a-branch-merged));
   `sync` or `clean` will stop tracking it.
@@ -365,21 +374,26 @@ git stack down                  # to main
 
 - From the bottom of a stack, it switches to the stack's root (e.g. `main`).
 
-### `git stack restack [--onto <parent>] [--squash]`
+### `git stack restack [--onto <parent>] [--squash] [--latest]`
 
-Rebase every branch in the current stack onto its parent, bottom-up.
+Rebase every branch in the current stack onto its parent, bottom-up, except
+that a branch on the stack's root (e.g. `main`) only moves if it conflicts
+with the root's latest commit.
 
 **When would I use it?** After you commit to a branch that has other branches
 stacked on it, e.g. to address review feedback on PR 1, so the branches above
 it include the change. It works locally, without fetching or pushing. With
 `--onto`, when a branch should be stacked somewhere else, e.g. PR 2 turns out
 not to need PR 1. With `--squash`, when a restack keeps stopping on the same
-conflict, commit after commit.
+conflict, commit after commit. With `--latest`, when you want the stack on
+the latest `main` anyway, e.g. because the repository requires pull requests
+to be up to date before they're merged.
 
 ```sh
 git stack restack
 git stack restack --onto main           # move the current branch onto main, then restack
 git stack restack --squash              # squash each branch first, then restack
+git stack restack --latest              # also move the stack onto main's latest commit
 ```
 
 - Only the branches' own commits are replayed (from their recorded base), so a
@@ -387,6 +401,8 @@ git stack restack --squash              # squash each branch first, then restack
   [How it works](#how-it-works).
 - `--onto` retargets only the current branch, onto another local branch. The
   branches stacked on it come along.
+- `--latest` moves the branches on the stack's root onto its latest commit
+  even if they don't conflict with it (and the rest of the stack with them).
 - `--squash` first squashes each branch in the current stack into one commit,
   keeping all the messages and the oldest commit's author and date, so a
   conflict is resolved once per branch instead of once per commit. It commits
@@ -401,7 +417,7 @@ git stack restack --squash              # squash each branch first, then restack
 - A branch checked out in another worktree is skipped, with a warning; see
   [Branches checked out in other worktrees](#branches-checked-out-in-other-worktrees).
 
-### `git stack sync [--remote origin] [-d local|remote|both]`
+### `git stack sync [--remote origin] [-d local|remote|both] [--latest]`
 
 Bring the current stack up to date with the remote:
 
@@ -409,14 +425,15 @@ Bring the current stack up to date with the remote:
 2. Fast-forward the stack's root (e.g. `main`) to its upstream.
 3. Stop tracking the stack's merged branches, moving their children onto their
    parent.
-4. Restack the rest.
+4. Restack the rest, like `restack` does: a branch on the root only moves if
+   it conflicts with the root's new commits, or with `--latest`.
 5. Pull in commits others pushed to its branches (see
    [Pulling commits others pushed](#pulling-commits-others-pushed)).
 
 **When would I use it?** Your everyday command for catching up with the remote:
-after a pull request in the stack was merged, when `main` has moved on and you
-want the stack on top of it, or when someone else pushed to one of your
-branches. Follow it with `git stack push`.
+after a pull request in the stack was merged, when `main` has moved on in a
+way that conflicts with the stack (or, with `--latest`, whenever you want the
+stack on top of it), or when someone else pushed to one of your branches. Follow it with `git stack push`.
 
 ```sh
 git stack sync

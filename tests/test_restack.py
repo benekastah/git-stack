@@ -79,11 +79,10 @@ def test_restack_skips_branch_merged_locally(
 
 def test_conflict_resolved_with_rebase_continue_records_new_base(repo: Repo, client: StackClient) -> None:
     repo.make_stack()
-    repo.git("switch", "--quiet", "main")
-    repo.commit("b", "main change\n", "main touches b")
     repo.git("switch", "--quiet", "pr1")
+    repo.commit("b", "pr1 change\n", "pr1 touches b")
 
-    # pr1 restacks cleanly; pr2 conflicts and pr3 is left for later.
+    # pr2 conflicts and pr3 is left for later.
     with pytest.raises(StackError, match="restacking pr2 stopped on a conflict"):
         client.restack()
 
@@ -93,7 +92,7 @@ def test_conflict_resolved_with_rebase_continue_records_new_base(repo: Repo, cli
     assert repo.branch_info("pr2") == BranchInfo("pr2", "pr1", BranchStatus.UP_TO_DATE, current=True)
     client.restack()
 
-    repo.assert_stacked("pr1", "main", ["pr1 c2", "pr1 c1"])
+    repo.assert_stacked("pr1", "main", ["pr1 touches b", "pr1 c2", "pr1 c1"])
     repo.assert_stacked("pr2", "pr1", ["pr2 c1"])
     repo.assert_stacked("pr3", "pr2", ["pr3 c1"])
 

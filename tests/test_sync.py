@@ -5,7 +5,7 @@ import pytest
 from git_stack import events
 from git_stack.errors import StackError
 from git_stack.git import GitClient
-from git_stack.stack import StackClient
+from git_stack.stack import BranchStatus, StackClient
 from tests.helpers import Repo
 
 
@@ -375,7 +375,7 @@ def test_sync_leaves_other_stacks_alone(repo: Repo, client: StackClient) -> None
 
     client.sync()
 
-    repo.assert_stacked("solo", "main", ["solo c1"])
+    assert repo.own_commits("solo", "main") == ["solo c1"]
     assert repo.config("pr1", "stackParent") == "main"
     assert repo.git("rev-parse", "pr2") == pr2
 
@@ -431,3 +431,42 @@ def test_sync_ignores_old_copies_of_rebased_commits_missing_from_reflog(repo: Re
 
     assert repo.own_commits("pr1", "main") == ["pr1 c2", "pr1 c1"]
     assert (repo.path / "a").read_text() == "pr1 second, reworked\n"
+
+
+def test_sync_leaves_branch_on_main_alone_when_main_moves_without_conflict(
+        repo: Repo, client: StackClient) -> None:
+    repo.make_stack()
+    client.push()
+    tips = {branch: repo.git("rev-parse", branch) for branch in ("pr1", "pr2", "pr3")}
+    repo.commit_on_forge("main", "d", "upstream\n", "main moved")
+
+    unpushed = client.sync()
+
+    assert repo.git("rev-parse", "main") == repo.git("rev-parse", "origin/main")
+    assert {branch: repo.git("rev-parse", branch) for branch in tips} == tips
+    assert unpushed == []
+    assert all(branch.status in (None, BranchStatus.UP_TO_DATE) for branch in client.info())
+
+
+def test_sync_rebases_branch_on_main_that_conflicts_with_it(repo: Repo, client: StackClient) -> None:
+    repo.make_stack()
+    client.push()
+    repo.commit_on_forge("main", "a", "upstream\n", "main touches a")
+    repo.git("fetch", "--quiet")
+    repo.git("branch", "--force", "main", "origin/main")
+    assert repo.branch_info("pr1").status is BranchStatus.NEEDS_RESTACK
+
+    with pytest.raises(StackError, match="restacking pr1 stopped on a conflict"):
+        client.sync()
+
+
+def test_sync_latest_moves_branch_on_main_onto_its_tip(repo: Repo, client: StackClient) -> None:
+    repo.make_stack()
+    client.push()
+    repo.commit_on_forge("main", "d", "upstream\n", "main moved")
+
+    client.sync(latest=True)
+
+    repo.assert_stacked("pr1", "main", ["pr1 c2", "pr1 c1"])
+    repo.assert_stacked("pr2", "pr1", ["pr2 c1"])
+    repo.assert_stacked("pr3", "pr2", ["pr3 c1"])

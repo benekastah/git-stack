@@ -271,7 +271,7 @@ class StackClient(StackCore):
                 return BranchStatus.MERGED
             if state is MergeState.MERGED_WITH_NEW_COMMITS:
                 return BranchStatus.MERGED_WITH_NEW_COMMITS
-            if git.config_get(branch, BASE_KEY) != parent_tip:
+            if self.needs_restack(branch, parent, git.config_get(branch, BASE_KEY), parent_tip, latest=False):
                 return BranchStatus.NEEDS_RESTACK
             return BranchStatus.UP_TO_DATE
 
@@ -307,11 +307,13 @@ class StackClient(StackCore):
                 remaining.append(branch)
         return remaining
 
-    def restack(self, onto: str | None = None, squash: bool = False) -> None:
-        """Rebase every branch in the current stack onto its parent, bottom-up.
+    def restack(self, onto: str | None = None, squash: bool = False, latest: bool = False) -> None:
+        """Rebase every branch in the current stack that needs it onto its
+        parent, bottom-up (see needs_restack).
 
         onto first retargets the current branch; squash first squashes each
-        branch into one commit.
+        branch into one commit; latest moves branches on the stack's root onto
+        its tip even if they don't conflict with it.
         """
         git = self.git
         self.ensure_no_operation_in_progress()
@@ -331,12 +333,12 @@ class StackClient(StackCore):
                 self.squash_branch(b, parents[b])
             if git.current_branch() != branch:
                 git.switch(branch)
-        self.restack_all(branches, parents)
+        self.restack_all(branches, parents, latest)
 
-    def sync(self, remote: str = DEFAULT_REMOTE, delete: str | None = None) -> list[str]:
+    def sync(self, remote: str = DEFAULT_REMOTE, delete: str | None = None, latest: bool = False) -> list[str]:
         """Fetch, untrack the current stack's merged branches (deleting what
-        delete, "local", "remote" or "both", says), restack it, and pull in
-        commits others pushed.
+        delete, "local", "remote" or "both", says), restack it (see restack for
+        latest), and pull in commits others pushed.
 
         Returns the branches that now differ from their remote branch.
         """
@@ -379,7 +381,7 @@ class StackClient(StackCore):
             if git.upstream_gone(branch):
                 self.emit(events.UpstreamGone(branch, parent))
             try:
-                restacked = self.restack_branch(branch, parent)
+                restacked = self.restack_branch(branch, parent, latest)
             except BrokenStackError as e:
                 self.emit(events.BrokenBranch(branch, str(e)))
                 restacked = False

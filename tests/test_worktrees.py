@@ -61,11 +61,12 @@ def test_sync_skips_branch_in_other_worktree_and_restacks_the_rest(
     repo.make_stack()
     client.push()
     worktree = add_worktree(repo, "pr2")
-    repo.commit_on_forge("main", "d", "upstream\n", "main moved")
+    repo.git("switch", "--quiet", "pr1")
+    repo.commit("a", "pr1 third\n", "pr1 c3")
 
     client.sync()
 
-    repo.assert_stacked("pr1", "main", ["pr1 c2", "pr1 c1"])
+    repo.assert_stacked("pr1", "main", ["pr1 c3", "pr1 c2", "pr1 c1"])
     assert events.NotRestackedInOtherWorktree("pr2", str(worktree)) in emitted
     assert events.ParentSkipped("pr3", "pr2") in emitted
     assert repo.git("status", "--porcelain", cwd=worktree) == ""
