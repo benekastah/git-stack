@@ -69,6 +69,7 @@ class StackClient(StackCore):
         parent = git.current_branch()
         if parent is None:
             raise StackError("not on a branch")
+        self.ensure_name_free_on_remotes(name)
         # Without --no-track, branch.autoSetupMerge=inherit (or always) would give
         # name its parent's upstream, which sync and push take as its own.
         git.run("switch", "--quiet", "--no-track", "--create", name)
@@ -133,6 +134,15 @@ class StackClient(StackCore):
         return (git.run("merge-base", "--fork-point", parent, branch, check=False)
                 or git.run("merge-base", parent, branch, check=False) or None)
 
+    def ensure_name_free_on_remotes(self, name: str) -> None:
+        """Refuse a new branch name that a remote already has a branch of, which
+        is most likely someone else's: pushing ours would overwrite it."""
+        for remote in self.git.remotes():
+            if self.git.rev(f"refs/remotes/{remote}/{name}") is not None:
+                raise StackError(f"{remote}/{name} already exists, so {name} is probably someone else's "
+                                 f"branch; pick another name. To work on {remote}/{name} itself, "
+                                 f"`git switch {name}` and track it with `git stack track <parent>`")
+
     def ensure_local_branch_parent(self, parent: str) -> None:
         """Refuse a parent that isn't a local branch: sync fast-forwards a stack's
         root, and pull requests are based on the parent, which both need a
@@ -167,6 +177,7 @@ class StackClient(StackCore):
             raise StackError("not on a branch; name the branch to rename")
         if not git.local_branch_exists(old):
             raise StackError(f"{old} isn't a local branch")
+        self.ensure_name_free_on_remotes(new)
         upstream = git.run("rev-parse", "--abbrev-ref", f"{old}@{{upstream}}", check=False) or None
         children = tuple(child for child, parent in self.tracked_branches().items() if parent == old)
         git.run("branch", "--move", old, new)
@@ -428,6 +439,13 @@ class StackClient(StackCore):
                 raise StackError(f"{b}'s remote branch was deleted; run `git stack sync` to stop tracking "
                                  f"it if it was merged, or `git branch --unset-upstream {b}` to push it "
                                  f"again")
+            # Someone else's branch of the same name. Overwriting it isn't what
+            # --force is for, so it doesn't override this.
+            if git.rev(f"refs/remotes/{remote}/{b}") is not None and not git.tracks_same_name(b, remote):
+                raise StackError(f"{remote}/{b} exists but isn't {b}'s upstream, so it's probably someone "
+                                 f"else's branch; rename yours with `git stack rename {b} <new>`. If "
+                                 f"{remote}/{b} is yours, run `git branch --set-upstream-to {remote}/{b} {b}` "
+                                 f"and `git stack sync` first")
 
         # Force-pushing is only safe if we've seen everything on the remote branch.
         # Refuse if we know of commits we haven't pulled (unless told to drop

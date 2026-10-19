@@ -1,5 +1,8 @@
 """git stack branch."""
 
+import pytest
+
+from git_stack.errors import StackError
 from git_stack.stack import StackClient
 from tests.helpers import Repo
 
@@ -21,3 +24,13 @@ def test_branch_does_not_inherit_parents_upstream(repo: Repo, client: StackClien
 
     assert not repo.config_exists("pr2", "remote")
     assert not repo.config_exists("pr2", "merge")
+
+
+def test_branch_refuses_name_taken_on_remote(repo: Repo, client: StackClient) -> None:
+    repo.push_someone_elses_branch("fix")
+
+    with pytest.raises(StackError, match="origin/fix already exists"):
+        client.branch("fix")
+
+    assert repo.git("branch", "--show-current") == "main"
+    assert repo.git("branch", "--list", "fix") == ""

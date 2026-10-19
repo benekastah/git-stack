@@ -188,6 +188,10 @@ git stack branch use-api        # stacked on add-api
 ```
 
 - Uncommitted changes come along to the new branch, as with `git switch -c`.
+- Refuses a name a remote already has a branch of (as of your last fetch),
+  since that's most likely someone else's branch, and pushing yours would
+  overwrite it. In a shared repository, prefixing branch names with your
+  username (e.g. `jane/add-api`) avoids picking a name that's taken.
 - The new branch has no upstream until you `git stack push` it, even if
   `branch.autoSetupMerge` would normally give it its parent's.
 - Whatever untracked branch is at the bottom of a stack (usually `main`) is its
@@ -260,6 +264,7 @@ git stack rename api-v2                 # rename the current branch
 git stack rename add-api api-v2
 ```
 
+- Like `branch`, refuses a new name a remote already has a branch of.
 - Its remote branch isn't renamed, and its pull request stays with the old
   name. The renamed branch's upstream is unset, so the next `git stack push`
   pushes it under the new name, and you have to open its pull request again.
@@ -467,6 +472,11 @@ git stack push --force          # drop commits on the remote you didn't pull
 ```
 
 - Each branch is pushed to a remote branch of the same name.
+- Refuses, even with `--force`, if that remote branch exists but isn't the
+  branch's upstream, since it's probably someone else's branch that happens to
+  have the same name. Rename yours with `git stack rename`, or, if the remote
+  branch is yours (say you pushed it with a plain `git push`), set it as the
+  upstream with `git branch --set-upstream-to`.
 - Merged branches are skipped.
 - Refuses if a remote branch has commits the local one doesn't, so you don't
   overwrite a collaborator's work: run `git stack sync` to pull them in first,
