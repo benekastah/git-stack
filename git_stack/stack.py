@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from git_stack import events
 from git_stack.adapters import ADAPTER_SETTING, make_adapter
 from git_stack.adapters.git import GitAdapter
+from git_stack.adapters.github import GitHubAdapter, OpenPullRequest
 from git_stack.adapters.merge_state import MergeState
 from git_stack.core import (BASE_KEY, PARENT_KEY, PULLED_KEY, Parents, StackCore, children_map,
                             descendants, drop_from_stack, ensure_no_cycle, stack_of, stack_root)
@@ -54,6 +55,31 @@ class Renamed:
     new: str
     children: tuple[str, ...]
     upstream: str | None
+
+
+class AutocreateAction(enum.Enum):
+    CREATE = "create"  # create the local branch from its remote branch, and track it
+    TRACK = "track"
+    ALREADY_TRACKED = "already-tracked"
+    PARENT_DIFFERS = "parent-differs"  # already tracked, on another parent
+    SKIP = "skip"
+
+
+@dataclass(frozen=True)
+class Autocreated:
+    """What autocreate did, or in a dry run would do, for the pull request
+    number of branch into parent.
+
+    base is the commit branch is tracked as built on (CREATE and TRACK),
+    tracked_parent the parent it's already tracked on instead
+    (PARENT_DIFFERS), and reason why it was skipped (SKIP)."""
+    branch: str
+    parent: str
+    number: int
+    action: AutocreateAction
+    base: str | None = None
+    tracked_parent: str | None = None
+    reason: str | None = None
 
 
 class StackClient(StackCore):
@@ -142,6 +168,99 @@ class StackClient(StackCore):
                 raise StackError(f"{remote}/{name} already exists, so {name} is probably someone else's "
                                  f"branch; pick another name. To work on {remote}/{name} itself, "
                                  f"`git switch {name}` and track it with `git stack track <parent>`")
+
+    def autocreate(self, remote: str = DEFAULT_REMOTE, dry_run: bool = False) -> list[Autocreated]:
+        """Track the gh user's open pull requests on GitHub, drafts included, as
+        stacks: each one's branch on the branch it merges into, creating local
+        branches from remote for those that don't have one. Branches that are
+        already tracked are left alone.
+
+        Returns an Autocreated for each pull request, parents before children.
+        With dry_run, nothing is changed (besides fetching remote).
+        """
+        git = self.git
+        self.ensure_no_operation_in_progress()
+        self.settle_all()
+        adapter = make_adapter(self, remote, fetch=True)
+        if not isinstance(adapter, GitHubAdapter):
+            raise StackError(f"autocreate finds stacks from pull requests on GitHub, but {remote} isn't a "
+                             f"GitHub repository, gh isn't installed, or {ADAPTER_SETTING} is git")
+        try:
+            prs = adapter.my_open_pull_requests()
+        except StackError as e:
+            raise StackError(f"couldn't look up your pull requests on GitHub; check `gh auth status` (and, for "
+                             f"an organization with SSO, that gh's token is authorized for it): {e}")
+        git.fetch(remote)
+        plan = self.plan_autocreate(prs, remote)
+        if not dry_run:
+            for step in plan:
+                if step.action is AutocreateAction.CREATE:
+                    git.run("branch", "--quiet", "--track", step.branch, f"refs/remotes/{remote}/{step.branch}")
+                elif (step.action is AutocreateAction.TRACK and git.config_get(step.branch, "remote") is None
+                      and git.rev(f"refs/remotes/{remote}/{step.branch}") is not None):
+                    git.run("branch", "--quiet", f"--set-upstream-to=refs/remotes/{remote}/{step.branch}",
+                            step.branch)
+                if step.base is not None:
+                    git.config_set(step.branch, PARENT_KEY, step.parent)
+                    git.config_set(step.branch, BASE_KEY, step.base)
+        return plan
+
+    def plan_autocreate(self, prs: list[OpenPullRequest], remote: str) -> list[Autocreated]:
+        """What autocreate should do for prs, parents before children, without
+        changing anything."""
+        git = self.git
+        parents = self.tracked_branches()
+        by_head = {pr.head: pr for pr in prs}
+        planned: dict[str, Autocreated] = {}
+        visiting = set()
+
+        def plan(pr: OpenPullRequest) -> Autocreated:
+            if pr.head not in planned:
+                visiting.add(pr.head)
+                planned[pr.head] = plan_one(pr)
+                visiting.discard(pr.head)
+            return planned[pr.head]
+
+        def plan_one(pr: OpenPullRequest) -> Autocreated:
+            branch, parent = pr.head, pr.base
+
+            def skip(reason: str) -> Autocreated:
+                return Autocreated(branch, parent, pr.number, AutocreateAction.SKIP, reason=reason)
+
+            if branch in parents:
+                if parents[branch] == parent:
+                    return Autocreated(branch, parent, pr.number, AutocreateAction.ALREADY_TRACKED)
+                return Autocreated(branch, parent, pr.number, AutocreateAction.PARENT_DIFFERS,
+                                   tracked_parent=parents[branch])
+            remote_ref = f"refs/remotes/{remote}/{branch}"
+            local = git.local_branch_exists(branch)
+            if not local and git.rev(remote_ref) is None:
+                return skip(f"{remote}/{branch} doesn't exist")
+            if parent in by_head:
+                if parent in visiting:
+                    return skip("the pull requests it's based on are based on it")
+                if plan(by_head[parent]).action is AutocreateAction.SKIP:
+                    return skip(f"{parent}, which it merges into, was skipped")
+                parent_ref = parent if git.local_branch_exists(parent) else f"refs/remotes/{remote}/{parent}"
+            elif git.local_branch_exists(parent):
+                parent_ref = parent
+            else:
+                return skip(f"{parent}, which it merges into, isn't a local branch; create it with "
+                            f"`git switch {parent}` and rerun")
+            try:
+                ensure_no_cycle(branch, parent, parents)
+            except StackError as e:
+                return skip(str(e))
+            base = self.fork_point(parent_ref, branch if local else remote_ref)
+            if base is None:
+                return skip(f"it has no history in common with {parent}")
+            parents[branch] = parent
+            action = AutocreateAction.TRACK if local else AutocreateAction.CREATE
+            return Autocreated(branch, parent, pr.number, action, base=base)
+
+        for pr in prs:
+            plan(pr)
+        return list(planned.values())
 
     def ensure_local_branch_parent(self, parent: str) -> None:
         """Refuse a parent that isn't a local branch: sync fast-forwards a stack's

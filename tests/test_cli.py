@@ -11,7 +11,8 @@ import pytest
 from git_stack.cli import main
 from git_stack.errors import StackError
 from git_stack.git import GitClient
-from git_stack.stack import BranchInfo, BranchStatus, Renamed, StackClient, Tracked, Untracked
+from git_stack.stack import (AutocreateAction, Autocreated, BranchInfo, BranchStatus, Renamed, StackClient,
+                             Tracked, Untracked)
 
 
 @pytest.fixture
@@ -21,6 +22,7 @@ def stack() -> Any:
     stack.git = create_autospec(GitClient, instance=True)
     stack.branch.return_value = "main"
     stack.track.return_value = []
+    stack.autocreate.return_value = []
     stack.untrack.return_value = Untracked("pr1", children=())
     stack.rename.return_value = Renamed("old", "new", children=(), upstream=None)
     stack.info.return_value = []
@@ -39,6 +41,8 @@ def stack() -> Any:
     (["track", "main"], "track", ("main", []), {"base": None}),
     (["track", "main", "pr1", "pr2", "--base", "abc123"], "track", ("main", ["pr1", "pr2"]),
      {"base": "abc123"}),
+    (["autocreate"], "autocreate", (), {"remote": "origin", "dry_run": False}),
+    (["autocreate", "-n", "--remote", "upstream"], "autocreate", (), {"remote": "upstream", "dry_run": True}),
     (["untrack"], "untrack", (None,), {}),
     (["untrack", "pr1"], "untrack", ("pr1",), {}),
     (["rename", "new"], "rename", ("new",), {"old": None}),
@@ -70,6 +74,36 @@ def test_command_calls_its_client_method(
     assert main(argv, stack=stack) == 0
 
     getattr(stack, method).assert_called_once_with(*args, **kwargs)
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_autocreate_says_what_it_did_for_each_pull_request(
+        stack: Any, capsys: pytest.CaptureFixture[str], dry_run: bool) -> None:
+    stack.autocreate.return_value = [
+        Autocreated("pr1", "main", 1, AutocreateAction.CREATE, base="a" * 40),
+        Autocreated("pr2", "pr1", 2, AutocreateAction.TRACK, base="b" * 40),
+        Autocreated("pr3", "pr2", 3, AutocreateAction.ALREADY_TRACKED),
+        Autocreated("pr4", "pr2", 4, AutocreateAction.PARENT_DIFFERS, tracked_parent="main"),
+        Autocreated("pr5", "theirs", 5, AutocreateAction.SKIP, reason="theirs isn't a local branch"),
+    ]
+
+    main(["autocreate", *(["--dry-run"] if dry_run else [])], stack=stack)
+
+    created, tracking = ("would create", "would track") if dry_run else ("created", "tracking")
+    assert capsys.readouterr().out.splitlines() == [
+        f"{created} pr1 from origin/pr1, tracking it on main (#1)",
+        f"{tracking} pr2 on pr1 (#2)",
+        "pr3 is already tracked on pr2 (#3)",
+        "pr4 is tracked on main, but #4 merges it into pr2; leaving it (to follow GitHub, run "
+        "`git stack track pr2 pr4`)",
+        "skipping pr5 (#5): theirs isn't a local branch",
+    ]
+
+
+def test_autocreate_without_pull_requests_says_so(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
+    main(["autocreate"], stack=stack)
+
+    assert capsys.readouterr().out == "you have no open pull requests from branches in this repository\n"
 
 
 def test_stack_error_is_printed_and_fails(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:

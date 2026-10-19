@@ -89,6 +89,12 @@ T}@T{
 \f[CR]git stack track main <branch>...\f[R]
 T}
 T{
+set up stacks from my open PRs (e.g.
+in a new clone)
+T}@T{
+\f[CR]git stack autocreate\f[R]
+T}
+T{
 rename a branch in a stack
 T}@T{
 \f[CR]git stack rename <new>\f[R]
@@ -256,6 +262,51 @@ that.
 .IP \(bu 2
 Nothing is written unless every branch can be tracked, so a bad argument
 doesn\(aqt leave the stack half\-tracked.
+.SS \f[CR]git stack autocreate [\-\-remote origin] [\-n]\f[R]
+Track your open pull requests on GitHub, drafts included, as stacks:
+each pull request\(aqs branch on the branch it merges into.
+.PP
+\f[B]When would I use it?\f[R] When you have pull requests open but
+git\-stack doesn\(aqt know about their branches yet: in a fresh clone,
+on another machine, or for pull requests you opened before you started
+using git\-stack.
+.IP
+.EX
+git stack autocreate \-n         \f[I]# see what it would do\f[R]
+git stack autocreate
+\f[I]# created add\-api from origin/add\-api, tracking it on main (#12)\f[R]
+\f[I]# created use\-api from origin/use\-api, tracking it on add\-api (#13)\f[R]
+.EE
+.IP \(bu 2
+Only your own pull requests from branches in the repository count, not
+others\(aq or ones from forks.
+It needs the GitHub adapter.
+.IP \(bu 2
+A pull request without a local branch gets one, created from its remote
+branch, with that as its upstream.
+A local branch without an upstream gets its remote branch as its
+upstream.
+.IP \(bu 2
+Branches that are already tracked are left alone.
+If one is tracked on a different parent than its pull request merges
+into, it says so; run \f[CR]git stack track <parent> <branch>\f[R] if
+GitHub is right.
+.IP \(bu 2
+A pull request into a branch that isn\(aqt local and isn\(aqt one of
+your pull requests (e.g.
+a coworker\(aqs branch) is skipped, along with the ones built on it.
+\f[CR]git switch\f[R] to that branch and rerun to track them.
+.IP \(bu 2
+Each branch\(aqs base is found as for \f[CR]git stack track\f[R].
+If a parent\(aqs commits were rewritten after its child was built on
+them (e.g.
+the parent was rebased and force\-pushed from another machine), the
+child\(aqs base can come out too old, and its next restack replays the
+parent\(aqs old commits; set it with
+\f[CR]git stack track <parent> <branch> \-\-base <sha>\f[R].
+.IP \(bu 2
+\f[CR]\-n\f[R]/\f[CR]\-\-dry\-run\f[R] prints what it would do without
+changing anything (besides fetching).
 .SS \f[CR]git stack untrack [<branch>]\f[R]
 Stop tracking a branch (default: the current one), without deleting it
 or changing its commits.

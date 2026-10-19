@@ -37,6 +37,7 @@ git stack push                  # update the PRs
 | move up or down the stack | `git stack up` / `git stack down` |
 | build a PR on a different parent | `git stack restack --onto <parent>` |
 | use git-stack with branches I already have | `git stack track main <branch>...` |
+| set up stacks from my open PRs (e.g. in a new clone) | `git stack autocreate` |
 | rename a branch in a stack | `git stack rename <new>` |
 | clean up merged branches in every stack | `git stack clean` |
 | read all of this in the terminal | `git stack --help` |
@@ -166,6 +167,41 @@ entry, it's their merge-base.
   doesn't rebase anything; run `git stack restack` for that.
 - Nothing is written unless every branch can be tracked, so a bad argument
   doesn't leave the stack half-tracked.
+
+### `git stack autocreate [--remote origin] [-n]`
+
+Track your open pull requests on GitHub, drafts included, as stacks: each
+pull request's branch on the branch it merges into.
+
+**When would I use it?** When you have pull requests open but git-stack doesn't
+know about their branches yet: in a fresh clone, on another machine, or for
+pull requests you opened before you started using git-stack.
+
+```sh
+git stack autocreate -n         # see what it would do
+git stack autocreate
+# created add-api from origin/add-api, tracking it on main (#12)
+# created use-api from origin/use-api, tracking it on add-api (#13)
+```
+
+- Only your own pull requests from branches in the repository count, not
+  others' or ones from forks. It needs the [GitHub adapter](#github).
+- A pull request without a local branch gets one, created from its remote
+  branch, with that as its upstream. A local branch without an upstream gets
+  its remote branch as its upstream.
+- Branches that are already tracked are left alone. If one is tracked on a
+  different parent than its pull request merges into, it says so; run
+  `git stack track <parent> <branch>` if GitHub is right.
+- A pull request into a branch that isn't local and isn't one of your pull
+  requests (e.g. a coworker's branch) is skipped, along with the ones built on
+  it. `git switch` to that branch and rerun to track them.
+- Each branch's base is found as for `git stack track`. If a parent's commits
+  were rewritten after its child was built on them (e.g. the parent was
+  rebased and force-pushed from another machine), the child's base can come
+  out too old, and its next restack replays the parent's old commits; set it
+  with `git stack track <parent> <branch> --base <sha>`.
+- `-n`/`--dry-run` prints what it would do without changing anything (besides
+  fetching).
 
 ### `git stack untrack [<branch>]`
 

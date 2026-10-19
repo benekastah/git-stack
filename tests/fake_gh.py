@@ -2,7 +2,8 @@
 """Stands in for the gh CLI in tests.
 
 Keeps pull requests and the calls it got in the JSON file at $FAKE_GH_STATE,
-and fails for commands whose first argument is listed in its "fail" key.
+and fails for commands whose first argument is listed in its "fail" key. A pull
+request's "author" is "me", the gh user, unless it says otherwise.
 """
 
 import json
@@ -24,6 +25,12 @@ def respond(args: list[str], prs: list[dict[str, Any]]) -> str | None:
         """The value of the -f key=value argument."""
         return next(a for a in args if a.startswith(f"{key}=")).removeprefix(f"{key}=")
 
+    if args[:2] == ["api", "graphql"] and "search(" in opt_value("query"):
+        # The gh user's open pull requests, all on one page.
+        mine = [p for p in prs if p["state"] == "OPEN" and p.get("author", "me") == "me"]
+        nodes = [{k: p[k] for k in ("number", "headRefName", "baseRefName", "isCrossRepository")} for p in mine]
+        return json.dumps({"data": {"search": {"pageInfo": {"hasNextPage": False, "endCursor": None},
+                                               "nodes": nodes}}})
     if args[:2] == ["api", "graphql"]:
         query = opt_value("query")
         found: dict[str, Any] = {"defaultBranchRef": {"name": "main"}}
