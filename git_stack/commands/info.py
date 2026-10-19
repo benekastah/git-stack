@@ -1,4 +1,5 @@
 import argparse
+import json
 
 from git_stack.commands import Subparsers
 from git_stack.stack import BranchInfo, BranchStatus, StackClient
@@ -11,8 +12,15 @@ NOTES: dict[BranchStatus, str | None] = {
 }
 
 
+class Args(argparse.Namespace):
+    """The arguments register's parser produces."""
+    json: bool
+
+
 def register(subparsers: Subparsers) -> None:
     p = subparsers.add_parser("info", help="show all tracked stacks")
+    p.add_argument("--json", action="store_true",
+                   help="print a JSON list of every branch, each stack's root first, parent before child")
     p.set_defaults(func=run)
 
 
@@ -29,8 +37,13 @@ def label(branch: BranchInfo) -> str:
     return " ".join([branch.name, *notes])
 
 
-def run(stack: StackClient, args: argparse.Namespace) -> None:
+def run(stack: StackClient, args: Args) -> None:
     branches = stack.info()
+    if args.json:
+        print(json.dumps([{"name": b.name, "parent": b.parent,
+                           "status": b.status.value if b.status else None, "current": b.current}
+                          for b in branches], indent=2))
+        return
     if not branches:
         print("no tracked branches")
         return

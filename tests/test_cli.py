@@ -2,6 +2,7 @@
 what it returns. StackClient is a mock; tests/test_end_to_end.py runs the
 real thing."""
 
+import json
 from typing import Any
 from unittest.mock import create_autospec
 
@@ -25,6 +26,11 @@ def stack() -> Any:
     stack.info.return_value = []
     stack.sync.return_value = []
     stack.push.return_value = ["pr1"]
+    stack.up.return_value = "pr2"
+    stack.down.return_value = "main"
+    stack.parent.return_value = "main"
+    stack.base.return_value = "a" * 40
+    stack.show_stack.return_value = ["pr1", "pr2"]
     return stack
 
 
@@ -38,6 +44,9 @@ def stack() -> Any:
     (["rename", "new"], "rename", ("new",), {"old": None}),
     (["rename", "old", "new"], "rename", ("new",), {"old": "old"}),
     (["info"], "info", (), {}),
+    (["info", "--json"], "info", (), {}),
+    (["up"], "up", (), {}),
+    (["down"], "down", (), {}),
     (["restack"], "restack", (), {"onto": None, "squash": False}),
     (["restack", "--onto", "main", "--squash"], "restack", (), {"onto": "main", "squash": True}),
     (["sync"], "sync", (), {"remote": "origin", "delete": None}),
@@ -47,6 +56,12 @@ def stack() -> Any:
     (["push"], "push", (None,), {"remote": "origin", "force": False}),
     (["push", "pr1", "--remote", "upstream"], "push", ("pr1",), {"remote": "upstream", "force": False}),
     (["push", "--force"], "push", (None,), {"remote": "origin", "force": True}),
+    (["parent"], "parent", (None,), {}),
+    (["parent", "pr1"], "parent", ("pr1",), {}),
+    (["base"], "base", (None,), {}),
+    (["base", "pr1"], "base", ("pr1",), {}),
+    (["show-stack"], "show_stack", (None,), {}),
+    (["show-stack", "-q", "pr1"], "show_stack", ("pr1",), {}),
 ])
 def test_command_calls_its_client_method(
         stack: Any, argv: list[str], method: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> None:
@@ -154,3 +169,55 @@ def test_untrack_prints_branches_left_on_it(stack: Any, capsys: pytest.CaptureFi
         "stopped tracking pr1\n"
         "note: pr2, pr2b still stacked on pr1, which is now the bottom of their stack. "
         "Move them with `git stack restack --onto <parent>`\n")
+
+
+def test_info_json_lists_every_branch(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
+    stack.info.return_value = [
+        BranchInfo("main", None, None, current=False),
+        BranchInfo("pr1", "main", BranchStatus.NEEDS_RESTACK, current=True),
+    ]
+
+    main(["info", "--json"], stack=stack)
+
+    assert json.loads(capsys.readouterr().out) == [
+        {"name": "main", "parent": None, "status": None, "current": False},
+        {"name": "pr1", "parent": "main", "status": "needs-restack", "current": True},
+    ]
+
+
+@pytest.mark.parametrize(("argv", "out"), [
+    (["up"], "switched to pr2\n"),
+    (["down"], "switched to main\n"),
+    (["parent"], "main\n"),
+    (["base"], "a" * 40 + "\n"),
+    (["show-stack"], "pr1\npr2\n"),
+])
+def test_command_prints_its_result(
+        stack: Any, capsys: pytest.CaptureFixture[str], argv: list[str], out: str) -> None:
+    assert main(argv, stack=stack) == 0
+
+    assert capsys.readouterr().out == out
+
+
+def test_show_stack_quiet_prints_nothing_for_a_stacked_branch(
+        stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["show-stack", "--quiet"], stack=stack) == 0
+
+    assert capsys.readouterr() == ("", "")
+
+
+def test_show_stack_quiet_fails_silently_outside_a_stack(
+        stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
+    stack.show_stack.side_effect = StackError("main isn't in a stack")
+
+    assert main(["show-stack", "--quiet"], stack=stack) == 1
+
+    assert capsys.readouterr() == ("", "")
+
+
+def test_show_stack_outside_a_stack_says_so(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
+    stack.show_stack.side_effect = StackError("main isn't in a stack")
+
+    assert main(["show-stack"], stack=stack) == 1
+
+    assert capsys.readouterr() == ("", "git stack: main isn't in a stack\n")
