@@ -62,9 +62,18 @@ class GitClient:
         self.run("switch", "--quiet", branch)
 
     def operation_in_progress(self) -> bool:
-        """Whether a rebase, cherry-pick or merge has stopped and is waiting for the user."""
+        """Whether a rebase, cherry-pick or merge has stopped and is waiting for the user.
+
+        A cherry-pick of several commits that stopped before changing anything
+        (e.g. because of an untracked file in the way) leaves only its
+        sequencer state behind, not CHERRY_PICK_HEAD.
+        """
         return any(os.path.exists(self.run("rev-parse", "--path-format=absolute", "--git-path", name))
-                   for name in ("rebase-merge", "rebase-apply", "CHERRY_PICK_HEAD", "MERGE_HEAD"))
+                   for name in ("rebase-merge", "rebase-apply", "CHERRY_PICK_HEAD", "sequencer", "MERGE_HEAD"))
+
+    def has_conflicts(self) -> bool:
+        """Whether the index has unmerged paths, i.e. a merge stopped on a conflict."""
+        return bool(self.run("diff", "--name-only", "--diff-filter=U"))
 
     def worktree_of(self, branch: str) -> str | None:
         """The path of the worktree branch is checked out in, if any."""

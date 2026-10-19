@@ -633,6 +633,13 @@ then rerun the git-stack command to finish the rest of the stack. The new
 parent and base (and the pulled upstream commits) are recorded only if the
 operation actually completed.
 
+`restack`, `sync` and `clean` refuse to start with uncommitted changes, but not
+with untracked files. If one is in the way of a commit being replayed, git
+stops without a conflict and says which file. Move or delete it, then run
+`git rebase --continue`, or for a pull, `git cherry-pick --abort` (git's
+`--continue` would skip the commit that couldn't be applied) and rerun
+`git stack sync`.
+
 ## Branches checked out in other worktrees
 
 git won't rebase, check out or delete a branch that's checked out in another

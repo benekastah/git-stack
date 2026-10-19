@@ -311,6 +311,29 @@ def test_sync_pull_conflict_resolved_with_cherry_pick_continue(repo: Repo, clien
     repo.assert_stacked("pr2", "pr1", ["pr2 c1"])
 
 
+def test_sync_pull_stopped_by_untracked_file_is_retried_after_cherry_pick_abort(
+        repo: Repo, client: StackClient) -> None:
+    repo.make_stack()
+    client.push()
+    repo.commit_on_forge("pr1", "d", "collab\n", "collab")
+    repo.commit_on_forge("pr1", "e", "collab 2\n", "collab 2")
+    repo.git("switch", "--quiet", "pr1")
+    repo.commit("a", "pr1 third\n", "pr1 c3")
+    repo.write("d", "untracked\n")
+
+    with pytest.raises(StackError, match="pulling upstream commits into pr1 stopped without a conflict") as failure:
+        client.sync()
+    assert "git cherry-pick --abort" in str(failure.value)
+    with pytest.raises(StackError, match="in progress"):
+        client.sync()
+
+    (repo.path / "d").unlink()
+    repo.git("cherry-pick", "--abort")
+    client.sync()
+    assert repo.own_commits("pr1", "main") == ["collab 2", "collab", "pr1 c3", "pr1 c2", "pr1 c1"]
+    assert repo.config("pr1", "stackPulled") == repo.git("rev-parse", "origin/pr1")
+
+
 def test_sync_pull_aborted_then_committed_over_is_not_pulled(repo: Repo, client: StackClient) -> None:
     repo.make_stack()
     client.push()

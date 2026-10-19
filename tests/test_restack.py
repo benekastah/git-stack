@@ -97,6 +97,27 @@ def test_conflict_resolved_with_rebase_continue_records_new_base(repo: Repo, cli
     repo.assert_stacked("pr3", "pr2", ["pr3 c1"])
 
 
+def test_restack_stopped_by_untracked_file_is_not_reported_as_conflict(repo: Repo, client: StackClient) -> None:
+    repo.make_stack()
+    repo.git("switch", "--quiet", "pr2")
+    repo.write("new", "pr2\n")
+    repo.git("add", "new")
+    repo.git("commit", "--quiet", "-m", "pr2 adds new")
+    repo.git("switch", "--quiet", "pr1")
+    repo.commit("a", "pr1 third\n", "pr1 c3")
+    repo.write("new", "untracked\n")
+
+    with pytest.raises(StackError, match="restacking pr2 stopped without a conflict") as failure:
+        client.restack()
+
+    assert "untracked" in str(failure.value)
+    (repo.path / "new").unlink()
+    repo.git("rebase", "--continue")
+    client.restack()
+    repo.assert_stacked("pr2", "pr1", ["pr2 adds new", "pr2 c1"])
+    repo.assert_stacked("pr3", "pr2", ["pr3 c1"])
+
+
 def test_aborted_restack_keeps_previous_base(repo: Repo, client: StackClient) -> None:
     repo.make_stack()
     old_base = repo.config("pr1", "stackBase")
