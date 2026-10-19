@@ -153,9 +153,13 @@ With the GitHub adapter:
 - A pull request that GitHub says was merged counts as merged once its merge
   commit is in the local parent branch (`sync` fetches it), even if the parent
   changed the merged lines since, or the merge changed them.
-- If GitHub can't be reached, git-stack warns and detects merges like the `git`
-  adapter does. `push` still pushes, but then fails without retargeting pull
-  requests or printing links.
+- If pull requests can't be looked up (e.g. `gh` isn't logged in, its token
+  isn't authorized for your organization's SSO, or GitHub can't be reached),
+  `sync`, `clean` and `push` stop before changing anything, since checking for
+  merges locally could untrack a branch whose pull request is still open, or
+  restack one that was merged. `info` and `restack` warn and check for merges
+  like the `git` adapter does. To run a command with the `git` adapter just
+  this once, use `git -c stack.adapter=git stack <command>`.
 
 ## Commands
 

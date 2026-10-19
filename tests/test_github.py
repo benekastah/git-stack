@@ -131,19 +131,17 @@ def test_merged_pr_from_someone_elses_branch_with_same_name_is_ignored(
     repo.assert_stacked("fix", "main", ["mine"])
 
 
-def test_push_after_failed_pr_lookup_leaves_prs_alone(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+def test_push_refuses_when_pr_lookup_fails(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
     repo.make_stack()
     client.push()
     repo.git("switch", "--quiet", "pr3")
     repo.commit("c", "pr3 again\n", "pr3 c2")
-    gh.clear_calls()
     gh.fail("api")
 
-    with pytest.raises(StackError, match="couldn't look up pull requests"):
+    with pytest.raises(StackError, match="couldn't look up pull requests on GitHub"):
         client.push()
 
-    assert repo.remote_subject("pr3") == "pr3 c2"
-    assert gh.calls("pr") == []
+    assert repo.remote_subject("pr3") == "pr3 c1"
 
 
 def test_push_retargets_pr_whose_parent_changed(
@@ -278,34 +276,45 @@ def test_open_pr_on_stacked_parent_falls_back_to_local_detection(
     repo.assert_stacked("pr3", "pr1", ["pr3 c1"])
 
 
-def test_failed_pr_lookup_falls_back_to_local_detection(
-        repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event]) -> None:
+@pytest.mark.parametrize("command", ["sync", "clean"])
+def test_refuses_to_change_anything_when_pr_lookup_fails(
+        repo: Repo, gh: FakeGitHub, client: StackClient, command: str) -> None:
     repo.make_stack()
     client.push()
     repo.squash_merge_on_forge("pr1")
+    old_main = repo.git("rev-parse", "origin/main")
     gh.fail("api")
 
-    client.sync()
+    with pytest.raises(StackError, match="couldn't look up pull requests on GitHub"):
+        getattr(client, command)()
 
-    assert any(isinstance(event, events.PullRequestLookupFailed) for event in emitted)
-    repo.assert_untracked("pr1")
-    repo.assert_stacked("pr2", "main", ["pr2 c1"])
+    assert repo.git("rev-parse", "origin/main") == old_main
+    assert repo.config("pr1", "stackParent") == "main"
+    assert repo.config("pr2", "stackParent") == "pr1"
 
 
-def test_malformed_pr_falls_back_to_local_detection(
-        repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event]) -> None:
+def test_refuses_to_sync_when_pr_lookup_answer_is_malformed(
+        repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
     repo.make_stack()
     client.push()
-    repo.squash_merge_on_forge("pr1")
     gh.add_pr(number=5, state="MERGED", headRefName="pr1", headRefOid=None, baseRefName="main",
               mergeCommit=None)
 
-    client.sync()
+    with pytest.raises(StackError, match="expected headRefOid to be a str"):
+        client.sync()
 
-    assert any(isinstance(event, events.PullRequestLookupFailed)
-               and "expected headRefOid to be a str" in event.error for event in emitted)
-    repo.assert_untracked("pr1")
-    repo.assert_stacked("pr2", "main", ["pr2 c1"])
+
+def test_info_falls_back_to_local_detection_when_pr_lookup_fails(
+        repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event]) -> None:
+    repo.make_stack()
+    client.push()
+    repo.squash_merge_on_forge("pr1")
+    repo.git("fetch", "--quiet", "--prune")
+    repo.git("branch", "--force", "main", "origin/main")
+    gh.fail("api")
+
+    assert repo.branch_info("pr1").status is BranchStatus.MERGED
+    assert any(isinstance(event, events.PullRequestLookupFailed) for event in emitted)
 
 
 def test_git_adapter_setting_leaves_github_alone(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:

@@ -21,25 +21,6 @@ next `push`) compared against the old parent branch, so its pull request shows
 every commit `main` gained since. Reviewers, and code owners of the files those
 commits touch, may be notified or requested in that window.
 
-## A failed GitHub lookup only warns
-
-If `gh` can't look up pull requests (e.g. its token isn't authorized for the
-organization's SSO, lacks a scope, was logged out, or hit a rate limit), each
-command warns once and carries on with the git adapter's local checks, as if
-`stack.adapter` were `git`:
-
-- A branch whose pull request was merged with changes of its own (a
-  maintainer's tweak, or a conflict resolved by "Update branch") doesn't look
-  merged, so `sync` restacks it, replaying its commits onto a parent that
-  already has them, which usually conflicts.
-- A branch on the default branch with an open pull request can look merged
-  (see "A branch can look merged when its parent made the same change"), so
-  `sync` untracks it, and deletes it with `-d local`.
-- `push` pushes, then fails without retargeting pull requests or printing
-  links to open them.
-
-The warning is easy to miss among `sync`'s other output.
-
 ## A reverted change can look merged
 
 A branch that was merged and then reverted on its parent still counts as
