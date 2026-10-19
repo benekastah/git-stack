@@ -87,6 +87,15 @@ class GitClient:
     def upstream_gone(self, branch: str) -> bool:
         return self.run("for-each-ref", "--format=%(upstream:track)", f"refs/heads/{branch}") == "[gone]"
 
+    def remotes(self) -> list[str]:
+        return self.run("remote").split()
+
+    def tracks_same_name(self, branch: str, remote: str) -> bool:
+        """Whether branch's upstream is the branch of the same name on remote,
+        which is how `git stack push` (or `git push -u`) sets it up."""
+        return (self.config_get(branch, "remote") == remote
+                and self.config_get(branch, "merge") == f"refs/heads/{branch}")
+
     def remote_branch(self, branch: str) -> tuple[str, str, str] | None:
         """Return (remote, ref, tip) for branch's upstream on a remote, or None."""
         remote = self.config_get(branch, "remote")

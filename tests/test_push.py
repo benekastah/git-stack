@@ -61,6 +61,19 @@ def test_push_force_refuses_when_remote_moved_since_last_fetch(repo: Repo, clien
     assert repo.remote_subject("pr1") == "collab"
 
 
+@pytest.mark.parametrize("force", [False, True])
+def test_push_refuses_to_overwrite_someone_elses_branch_of_the_same_name(
+        repo: Repo, client: StackClient, force: bool) -> None:
+    client.branch("fix")
+    repo.commit("a", "mine\n", "mine")
+    repo.push_someone_elses_branch("fix")
+
+    with pytest.raises(StackError, match="origin/fix exists but isn't fix's upstream"):
+        client.push(force=force)
+
+    assert repo.remote_subject("fix") == "theirs"
+
+
 def test_push_refuses_outside_a_stack(repo: Repo, client: StackClient) -> None:
     repo.make_stack()
     repo.git("switch", "--quiet", "main")

@@ -85,6 +85,17 @@ class Repo:
                  cwd=self.forge)
         self.git("push", "--quiet", "origin", branch, cwd=self.forge)
 
+    def push_someone_elses_branch(self, branch: str) -> None:
+        """Push a branch called branch, with a commit "theirs" on main, as a
+        coworker would, and fetch it."""
+        self.git("fetch", "--quiet", cwd=self.forge)
+        self.git("switch", "--quiet", "-C", branch, "origin/main", cwd=self.forge)
+        (self.forge / "theirs").write_text("theirs\n")
+        self.git("add", "theirs", cwd=self.forge)
+        self.git("commit", "--quiet", "-m", "theirs", cwd=self.forge)
+        self.git("push", "--quiet", "origin", branch, cwd=self.forge)
+        self.git("fetch", "--quiet")
+
     def remote_subject(self, branch: str) -> str:
         """Subject of the commit at <branch> on the remote itself."""
         return self.git("log", "-1", "--format=%s", branch, cwd=self.origin)

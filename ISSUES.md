@@ -2,24 +2,15 @@
 
 Most severe first.
 
-## A remote branch with the same name is assumed to be yours
+## A pull request from a same-named branch is assumed to be yours
 
-In a shared repository, someone else may already have pushed a branch with the
-name you give a new branch (e.g. `fix-tests`). git-stack treats it as yours:
-
-- `push` refuses because the remote branch "has commits that `<branch>`
-  doesn't", and tells you to run `sync` or pass `--force`. `sync` can't help,
-  since the new branch has no upstream to pull from, so `--force` is the only
-  way forward, and it overwrites the other person's branch and their pull
-  request.
-- With the GitHub adapter, their open pull request counts as the branch's, so
-  after a forced push `push` retargets it to your branch's parent. A merged one
-  of theirs counts too if its head descends from your branch's base, which can
-  make `info` and `sync` report your branch as merged (or merged with new
-  commits).
-
-`branch` doesn't check whether the name is taken on the remote. Prefixing
-branch names with your username (e.g. `paul/fix-tests`) avoids this.
+With the GitHub adapter, a branch's pull request is found by the branch's name
+alone, so in a shared repository a coworker's pull request from a branch with
+the same name (e.g. `fix-tests`) counts as yours. A merged one of theirs counts
+if its head descends from your branch's base, which can make `info` and `sync`
+report your branch as merged (or merged with new commits). An open one stops
+the git adapter's checks for a branch on the default branch, so a branch merged
+some other way isn't seen as merged.
 
 ## `sync` always moves the whole stack onto the latest root
 

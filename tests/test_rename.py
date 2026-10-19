@@ -67,3 +67,13 @@ def test_rename_to_existing_branch_changes_nothing(repo: Repo, client: StackClie
 
     assert repo.config("pr2", "stackParent") == "pr1"
     assert repo.git("branch", "--show-current") == "pr1"
+
+
+def test_rename_refuses_name_taken_on_remote(repo: Repo, client: StackClient) -> None:
+    repo.make_stack()
+    repo.push_someone_elses_branch("fix")
+
+    with pytest.raises(StackError, match="origin/fix already exists"):
+        client.rename("fix", old="pr2")
+
+    assert repo.git("branch", "--list", "pr2", "fix") == "pr2"
