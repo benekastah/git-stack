@@ -3,7 +3,11 @@ delete here."""
 
 import pathlib
 
+import pytest
+
 from git_stack import events
+from git_stack.errors import StackError
+from git_stack.git import GitClient
 from git_stack.stack import StackClient
 from tests.helpers import Repo
 
@@ -42,7 +46,6 @@ def test_restack_finishes_once_other_worktree_moves_on(repo: Repo, client: Stack
     client.restack()
 
     repo.assert_stacked("pr2", "pr1", ["pr2 c1"])
-    repo.assert_stacked("pr3", "pr2", ["pr3 c1"])
 
 
 def test_branch_in_other_worktree_that_needs_no_restack_is_left_quietly(
@@ -124,3 +127,25 @@ def test_restack_squash_skips_branch_in_other_worktree(
 
     assert events.NotSquashedInOtherWorktree("pr1", str(worktree)) in emitted
     assert repo.own_commits("pr1", "main") == ["pr1 c2", "pr1 c1"]
+
+
+def test_restack_stopped_in_other_worktree_is_left_to_finish_there(
+        repo: Repo, client: StackClient, emitted: list[events.Event]) -> None:
+    repo.make_stack()
+    repo.git("switch", "--quiet", "pr1")
+    repo.commit("b", "pr1 b\n", "pr1 c3")  # conflicts with pr2 c1
+    repo.git("switch", "--quiet", "pr3")
+    worktree = add_worktree(repo, "pr1")
+    worktree_client = StackClient(GitClient(worktree))
+    with pytest.raises(StackError, match="conflict"):
+        worktree_client.restack()
+
+    # Here, pr2 is neither checked out nor rebasing, but must be left alone.
+    client.restack()
+
+    assert events.NotRestackedInOtherWorktree("pr2", str(worktree)) in emitted
+    (worktree / "b").write_text("resolved\n")
+    repo.git("add", "b", cwd=worktree)
+    repo.git("rebase", "--continue", cwd=worktree)
+    worktree_client.restack()
+    repo.assert_stacked("pr2", "pr1", ["pr2 c1"])

@@ -158,7 +158,9 @@ class StackCore:
         A restack or pull that hasn't finished may also not have started yet,
         in another git-stack process. Unless forget_unfinished is set, which
         only commands that restack or pull themselves should do, it's left
-        pending for that process to record.
+        pending for that process to record. It's also left pending while
+        branch is checked out or being rebased in another worktree, where it
+        may have stopped on a conflict.
 
         Must not be called while a rebase or cherry-pick is in progress, since the
         branch hasn't been updated yet.
@@ -175,7 +177,8 @@ class StackCore:
         if pending_base is not None and git.is_ancestor(pending_base, branch):
             git.config_set(branch, PARENT_KEY, pending_parent)
             git.config_set(branch, BASE_KEY, pending_base)
-        elif not forget_unfinished:
+        elif not forget_unfinished or git.other_worktree_of(branch) is not None:
+            # Another worktree may have stopped partway through it.
             return
         # Only if they're unchanged, in case another process has started a new
         # restack since we read them.
@@ -195,7 +198,7 @@ class StackCore:
         if (pull_from and picked and git.is_ancestor(pull_from, branch)
                 and picked <= git.identities(f"{pull_from}..refs/heads/{branch}")):
             git.config_set(branch, PULLED_KEY, pending_pulled)
-        elif not forget_unfinished:
+        elif not forget_unfinished or git.other_worktree_of(branch) is not None:
             return
         git.config_unset(branch, PENDING_PULLED_KEY, pending_pulled)
         git.config_unset(branch, PENDING_PULL_FROM_KEY, pull_from)

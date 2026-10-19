@@ -76,22 +76,41 @@ class GitClient:
         return bool(self.run("diff", "--name-only", "--diff-filter=U"))
 
     def worktree_of(self, branch: str) -> str | None:
-        """The path of the worktree branch is checked out in, if any."""
+        """The path of the worktree branch is checked out in, if any, or that a
+        rebase of branch is in progress in. The rebase detaches that worktree's
+        HEAD, so `git worktree list` doesn't show the branch."""
         path = None
         for line in self.run("worktree", "list", "--porcelain").splitlines():
             if line.startswith("worktree "):
                 path = line.removeprefix("worktree ")
             elif line == f"branch refs/heads/{branch}":
                 return path
+            elif line == "detached" and path is not None and self.rebasing_in(path) == branch:
+                return path
+        return None
+
+    def rebasing_in(self, worktree: str) -> str | None:
+        """The branch a rebase in progress in worktree is rebasing, if any."""
+        git_dir = GitClient(worktree).run("rev-parse", "--absolute-git-dir", check=False)
+        if not git_dir:  # e.g. the worktree was deleted without `git worktree remove`
+            return None
+        for name in ("rebase-merge", "rebase-apply"):
+            try:
+                with open(os.path.join(git_dir, name, "head-name")) as f:
+                    head = f.read().strip()
+            except OSError:
+                continue
+            return head.removeprefix("refs/heads/") if head.startswith("refs/heads/") else None
         return None
 
     def other_worktree_of(self, branch: str) -> str | None:
-        """The path of the worktree branch is checked out in, if that isn't this
-        one. git won't check out, rebase or delete a branch that's checked out
-        elsewhere."""
-        if self.current_branch() == branch:
+        """The path of the worktree branch is checked out (or being rebased) in,
+        if that isn't this one. git won't check out, rebase or delete a branch
+        that's checked out or being rebased elsewhere."""
+        path = self.worktree_of(branch)
+        if path is None or os.path.realpath(path) == os.path.realpath(self.run("rev-parse", "--show-toplevel")):
             return None
-        return self.worktree_of(branch)
+        return path
 
     def upstream_gone(self, branch: str) -> bool:
         return self.run("for-each-ref", "--format=%(upstream:track)", f"refs/heads/{branch}") == "[gone]"

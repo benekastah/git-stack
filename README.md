@@ -562,9 +562,9 @@ stops without a conflict and says which file. Move or delete it, then run
 ## Branches checked out in other worktrees
 
 git won't rebase, check out or delete a branch that's checked out in another
-worktree, and doing it anyway would change files under whatever is using that
-worktree. So git-stack leaves such a branch alone, with a warning, and carries
-on with the rest:
+worktree, or that a rebase stopped partway through there, and doing it anyway
+would change files under whatever is using that worktree. So git-stack leaves
+such a branch alone, with a warning, and carries on with the rest:
 
 - A branch that needs restacking is skipped, along with the branches stacked
   on it. A branch that's already up to date isn't a problem.
@@ -573,6 +573,9 @@ on with the rest:
 - `sync -d local` and `clean -d local` stop tracking it once it's merged, but
   don't delete it.
 - A stack's root (e.g. `main`) isn't fast-forwarded.
+- A restack or pull of it that stopped on a conflict there stays pending, so
+  rerunning git-stack there after `git rebase --continue` (or
+  `git cherry-pick --continue`) still records it.
 
 Once that worktree is on another branch, rerun the command to restack or pull
 what it skipped. A merged branch it didn't delete is no longer tracked, so

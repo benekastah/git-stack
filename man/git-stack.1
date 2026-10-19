@@ -740,8 +740,9 @@ pull, \f[CR]git cherry\-pick \-\-abort\f[R] (git\(aqs
 applied) and rerun \f[CR]git stack sync\f[R].
 .SH BRANCHES CHECKED OUT IN OTHER WORKTREES
 git won\(aqt rebase, check out or delete a branch that\(aqs checked out
-in another worktree, and doing it anyway would change files under
-whatever is using that worktree.
+in another worktree, or that a rebase stopped partway through there, and
+doing it anyway would change files under whatever is using that
+worktree.
 So git\-stack leaves such a branch alone, with a warning, and carries on
 with the rest:
 .IP \(bu 2
@@ -757,6 +758,10 @@ it once it\(aqs merged, but don\(aqt delete it.
 .IP \(bu 2
 A stack\(aqs root (e.g.
 \f[CR]main\f[R]) isn\(aqt fast\-forwarded.
+.IP \(bu 2
+A restack or pull of it that stopped on a conflict there stays pending,
+so rerunning git\-stack there after \f[CR]git rebase \-\-continue\f[R]
+(or \f[CR]git cherry\-pick \-\-continue\f[R]) still records it.
 .PP
 Once that worktree is on another branch, rerun the command to restack or
 pull what it skipped.
