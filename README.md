@@ -14,7 +14,8 @@ git stack branch add-api        # a branch for PR 1
 # ...commit...
 git stack branch use-api        # a branch for PR 2, built on PR 1
 # ...commit...
-git stack push                  # push both, and print links to open their PRs
+git stack push                  # push both
+git stack prs                   # open draft PRs for both, each into the branch it's built on
 ```
 
 After that, day to day:
@@ -38,6 +39,7 @@ git stack push                  # update the PRs
 | build a PR on a different parent | `git stack restack --onto <parent>` |
 | use git-stack with branches I already have | `git stack track main <branch>...` |
 | set up stacks from my open PRs (e.g. in a new clone) | `git stack autocreate` |
+| open draft PRs for my stack | `git stack push`, then `git stack prs` |
 | rename a branch in a stack | `git stack rename <new>` |
 | clean up merged branches in every stack | `git stack clean` |
 | read all of this in the terminal | `git stack --help` |
@@ -484,7 +486,41 @@ git stack push --force          # drop commits on the remote you didn't pull
   `git branch --unset-upstream <branch>` to push it again.
 - With the [GitHub adapter](#github), points each open pull request at its
   stack parent (e.g. at `main` once the parent PR was merged), and prints a
-  link to open one for each branch that has none.
+  link to open one for each branch that has none. To open them all at once,
+  run `git stack prs`.
+
+### `git stack prs [--remote origin] [-n]`
+
+Open a draft pull request on GitHub for each branch in the current stack that
+has none, into its stack parent, bottom-up.
+
+**When would I use it?** After pushing a new stack, or new branches in one,
+to open their pull requests with the right bases, rather than following each
+link `push` prints.
+
+```sh
+git stack push
+git stack prs -n                # see what it would open
+git stack prs
+# opened draft pull request #12 for add-api into main: https://github.com/...
+# opened draft pull request #13 for use-api into add-api: https://github.com/...
+```
+
+- Each pull request's title is its branch's oldest commit's subject, and its
+  body the repository's pull request template, `pull_request_template.md`
+  (in any case) in `.github/`, the repository's root or `docs/`, as on the
+  remote's default branch. Templates in a `PULL_REQUEST_TEMPLATE/` directory
+  aren't used, as GitHub only uses them when asked for by name.
+- Branches that already have a pull request (open or merged), merged branches,
+  and branches with no commits of their own are skipped.
+- Refuses unless every branch in the stack has been pushed with
+  `git stack push` and matches its remote branch, so each pull request shows
+  what you have locally, as of your last fetch.
+- If opening one fails, it says which it had opened already; rerun it once the
+  problem is fixed to open the rest.
+- Needs the [GitHub adapter](#github).
+- `-n`/`--dry-run` prints the pull requests it would open, with their titles,
+  without opening them.
 
 ## Scripting
 
@@ -691,8 +727,8 @@ With the GitHub adapter:
   after its branch was rebased onto the new one, which would show every commit
   the new base gained since. (A parent that isn't on GitHub yet is pushed
   first.)
-- git-stack doesn't open pull requests. For each pushed branch without one,
-  `push` prints a link to GitHub's page for opening one against its stack
+- `git stack prs` opens draft pull requests; see its section. Otherwise, for
+  each pushed branch without one, `push` prints a link to GitHub's page for opening one against its stack
   parent, with the repository's pull request template filled in. (The link
   GitHub prints when a branch is first pushed targets the default branch
   instead; `push` retargets a pull request opened from it the next time it
@@ -702,15 +738,15 @@ With the GitHub adapter:
   changed the merged lines since, or the merge changed them.
 - If pull requests can't be looked up (e.g. `gh` isn't logged in, its token
   isn't authorized for your organization's SSO, or GitHub can't be reached),
-  `sync`, `clean` and `push` stop before changing anything, since checking for
-  merges locally could untrack a branch whose pull request is still open, or
-  restack one that was merged. `info` and `restack` warn and check for merges
-  like the `git` adapter does. To run a command with the `git` adapter just
+  `sync`, `clean`, `push` and `prs` stop before changing anything, since
+  checking for merges locally could untrack a branch whose pull request is
+  still open, or restack one that was merged. `info` and `restack` warn and
+  check for merges like the `git` adapter does. To run a command with the `git` adapter just
   this once, use `git -c stack.adapter=git stack <command>`.
 
 ## When does `sync` consider a branch merged?
 
-`sync`, `clean`, `restack`, `push` and `info` all use this check.
+`sync`, `clean`, `restack`, `push`, `prs` and `info` all use this check.
 
 With the [GitHub adapter](#github), a branch whose pull request GitHub says was
 merged counts as merged once the merge is in its local parent, unless the branch

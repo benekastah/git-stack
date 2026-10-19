@@ -22,7 +22,8 @@ git stack branch add\-api        \f[I]# a branch for PR 1\f[R]
 \f[I]# ...commit...\f[R]
 git stack branch use\-api        \f[I]# a branch for PR 2, built on PR 1\f[R]
 \f[I]# ...commit...\f[R]
-git stack push                  \f[I]# push both, and print links to open their PRs\f[R]
+git stack push                  \f[I]# push both\f[R]
+git stack prs                   \f[I]# open draft PRs for both, each into the branch it\(aqs built on\f[R]
 .EE
 .PP
 After that, day to day:
@@ -93,6 +94,11 @@ set up stacks from my open PRs (e.g.
 in a new clone)
 T}@T{
 \f[CR]git stack autocreate\f[R]
+T}
+T{
+open draft PRs for my stack
+T}@T{
+\f[CR]git stack push\f[R], then \f[CR]git stack prs\f[R]
 T}
 T{
 rename a branch in a stack
@@ -663,6 +669,45 @@ With the GitHub adapter, points each open pull request at its stack
 parent (e.g.
 at \f[CR]main\f[R] once the parent PR was merged), and prints a link to
 open one for each branch that has none.
+To open them all at once, run \f[CR]git stack prs\f[R].
+.SS \f[CR]git stack prs [\-\-remote origin] [\-n]\f[R]
+Open a draft pull request on GitHub for each branch in the current stack
+that has none, into its stack parent, bottom\-up.
+.PP
+\f[B]When would I use it?\f[R] After pushing a new stack, or new
+branches in one, to open their pull requests with the right bases,
+rather than following each link \f[CR]push\f[R] prints.
+.IP
+.EX
+git stack push
+git stack prs \-n                \f[I]# see what it would open\f[R]
+git stack prs
+\f[I]# opened draft pull request #12 for add\-api into main: https://github.com/...\f[R]
+\f[I]# opened draft pull request #13 for use\-api into add\-api: https://github.com/...\f[R]
+.EE
+.IP \(bu 2
+Each pull request\(aqs title is its branch\(aqs oldest commit\(aqs
+subject, and its body the repository\(aqs pull request template,
+\f[CR]pull_request_template.md\f[R] (in any case) in
+\f[CR].github/\f[R], the repository\(aqs root or \f[CR]docs/\f[R], as on
+the remote\(aqs default branch.
+Templates in a \f[CR]PULL_REQUEST_TEMPLATE/\f[R] directory aren\(aqt
+used, as GitHub only uses them when asked for by name.
+.IP \(bu 2
+Branches that already have a pull request (open or merged), merged
+branches, and branches with no commits of their own are skipped.
+.IP \(bu 2
+Refuses unless every branch in the stack has been pushed with
+\f[CR]git stack push\f[R] and matches its remote branch, so each pull
+request shows what you have locally, as of your last fetch.
+.IP \(bu 2
+If opening one fails, it says which it had opened already; rerun it once
+the problem is fixed to open the rest.
+.IP \(bu 2
+Needs the GitHub adapter.
+.IP \(bu 2
+\f[CR]\-n\f[R]/\f[CR]\-\-dry\-run\f[R] prints the pull requests it would
+open, with their titles, without opening them.
 .SH SCRIPTING
 These commands print one thing per line, for use in scripts, aliases,
 shell prompts and editors.
@@ -901,10 +946,10 @@ its old base after its branch was rebased onto the new one, which would
 show every commit the new base gained since.
 (A parent that isn\(aqt on GitHub yet is pushed first.)
 .IP \(bu 2
-git\-stack doesn\(aqt open pull requests.
-For each pushed branch without one, \f[CR]push\f[R] prints a link to
-GitHub\(aqs page for opening one against its stack parent, with the
-repository\(aqs pull request template filled in.
+\f[CR]git stack prs\f[R] opens draft pull requests; see its section.
+Otherwise, for each pushed branch without one, \f[CR]push\f[R] prints a
+link to GitHub\(aqs page for opening one against its stack parent, with
+the repository\(aqs pull request template filled in.
 (The link GitHub prints when a branch is first pushed targets the
 default branch instead; \f[CR]push\f[R] retargets a pull request opened
 from it the next time it runs.)
@@ -917,16 +962,16 @@ them.
 If pull requests can\(aqt be looked up (e.g.
 \f[CR]gh\f[R] isn\(aqt logged in, its token isn\(aqt authorized for your
 organization\(aqs SSO, or GitHub can\(aqt be reached), \f[CR]sync\f[R],
-\f[CR]clean\f[R] and \f[CR]push\f[R] stop before changing anything,
-since checking for merges locally could untrack a branch whose pull
-request is still open, or restack one that was merged.
+\f[CR]clean\f[R], \f[CR]push\f[R] and \f[CR]prs\f[R] stop before
+changing anything, since checking for merges locally could untrack a
+branch whose pull request is still open, or restack one that was merged.
 \f[CR]info\f[R] and \f[CR]restack\f[R] warn and check for merges like
 the \f[CR]git\f[R] adapter does.
 To run a command with the \f[CR]git\f[R] adapter just this once, use
 \f[CR]git \-c stack.adapter=git stack <command>\f[R].
 .SH WHEN DOES SYNC CONSIDER A BRANCH MERGED?
-\f[CR]sync\f[R], \f[CR]clean\f[R], \f[CR]restack\f[R], \f[CR]push\f[R]
-and \f[CR]info\f[R] all use this check.
+\f[CR]sync\f[R], \f[CR]clean\f[R], \f[CR]restack\f[R], \f[CR]push\f[R],
+\f[CR]prs\f[R] and \f[CR]info\f[R] all use this check.
 .PP
 With the GitHub adapter, a branch whose pull request GitHub says was
 merged counts as merged once the merge is in its local parent, unless
