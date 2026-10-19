@@ -16,5 +16,6 @@ of commits since rebased) aren't pulled in again.
 
 How a merge is detected depends on the adapter (the stack.adapter setting): the
 git adapter only looks at the repository, and the GitHub adapter asks GitHub
-about each branch's pull request first, finding it by the branch's name.
+about each branch's pull request first, finding it by the branch's name once the
+branch tracks the remote branch of that name.
 """

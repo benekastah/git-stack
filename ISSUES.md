@@ -2,16 +2,6 @@
 
 Most severe first.
 
-## A pull request from a same-named branch is assumed to be yours
-
-With the GitHub adapter, a branch's pull request is found by the branch's name
-alone, so in a shared repository a coworker's pull request from a branch with
-the same name (e.g. `fix-tests`) counts as yours. A merged one of theirs counts
-if its head descends from your branch's base, which can make `info` and `sync`
-report your branch as merged (or merged with new commits). An open one stops
-the git adapter's checks for a branch on the default branch, so a branch merged
-some other way isn't seen as merged.
-
 ## `sync` always moves the whole stack onto the latest root
 
 `sync` fast-forwards the root (e.g. `main`) and rebases every branch in the

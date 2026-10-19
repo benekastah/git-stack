@@ -58,7 +58,9 @@ def test_push_link_quotes_branch_names(
 def test_push_retargets_pr_opened_elsewhere_instead_of_linking(
         repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event]) -> None:
     repo.make_stack()
-    gh.add_pr(number=7, state="OPEN", headRefName="pr2", headRefOid=repo.git("rev-parse", "main"), baseRefName="main",
+    client.push()
+    emitted.clear()
+    gh.add_pr(number=7, state="OPEN", headRefName="pr2", headRefOid=repo.git("rev-parse", "pr2"), baseRefName="main",
               mergeCommit=None)
 
     client.push()
@@ -102,6 +104,8 @@ def test_merged_pr_of_earlier_branch_with_same_name_is_ignored(
               mergeCommit={"oid": old_pr1})
     repo.make_stack()
     repo.git("switch", "--quiet", "pr1")
+    client.push()
+    emitted.clear()
 
     client.sync()
     client.push()
@@ -111,14 +115,34 @@ def test_merged_pr_of_earlier_branch_with_same_name_is_ignored(
     assert events.NoPullRequest("pr1", compare_url("main", "pr1")) in emitted
 
 
+def test_merged_pr_from_someone_elses_branch_with_same_name_is_ignored(
+        repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event]) -> None:
+    client.branch("fix")
+    repo.commit("a", "mine\n", "mine")
+    repo.push_someone_elses_branch("fix")
+    theirs = repo.git("rev-parse", "origin/fix")
+    repo.git("push", "--quiet", "origin", "fix:main", cwd=repo.forge)
+    gh.add_pr(number=9, state="MERGED", headRefName="fix", headRefOid=theirs, baseRefName="main",
+              mergeCommit={"oid": theirs})
+
+    client.sync()
+
+    assert not any(isinstance(event, events.MergedWithNewCommits) for event in emitted)
+    repo.assert_stacked("fix", "main", ["mine"])
+
+
 def test_push_after_failed_pr_lookup_leaves_prs_alone(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
     repo.make_stack()
+    client.push()
+    repo.git("switch", "--quiet", "pr3")
+    repo.commit("c", "pr3 again\n", "pr3 c2")
+    gh.clear_calls()
     gh.fail("api")
 
     with pytest.raises(StackError, match="couldn't look up pull requests"):
         client.push()
 
-    assert repo.git("branch", "--list", "pr3", cwd=repo.origin) != ""
+    assert repo.remote_subject("pr3") == "pr3 c2"
     assert gh.calls("pr") == []
 
 
