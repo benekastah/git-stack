@@ -763,7 +763,8 @@ won't work:
 
 ## Development
 
-Run every check (mypy in strict mode, then the tests) with:
+Run every check (shellcheck on the shell scripts, mypy in strict mode, then
+the tests) with:
 
 ```sh
 ./check.sh
