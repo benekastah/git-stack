@@ -1,5 +1,6 @@
 #!/bin/sh
-# Run every check: the type checker, then the tests.
+# Run every check: shellcheck on the shell scripts, the type checker, then the
+# tests.
 #
 # The first run creates .venv with the dev dependencies from pyproject.toml,
 # and later runs reinstall them whenever pyproject.toml changes.
@@ -17,5 +18,6 @@ if [ ! -f .venv/installed ] || [ pyproject.toml -nt .venv/installed ]; then
     touch .venv/installed
 fi
 
+git ls-files -z '*.sh' 'git_hooks/*' | xargs -0 .venv/bin/shellcheck
 .venv/bin/python -m mypy
 .venv/bin/python -m pytest "$@"

@@ -1,0 +1,22 @@
+#!/bin/sh
+# Regenerate man/git-stack.1 when a commit changes README.md (or how the page
+# is built), and add it to the same commit. The page is built from the staged
+# README, so it matches what's committed even if only part of the README is.
+#
+# dev-install.sh makes git use this directory's hooks, with
+# `git config core.hooksPath git_hooks`.
+
+set -eu
+
+if ! git diff --cached --quiet -- README.md man/git-stack.lua man/build.py; then
+    if [ ! -x .venv/bin/python ]; then
+        echo "pre-commit: README.md changed, but regenerating man/git-stack.1 needs .venv;" \
+             "run ./check.sh once to create it" >&2
+        exit 1
+    fi
+    readme=$(mktemp)
+    trap 'rm -f "$readme"' EXIT
+    git show :README.md > "$readme"
+    .venv/bin/python man/build.py --readme "$readme"
+    git add man/git-stack.1
+fi
