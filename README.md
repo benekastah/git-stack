@@ -176,6 +176,11 @@ main
 
 Create `<name>` on top of the current branch, switch to it, and track it.
 
+**When would I use it?** Whenever you start a new branch for a pull request,
+use this instead of `git switch -c`, so git-stack knows what it's built on. Run
+it from `main` for a change that stands on its own, or from another PR's branch
+for a change that depends on that PR before it's merged.
+
 ```sh
 git switch main
 git stack branch add-api        # stacked on main
@@ -193,6 +198,13 @@ git stack branch use-api        # stacked on add-api
 
 Track existing branches (default: the current branch) as a stack on `<parent>`,
 each stacked on the one before it.
+
+**When would I use it?** When you have branches that git-stack doesn't know
+about yet: made with plain `git switch -c`, or from before you installed
+git-stack. Also to record a different parent or base for a branch that's
+already tracked without rebasing it, e.g. after rebasing it by hand. To move a
+branch onto another parent and rebase it in one go, use
+`git stack restack --onto` instead.
 
 ```sh
 git stack track main            # stack the current branch on main
@@ -219,6 +231,11 @@ entry, it's their merge-base.
 Stop tracking a branch (default: the current one), without deleting it or
 changing its commits.
 
+**When would I use it?** When you want git-stack to stop managing a branch but
+keep it around: a long-lived branch you don't want `sync` to rebase, or a pull
+request you abandoned but might come back to. You don't need it for merged
+branches, since `sync` and `clean` untrack those for you.
+
 ```sh
 git stack untrack experiment
 ```
@@ -234,6 +251,10 @@ git stack untrack experiment
 Rename a branch (default: the current one) and keep the branches stacked on it
 on it.
 
+**When would I use it?** When you want to rename a branch in a stack. A plain
+`git branch -m` leaves the branches stacked on it pointing at the old name, so
+they'd show up with a missing parent.
+
 ```sh
 git stack rename api-v2                 # rename the current branch
 git stack rename add-api api-v2
@@ -248,6 +269,10 @@ git stack rename add-api api-v2
 ### `git stack info`
 
 Show every tracked stack as a tree.
+
+**When would I use it?** When you want to see your stacks and what needs doing:
+which branches depend on which, which need a restack, and which were merged.
+It's a good first step before `restack`, `sync` or `push`.
 
 ```sh
 git stack info
@@ -274,6 +299,13 @@ git stack info
 ### `git stack restack [--onto <parent>] [--squash]`
 
 Rebase every branch in the current stack onto its parent, bottom-up.
+
+**When would I use it?** After you commit to a branch that has other branches
+stacked on it, e.g. to address review feedback on PR 1, so the branches above
+it include the change. It works locally, without fetching or pushing. With
+`--onto`, when a branch should be stacked somewhere else, e.g. PR 2 turns out
+not to need PR 1. With `--squash`, when a restack keeps stopping on the same
+conflict, commit after commit.
 
 ```sh
 git stack restack
@@ -307,6 +339,11 @@ Bring the current stack up to date with the remote:
 4. Restack the rest.
 5. Pull in commits others pushed to its branches (see
    [Pulling commits others pushed](#pulling-commits-others-pushed)).
+
+**When would I use it?** Your everyday command for catching up with the remote:
+after a pull request in the stack was merged, when `main` has moved on and you
+want the stack on top of it, or when someone else pushed to one of your
+branches. Follow it with `git stack push`.
 
 ```sh
 git stack sync
@@ -343,6 +380,11 @@ git stack sync -d both          # ...and their remote branches
 Fetch with `--prune`, fast-forward every stack's root, and stop tracking merged
 branches in every stack, moving their children onto their parent.
 
+**When would I use it?** For housekeeping across every stack at once, e.g.
+after pull requests in several stacks were merged, without having to resolve
+conflicts in stacks you're not working on right now. For the stack you're
+working on, use `sync`.
+
 ```sh
 git stack clean
 git stack clean -d local
@@ -358,6 +400,12 @@ git stack clean -d local
 
 Force-push (with lease) every branch in the current stack, or in `<branch>`'s,
 and set each one's upstream.
+
+**When would I use it?** Whenever the remote should match your local branches:
+after committing, and after a `restack` or `sync`. Use it instead of
+`git push`, since restacking rewrites the branches' history. It also keeps pull
+requests pointed at the right base, and records what it pushed, so `sync` won't
+pull the old copies of your rebased commits back in.
 
 ```sh
 git stack push
