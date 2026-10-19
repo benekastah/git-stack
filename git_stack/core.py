@@ -333,9 +333,17 @@ class StackCore:
                               "--right-only", f"refs/heads/{branch}...{upstream_tip}").split()
         return [commit for commit in new_patches if commit in unknown]
 
-    def pull_upstream(self, branch: str, parent: str) -> None:
-        """Cherry-pick commits that others pushed to branch's upstream onto branch."""
+    def pull_upstream(self, branch: str, parent: str, remote: str) -> None:
+        """Cherry-pick commits that others pushed to branch's upstream onto branch.
+
+        Only an upstream that's the branch of the same name on remote, as
+        `git stack push` sets it, is pulled from. Any other (e.g. origin/main,
+        for a branch made with `git switch -c <branch> origin/main`) isn't
+        branch's own remote branch, and its commits aren't branch's to take.
+        """
         git = self.git
+        if not git.tracks_same_name(branch, remote):
+            return
         upstream_tip = git.rev(f"{branch}@{{upstream}}")
         if upstream_tip is None:
             return

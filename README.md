@@ -733,6 +733,11 @@ upstream that it doesn't already have (fast-forwarding when it can). Commits
 that are older versions of your own rebased commits, merge commits (e.g.
 GitHub's "Update branch"), and changes already in the parent are skipped.
 
+Only an upstream that's the remote branch of the same name, as `git stack push`
+sets it, is pulled from. A branch made with `git switch -c <branch> origin/main`
+has `origin/main` as its upstream, and `main`'s commits aren't the branch's to
+take, so nothing is pulled into it until `git stack push` gives it its own.
+
 If a pull stops on a conflict and you abort it (or skip some of the commits),
 the commits you didn't take aren't counted as pulled: the next `sync` offers
 them again, and `push` refuses to drop them. To drop them anyway, run

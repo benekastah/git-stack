@@ -950,6 +950,13 @@ commits (e.g.
 GitHub\(aqs \(dqUpdate branch\(dq), and changes already in the parent
 are skipped.
 .PP
+Only an upstream that\(aqs the remote branch of the same name, as
+\f[CR]git stack push\f[R] sets it, is pulled from.
+A branch made with \f[CR]git switch \-c <branch> origin/main\f[R] has
+\f[CR]origin/main\f[R] as its upstream, and \f[CR]main\f[R]\(aqs commits
+aren\(aqt the branch\(aqs to take, so nothing is pulled into it until
+\f[CR]git stack push\f[R] gives it its own.
+.PP
 If a pull stops on a conflict and you abort it (or skip some of the
 commits), the commits you didn\(aqt take aren\(aqt counted as pulled:
 the next \f[CR]sync\f[R] offers them again, and \f[CR]push\f[R] refuses

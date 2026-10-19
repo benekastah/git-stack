@@ -507,7 +507,7 @@ class StackClient(StackCore):
             if not restacked:
                 skipped.add(branch)
                 continue
-            self.pull_upstream(branch, parent)
+            self.pull_upstream(branch, parent, remote)
             upstream_tip = git.rev(f"{branch}@{{upstream}}")
             if upstream_tip and upstream_tip != git.rev(branch):
                 unpushed.append(branch)

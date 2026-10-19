@@ -292,6 +292,18 @@ def test_sync_pulls_commits_pushed_by_others_into_diverged_branch(repo: Repo, cl
     assert repo.remote_subject("pr1") == "collab"
 
 
+def test_sync_doesnt_pull_from_upstream_of_another_name(repo: Repo, client: StackClient) -> None:
+    # As `git switch -c pr2 origin/main` would set it.
+    repo.make_stack()
+    repo.commit_on_forge("main", "d", "main\n", "main c1")
+    repo.git("fetch", "--quiet")
+    repo.git("branch", "--quiet", "--set-upstream-to=origin/main", "pr2")
+
+    client.sync()
+
+    repo.assert_stacked("pr2", "pr1", ["pr2 c1"])
+
+
 def test_sync_pull_conflict_resolved_with_cherry_pick_continue(repo: Repo, client: StackClient) -> None:
     repo.make_stack()
     client.push()
