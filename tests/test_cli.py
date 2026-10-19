@@ -23,7 +23,7 @@ def stack() -> Any:
     stack.branch.return_value = "main"
     stack.track.return_value = []
     stack.autocreate.return_value = []
-    stack.untrack.return_value = Untracked("pr1", children=())
+    stack.untrack.return_value = [Untracked("pr1", children=())]
     stack.rename.return_value = Renamed("old", "new", children=(), upstream=None)
     stack.info.return_value = []
     stack.sync.return_value = []
@@ -43,8 +43,8 @@ def stack() -> Any:
      {"base": "abc123"}),
     (["autocreate"], "autocreate", (), {"remote": "origin", "dry_run": False}),
     (["autocreate", "-n", "--remote", "upstream"], "autocreate", (), {"remote": "upstream", "dry_run": True}),
-    (["untrack"], "untrack", (None,), {}),
-    (["untrack", "pr1"], "untrack", ("pr1",), {}),
+    (["untrack"], "untrack", ([],), {}),
+    (["untrack", "pr1", "pr2"], "untrack", (["pr1", "pr2"],), {}),
     (["rename", "new"], "rename", ("new",), {"old": None}),
     (["rename", "old", "new"], "rename", ("new",), {"old": "old"}),
     (["info"], "info", (), {}),
@@ -197,7 +197,7 @@ def test_push_says_when_everything_looks_merged(stack: Any, capsys: pytest.Captu
 
 
 def test_untrack_prints_branches_left_on_it(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
-    stack.untrack.return_value = Untracked("pr1", children=("pr2", "pr2b"))
+    stack.untrack.return_value = [Untracked("pr1", children=("pr2", "pr2b"))]
 
     main(["untrack", "pr1"], stack=stack)
 

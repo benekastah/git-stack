@@ -208,10 +208,10 @@ git stack autocreate
 - `-n`/`--dry-run` prints what it would do without changing anything (besides
   fetching).
 
-### `git stack untrack [<branch>]`
+### `git stack untrack [<branch>...]`
 
-Stop tracking a branch (default: the current one), without deleting it or
-changing its commits.
+Stop tracking branches (default: the current one), without deleting them or
+changing their commits.
 
 **When would I use it?** When you want git-stack to stop managing a branch but
 keep it around: a long-lived branch you don't want `sync` to rebase, or a pull
@@ -220,6 +220,7 @@ branches, since `sync` and `clean` untrack those for you.
 
 ```sh
 git stack untrack experiment
+git stack untrack old-poc old-poc-2
 ```
 
 - Branches stacked on it stay on it, so it becomes the root of their stack,
@@ -227,6 +228,7 @@ git stack untrack experiment
   them elsewhere, switch to each and run `git stack restack --onto <parent>`.
 - To stop tracking a branch that was merged, use `sync` or `clean`, which also
   move its children down.
+- Nothing is untracked unless every branch is tracked.
 
 ### `git stack rename [<old>] <new>`
 

@@ -277,19 +277,28 @@ class StackClient(StackCore):
             raise StackError(f"{parent} isn't a local branch; branches can only be stacked on local "
                              f"branches (e.g. branch, not origin/branch)")
 
-    def untrack(self, branch: str | None = None) -> Untracked:
-        """Stop tracking branch (default: the current branch), leaving the branch
-        itself alone. Branches stacked on it stay on it. Returns an Untracked.
+    def untrack(self, branches: Iterable[str] = ()) -> list[Untracked]:
+        """Stop tracking branches (default: the current branch), leaving the
+        branches themselves alone. Branches stacked on them stay on them.
+        Returns an Untracked for each branch.
+
+        Nothing is untracked unless every branch is tracked, so a bad argument
+        doesn't leave some of them untracked.
         """
         self.ensure_no_operation_in_progress()
         self.settle_all()
         parents = self.tracked_branches()
-        if branch is None:
-            branch = self.current_stacked_branch(parents, "untrack", hint="name the branch to untrack")
-        elif branch not in parents:
-            raise StackError(f"{branch} isn't in a stack")
-        self.forget(branch)
-        return Untracked(branch, tuple(child for child, parent in sorted(parents.items()) if parent == branch))
+        branches = list(branches) or [self.current_stacked_branch(parents, "untrack",
+                                                                 hint="name the branches to untrack")]
+        for branch in branches:
+            if branch not in parents:
+                raise StackError(f"{branch} isn't in a stack")
+        for branch in branches:
+            self.forget(branch)
+        # Children untracked along with their parent aren't still stacked on it.
+        return [Untracked(branch, tuple(child for child, parent in sorted(parents.items())
+                                        if parent == branch and child not in branches))
+                for branch in dict.fromkeys(branches)]
 
     def rename(self, new: str, old: str | None = None) -> Renamed:
         """Rename old (default: the current branch) to new, keeping the branches

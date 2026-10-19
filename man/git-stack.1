@@ -313,9 +313,9 @@ parent\(aqs old commits; set it with
 .IP \(bu 2
 \f[CR]\-n\f[R]/\f[CR]\-\-dry\-run\f[R] prints what it would do without
 changing anything (besides fetching).
-.SS \f[CR]git stack untrack [<branch>]\f[R]
-Stop tracking a branch (default: the current one), without deleting it
-or changing its commits.
+.SS \f[CR]git stack untrack [<branch>...]\f[R]
+Stop tracking branches (default: the current one), without deleting them
+or changing their commits.
 .PP
 \f[B]When would I use it?\f[R] When you want git\-stack to stop managing
 a branch but keep it around: a long\-lived branch you don\(aqt want
@@ -326,6 +326,7 @@ You don\(aqt need it for merged branches, since \f[CR]sync\f[R] and
 .IP
 .EX
 git stack untrack experiment
+git stack untrack old\-poc old\-poc\-2
 .EE
 .IP \(bu 2
 Branches stacked on it stay on it, so it becomes the root of their
@@ -336,6 +337,8 @@ To move them elsewhere, switch to each and run
 .IP \(bu 2
 To stop tracking a branch that was merged, use \f[CR]sync\f[R] or
 \f[CR]clean\f[R], which also move its children down.
+.IP \(bu 2
+Nothing is untracked unless every branch is tracked.
 .SS \f[CR]git stack rename [<old>] <new>\f[R]
 Rename a branch (default: the current one) and keep the branches stacked
 on it on it.
