@@ -158,3 +158,9 @@ class FakeGitHub:
         state = self.load()
         state["fail"] = list(commands)
         self.save(state)
+
+    def fail_opening(self, *heads: str) -> None:
+        """Make gh fail to open pull requests of the branches heads."""
+        state = self.load()
+        state["fail_heads"] = list(heads)
+        self.save(state)

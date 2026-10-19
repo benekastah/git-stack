@@ -11,8 +11,8 @@ import pytest
 from git_stack.cli import main
 from git_stack.errors import StackError
 from git_stack.git import GitClient
-from git_stack.stack import (AutocreateAction, Autocreated, BranchInfo, BranchStatus, Renamed, StackClient,
-                             Tracked, Untracked)
+from git_stack.stack import (AutocreateAction, Autocreated, BranchInfo, BranchStatus, PullRequestAction,
+                             PullRequestStep, Renamed, StackClient, Tracked, Untracked)
 
 
 @pytest.fixture
@@ -28,6 +28,7 @@ def stack() -> Any:
     stack.info.return_value = []
     stack.sync.return_value = []
     stack.push.return_value = ["pr1"]
+    stack.prs.return_value = []
     stack.up.return_value = "pr2"
     stack.down.return_value = "main"
     stack.parent.return_value = "main"
@@ -62,6 +63,8 @@ def stack() -> Any:
     (["push"], "push", (None,), {"remote": "origin", "force": False}),
     (["push", "pr1", "--remote", "upstream"], "push", ("pr1",), {"remote": "upstream", "force": False}),
     (["push", "--force"], "push", (None,), {"remote": "origin", "force": True}),
+    (["prs"], "prs", (), {"remote": "origin", "dry_run": False}),
+    (["prs", "-n", "--remote", "upstream"], "prs", (), {"remote": "upstream", "dry_run": True}),
     (["parent"], "parent", (None,), {}),
     (["parent", "pr1"], "parent", ("pr1",), {}),
     (["base"], "base", (None,), {}),
@@ -104,6 +107,32 @@ def test_autocreate_without_pull_requests_says_so(stack: Any, capsys: pytest.Cap
     main(["autocreate"], stack=stack)
 
     assert capsys.readouterr().out == "you have no open pull requests from branches in this repository\n"
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_prs_says_what_it_did_for_each_branch(
+        stack: Any, capsys: pytest.CaptureFixture[str], dry_run: bool) -> None:
+    url = "https://github.com/acme/widgets/pull/1"
+    stack.prs.return_value = [
+        PullRequestStep("pr1", "main", PullRequestAction.OPEN, "Add the API", *((None, None) if dry_run else (1, url))),
+        PullRequestStep("pr2", "pr1", PullRequestAction.EXISTS, number=7),
+        PullRequestStep("pr3", "pr2", PullRequestAction.NO_COMMITS),
+    ]
+
+    main(["prs", *(["--dry-run"] if dry_run else [])], stack=stack)
+
+    assert capsys.readouterr().out.splitlines() == [
+        "would open a draft pull request for pr1 into main: Add the API" if dry_run
+        else f"opened draft pull request #1 for pr1 into main: {url}",
+        "pr2 already has pull request #7",
+        "skipping pr3: it has no commits of its own",
+    ]
+
+
+def test_prs_says_when_everything_looks_merged(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
+    main(["prs"], stack=stack)
+
+    assert capsys.readouterr().out == "nothing to open: every branch in the current stack looks merged\n"
 
 
 def test_stack_error_is_printed_and_fails(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:

@@ -83,6 +83,27 @@ class Autocreated:
     reason: str | None = None
 
 
+class PullRequestAction(enum.Enum):
+    OPEN = "open"
+    EXISTS = "exists"  # it already has a pull request, open or merged
+    NO_COMMITS = "no-commits"  # GitHub won't open a pull request without changes
+
+
+@dataclass(frozen=True)
+class PullRequestStep:
+    """What prs did, or in a dry run would do, for branch, stacked on parent.
+
+    title is the pull request's title (OPEN). number is its number, and url
+    its URL, for one that was opened (OPEN, unless a dry run) or already
+    existed (EXISTS, number only)."""
+    branch: str
+    parent: str
+    action: PullRequestAction
+    title: str | None = None
+    number: int | None = None
+    url: str | None = None
+
+
 class StackClient(StackCore):
     """The operations behind each `git stack` command.
 
@@ -634,3 +655,61 @@ class StackClient(StackCore):
             raise StackError(f"pushed, but updating pull requests failed (set {ADAPTER_SETTING} to git "
                              f"to stop using GitHub): {e}")
         return branches
+
+    def prs(self, remote: str = DEFAULT_REMOTE, dry_run: bool = False) -> list[PullRequestStep]:
+        """Open a draft pull request into its stack parent for each unmerged
+        branch in the current stack that has none, bottom-up. Its title is the
+        branch's oldest commit's subject, and its body the repository's pull
+        request template.
+
+        Refuses unless every unmerged branch in the stack was pushed with `git
+        stack push` and matches its remote branch, so each pull request shows
+        what's local. Returns a PullRequestStep for each branch. With dry_run, nothing
+        is opened.
+        """
+        git = self.git
+        self.ensure_no_operation_in_progress()
+        self.settle_all()
+        parents = self.tracked_branches()
+        branch = self.current_stacked_branch(parents, "open pull requests for")
+        adapter = make_adapter(self, remote, fetch=True)
+        if not isinstance(adapter, GitHubAdapter):
+            raise StackError(f"prs opens pull requests on GitHub, but {remote} isn't a GitHub repository, gh "
+                             f"isn't installed, or {ADAPTER_SETTING} is git")
+        adapter.ensure_available()
+        branches = self.skip_merged(stack_of(branch, parents), parents, adapter)
+        unpushed = [b for b in branches
+                    if not git.tracks_same_name(b, remote) or git.rev(f"refs/remotes/{remote}/{b}") != git.tip(b)]
+        if unpushed:
+            raise StackError(f"these branches aren't pushed, or differ from their remote branches: "
+                             f"{', '.join(unpushed)}; run `git stack push` first")
+        root = stack_root(branch, parents)
+        if git.rev(f"refs/remotes/{remote}/{root}") is None:
+            raise StackError(f"{root} isn't on {remote}, so pull requests can't merge into it")
+
+        prs = adapter.pull_requests()
+        template = adapter.pull_request_template() or ""
+        steps: list[PullRequestStep] = []
+        for b in branches:
+            parent = parents[b]
+            pr = prs.get(b)
+            if pr is not None:
+                steps.append(PullRequestStep(b, parent, PullRequestAction.EXISTS, number=pr.number))
+                continue
+            base = self.recorded_base(b, parent)
+            subjects = git.run("log", "--reverse", "--format=%s", f"{base}..refs/heads/{b}").splitlines()
+            if not subjects:
+                steps.append(PullRequestStep(b, parent, PullRequestAction.NO_COMMITS))
+                continue
+            title = subjects[0]
+            if dry_run:
+                steps.append(PullRequestStep(b, parent, PullRequestAction.OPEN, title=title))
+                continue
+            try:
+                number, url = adapter.open_pull_request(b, parent, title, template)
+            except StackError as e:
+                opened = ", ".join(f"#{s.number} for {s.branch}" for s in steps if s.action is PullRequestAction.OPEN)
+                raise StackError(f"opening a pull request for {b} failed"
+                                 f"{f' (after opening {opened})' if opened else ''}: {e}")
+            steps.append(PullRequestStep(b, parent, PullRequestAction.OPEN, title=title, number=number, url=url))
+        return steps

@@ -20,6 +20,10 @@ PR_FIELDS = "number state isCrossRepository headRefOid baseRefName mergeCommit {
 # How many of a branch's pull requests to look at, newest first. More than one
 # only if its name was reused, or a pull request was closed and replaced.
 PRS_PER_BRANCH = 10
+# Where GitHub looks for a repository's pull request template, matching names
+# case-insensitively. GitHub doesn't say which wins if there are several.
+TEMPLATE_DIRECTORIES = (".github", "", "docs")
+TEMPLATE_NAMES = ("pull_request_template.md", "pull_request_template.txt")
 
 
 T = TypeVar("T")
@@ -103,8 +107,8 @@ class GitHubAdapter(GitAdapter):
         self._pull_requests_lock = threading.Lock()
         self._default_branch: str | None = None
 
-    def gh(self, *args: str) -> str:
-        result = subprocess.run(["gh", *args], capture_output=True, text=True)
+    def gh(self, *args: str, input: str | None = None) -> str:
+        result = subprocess.run(["gh", *args], capture_output=True, text=True, input=input)
         if result.returncode != 0:
             raise StackError(f"gh {' '.join(args)} failed:\n{result.stderr.strip()}")
         return result.stdout.strip()
@@ -287,6 +291,32 @@ class GitHubAdapter(GitAdapter):
         self.gh("pr", "edit", str(pr.number), "--repo", self.repo, "--base", base)
         prs[branch] = replace(pr, base=base)
         self.core.emit(events.PullRequestRetargeted(branch, pr.number, base))
+
+    def pull_request_template(self) -> str | None:
+        """The repository's pull request template, as GitHub fills it in: from
+        the remote's default branch, ignoring the named templates in a
+        PULL_REQUEST_TEMPLATE directory. None if it has none."""
+        self.ensure_available()
+        if self._default_branch is None:
+            return None
+        ref = f"refs/remotes/{self.remote}/{self._default_branch}"
+        for directory in TEMPLATE_DIRECTORIES:
+            listing = self.git.run("ls-tree", "-z", f"{ref}:{directory}", check=False)
+            for entry in filter(None, listing.split("\0")):
+                info, _, name = entry.partition("\t")
+                _, kind, oid = info.split()
+                if kind == "blob" and name.lower() in TEMPLATE_NAMES:
+                    return self.git.run("cat-file", "blob", oid)
+        return None
+
+    def open_pull_request(self, branch: str, base: str, title: str, body: str) -> tuple[int, str]:
+        """Open a draft pull request of branch into base. Returns its number and URL."""
+        url = self.gh("pr", "create", "--repo", self.repo, "--draft", "--base", base, "--head", branch,
+                      "--title", title, "--body-file", "-", input=body).splitlines()[-1]
+        match = re.search(r"/pull/(\d+)$", url)
+        if not match:
+            raise StackError(f"couldn't tell which pull request gh opened for {branch} from {url!r}")
+        return int(match.group(1)), url
 
     def compare_url(self, base: str, head: str) -> str:
         """The page for opening a pull request of head into base, with the

@@ -3,7 +3,7 @@ import os
 import sys
 
 import git_stack
-from git_stack.commands import (autocreate, base, branch, clean, down, info, parent, push, rename, restack,
+from git_stack.commands import (autocreate, base, branch, clean, down, info, parent, prs, push, rename, restack,
                                 show_stack, sync, track, untrack, up)
 from git_stack.errors import StackError
 from git_stack.git import GitClient
@@ -11,7 +11,7 @@ from git_stack.output import print_event
 from git_stack.stack import StackClient
 
 # In the order `git stack -h` lists them.
-COMMANDS = (branch, track, autocreate, untrack, rename, info, up, down, restack, sync, clean, push, parent,
+COMMANDS = (branch, track, autocreate, untrack, rename, info, up, down, restack, sync, clean, push, prs, parent,
             base, show_stack)
 
 
