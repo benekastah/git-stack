@@ -382,7 +382,9 @@ git stack restack --squash              # squash each branch first, then restack
 - `--squash` first squashes each branch in the current stack into one commit,
   keeping all the messages and the oldest commit's author and date, so a
   conflict is resolved once per branch instead of once per commit. It commits
-  with `--no-verify`, so commit-msg hooks don't run.
+  as `git commit` does, running your pre-commit and commit-msg hooks and
+  signing if you've set that up. If the commit fails (e.g. a hook rejects it),
+  that branch is left as it was.
 - Merged branches are skipped and their children restacked onto their parent;
   `sync` or `clean` removes them from the stack.
 - Doesn't fetch or push. Needs a clean worktree, and refuses to run outside a

@@ -1,3 +1,5 @@
+import os
+import tempfile
 from collections.abc import Callable, Iterable
 from typing import TypeAlias
 
@@ -228,10 +230,20 @@ class StackCore:
         self.emit(events.Squashing(branch, len(commits)))
         message = "\n\n".join(git.run("show", "--no-patch", "--format=%B", c) for c in commits)
         author, date = git.run("show", "--no-patch", "--format=%an <%ae>%x00%aI", commits[0]).split("\0")
+        tip = git.tip(branch)
         git.switch(branch)
         git.run("reset", "--quiet", "--soft", base)
-        git.run("commit", "--quiet", "--no-verify", "--cleanup=whitespace",
-                f"--author={author}", f"--date={date}", "--file=-", input=message)
+        # Committed like `git commit` would be, with the user's hooks, and their
+        # terminal for anything that prompts (e.g. a GPG passphrase).
+        with tempfile.TemporaryDirectory() as directory:
+            message_file = os.path.join(directory, "message")
+            with open(message_file, "w") as f:
+                f.write(message)
+            committed = git.passthrough("commit", "--quiet", "--cleanup=whitespace", f"--author={author}",
+                                        f"--date={date}", f"--file={message_file}")
+        if not committed:
+            git.run("reset", "--quiet", "--soft", tip)
+            raise StackError(f"squashing {branch} failed, so it was left as it was; see git's output above")
 
     def restack_branch(self, branch: str, parent: str) -> bool:
         """Rebase branch's own commits onto parent's current tip.

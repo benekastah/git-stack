@@ -40,12 +40,6 @@ command warns once and carries on with the git adapter's local checks, as if
 
 The warning is easy to miss among `sync`'s other output.
 
-## `restack --squash` commits with `--no-verify` and captured stdio
-
-`squash_branch` skips commit-msg hooks (e.g. ones that add a ticket ID or
-Change-Id), and because stdin/stdout are captured, GPG signing that prompts on
-the terminal fails.
-
 ## A reverted change can look merged
 
 A branch that was merged and then reverted on its parent still counts as
