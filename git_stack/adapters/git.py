@@ -65,5 +65,9 @@ class GitAdapter:
         own = git.patch_ids("log", "-p", "--no-merges", f"{base}..refs/heads/{branch}")
         return bool(own) and own <= landed
 
+    def ensure_available(self) -> None:
+        """Fail now if whatever the adapter asks about merges can't answer,
+        rather than falling back to the repository alone."""
+
     def after_push(self, pushed: list[str], parents: Parents) -> None:
         """Called once pushed, a stack's unmerged branches, were pushed."""

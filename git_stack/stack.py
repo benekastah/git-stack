@@ -282,6 +282,19 @@ class StackClient(StackCore):
                           for b in descendants(root, children))
         return result
 
+    def checked_adapter(self, remote: str) -> GitAdapter:
+        """The adapter for sync, clean and push, which fetch and change
+        branches. Fails unless it can say which branches were merged, since
+        checking locally instead could untrack (or delete) a branch whose pull
+        request is open, or restack one that was merged."""
+        adapter = make_adapter(self, remote, fetch=True)
+        try:
+            adapter.ensure_available()
+        except StackError as e:
+            raise StackError(f"{e}\nNothing was changed. To only check for merges locally, run "
+                             f"`git -c {ADAPTER_SETTING}=git stack ...`")
+        return adapter
+
     def skip_merged(self, branches: Iterable[str], parents: Parents, adapter: GitAdapter) -> list[str]:
         """Leave merged branches out of branches, moving their children down in parents."""
         remaining = []
@@ -335,7 +348,7 @@ class StackClient(StackCore):
         # Where to leave the user afterwards: their branch, or wherever deleting
         # it left them.
         original = self.current_stacked_branch(parents, "sync")
-        adapter = make_adapter(self, remote, fetch=True)
+        adapter = self.checked_adapter(remote)
         git.fetch(remote)
         self.fast_forward_trunks([stack_root(original, parents)])
 
@@ -391,7 +404,7 @@ class StackClient(StackCore):
         # Where to leave the user afterwards: their branch (or the commit they had
         # detached at), or wherever deleting their branch left them.
         original = self.current_checkout()
-        adapter = make_adapter(self, remote, fetch=True)
+        adapter = self.checked_adapter(remote)
         git.fetch(remote)
         parents = self.tracked_branches()
         roots = sorted({stack_root(b, parents) for b in parents})
@@ -430,7 +443,7 @@ class StackClient(StackCore):
             branch = self.current_stacked_branch(parents, "push")
         elif branch not in parents:
             raise StackError(f"{branch} isn't in a stack")
-        adapter = make_adapter(self, remote, fetch=True)
+        adapter = self.checked_adapter(remote)
         branches = self.skip_merged(stack_of(branch, parents), parents, adapter)
         if not branches:
             return []

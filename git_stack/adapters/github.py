@@ -90,7 +90,6 @@ class GitHubAdapter(GitAdapter):
         self.repo = f"{host}/{owner}/{name}"
         self._pull_requests: dict[str, PullRequest] | None = None
         self._default_branch: str | None = None
-        self._lookup_error: str | None = None
 
     def gh(self, *args: str) -> str:
         result = subprocess.run(["gh", *args], capture_output=True, text=True)
@@ -107,16 +106,28 @@ class GitHubAdapter(GitAdapter):
 
         Looked up with one API call per command. If that fails, or GitHub's
         answer isn't what we asked for, emits PullRequestLookupFailed and
-        returns {}, so merges are only detected locally.
+        returns {}, so merges are only detected locally, unless
+        ensure_available was called first.
         """
         if self._pull_requests is None:
             self._pull_requests = {}
             try:
                 self._pull_requests = self.look_up_pull_requests()
             except StackError as e:
-                self._lookup_error = str(e)
                 self.core.emit(events.PullRequestLookupFailed(str(e)))
         return self._pull_requests
+
+    def ensure_available(self) -> None:
+        """Look up pull requests now, failing if GitHub can't be asked (e.g. gh
+        isn't logged in, or its token isn't authorized for the organization's
+        SSO). Without them, merges detected locally can be wrong both ways."""
+        if self._pull_requests is not None:
+            return
+        try:
+            self._pull_requests = self.look_up_pull_requests()
+        except StackError as e:
+            raise StackError(f"couldn't look up pull requests on GitHub; check `gh auth status` (and, for "
+                             f"an organization with SSO, that gh's token is authorized for it): {e}")
 
     def look_up_pull_requests(self) -> dict[str, PullRequest]:
         branches = [b for b in self.core.tracked_branches() if self.git.tracks_same_name(b, self.remote)]
@@ -211,9 +222,6 @@ class GitHubAdapter(GitAdapter):
         """Point the open pull requests of pushed branches at their stack parents,
         and give a link to open one for each pushed branch that has none."""
         prs = self.pull_requests()
-        if self._lookup_error is not None:
-            # Without the lookup, we can't tell which branches have a pull request.
-            raise StackError(f"couldn't look up pull requests: {self._lookup_error}")
         for b in pushed:
             pr = prs.get(b)
             if pr is None:
