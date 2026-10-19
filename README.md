@@ -184,17 +184,20 @@ git stack autocreate
 # created use-api from origin/use-api, tracking it on add-api (#13)
 ```
 
-- Only your own pull requests from branches in the repository count, not
-  others' or ones from forks. It needs the [GitHub adapter](#github).
+- It only looks at your own open pull requests from branches in the
+  repository: GitHub finds them with a search for pull requests by you, so
+  other people's are never fetched, however many there are. Pull requests from
+  forks don't count. It needs the [GitHub adapter](#github).
 - A pull request without a local branch gets one, created from its remote
   branch, with that as its upstream. A local branch without an upstream gets
   its remote branch as its upstream.
 - Branches that are already tracked are left alone. If one is tracked on a
   different parent than its pull request merges into, it says so; run
   `git stack track <parent> <branch>` if GitHub is right.
-- A pull request into a branch that isn't local and isn't one of your pull
-  requests (e.g. a coworker's branch) is skipped, along with the ones built on
-  it. `git switch` to that branch and rerun to track them.
+- If one of your pull requests merges into a branch you don't have locally
+  (e.g. you built it on a coworker's branch), it's skipped, along with your
+  pull requests built on it. `git switch` to that branch and rerun to track
+  them.
 - Each branch's base is found as for `git stack track`. If a parent's commits
   were rewritten after its child was built on them (e.g. the parent was
   rebased and force-pushed from another machine), the child's base can come

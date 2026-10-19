@@ -278,8 +278,10 @@ git stack autocreate
 \f[I]# created use\-api from origin/use\-api, tracking it on add\-api (#13)\f[R]
 .EE
 .IP \(bu 2
-Only your own pull requests from branches in the repository count, not
-others\(aq or ones from forks.
+It only looks at your own open pull requests from branches in the
+repository: GitHub finds them with a search for pull requests by you, so
+other people\(aqs are never fetched, however many there are.
+Pull requests from forks don\(aqt count.
 It needs the GitHub adapter.
 .IP \(bu 2
 A pull request without a local branch gets one, created from its remote
@@ -292,9 +294,10 @@ If one is tracked on a different parent than its pull request merges
 into, it says so; run \f[CR]git stack track <parent> <branch>\f[R] if
 GitHub is right.
 .IP \(bu 2
-A pull request into a branch that isn\(aqt local and isn\(aqt one of
-your pull requests (e.g.
-a coworker\(aqs branch) is skipped, along with the ones built on it.
+If one of your pull requests merges into a branch you don\(aqt have
+locally (e.g.
+you built it on a coworker\(aqs branch), it\(aqs skipped, along with
+your pull requests built on it.
 \f[CR]git switch\f[R] to that branch and rerun to track them.
 .IP \(bu 2
 Each branch\(aqs base is found as for \f[CR]git stack track\f[R].
