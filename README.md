@@ -826,6 +826,11 @@ changes. Arguments are passed to pytest, so `./check.sh -k sync` runs only the
 tests whose names contain `sync`. git-stack itself still has no runtime
 dependencies.
 
+The tests run in parallel, with one worker per CPU (pytest-xdist's `-n auto`).
+Set `PYTEST_XDIST_AUTO_NUM_WORKERS` to use another number of workers, e.g.
+`PYTEST_XDIST_AUTO_NUM_WORKERS=4 ./check.sh`, or pass `-n 0` to run them one
+at a time, e.g. to debug a failing test.
+
 ### Git hooks
 
 `dev-install.sh` makes the clone use the hooks in `git_hooks/`. To turn them on
