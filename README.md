@@ -733,44 +733,33 @@ ln -s "$(uv tool dir)/git-stack/share/man/man1/git-stack.1" ~/.local/share/man/m
 
 ### From a local clone
 
-To run git-stack from a clone of this repository, install it in editable mode,
-so changes to the clone take effect without reinstalling:
+To run git-stack from a clone of this repository, so changes to the clone take
+effect without reinstalling, run its `dev-install.sh`:
 
 ```sh
-pipx install --editable /path/to/git-stack
-# or
-uv tool install --editable /path/to/git-stack
+git clone https://github.com/benekastah/git-stack ~/src/git-stack
+~/src/git-stack/dev-install.sh
 ```
 
-Without pipx or uv, install it into a virtualenv, then link the `git-stack`
-command into a directory on your `PATH`, and the man page into one `man`
-searches. Replace `/path/to/git-stack` with your clone's path:
-
-```sh
-python3 -m venv ~/.local/share/git-stack/venv
-~/.local/share/git-stack/venv/bin/pip install --editable /path/to/git-stack
-mkdir -p ~/.local/bin ~/.local/share/man/man1
-ln -s ~/.local/share/git-stack/venv/bin/git-stack ~/.local/bin/
-ln -s /path/to/git-stack/man/git-stack.1 ~/.local/share/man/man1/
-```
-
-The man page is linked by hand because an editable install doesn't install
-it, with pipx and uv too: for those, run just the last two lines. The link
-points into your clone, so the page stays up to date with it.
+It installs git-stack in editable mode into a virtualenv in
+`~/.local/share/git-stack/venv`, links the `git-stack` command into
+`~/.local/bin` and the man page into `~/.local/share/man/man1` (an editable
+install doesn't install it), and makes the clone use the git hooks in
+`git_hooks/` (see [Development](#development)). It's safe to rerun, and only
+needs rerunning when `pyproject.toml` changes, for example when a command-line
+entry point is added.
 
 To check it worked, `git stack -h` should print git-stack's usage, and
-`git stack --help` should open the man page:
+`git stack --help` should open the man page. `dev-install.sh` warns if either
+won't work:
 
 - If `git stack` isn't found, `~/.local/bin` isn't on your `PATH`; add it in
   your shell's startup file.
 - If `git stack --help` says "No manual entry for git-stack", `man` isn't
-  searching `~/.local/share/man`: check with `manpath`. Most systems add it
-  because `~/.local/bin` is on your `PATH`; otherwise, add
-  `export MANPATH="$HOME/.local/share/man:"` to your shell's startup file
-  (the trailing `:` keeps the system's manual directories too).
-
-Reinstall only when `pyproject.toml` changes, for example when a command-line
-entry point is added.
+  searching `~/.local/share/man`. Most systems search it because `~/.local/bin`
+  is on your `PATH`; otherwise, add `export MANPATH="$HOME/.local/share/man:"`
+  to your shell's startup file (the trailing `:` keeps the system's manual
+  directories too).
 
 ## Development
 
@@ -789,10 +778,14 @@ dependencies.
 
 The man page, `man/git-stack.1`, is generated from this README by
 `man/build.py`, with pandoc (from the `pypandoc_binary` dev dependency) and the
-filter `man/git-stack.lua`. After changing the README, regenerate it with:
+filter `man/git-stack.lua`. The pre-commit hook in `git_hooks/` regenerates it
+and adds it to any commit that changes the README (it needs `.venv`, so run
+`./check.sh` once first). `dev-install.sh` turns the hooks on; to turn them on
+without it, run:
 
 ```sh
-.venv/bin/python man/build.py
+git config core.hooksPath git_hooks
 ```
 
+Without the hook, regenerate the page with `.venv/bin/python man/build.py`.
 The tests fail if it's out of date.
