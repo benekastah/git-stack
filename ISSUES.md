@@ -21,6 +21,25 @@ next `push`) compared against the old parent branch, so its pull request shows
 every commit `main` gained since. Reviewers, and code owners of the files those
 commits touch, may be notified or requested in that window.
 
+## A failed GitHub lookup only warns
+
+If `gh` can't look up pull requests (e.g. its token isn't authorized for the
+organization's SSO, lacks a scope, was logged out, or hit a rate limit), each
+command warns once and carries on with the git adapter's local checks, as if
+`stack.adapter` were `git`:
+
+- A branch whose pull request was merged with changes of its own (a
+  maintainer's tweak, or a conflict resolved by "Update branch") doesn't look
+  merged, so `sync` restacks it, replaying its commits onto a parent that
+  already has them, which usually conflicts.
+- A branch on the default branch with an open pull request can look merged
+  (see "A branch can look merged when its parent made the same change"), so
+  `sync` untracks it, and deletes it with `-d local`.
+- `push` pushes, then fails without retargeting pull requests or printing
+  links to open them.
+
+The warning is easy to miss among `sync`'s other output.
+
 ## `restack --squash` commits with `--no-verify` and captured stdio
 
 `squash_branch` skips commit-msg hooks (e.g. ones that add a ticket ID or
@@ -67,6 +86,16 @@ restack or pull it finds unfinished as aborted, and discards it. If another
 such command is between writing its pending keys and starting its rebase or
 cherry-pick, that rebase is never recorded, so the branch keeps its old base.
 There's no lock to stop two from running at once.
+
+## Untracked files aren't checked before restacking
+
+`restack`, `sync` and `clean` refuse to run with uncommitted changes, but
+ignore untracked files (`ensure_clean_worktree` passes
+`--untracked-files=no`). If a commit being replayed adds a file that's
+untracked in the worktree, git stops the rebase to avoid overwriting it, and
+git-stack reports it as a conflict ("stopped on a conflict. Resolve it, run
+`git rebase --continue`"), though there's nothing to resolve: the untracked
+file has to be moved out of the way first.
 
 ## Branch and parent names are resolved like any revision
 
