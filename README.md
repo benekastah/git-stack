@@ -69,6 +69,19 @@ Either one puts `git-stack` on your `PATH` (run `pipx ensurepath` or
 a specific branch, tag or commit, add `@<ref>` to the URL. To update to the
 latest version, run `pipx upgrade git-stack` or `uv tool upgrade git-stack`.
 
+### The man page
+
+`git stack --help` opens git-stack's man page (git runs `man git-stack` for
+it); `git stack -h` and `git stack <command> --help` print git-stack's own
+shorter help. pipx installs the page into `~/.local/share/man`, which `man`
+searches when `~/.local/bin` is on your `PATH`. uv doesn't install man pages,
+so link it there yourself:
+
+```sh
+mkdir -p ~/.local/share/man/man1
+ln -s "$(uv tool dir)/git-stack/share/man/man1/git-stack.1" ~/.local/share/man/man1/
+```
+
 ### From a local clone
 
 To run git-stack from a clone of this repository, install it in editable mode,
@@ -91,6 +104,14 @@ ln -s ~/.local/share/git-stack/venv/bin/git-stack ~/.local/bin/git-stack
 
 Reinstall only when `pyproject.toml` changes, for example when a command-line
 entry point is added.
+
+An editable install doesn't install the man page, so link the clone's copy,
+which stays up to date with it:
+
+```sh
+mkdir -p ~/.local/share/man/man1
+ln -s /path/to/git-stack/man/git-stack.1 ~/.local/share/man/man1/
+```
 
 ## How it works
 
@@ -710,3 +731,13 @@ which needs pip 25.1+). Later runs reinstall it whenever `pyproject.toml`
 changes. Arguments are passed to pytest, so `./check.sh -k sync` runs only the
 tests whose names contain `sync`. git-stack itself still has no runtime
 dependencies.
+
+The man page, `man/git-stack.1`, is generated from this README by
+`man/build.py`, with pandoc (from the `pypandoc_binary` dev dependency) and the
+filter `man/git-stack.lua`. After changing the README, regenerate it with:
+
+```sh
+.venv/bin/python man/build.py
+```
+
+The tests fail if it's out of date.
