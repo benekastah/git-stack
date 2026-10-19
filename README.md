@@ -266,7 +266,7 @@ git stack rename add-api api-v2
   Delete the old remote branch yourself (`git push origin :add-api`) if you
   no longer want it.
 
-### `git stack info`
+### `git stack info [--json]`
 
 Show every tracked stack as a tree.
 
@@ -295,6 +295,55 @@ git stack info
   with `git stack track <parent>`.
 - `info` doesn't fetch, so merges on the remote only show up after a `sync`,
   `clean` or `git fetch`.
+- `--json` prints the same information for scripts: a list with an object for
+  each branch, each stack's root first, parent before child. `parent` and
+  `status` are `null` for a root, and `status` is one of `up-to-date`,
+  `needs-restack`, `merged`, `merged-with-new-commits` or `parent-missing`.
+
+  ```sh
+  git stack info --json
+  # [
+  #   {"name": "main", "parent": null, "status": null, "current": false},
+  #   {"name": "add-api", "parent": "main", "status": "up-to-date", "current": true},
+  #   ...
+  # ]
+  ```
+
+- With the [GitHub adapter](#github), `info` asks GitHub about each branch's
+  pull request, so it can take a moment. For a shell prompt or an editor, the
+  [scripting commands](#scripting) below only read git config, and are fast.
+
+### `git stack up`
+
+Switch to the branch stacked on the current one.
+
+**When would I use it?** To move up the stack, e.g. from PR 1 to PR 2 after
+committing to PR 1, without remembering the branch's name.
+
+```sh
+git switch main
+git stack up                    # to add-api
+git stack up                    # to use-api
+```
+
+- If several branches are stacked on the current one, it lists them and
+  leaves you where you are; pick one with `git switch`.
+- Works from a stack's root (e.g. `main`), as long as only one branch is
+  stacked on it.
+
+### `git stack down`
+
+Switch to the branch the current one is stacked on.
+
+**When would I use it?** To move down the stack, e.g. back to PR 1 to address
+review feedback while you're working on PR 2.
+
+```sh
+git stack down                  # from use-api to add-api
+git stack down                  # to main
+```
+
+- From the bottom of a stack, it switches to the stack's root (e.g. `main`).
 
 ### `git stack restack [--onto <parent>] [--squash]`
 
@@ -426,6 +475,64 @@ git stack push --force          # drop commits on the remote you didn't pull
 - With the [GitHub adapter](#github), points each open pull request at its
   stack parent (e.g. at `main` once the parent PR was merged), and prints a
   link to open one for each branch that has none.
+
+## Scripting
+
+These commands print one thing per line and change nothing, for use in scripts,
+aliases, shell prompts and editors. They only read git config, so they're
+fast. They fail with exit status 1 for a branch that isn't in a stack.
+
+### `git stack parent [<branch>]`
+
+Print the branch that `<branch>` (default: the current branch) is stacked on.
+
+**When would I use it?** To compare a branch with what it's built on, the way
+its pull request does:
+
+```sh
+git diff $(git stack parent)...         # what this branch's pull request changes
+git log --oneline $(git stack parent)..
+```
+
+### `git stack base [<branch>]`
+
+Print the commit `<branch>` (default: the current branch) was last rebased
+onto: where its own commits start.
+
+**When would I use it?** To act on just a branch's own commits. Unlike
+`git stack parent`, this still works after the parent was squash-merged or
+rewritten, since it doesn't depend on the parent's current history:
+
+```sh
+git log --oneline $(git stack base)..   # this branch's own commits
+git rebase -i $(git stack base)         # reword or reorder them
+```
+
+- It's the commit `restack` replays the branch's commits from, so it's only
+  out of date while a restack is stopped on a conflict.
+
+### `git stack show-stack [-q] [<branch>]`
+
+Print the branches in `<branch>`'s (default: the current branch's) stack,
+bottom first, one per line. The stack's root (e.g. `main`) isn't included.
+
+**When would I use it?** To run something on every branch in a stack, or, with
+`-q`, to check whether a branch is in a stack at all:
+
+```sh
+for branch in $(git stack show-stack); do
+    git switch --quiet "$branch" && make test || break
+done
+
+if git stack show-stack -q; then
+    echo "in a stack"
+fi
+```
+
+- `-q`/`--quiet` prints nothing, not even an error: it only exits with status
+  0 if the branch is in a stack, and 1 if it isn't.
+- As with the other commands, the stack includes branches beside the current
+  one, not just those above and below it.
 
 ## When does `sync` consider a branch merged?
 

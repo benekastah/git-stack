@@ -10,9 +10,9 @@ Knowing the base lets us replay only the branch's own commits with
 (and whose individual commits therefore never appear in main) doesn't cause
 conflicts.
 
-A third key, branch.<name>.stackPulled, records the last upstream tip whose
-commits were pulled into the branch, so a pull whose conflicts the user resolved
-isn't repeated.
+A third key, branch.<name>.stackPulled, records the last upstream tip the branch
+caught up with, by pulling or pushing it, so its commits (including old copies
+of commits since rebased) aren't pulled in again.
 
 How a merge is detected depends on the adapter (the stack.adapter setting): the
 git adapter only looks at the repository, and the GitHub adapter asks GitHub

@@ -13,11 +13,12 @@ from git_stack.git import DEFAULT_REMOTE
 
 
 class BranchStatus(enum.Enum):
-    UP_TO_DATE = "up to date"
-    NEEDS_RESTACK = "needs restack"
-    PARENT_MISSING = "parent missing"
+    """Values are what `git stack info --json` prints."""
+    UP_TO_DATE = "up-to-date"
+    NEEDS_RESTACK = "needs-restack"
+    PARENT_MISSING = "parent-missing"
     MERGED = "merged"
-    MERGED_WITH_NEW_COMMITS = "merged, with new commits"
+    MERGED_WITH_NEW_COMMITS = "merged-with-new-commits"
 
 
 @dataclass(frozen=True)
@@ -177,15 +178,73 @@ class StackClient(StackCore):
             git.run("branch", "--unset-upstream", new)
         return Renamed(old, new, children, upstream)
 
+    def settled_branches(self) -> Parents:
+        """Like tracked_branches, but first picks up the result of a restack or
+        pull the user finished by hand. One that's still running is left alone,
+        so this is safe to call at any time."""
+        if not self.git.operation_in_progress():
+            self.settle_all()
+        return self.tracked_branches()
+
+    def stacked_branch(self, branch: str | None, parents: Parents) -> str:
+        """Return branch, or the current branch if it's None, refusing unless it's
+        in a stack."""
+        if branch is None:
+            return self.current_stacked_branch(parents, "", hint="name a stacked branch, or switch to one")
+        if branch not in parents:
+            raise StackError(f"{branch} isn't in a stack")
+        return branch
+
+    def parent(self, branch: str | None = None) -> str:
+        """The branch that branch (default: the current branch) is stacked on."""
+        parents = self.settled_branches()
+        return parents[self.stacked_branch(branch, parents)]
+
+    def base(self, branch: str | None = None) -> str:
+        """The commit branch (default: the current branch) was last rebased onto."""
+        parents = self.settled_branches()
+        branch = self.stacked_branch(branch, parents)
+        return self.recorded_base(branch, parents[branch])
+
+    def show_stack(self, branch: str | None = None) -> list[str]:
+        """The branches in branch's (default: the current branch's) stack,
+        parent-before-child."""
+        parents = self.settled_branches()
+        return stack_of(self.stacked_branch(branch, parents), parents)
+
+    def up(self) -> str:
+        """Switch to the branch stacked on the current one, and return it."""
+        current = self.git.current_branch()
+        if current is None:
+            raise StackError("not on a branch")
+        children = children_map(self.settled_branches()).get(current, [])
+        if not children:
+            raise StackError(f"no branch is stacked on {current}")
+        if len(children) > 1:
+            raise StackError(f"several branches are stacked on {current}: {', '.join(children)}; "
+                             f"switch to one with `git switch`")
+        self.switch_to(children[0])
+        return children[0]
+
+    def down(self) -> str:
+        """Switch to the current branch's parent, and return it."""
+        parents = self.settled_branches()
+        parent = parents[self.current_stacked_branch(parents, "", hint="there's no branch below it")]
+        if not self.git.local_branch_exists(parent):
+            raise StackError(f"{parent} doesn't exist")
+        self.switch_to(parent)
+        return parent
+
+    def switch_to(self, branch: str) -> None:
+        """Switch to branch, showing git's output (e.g. why it couldn't)."""
+        if not self.git.passthrough("switch", "--quiet", branch):
+            raise StackError(f"switching to {branch} failed; see git's output above")
+
     def info(self) -> list[BranchInfo]:
         """Every tracked stack, as a list of BranchInfo: each stack's root, then
         its branches, parent-before-child."""
         git = self.git
-        # Pick up the result of a rebase the user finished by hand, but leave the
-        # pending state alone while it's still running.
-        if not git.operation_in_progress():
-            self.settle_all()
-        parents = self.tracked_branches()
+        parents = self.settled_branches()
         current = git.current_branch()
         children = children_map(parents)
         adapter = make_adapter(self, DEFAULT_REMOTE)
