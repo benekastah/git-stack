@@ -1,32 +1,74 @@
 # git-stack
 
-A small, dependency-free tool for stacked branches/PRs that survive squash
-merges. No hosted service; everything lives in your local git config. On
-GitHub, it can also use the [`gh` CLI](https://cli.github.com) to tell which
-pull requests were merged and to keep their base branches in step with the
-stack (see [GitHub](#github)).
+Stacked pull requests on GitHub (or any git host) without the conflicts that
+squash merges cause. It's a command-line tool with nothing to sign up for: it
+keeps what it knows in your repository's git config.
+
+## Quick start
+
+```sh
+pipx install git+https://github.com/benekastah/git-stack   # see Install for uv and requirements
+
+git switch main
+git stack branch add-api        # a branch for PR 1
+# ...commit...
+git stack branch use-api        # a branch for PR 2, built on PR 1
+# ...commit...
+git stack push                  # push both, and print links to open their PRs
+```
+
+After that, day to day:
+
+```sh
+git stack sync                  # catch up: drop merged PRs, rebase what's left
+git stack push                  # update the PRs
+```
+
+## Cheat sheet
+
+| I want to... | Run |
+| --- | --- |
+| start a PR | `git stack branch <name>`, from `main` or from the PR it builds on |
+| see my stacks and what needs doing | `git stack info` |
+| update the PRs above one I just changed | `git stack restack`, then `git stack push` |
+| catch up after a PR merged, or `main` changed | `git stack sync`, then `git stack push` |
+| also delete merged branches | `git stack sync -d local` |
+| put the stack on the latest `main` | `git stack sync --latest`, then `git stack push` |
+| move up or down the stack | `git stack up` / `git stack down` |
+| build a PR on a different parent | `git stack restack --onto <parent>` |
+| use git-stack with branches I already have | `git stack track main <branch>...` |
+| rename a branch in a stack | `git stack rename <new>` |
+| clean up merged branches in every stack | `git stack clean` |
+| read all of this in the terminal | `git stack --help` |
+
+## Words used here
+
+- **stack**: branches built on each other, e.g. `use-api` built on `add-api`,
+  built on `main`. It can branch out, with several PRs built on the same one.
+- **parent**: the branch a branch is built on. `add-api` is `use-api`'s parent.
+- **root**: the branch at the bottom of a stack, usually `main`. git-stack
+  doesn't manage it, but `sync` keeps it up to date.
+- **tracked**: a branch git-stack knows about, because you made it with
+  `git stack branch` or added it with `git stack track`.
+- **restack**: rebase a branch onto its parent's latest commit, replaying only
+  the branch's own commits.
+- **the current stack**: the whole stack the branch you're on is part of,
+  including branches beside yours, not just the ones above it.
 
 ## The problem
 
-PR 2 is based on PR 1's branch. PR 1 is squash-merged into `main`. Now
-`git rebase main` on PR 2 conflicts, because it tries to replay PR 1's
-individual commits on top of a `main` that already contains them as one
-squashed commit.
+PR 2 is built on PR 1's branch. PR 1 is squash-merged into `main`. Now
+`git rebase main` on PR 2 conflicts, because it replays PR 1's individual
+commits on top of a `main` that already has them, squashed into one commit.
+git-stack remembers where each branch's own commits start, so it only
+replays those.
 
 ## Example workflow
 
-Build a stack of two PRs on `main`:
+Carrying on from the [Quick start](#quick-start), with `add-api` (PR 1) and
+`use-api` (PR 2, built on PR 1).
 
-```sh
-git switch main
-git stack branch add-api        # PR 1
-# ...commit...
-git stack branch use-api        # PR 2, stacked on add-api
-# ...commit...
-git stack push                  # push both, printing links to open their PRs
-```
-
-Address review feedback on PR 1, then move PR 2 on top of it:
+Address review feedback on PR 1, then bring PR 2 up to date with it:
 
 ```sh
 git switch add-api
@@ -39,8 +81,7 @@ git stack restack               # rebase use-api onto the new add-api
 git stack push
 ```
 
-Once PR 1 is merged, on GitHub or by merging it into `main` locally and pushing
-(see [When does `sync` consider a branch merged?](#when-does-sync-consider-a-branch-merged)):
+Once PR 1 is merged:
 
 ```sh
 git stack sync -d local         # delete add-api, rebase use-api onto main, switch to it
@@ -50,159 +91,10 @@ git stack push
 `sync` only touches the current stack. To untrack (or delete) merged branches
 in every stack without restacking anything, run `git stack clean`.
 
-## Install
-
-Requires Python 3.11+ and git 2.38+. The GitHub integration also needs
-[`gh`](https://cli.github.com), logged in with `gh auth login`.
-
-Install it with [pipx](https://pipx.pypa.io) or
-[uv](https://docs.astral.sh/uv/):
-
-```sh
-pipx install git+https://github.com/benekastah/git-stack
-# or
-uv tool install git+https://github.com/benekastah/git-stack
-```
-
-Either one puts `git-stack` on your `PATH` (run `pipx ensurepath` or
-`uv tool update-shell` if it isn't), so git runs it as `git stack`. To install
-a specific branch, tag or commit, add `@<ref>` to the URL. To update to the
-latest version, run `pipx upgrade git-stack` or `uv tool upgrade git-stack`.
-
-### The man page
-
-`git stack --help` opens git-stack's man page (git runs `man git-stack` for
-it); `git stack -h` and `git stack <command> --help` print git-stack's own
-shorter help. pipx installs the page into `~/.local/share/man`, which `man`
-searches when `~/.local/bin` is on your `PATH`. uv doesn't install man pages,
-so link it there yourself:
-
-```sh
-mkdir -p ~/.local/share/man/man1
-ln -s "$(uv tool dir)/git-stack/share/man/man1/git-stack.1" ~/.local/share/man/man1/
-```
-
-### From a local clone
-
-To run git-stack from a clone of this repository, install it in editable mode,
-so changes to the clone take effect without reinstalling:
-
-```sh
-pipx install --editable /path/to/git-stack
-# or
-uv tool install --editable /path/to/git-stack
-```
-
-Without pipx or uv, install it into a virtualenv and link its `git-stack`
-into a directory on your `PATH`:
-
-```sh
-python3 -m venv ~/.local/share/git-stack/venv
-~/.local/share/git-stack/venv/bin/pip install --editable /path/to/git-stack
-ln -s ~/.local/share/git-stack/venv/bin/git-stack ~/.local/bin/git-stack
-```
-
-Reinstall only when `pyproject.toml` changes, for example when a command-line
-entry point is added.
-
-An editable install doesn't install the man page, so link the clone's copy,
-which stays up to date with it:
-
-```sh
-mkdir -p ~/.local/share/man/man1
-ln -s /path/to/git-stack/man/git-stack.1 ~/.local/share/man/man1/
-```
-
-## How it works
-
-When a branch is created (or tracked), git-stack records its parent branch and
-the exact parent commit it was built on:
-
-```
-branch.<name>.stackParent   e.g. pr1
-branch.<name>.stackBase     the pr1 commit pr2 was last rebased onto
-```
-
-Restacking runs `git rebase --onto <parent> <stackBase> <branch>`, which
-replays only the branch's own commits, so PR 1's original commits never
-collide with the squashed version in `main`.
-
-A branch stacked directly on a stack's root (e.g. `main`) is only restacked
-when it conflicts with the root's latest commit (or with `--latest`), not
-every time the root moves. A pull request only shows the branch's own
-changes either way, and leaving it alone means its CI doesn't rerun and its
-reviews aren't dismissed just because `main` moved on. Branches stacked on
-other branches are restacked whenever their parent changes, since they need
-its new commits.
-
-## GitHub
-
-git-stack works out merges through an adapter, chosen by the `stack.adapter`
-setting:
-
-- `git`: looks only at the repository.
-- `github`: asks GitHub, through `gh`, about each branch's pull request, and
-  falls back to the `git` adapter for branches merged without one (for
-  example, merged into their parent locally). It doesn't fall back for a
-  branch whose parent is the repository's default branch (e.g. `main`) and
-  whose pull request isn't merged, since it assumes nobody merges into the
-  default branch locally.
-
-If `stack.adapter` isn't set, git-stack uses `github` when the remote's URL is
-on github.com (including through a `Host` alias in `~/.ssh/config`, e.g.
-`git@github-work:org/repo.git`) and `gh` is installed, and `git` otherwise. Set it to `github` for
-a GitHub Enterprise host, or to `git` to turn the GitHub integration off:
-
-```sh
-git config stack.adapter git
-```
-
-With the GitHub adapter:
-
-- A branch's pull request is the one whose head is a remote branch of the same
-  name in the same repository, however it was opened, as long as that remote
-  branch is the branch's upstream (as `git stack push` sets it). A pull request
-  from someone else's branch that happens to have the same name doesn't count.
-  An open one wins; otherwise the newest merged one counts, if its head
-  descends from the commit the branch is stacked on (so one merged from an
-  earlier branch of the same name doesn't). Closed pull requests are ignored.
-  If a merged pull request's last commit was never fetched (say GitHub's
-  "Update branch" made it right before the merge, and the branch was deleted
-  on merge), `sync`, `clean` and `push` fetch it from the pull request. Until
-  then, `info` and `restack`, which don't fetch, can't tell that pull request
-  is the branch's, and check the branch like the `git` adapter does.
-- `git stack push` changes the base of the stack's open pull requests to match
-  their stack parents, e.g. to `main` once the parent PR was merged. It does
-  that before pushing, so a pull request is never compared with its old base
-  after its branch was rebased onto the new one, which would show every commit
-  the new base gained since. (A parent that isn't on GitHub yet is pushed
-  first.)
-- git-stack doesn't open pull requests. For each pushed branch without one,
-  `push` prints a link to GitHub's page for opening one against its stack
-  parent, with the repository's pull request template filled in. (The link
-  GitHub prints when a branch is first pushed targets the default branch
-  instead; `push` retargets a pull request opened from it the next time it
-  runs.)
-- A pull request that GitHub says was merged counts as merged once its merge
-  commit is in the local parent branch (`sync` fetches it), even if the parent
-  changed the merged lines since, or the merge changed them.
-- If pull requests can't be looked up (e.g. `gh` isn't logged in, its token
-  isn't authorized for your organization's SSO, or GitHub can't be reached),
-  `sync`, `clean` and `push` stop before changing anything, since checking for
-  merges locally could untrack a branch whose pull request is still open, or
-  restack one that was merged. `info` and `restack` warn and check for merges
-  like the `git` adapter does. To run a command with the `git` adapter just
-  this once, use `git -c stack.adapter=git stack <command>`.
-
 ## Commands
 
-Like git, every command accepts `-C <path>` before it to run as if started in
-`<path>`, e.g. `git stack -C ~/src/app info`. Each `-C` after the first is
-relative to the one before. It's also fine to do `git -C <path> stack ...`.
-
-Several commands act on "the current stack": every tracked branch stacked on
-the current branch's bottom-most tracked ancestor, including branches beside
-the current one, not just the ones above it. In this stack, running `restack`
+Several commands act on the current stack: the whole stack the branch you're on
+is part of, including branches beside yours. In this stack, running `restack`
 from `pr2b` restacks `pr1`, `pr2a`, `pr2b` and `pr3`:
 
 ```
@@ -212,6 +104,10 @@ main
     │   └── pr3
     └── pr2b *
 ```
+
+Like git, every command accepts `-C <path>` before it to run as if started in
+`<path>`, e.g. `git stack -C ~/src/app info`, and `git -C <path> stack ...`
+works too.
 
 ### `git stack branch <name>`
 
@@ -329,9 +225,9 @@ git stack info
 ```
 
 - `*` marks the current branch.
-- `(needs restack)`: its parent moved since it was last rebased (for a branch
-  on the stack's root, e.g. `main`: and it conflicts with the root's latest
-  commit); run `git stack restack` or `git stack sync`.
+- `(needs restack)`: it's missing its parent's latest commits (or, for a
+  branch on `main`, it conflicts with `main`). Run `git stack sync` or
+  `git stack restack`.
 - `(merged)`: it was merged into its parent (see
   [When does `sync` consider a branch merged?](#when-does-sync-consider-a-branch-merged));
   `sync` or `clean` will stop tracking it.
@@ -451,10 +347,10 @@ Bring the current stack up to date with the remote:
 5. Pull in commits others pushed to its branches (see
    [Pulling commits others pushed](#pulling-commits-others-pushed)).
 
-**When would I use it?** Your everyday command for catching up with the remote:
-after a pull request in the stack was merged, when `main` has moved on in a
-way that conflicts with the stack (or, with `--latest`, whenever you want the
-stack on top of it), or when someone else pushed to one of your branches. Follow it with `git stack push`.
+**When would I use it?** Your everyday command for catching up: after a pull
+request in the stack was merged, when `main` changed in a way that conflicts
+with your stack, or when someone else pushed to one of your branches. Follow
+it with `git stack push`.
 
 ```sh
 git stack sync
@@ -609,43 +505,6 @@ fi
 - As with the other commands, the stack includes branches beside the current
   one, not just those above and below it.
 
-## When does `sync` consider a branch merged?
-
-`sync`, `clean`, `restack`, `push` and `info` all use this check.
-
-With the [GitHub adapter](#github), a branch whose pull request GitHub says was
-merged counts as merged once the merge is in its local parent, unless the branch
-or its remote branch has commits that weren't merged. Otherwise:
-
-Its changes must already be in its parent (`main`, or the parent PR's branch if
-it was merged into that): either merging it into the parent would change
-nothing, or the parent has a commit with the same changes as the whole branch
-(a squash merge) or commits with the same changes as each of its commits (a
-rebase merge), even if the parent edited the same lines again afterwards. This
-holds however it was merged: squash, rebase or merge commit, on GitHub or
-locally. In addition, either:
-
-- its upstream branch is gone after `git fetch --prune` (e.g. GitHub's
-  "Automatically delete head branches" deleted it), or
-- it has no upstream, or everything on its upstream is in the parent too, and
-  it changes something relative to the commit it was built on (so a new branch
-  with no commits isn't mistaken for a merged one).
-
-A branch whose remote branch was deleted without merging (a closed PR) fails
-the first check, so it's not considered merged.
-
-## Pulling commits others pushed
-
-After restacking a branch, `sync` cherry-picks onto it any commits on its
-upstream that it doesn't already have (fast-forwarding when it can). Commits
-that are older versions of your own rebased commits, merge commits (e.g.
-GitHub's "Update branch"), and changes already in the parent are skipped.
-
-If a pull stops on a conflict and you abort it (or skip some of the commits),
-the commits you didn't take aren't counted as pulled: the next `sync` offers
-them again, and `push` refuses to drop them. To drop them anyway, run
-`git stack push --force`.
-
 ## Conflicts
 
 If a rebase or cherry-pick stops on a conflict, resolve it and run
@@ -716,6 +575,192 @@ git stack push                     # point pr2's pull request at pr1-again, and 
 
 `restack --onto` moves only the current branch, so if `pr1` had several
 children, run it from each one.
+
+## How it works
+
+When a branch is created (or tracked), git-stack records its parent branch and
+the exact parent commit it was built on:
+
+```
+branch.<name>.stackParent   e.g. pr1
+branch.<name>.stackBase     the pr1 commit pr2 was last rebased onto
+```
+
+Restacking runs `git rebase --onto <parent> <stackBase> <branch>`, which
+replays only the branch's own commits, so PR 1's original commits never
+collide with the squashed version in `main`.
+
+A branch stacked directly on a stack's root (e.g. `main`) is only restacked
+when it conflicts with the root's latest commit (or with `--latest`), not
+every time the root moves. A pull request only shows the branch's own
+changes either way, and leaving it alone means its CI doesn't rerun and its
+reviews aren't dismissed just because `main` moved on. Branches stacked on
+other branches are restacked whenever their parent changes, since they need
+its new commits.
+
+## GitHub
+
+If your repository is on github.com and [`gh`](https://cli.github.com) is
+installed and logged in (`gh auth login`), git-stack uses GitHub automatically;
+there's nothing to set up. The rest of this section is the details.
+
+git-stack works out merges through an adapter, chosen by the `stack.adapter`
+setting:
+
+- `git`: looks only at the repository.
+- `github`: asks GitHub, through `gh`, about each branch's pull request, and
+  falls back to the `git` adapter for branches merged without one (for
+  example, merged into their parent locally). It doesn't fall back for a
+  branch whose parent is the repository's default branch (e.g. `main`) and
+  whose pull request isn't merged, since it assumes nobody merges into the
+  default branch locally.
+
+If `stack.adapter` isn't set, git-stack uses `github` when the remote's URL is
+on github.com (including through a `Host` alias in `~/.ssh/config`, e.g.
+`git@github-work:org/repo.git`) and `gh` is installed, and `git` otherwise.
+Set it to `github` for a GitHub Enterprise host, or to `git` to turn the
+GitHub integration off:
+
+```sh
+git config stack.adapter git
+```
+
+With the GitHub adapter:
+
+- A branch's pull request is the one whose head is a remote branch of the same
+  name in the same repository, however it was opened, as long as that remote
+  branch is the branch's upstream (as `git stack push` sets it). A pull request
+  from someone else's branch that happens to have the same name doesn't count.
+  An open one wins; otherwise the newest merged one counts, if its head
+  descends from the commit the branch is stacked on (so one merged from an
+  earlier branch of the same name doesn't). Closed pull requests are ignored.
+  If a merged pull request's last commit was never fetched (say GitHub's
+  "Update branch" made it right before the merge, and the branch was deleted
+  on merge), `sync`, `clean` and `push` fetch it from the pull request. Until
+  then, `info` and `restack`, which don't fetch, can't tell that pull request
+  is the branch's, and check the branch like the `git` adapter does.
+- `git stack push` changes the base of the stack's open pull requests to match
+  their stack parents, e.g. to `main` once the parent PR was merged. It does
+  that before pushing, so a pull request is never compared with its old base
+  after its branch was rebased onto the new one, which would show every commit
+  the new base gained since. (A parent that isn't on GitHub yet is pushed
+  first.)
+- git-stack doesn't open pull requests. For each pushed branch without one,
+  `push` prints a link to GitHub's page for opening one against its stack
+  parent, with the repository's pull request template filled in. (The link
+  GitHub prints when a branch is first pushed targets the default branch
+  instead; `push` retargets a pull request opened from it the next time it
+  runs.)
+- A pull request that GitHub says was merged counts as merged once its merge
+  commit is in the local parent branch (`sync` fetches it), even if the parent
+  changed the merged lines since, or the merge changed them.
+- If pull requests can't be looked up (e.g. `gh` isn't logged in, its token
+  isn't authorized for your organization's SSO, or GitHub can't be reached),
+  `sync`, `clean` and `push` stop before changing anything, since checking for
+  merges locally could untrack a branch whose pull request is still open, or
+  restack one that was merged. `info` and `restack` warn and check for merges
+  like the `git` adapter does. To run a command with the `git` adapter just
+  this once, use `git -c stack.adapter=git stack <command>`.
+
+## When does `sync` consider a branch merged?
+
+`sync`, `clean`, `restack`, `push` and `info` all use this check.
+
+With the [GitHub adapter](#github), a branch whose pull request GitHub says was
+merged counts as merged once the merge is in its local parent, unless the branch
+or its remote branch has commits that weren't merged. Otherwise:
+
+Its changes must already be in its parent (`main`, or the parent PR's branch if
+it was merged into that): either merging it into the parent would change
+nothing, or the parent has a commit with the same changes as the whole branch
+(a squash merge) or commits with the same changes as each of its commits (a
+rebase merge), even if the parent edited the same lines again afterwards. This
+holds however it was merged: squash, rebase or merge commit, on GitHub or
+locally. In addition, either:
+
+- its upstream branch is gone after `git fetch --prune` (e.g. GitHub's
+  "Automatically delete head branches" deleted it), or
+- it has no upstream, or everything on its upstream is in the parent too, and
+  it changes something relative to the commit it was built on (so a new branch
+  with no commits isn't mistaken for a merged one).
+
+A branch whose remote branch was deleted without merging (a closed PR) fails
+the first check, so it's not considered merged.
+
+## Pulling commits others pushed
+
+After restacking a branch, `sync` cherry-picks onto it any commits on its
+upstream that it doesn't already have (fast-forwarding when it can). Commits
+that are older versions of your own rebased commits, merge commits (e.g.
+GitHub's "Update branch"), and changes already in the parent are skipped.
+
+If a pull stops on a conflict and you abort it (or skip some of the commits),
+the commits you didn't take aren't counted as pulled: the next `sync` offers
+them again, and `push` refuses to drop them. To drop them anyway, run
+`git stack push --force`.
+
+## Install
+
+Requires Python 3.11+ and git 2.38+. The GitHub integration also needs
+[`gh`](https://cli.github.com), logged in with `gh auth login`.
+
+Install it with [pipx](https://pipx.pypa.io) or
+[uv](https://docs.astral.sh/uv/):
+
+```sh
+pipx install git+https://github.com/benekastah/git-stack
+# or
+uv tool install git+https://github.com/benekastah/git-stack
+```
+
+Either one puts `git-stack` on your `PATH` (run `pipx ensurepath` or
+`uv tool update-shell` if it isn't), so git runs it as `git stack`. To install
+a specific branch, tag or commit, add `@<ref>` to the URL. To update to the
+latest version, run `pipx upgrade git-stack` or `uv tool upgrade git-stack`.
+
+### The man page
+
+`git stack --help` opens git-stack's man page (git runs `man git-stack` for
+it); `git stack -h` and `git stack <command> --help` print git-stack's own
+shorter help. pipx installs the page into `~/.local/share/man`, which `man`
+searches when `~/.local/bin` is on your `PATH`. uv doesn't install man pages,
+so link it there yourself:
+
+```sh
+mkdir -p ~/.local/share/man/man1
+ln -s "$(uv tool dir)/git-stack/share/man/man1/git-stack.1" ~/.local/share/man/man1/
+```
+
+### From a local clone
+
+To run git-stack from a clone of this repository, install it in editable mode,
+so changes to the clone take effect without reinstalling:
+
+```sh
+pipx install --editable /path/to/git-stack
+# or
+uv tool install --editable /path/to/git-stack
+```
+
+Without pipx or uv, install it into a virtualenv and link its `git-stack`
+into a directory on your `PATH`:
+
+```sh
+python3 -m venv ~/.local/share/git-stack/venv
+~/.local/share/git-stack/venv/bin/pip install --editable /path/to/git-stack
+ln -s ~/.local/share/git-stack/venv/bin/git-stack ~/.local/bin/git-stack
+```
+
+Reinstall only when `pyproject.toml` changes, for example when a command-line
+entry point is added.
+
+An editable install doesn't install the man page, so link the clone's copy,
+which stays up to date with it:
+
+```sh
+mkdir -p ~/.local/share/man/man1
+ln -s /path/to/git-stack/man/git-stack.1 ~/.local/share/man/man1/
+```
 
 ## Development
 
