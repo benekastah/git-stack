@@ -21,25 +21,6 @@ name you give a new branch (e.g. `fix-tests`). git-stack treats it as yours:
 `branch` doesn't check whether the name is taken on the remote. Prefixing
 branch names with your username (e.g. `paul/fix-tests`) avoids this.
 
-## `info` and the scripting commands can corrupt a running restack
-
-`info`, `parent`, `base`, `show-stack`, `up` and `down` settle interrupted
-restacks and pulls (`settled_branches`) whenever no rebase or cherry-pick is in
-progress, which writes git config, though the README says the scripting
-commands change nothing. If one runs while `restack` or `sync` is between
-writing a branch's pending parent and base and starting its rebase (or, for a
-pull, during the `git switch` before the cherry-pick), it discards the pending
-keys, so the finished rebase is never recorded:
-
-- the branch keeps its old base. For a branch on another stacked branch, that
-  base is no longer in its history, so the next command fails with "recorded
-  base isn't in its history (was it rebased by hand?)" until it's fixed with
-  `track --base`.
-- a pull isn't recorded in `stackPulled`.
-
-The README suggests running the scripting commands from shell prompts and
-editors, which is exactly what runs them in the background.
-
 ## `sync` always moves the whole stack onto the latest root
 
 `sync` fast-forwards the root (e.g. `main`) and rebases every branch in the
@@ -96,6 +77,15 @@ plausible for small, mechanical changes, such as a dependency bump or
 regenerated file. `sync` and `clean` then untrack the branch, and delete it
 with `-d local`, though its pull request was never merged. Its changes are in
 the parent, but its own commits and messages are dropped.
+
+## Two commands that restack at once can corrupt each other's records
+
+Each command that restacks or pulls (`restack`, `sync`, and the others that
+settle first: `track`, `untrack`, `rename`, `clean`, `push`) takes a pending
+restack or pull it finds unfinished as aborted, and discards it. If another
+such command is between writing its pending keys and starting its rebase or
+cherry-pick, that rebase is never recorded, so the branch keeps its old base.
+There's no lock to stop two from running at once.
 
 ## Branch and parent names are resolved like any revision
 

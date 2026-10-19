@@ -4,6 +4,7 @@ import pytest
 
 from git_stack import events
 from git_stack.errors import StackError
+from git_stack.git import GitClient
 from git_stack.stack import StackClient
 from tests.helpers import Repo
 
@@ -250,6 +251,29 @@ def test_sync_fast_forwards_branch_to_commits_pushed_by_others(repo: Repo, clien
     assert repo.git("rev-parse", "pr1") == repo.git("rev-parse", "origin/pr1")
     repo.assert_stacked("pr2", "pr1", ["pr2 c1"])
     repo.assert_stacked("pr3", "pr2", ["pr3 c1"])
+
+
+def test_sync_records_pull_despite_info_run_before_it(
+        repo: Repo, client: StackClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo.make_stack()
+    client.push()
+    repo.commit_on_forge("pr1", "d", "collab\n", "collab")
+    repo.git("switch", "--quiet", "pr1")
+    repo.commit("a", "pr1 third\n", "pr1 c3")
+    # As an editor showing `git stack info` would, while sync has written the
+    # pending pull but hasn't started cherry-picking yet.
+    editor = StackClient(GitClient(repo.path))
+    switch = client.git.switch
+
+    def run_editor_first(branch: str) -> None:
+        editor.info()
+        switch(branch)
+
+    monkeypatch.setattr(client.git, "switch", run_editor_first)
+
+    client.sync()
+
+    assert repo.config("pr1", "stackPulled") == repo.git("rev-parse", "origin/pr1")
 
 
 def test_sync_pulls_commits_pushed_by_others_into_diverged_branch(repo: Repo, client: StackClient) -> None:

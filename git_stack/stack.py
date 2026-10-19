@@ -180,10 +180,11 @@ class StackClient(StackCore):
 
     def settled_branches(self) -> Parents:
         """Like tracked_branches, but first picks up the result of a restack or
-        pull the user finished by hand. One that's still running is left alone,
-        so this is safe to call at any time."""
+        pull the user finished by hand. One that hasn't finished is left alone,
+        even if it looks aborted, since it may be about to start in another
+        git-stack process, so this is safe to call at any time."""
         if not self.git.operation_in_progress():
-            self.settle_all()
+            self.settle_all(forget_unfinished=False)
         return self.tracked_branches()
 
     def stacked_branch(self, branch: str | None, parents: Parents) -> str:
