@@ -2,16 +2,6 @@
 
 Most severe first.
 
-## `sync` always moves the whole stack onto the latest root
-
-`sync` fast-forwards the root (e.g. `main`) and rebases every branch in the
-stack onto it, and `restack` does the same with whatever the local root is.
-There's no way to restack children onto a merged parent's replacement without
-also moving them onto the newest `main`. On a busy repository, every
-`sync` + `push` rewrites every branch in the stack, so each pull request reruns
-CI, may lose approvals if the repository dismisses stale reviews, and loses
-GitHub's "changes since your last review" view.
-
 ## A reverted change can look merged
 
 A branch that was merged and then reverted on its parent still counts as

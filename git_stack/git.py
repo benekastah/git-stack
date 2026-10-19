@@ -117,6 +117,15 @@ class GitClient:
         """Every commit branch has pointed at, as far back as its reflog goes."""
         return self.run("log", "--walk-reflogs", "--format=%H", f"refs/heads/{branch}", check=False).split()
 
+    def conflicts(self, branch: str, target: str) -> bool:
+        """Whether merging branch into target would conflict."""
+        result = subprocess.run(
+            self._command("merge-tree", "--write-tree", "--name-only", target, branch),
+            capture_output=True, text=True)
+        if result.returncode not in (0, 1):
+            raise StackError(f"git merge-tree {target} {branch} failed:\n{result.stderr.strip()}")
+        return result.returncode == 1
+
     def contained_in(self, branch: str, target: str) -> bool:
         """Whether merging branch into target would change nothing.
 

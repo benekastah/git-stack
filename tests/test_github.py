@@ -128,7 +128,8 @@ def test_merged_pr_from_someone_elses_branch_with_same_name_is_ignored(
     client.sync()
 
     assert not any(isinstance(event, events.MergedWithNewCommits) for event in emitted)
-    repo.assert_stacked("fix", "main", ["mine"])
+    assert repo.config("fix", "stackParent") == "main"
+    assert repo.own_commits("fix", "main") == ["mine"]
 
 
 def test_push_refuses_when_pr_lookup_fails(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
@@ -315,7 +316,7 @@ def test_open_pr_on_default_branch_overrides_local_detection(
     repo.git("commit", "--quiet", "-m", "pr1 (squashed)")
     repo.git("push", "--quiet")
 
-    assert repo.branch_info("pr1").status is BranchStatus.NEEDS_RESTACK
+    assert repo.branch_info("pr1").status is BranchStatus.UP_TO_DATE
 
 
 def test_open_pr_on_stacked_parent_falls_back_to_local_detection(
