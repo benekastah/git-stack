@@ -459,8 +459,11 @@ class StackClient(StackCore):
                 raise StackError(f"{remote}/{b} has commits that {b} doesn't; run `git stack sync` "
                                  f"to pull them in first, or push with --force to drop them")
             leases.append(f"--force-with-lease={b}:{remote_tip or ''}")
-        if not git.passthrough("push", *leases, "--set-upstream", remote, *branches):
-            raise StackError("push failed; if the remote has new commits, run `git stack sync` and try again")
+        # Atomic, so a branch that can't be pushed doesn't leave the rest of the
+        # stack pushed without it, and its pull requests not retargeted.
+        if not git.passthrough("push", "--atomic", *leases, "--set-upstream", remote, *branches):
+            raise StackError("push failed, so nothing was pushed; if the remote has new commits, run "
+                             "`git stack sync` and try again")
         for b in branches:
             git.config_set(b, PULLED_KEY, git.tip(b))
         try:

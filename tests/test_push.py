@@ -35,6 +35,20 @@ def test_push_refuses_when_remote_moved_since_last_fetch(repo: Repo, client: Sta
     assert repo.remote_subject("pr1") == "collab"
 
 
+def test_push_pushes_no_branch_if_one_cant_be_pushed(repo: Repo, client: StackClient) -> None:
+    repo.make_stack()
+    client.push()
+    repo.commit_on_forge("pr1", "d", "collab\n", "collab")
+    repo.git("switch", "--quiet", "pr3")
+    repo.commit("c", "pr3 again\n", "pr3 c2")
+
+    with pytest.raises(StackError, match="nothing was pushed"):
+        client.push()
+
+    assert repo.remote_subject("pr1") == "collab"
+    assert repo.remote_subject("pr3") == "pr3 c1"
+
+
 def test_push_force_drops_unpulled_commits(repo: Repo, client: StackClient) -> None:
     repo.make_stack()
     client.push()
