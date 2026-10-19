@@ -63,6 +63,16 @@ def test_autocreate_tracks_existing_local_branch_and_sets_its_upstream(
     assert repo.git("rev-parse", "--abbrev-ref", "pr1@{upstream}") == "origin/pr1"
 
 
+def test_autocreate_fast_forwards_main_before_finding_bases(
+        repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+    repo.commit_on_forge("main", "d", "main\n", "main c1")
+    open_pr(repo, gh, 1, "pr1", "main")  # built on the new origin/main, which main lacks
+
+    client.autocreate()
+
+    repo.assert_stacked("pr1", "main", ["pr1 c1"])
+
+
 def test_autocreate_leaves_tracked_branches_alone(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
     open_pr(repo, gh, 1, "pr1", "main")
     open_pr(repo, gh, 2, "pr2", "pr1")

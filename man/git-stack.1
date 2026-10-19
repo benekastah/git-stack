@@ -300,7 +300,10 @@ you built it on a coworker\(aqs branch), it\(aqs skipped, along with
 your pull requests built on it.
 \f[CR]git switch\f[R] to that branch and rerun to track them.
 .IP \(bu 2
-Each branch\(aqs base is found as for \f[CR]git stack track\f[R].
+Each branch\(aqs base is found as for \f[CR]git stack track\f[R], after
+fast\-forwarding the branches your pull requests merge into that
+aren\(aqt tracked (e.g.
+\f[CR]main\f[R]) to their upstreams, as \f[CR]sync\f[R] does.
 If a parent\(aqs commits were rewritten after its child was built on
 them (e.g.
 the parent was rebased and force\-pushed from another machine), the

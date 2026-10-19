@@ -173,7 +173,8 @@ class StackClient(StackCore):
         """Track the gh user's open pull requests on GitHub, drafts included, as
         stacks: each one's branch on the branch it merges into, creating local
         branches from remote for those that don't have one. Branches that are
-        already tracked are left alone.
+        already tracked are left alone. The untracked branches they merge into
+        (e.g. main) are fast-forwarded to their upstreams first.
 
         Returns an Autocreated for each pull request, parents before children.
         With dry_run, nothing is changed (besides fetching remote).
@@ -191,6 +192,11 @@ class StackClient(StackCore):
             raise StackError(f"couldn't look up your pull requests on GitHub; check `gh auth status` (and, for "
                              f"an organization with SSO, that gh's token is authorized for it): {e}")
         git.fetch(remote)
+        if not dry_run:
+            # Bases are worked out from the local parents, so a stale main would
+            # make them too old for branches built on a newer origin/main.
+            heads, parents = {pr.head for pr in prs}, self.tracked_branches()
+            self.fast_forward_trunks(sorted({pr.base for pr in prs if pr.base not in heads | parents.keys()}))
         plan = self.plan_autocreate(prs, remote)
         if not dry_run:
             for step in plan:

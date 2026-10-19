@@ -198,7 +198,9 @@ git stack autocreate
   (e.g. you built it on a coworker's branch), it's skipped, along with your
   pull requests built on it. `git switch` to that branch and rerun to track
   them.
-- Each branch's base is found as for `git stack track`. If a parent's commits
+- Each branch's base is found as for `git stack track`, after fast-forwarding
+  the branches your pull requests merge into that aren't tracked (e.g. `main`)
+  to their upstreams, as `sync` does. If a parent's commits
   were rewritten after its child was built on them (e.g. the parent was
   rebased and force-pushed from another machine), the child's base can come
   out too old, and its next restack replays the parent's old commits; set it
