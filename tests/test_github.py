@@ -160,6 +160,65 @@ def test_push_retargets_pr_whose_parent_changed(
     assert gh.load()["prs"][0]["baseRefName"] == "main"
 
 
+def record_retargets_and_pushes(repo: Repo, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Record, in order, each pull request client retargets and each push it
+    makes, as "retarget <branch>" and "push"."""
+    order: list[str] = []
+    client = repo.client
+
+    def on_event(event: events.Event) -> None:
+        if isinstance(event, events.PullRequestRetargeted):
+            order.append(f"retarget {event.branch}")
+        repo.emitted.append(event)
+
+    passthrough = client.git.passthrough
+
+    def recording_passthrough(*args: str) -> bool:
+        if args[0] == "push":
+            order.append("push")
+        return passthrough(*args)
+
+    monkeypatch.setattr(client, "on_event", on_event)
+    monkeypatch.setattr(client.git, "passthrough", recording_passthrough)
+    return order
+
+
+def test_push_retargets_pr_before_pushing_when_parent_was_merged(
+        repo: Repo, gh: FakeGitHub, client: StackClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo.make_stack()
+    repo.git("switch", "--quiet", "pr2")
+    client.push()
+    gh.add_pr(number=1, state="OPEN", headRefName="pr2", headRefOid=repo.git("rev-parse", "pr2"),
+              baseRefName="pr1", mergeCommit=None)
+    repo.squash_merge_on_forge("pr1", delete_branch=False)
+    client.sync()
+    order = record_retargets_and_pushes(repo, monkeypatch)
+
+    client.push()
+
+    assert order == ["retarget pr2", "push"]
+    assert gh.load()["prs"][0]["baseRefName"] == "main"
+
+
+def test_push_retargets_pr_after_pushing_new_parent(
+        repo: Repo, gh: FakeGitHub, client: StackClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo.make_stack()
+    client.push()
+    gh.add_pr(number=1, state="OPEN", headRefName="pr2", headRefOid=repo.git("rev-parse", "pr2"),
+              baseRefName="pr1", mergeCommit=None)
+    repo.git("switch", "--quiet", "main")
+    client.branch("other")
+    repo.commit("a", "other\n", "other c1")
+    repo.git("switch", "--quiet", "pr2")
+    client.restack(onto="other")
+    order = record_retargets_and_pushes(repo, monkeypatch)
+
+    client.push()
+
+    assert order == ["push", "retarget pr2"]
+    assert gh.load()["prs"][0]["baseRefName"] == "other"
+
+
 def test_sync_trusts_merged_pr_whose_merge_differs_from_branch(
         repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
     repo.make_stack()

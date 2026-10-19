@@ -473,6 +473,11 @@ class StackClient(StackCore):
                 raise StackError(f"{remote}/{b} has commits that {b} doesn't; run `git stack sync` "
                                  f"to pull them in first, or push with --force to drop them")
             leases.append(f"--force-with-lease={b}:{remote_tip or ''}")
+        try:
+            adapter.before_push(branches, parents)
+        except StackError as e:
+            raise StackError(f"updating pull requests failed, so nothing was pushed (set {ADAPTER_SETTING} "
+                             f"to git to stop using GitHub): {e}")
         # Atomic, so a branch that can't be pushed doesn't leave the rest of the
         # stack pushed without it, and its pull requests not retargeted.
         if not git.passthrough("push", "--atomic", *leases, "--set-upstream", remote, *branches):
