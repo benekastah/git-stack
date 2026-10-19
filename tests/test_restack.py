@@ -184,6 +184,33 @@ def test_restack_squash_squashes_each_branch_in_stack(repo: Repo, client: StackC
     assert repo.git("branch", "--show-current") == "pr2"
 
 
+def test_restack_squash_runs_commit_hooks(repo: Repo, client: StackClient) -> None:
+    repo.make_stack()
+    hook = repo.path / ".git" / "hooks" / "commit-msg"
+    hook.write_text('#!/bin/sh\nprintf "\\nTicket: ABC-1\\n" >> "$1"\n')
+    hook.chmod(0o755)
+    repo.git("switch", "--quiet", "pr1")
+
+    client.restack(squash=True)
+
+    assert repo.git("log", "-1", "--format=%B", "pr1") == "pr1 c1\n\npr1 c2\n\nTicket: ABC-1"
+
+
+def test_restack_squash_leaves_branch_alone_when_commit_hook_fails(repo: Repo, client: StackClient) -> None:
+    repo.make_stack()
+    hook = repo.path / ".git" / "hooks" / "commit-msg"
+    hook.write_text("#!/bin/sh\nexit 1\n")
+    hook.chmod(0o755)
+    repo.git("switch", "--quiet", "pr1")
+    tip = repo.git("rev-parse", "pr1")
+
+    with pytest.raises(StackError, match="squashing pr1 failed"):
+        client.restack(squash=True)
+
+    assert repo.git("rev-parse", "pr1") == tip
+    assert repo.git("status", "--porcelain") == ""
+
+
 def test_restack_squash_resolves_a_line_edited_by_every_commit_once(repo: Repo, client: StackClient) -> None:
     client.branch("pr1")
     repo.commit("a", "function(A, B)\n", "pr1 c1")
