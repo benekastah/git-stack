@@ -482,9 +482,13 @@ git stack push --force          # drop commits on the remote you didn't pull
 
 ## Scripting
 
-These commands print one thing per line and change nothing, for use in scripts,
-aliases, shell prompts and editors. They only read git config, so they're
-fast. They fail with exit status 1 for a branch that isn't in a stack.
+These commands print one thing per line, for use in scripts, aliases, shell
+prompts and editors. They only read git config, so they're fast, and they're
+safe to run while another git-stack command is running. They fail with exit
+status 1 for a branch that isn't in a stack.
+
+They don't change any branch. The only thing they write, like every command,
+is the result of a restack or pull you finished by hand after a conflict.
 
 ### `git stack parent [<branch>]`
 

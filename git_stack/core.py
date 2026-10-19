@@ -142,7 +142,7 @@ class StackCore:
         if self.git.run("status", "--porcelain", "--untracked-files=no"):
             raise StackError("you have uncommitted changes; commit or stash them first")
 
-    def settle(self, branch: str) -> None:
+    def settle(self, branch: str, forget_unfinished: bool = True) -> None:
         """Record the result of an interrupted restack or pull, if there was one.
 
         If the rebase finished, the pending parent commit is now in the branch's
@@ -153,35 +153,55 @@ class StackCore:
         branch, the upstream tip counts as pulled. If the cherry-pick was aborted,
         or some commits were skipped, it doesn't, and the next sync tries again.
 
+        A restack or pull that hasn't finished may also not have started yet,
+        in another git-stack process. Unless forget_unfinished is set, which
+        only commands that restack or pull themselves should do, it's left
+        pending for that process to record.
+
         Must not be called while a rebase or cherry-pick is in progress, since the
         branch hasn't been updated yet.
         """
+        self.settle_restack(branch, forget_unfinished)
+        self.settle_pull(branch, forget_unfinished)
+
+    def settle_restack(self, branch: str, forget_unfinished: bool) -> None:
         git = self.git
         pending_parent = git.config_get(branch, PENDING_PARENT_KEY)
-        if pending_parent is not None:
-            pending_base = git.config_get(branch, PENDING_BASE_KEY)
-            if pending_base and git.is_ancestor(pending_base, branch):
-                git.config_set(branch, PARENT_KEY, pending_parent)
-                git.config_set(branch, BASE_KEY, pending_base)
-            git.config_unset(branch, PENDING_PARENT_KEY)
-            git.config_unset(branch, PENDING_BASE_KEY)
+        if pending_parent is None:
+            return
+        pending_base = git.config_get(branch, PENDING_BASE_KEY)
+        if pending_base is not None and git.is_ancestor(pending_base, branch):
+            git.config_set(branch, PARENT_KEY, pending_parent)
+            git.config_set(branch, BASE_KEY, pending_base)
+        elif not forget_unfinished:
+            return
+        # Only if they're unchanged, in case another process has started a new
+        # restack since we read them.
+        git.config_unset(branch, PENDING_PARENT_KEY, pending_parent)
+        git.config_unset(branch, PENDING_BASE_KEY, pending_base)
 
+    def settle_pull(self, branch: str, forget_unfinished: bool) -> None:
+        git = self.git
         pending_pulled = git.config_get(branch, PENDING_PULLED_KEY)
-        if pending_pulled is not None:
-            pull_from = git.config_get(branch, PENDING_PULL_FROM_KEY)
-            picked = set((git.config_get(branch, PENDING_PULL_IDENTITIES_KEY) or "").splitlines())
-            # Cherry-picking keeps each commit's author, date and subject, even
-            # when the user resolves a conflict.
-            if (pull_from and picked and git.is_ancestor(pull_from, branch)
-                    and picked <= git.identities(f"{pull_from}..refs/heads/{branch}")):
-                git.config_set(branch, PULLED_KEY, pending_pulled)
-            git.config_unset(branch, PENDING_PULLED_KEY)
-            git.config_unset(branch, PENDING_PULL_FROM_KEY)
-            git.config_unset(branch, PENDING_PULL_IDENTITIES_KEY)
+        if pending_pulled is None:
+            return
+        pull_from = git.config_get(branch, PENDING_PULL_FROM_KEY)
+        identities = git.config_get(branch, PENDING_PULL_IDENTITIES_KEY)
+        picked = set((identities or "").splitlines())
+        # Cherry-picking keeps each commit's author, date and subject, even
+        # when the user resolves a conflict.
+        if (pull_from and picked and git.is_ancestor(pull_from, branch)
+                and picked <= git.identities(f"{pull_from}..refs/heads/{branch}")):
+            git.config_set(branch, PULLED_KEY, pending_pulled)
+        elif not forget_unfinished:
+            return
+        git.config_unset(branch, PENDING_PULLED_KEY, pending_pulled)
+        git.config_unset(branch, PENDING_PULL_FROM_KEY, pull_from)
+        git.config_unset(branch, PENDING_PULL_IDENTITIES_KEY, identities)
 
-    def settle_all(self) -> None:
+    def settle_all(self, forget_unfinished: bool = True) -> None:
         for branch in self.tracked_branches():
-            self.settle(branch)
+            self.settle(branch, forget_unfinished)
 
     def recorded_base(self, branch: str, parent: str) -> str:
         """Return branch's base, checking that it is still in the branch's history."""

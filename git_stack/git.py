@@ -37,8 +37,10 @@ class GitClient:
     def config_set(self, branch: str, key: str, value: str) -> None:
         self.run("config", f"branch.{branch}.{key}", value)
 
-    def config_unset(self, branch: str, key: str) -> None:
-        self.run("config", "--unset", f"branch.{branch}.{key}", check=False)
+    def config_unset(self, branch: str, key: str, value: str | None = None) -> None:
+        """Unset branch's key, or, if value is given, only if it's still value."""
+        self.run("config", "--unset", *(("--fixed-value",) if value is not None else ()),
+                 f"branch.{branch}.{key}", *((value,) if value is not None else ()), check=False)
 
     def rev(self, ref: str) -> str | None:
         return self.run("rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}", check=False) or None

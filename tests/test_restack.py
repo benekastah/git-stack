@@ -4,6 +4,7 @@ import pytest
 
 from git_stack import events
 from git_stack.errors import StackError
+from git_stack.git import GitClient
 from git_stack.stack import BranchInfo, BranchStatus, StackClient
 from tests.helpers import Repo
 
@@ -20,6 +21,30 @@ def test_restack_moves_whole_stack_after_parent_changes(repo: Repo, client: Stac
     repo.assert_stacked("pr3", "pr2", ["pr3 c1"])
     assert repo.git("branch", "--show-current") == "pr3"
     assert all(branch.status is not BranchStatus.NEEDS_RESTACK for branch in client.info())
+
+
+def test_restack_survives_scripting_command_run_before_each_rebase(
+        repo: Repo, client: StackClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo.make_stack()
+    repo.git("switch", "--quiet", "pr1")
+    repo.commit("a", "pr1 review fix\n", "pr1 review fix")
+    repo.git("switch", "--quiet", "pr3")
+    # As a shell prompt would, while restack has written a branch's pending
+    # parent and base but its rebase hasn't started yet.
+    prompt = StackClient(GitClient(repo.path))
+    passthrough = client.git.passthrough
+
+    def run_prompt_first(*args: str) -> bool:
+        if args[0] == "rebase":
+            prompt.parent(args[-1])
+        return passthrough(*args)
+
+    monkeypatch.setattr(client.git, "passthrough", run_prompt_first)
+
+    client.restack()
+
+    repo.assert_stacked("pr2", "pr1", ["pr2 c1"])
+    repo.assert_stacked("pr3", "pr2", ["pr3 c1"])
 
 
 def test_restack_onto_retargets_after_local_squash_merge(repo: Repo, client: StackClient) -> None:
