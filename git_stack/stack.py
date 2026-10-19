@@ -6,8 +6,8 @@ from git_stack import events
 from git_stack.adapters import ADAPTER_SETTING, make_adapter
 from git_stack.adapters.git import GitAdapter
 from git_stack.adapters.merge_state import MergeState
-from git_stack.core import (BASE_KEY, PARENT_KEY, Parents, StackCore, children_map, descendants,
-                            drop_from_stack, ensure_no_cycle, stack_of, stack_root)
+from git_stack.core import (BASE_KEY, PARENT_KEY, PULLED_KEY, Parents, StackCore, children_map,
+                            descendants, drop_from_stack, ensure_no_cycle, stack_of, stack_root)
 from git_stack.errors import BrokenStackError, StackError
 from git_stack.git import DEFAULT_REMOTE
 
@@ -381,6 +381,8 @@ class StackClient(StackCore):
             leases.append(f"--force-with-lease={b}:{remote_tip or ''}")
         if not git.passthrough("push", *leases, "--set-upstream", remote, *branches):
             raise StackError("push failed; if the remote has new commits, run `git stack sync` and try again")
+        for b in branches:
+            git.config_set(b, PULLED_KEY, git.tip(b))
         try:
             adapter.after_push(branches, parents)
         except StackError as e:
