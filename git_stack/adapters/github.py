@@ -71,6 +71,15 @@ class PullRequest:
         )
 
 
+@dataclass(frozen=True)
+class OpenPullRequest:
+    """An open (or draft) pull request of head, a branch in the repository,
+    into base."""
+    number: int
+    head: str
+    base: str
+
+
 class GitHubAdapter(GitAdapter):
     """Asks GitHub, through the gh CLI, whether each branch's pull request was
     merged, and keeps pull requests' bases in step with the stack when
@@ -191,6 +200,29 @@ class GitHubAdapter(GitAdapter):
         refs = [f"refs/pull/{pr.number}/head" for pr in prs if not self.git.rev(pr.head_oid)]
         if refs:
             self.git.run("fetch", "--quiet", "--no-write-fetch-head", self.remote, *refs, check=False)
+
+    def my_open_pull_requests(self) -> list[OpenPullRequest]:
+        """The gh user's open pull requests, drafts included, from branches in
+        the repository (not forks)."""
+        query = ("query($q: String!, $after: String) { search(query: $q, type: ISSUE, first: 100, after: $after) "
+                 "{ pageInfo { hasNextPage endCursor } "
+                 "nodes { ... on PullRequest { number headRefName baseRefName isCrossRepository } } } }")
+        prs = []
+        after = None
+        while True:
+            args = ["api", "graphql", "--hostname", self.host,
+                    "-f", f"q=repo:{self.owner}/{self.name} is:pr is:open author:@me", "-f", f"query={query}"]
+            if after is not None:
+                args += ["-f", f"after={after}"]
+            search = field(field(parse_json(self.gh(*args)), "data", dict), "search", dict)
+            for node in field(search, "nodes", list):
+                if not field(node, "isCrossRepository", bool):
+                    prs.append(OpenPullRequest(field(node, "number", int), field(node, "headRefName", str),
+                                               field(node, "baseRefName", str)))
+            page = field(search, "pageInfo", dict)
+            if not field(page, "hasNextPage", bool):
+                return prs
+            after = field(page, "endCursor", str)
 
     def merge_state(self, branch: str, parent: str) -> MergeState:
         git = self.git
