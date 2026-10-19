@@ -488,6 +488,8 @@ git stack push --force          # drop commits on the remote you didn't pull
   or pass `--force` to drop them. Either way, each lease is pinned to the
   remote-tracking ref that was checked, so if someone pushes after your last
   fetch, the push fails instead of overwriting their work.
+- The branches are pushed in one atomic push: if any of them can't be pushed
+  (e.g. because its remote branch changed since your last fetch), none are.
 - Refuses to push a branch whose remote branch was deleted, since that's
   usually a merged pull request `sync` hasn't seen yet. If it wasn't, run
   `git branch --unset-upstream <branch>` to push it again.
