@@ -133,13 +133,15 @@ With the GitHub adapter:
 - A branch's pull request is the one whose head is a remote branch of the same
   name in the same repository, however it was opened, as long as that remote
   branch is the branch's upstream (as `git stack push` sets it). A pull request
-  from someone else's branch that happens to have the same name doesn't count. An open one wins;
-  otherwise the newest merged one counts, if its head descends from the commit
-  the branch is stacked on (so one merged from an earlier branch of the same
-  name doesn't). Closed pull requests are ignored. If a merged pull request's
-  last commit was never fetched (say GitHub's "Update branch" made it right
-  before the merge, and the branch was deleted on merge), git-stack fetches it
-  from the pull request.
+  from someone else's branch that happens to have the same name doesn't count.
+  An open one wins; otherwise the newest merged one counts, if its head
+  descends from the commit the branch is stacked on (so one merged from an
+  earlier branch of the same name doesn't). Closed pull requests are ignored.
+  If a merged pull request's last commit was never fetched (say GitHub's
+  "Update branch" made it right before the merge, and the branch was deleted
+  on merge), `sync`, `clean` and `push` fetch it from the pull request. Until
+  then, `info` and `restack`, which don't fetch, can't tell that pull request
+  is the branch's, and check the branch like the `git` adapter does.
 - `git stack push` changes the base of the stack's open pull requests to match
   their stack parents, e.g. to `main` once the parent PR was merged.
 - git-stack doesn't open pull requests. For each pushed branch without one,
@@ -301,7 +303,8 @@ git stack info
 - `(parent <name> missing)`: its parent branch was deleted by hand; fix it
   with `git stack track <parent>`.
 - `info` doesn't fetch, so merges on the remote only show up after a `sync`,
-  `clean` or `git fetch`.
+  `clean` or `git fetch --prune`. For an up-to-date view without changing
+  anything, run `git fetch --prune && git stack info`.
 - `--json` prints the same information for scripts: a list with an object for
   each branch, each stack's root first, parent before child. `parent` and
   `status` are `null` for a root, and `status` is one of `up-to-date`,
