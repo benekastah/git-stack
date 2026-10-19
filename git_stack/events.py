@@ -49,6 +49,36 @@ class TrunkInOtherWorktree:
 
 
 @dataclass(frozen=True)
+class NotRestackedInOtherWorktree:
+    """branch needed restacking, but was skipped (along with the branches stacked
+    on it) because it's checked out in the worktree at path."""
+    branch: str
+    path: str
+
+
+@dataclass(frozen=True)
+class NotSquashedInOtherWorktree:
+    branch: str
+    path: str
+
+
+@dataclass(frozen=True)
+class NotPulledInOtherWorktree:
+    """branch's upstream has new commits, but they weren't pulled because branch
+    is checked out in the worktree at path."""
+    branch: str
+    path: str
+
+
+@dataclass(frozen=True)
+class NotDeletedInOtherWorktree:
+    """branch was merged and untracked, but not deleted because it's checked out
+    in the worktree at path."""
+    branch: str
+    path: str
+
+
+@dataclass(frozen=True)
 class SkippedMerged:
     """branch looks merged, so it was left out and its children moved onto parent,
     without changing the stack's metadata."""
@@ -152,6 +182,10 @@ Event: TypeAlias = (
     | FastForwarded
     | TrunkDiverged
     | TrunkInOtherWorktree
+    | NotRestackedInOtherWorktree
+    | NotSquashedInOtherWorktree
+    | NotPulledInOtherWorktree
+    | NotDeletedInOtherWorktree
     | SkippedMerged
     | Untracked
     | RemoteBranchDeleted

@@ -376,6 +376,8 @@ git stack restack --squash              # squash each branch first, then restack
 - Doesn't fetch or push. Needs a clean worktree, and refuses to run outside a
   stack.
 - If a rebase stops on a conflict, see [Conflicts](#conflicts).
+- A branch checked out in another worktree is skipped, with a warning; see
+  [Branches checked out in other worktrees](#branches-checked-out-in-other-worktrees).
 
 ### `git stack sync [--remote origin] [-d local|remote|both]`
 
@@ -420,8 +422,10 @@ git stack sync -d both          # ...and their remote branches
 - A branch with broken metadata (e.g. its parent was deleted by hand) is
   skipped with a warning, along with everything stacked on it; the rest of the
   stack is still synced.
-- The root isn't fast-forwarded if it has diverged from its upstream, or if
-  it's checked out in another worktree; `sync` warns instead.
+- The root isn't fast-forwarded if it has diverged from its upstream; `sync`
+  warns instead.
+- Branches checked out in another worktree are left alone, with a warning;
+  see [Branches checked out in other worktrees](#branches-checked-out-in-other-worktrees).
 - Needs a clean worktree, and refuses to run outside a stack.
 
 ### `git stack clean [--remote origin] [-d local|remote|both]`
@@ -578,6 +582,25 @@ If a rebase or cherry-pick stops on a conflict, resolve it and run
 then rerun the git-stack command to finish the rest of the stack. The new
 parent and base (and the pulled upstream commits) are recorded only if the
 operation actually completed.
+
+## Branches checked out in other worktrees
+
+git won't rebase, check out or delete a branch that's checked out in another
+worktree, and doing it anyway would change files under whatever is using that
+worktree. So git-stack leaves such a branch alone, with a warning, and carries
+on with the rest:
+
+- A branch that needs restacking is skipped, along with the branches stacked
+  on it. A branch that's already up to date isn't a problem.
+- `sync` doesn't pull new commits from its upstream into it, and
+  `restack --squash` doesn't squash it.
+- `sync -d local` and `clean -d local` stop tracking it once it's merged, but
+  don't delete it.
+- A stack's root (e.g. `main`) isn't fast-forwarded.
+
+Once that worktree is on another branch, rerun the command to restack or pull
+what it skipped. A merged branch it didn't delete is no longer tracked, so
+delete it yourself with `git branch -D`.
 
 ## Common issues
 

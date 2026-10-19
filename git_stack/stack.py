@@ -353,9 +353,11 @@ class StackClient(StackCore):
             if git.upstream_gone(branch):
                 self.emit(events.UpstreamGone(branch, parent))
             try:
-                self.restack_branch(branch, parent)
+                restacked = self.restack_branch(branch, parent)
             except BrokenStackError as e:
                 self.emit(events.BrokenBranch(branch, str(e)))
+                restacked = False
+            if not restacked:
                 skipped.add(branch)
                 continue
             self.pull_upstream(branch, parent)

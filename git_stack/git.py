@@ -74,6 +74,14 @@ class GitClient:
                 return path
         return None
 
+    def other_worktree_of(self, branch: str) -> str | None:
+        """The path of the worktree branch is checked out in, if that isn't this
+        one. git won't check out, rebase or delete a branch that's checked out
+        elsewhere."""
+        if self.current_branch() == branch:
+            return None
+        return self.worktree_of(branch)
+
     def upstream_gone(self, branch: str) -> bool:
         return self.run("for-each-ref", "--format=%(upstream:track)", f"refs/heads/{branch}") == "[gone]"
 
