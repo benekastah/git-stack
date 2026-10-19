@@ -157,7 +157,7 @@ With the GitHub adapter:
 
 Like git, every command accepts `-C <path>` before it to run as if started in
 `<path>`, e.g. `git stack -C ~/src/app info`. Each `-C` after the first is
-relative to the one before.
+relative to the one before. It's also fine to do `git -C <path> stack ...`.
 
 Several commands act on "the current stack": every tracked branch stacked on
 the current branch's bottom-most tracked ancestor, including branches beside
