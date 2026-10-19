@@ -131,7 +131,9 @@ git config stack.adapter git
 With the GitHub adapter:
 
 - A branch's pull request is the one whose head is a remote branch of the same
-  name in the same repository, however it was opened. An open one wins;
+  name in the same repository, however it was opened, as long as that remote
+  branch is the branch's upstream (as `git stack push` sets it). A pull request
+  from someone else's branch that happens to have the same name doesn't count. An open one wins;
   otherwise the newest merged one counts, if its head descends from the commit
   the branch is stacked on (so one merged from an earlier branch of the same
   name doesn't). Closed pull requests are ignored. If a merged pull request's

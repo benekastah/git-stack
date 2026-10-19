@@ -100,6 +100,10 @@ class GitHubAdapter(GitAdapter):
     def pull_requests(self) -> dict[str, PullRequest]:
         """{branch: pull request} for tracked branches with a pull request.
 
+        Only branches whose upstream is the remote branch of the same name can
+        have one: a remote branch the branch doesn't track (or a pull request
+        from one) is most likely someone else's that happens to share its name.
+
         Looked up with one API call per command. If that fails, or GitHub's
         answer isn't what we asked for, emits PullRequestLookupFailed and
         returns {}, so merges are only detected locally.
@@ -114,7 +118,7 @@ class GitHubAdapter(GitAdapter):
         return self._pull_requests
 
     def look_up_pull_requests(self) -> dict[str, PullRequest]:
-        branches = list(self.core.tracked_branches())
+        branches = [b for b in self.core.tracked_branches() if self.git.tracks_same_name(b, self.remote)]
         if not branches:
             return {}
         # Branch names are passed as variables, so they needn't be escaped.
