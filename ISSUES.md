@@ -2,15 +2,6 @@
 
 Most severe first.
 
-## Old copies of rebased commits can be pulled back in
-
-`unpulled_commits` recognizes old copies of the branch's own rebased commits by
-the tip `git stack push` last pushed, the branch's reflog, and patch-id
-equivalence. Old copies get cherry-picked back in as if a collaborator pushed
-them if the rebase changed their patches (e.g. resolved conflicts) and they
-were pushed either from another clone or machine, or with a plain `git push`
-whose reflog entry has since expired.
-
 ## Branches checked out in other worktrees
 
 Restacking, switching to or deleting a branch that's checked out in another
@@ -54,3 +45,12 @@ changes, without any warning that the branch was reverted.
 
 The README's "A merged branch was reverted" describes recovering by recreating
 the branch and moving its children back with `restack --onto`.
+
+## Old copies of rebased commits can be pulled back in
+
+`unpulled_commits` recognizes old copies of the branch's own rebased commits by
+the tip `git stack push` last pushed, the branch's reflog, and patch-id
+equivalence. Old copies get cherry-picked back in as if a collaborator pushed
+them if the rebase changed their patches (e.g. resolved conflicts) and they
+were pushed either from another clone or machine, or with a plain `git push`
+whose reflog entry has since expired.
