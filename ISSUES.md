@@ -12,15 +12,6 @@ also moving them onto the newest `main`. On a busy repository, every
 CI, may lose approvals if the repository dismisses stale reviews, and loses
 GitHub's "changes since your last review" view.
 
-## `push` pushes before it retargets pull requests
-
-`push` pushes every branch, then changes the bases of their pull requests. If a
-parent's pull request was merged but its remote branch wasn't deleted, a child
-rebased onto a newer `main` is briefly (or, if retargeting fails, until the
-next `push`) compared against the old parent branch, so its pull request shows
-every commit `main` gained since. Reviewers, and code owners of the files those
-commits touch, may be notified or requested in that window.
-
 ## A reverted change can look merged
 
 A branch that was merged and then reverted on its parent still counts as

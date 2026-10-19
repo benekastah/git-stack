@@ -2,7 +2,7 @@ import json
 import re
 import subprocess
 import urllib.parse
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Self, TypeVar
 
 from git_stack import events
@@ -218,17 +218,39 @@ class GitHubAdapter(GitAdapter):
         return (set(unmatched.split())
                 & set(self.git.run("rev-list", "--no-merges", ref, "--not", parent).split()))
 
+    def before_push(self, to_push: list[str], parents: Parents) -> None:
+        """Point the open pull requests of branches about to be pushed at their
+        stack parents, where the parent is already on the remote.
+
+        Pushing first would briefly compare a rebased branch with its old base
+        (e.g. its parent's branch, after the parent was merged), so its pull
+        request would show every commit the new base gained since. The other
+        way round, it shows at most the old parent's commits.
+        """
+        for b in to_push:
+            if self.git.rev(f"refs/remotes/{self.remote}/{parents[b]}") is not None:
+                self.retarget(b, parents[b])
+
     def after_push(self, pushed: list[str], parents: Parents) -> None:
         """Point the open pull requests of pushed branches at their stack parents,
-        and give a link to open one for each pushed branch that has none."""
+        if before_push couldn't because the parent wasn't on the remote yet, and
+        give a link to open one for each pushed branch that has none."""
         prs = self.pull_requests()
         for b in pushed:
-            pr = prs.get(b)
-            if pr is None:
+            if b in prs:
+                self.retarget(b, parents[b])
+            else:
                 self.core.emit(events.NoPullRequest(b, self.compare_url(parents[b], b)))
-            elif pr.state == "OPEN" and pr.base != parents[b]:
-                self.gh("pr", "edit", str(pr.number), "--repo", self.repo, "--base", parents[b])
-                self.core.emit(events.PullRequestRetargeted(b, pr.number, parents[b]))
+
+    def retarget(self, branch: str, base: str) -> None:
+        """Point branch's pull request at base, if it's open and isn't already."""
+        prs = self.pull_requests()
+        pr = prs.get(branch)
+        if pr is None or pr.state != "OPEN" or pr.base == base:
+            return
+        self.gh("pr", "edit", str(pr.number), "--repo", self.repo, "--base", base)
+        prs[branch] = replace(pr, base=base)
+        self.core.emit(events.PullRequestRetargeted(branch, pr.number, base))
 
     def compare_url(self, base: str, head: str) -> str:
         """The page for opening a pull request of head into base, with the

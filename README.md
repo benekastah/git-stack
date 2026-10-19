@@ -143,7 +143,11 @@ With the GitHub adapter:
   then, `info` and `restack`, which don't fetch, can't tell that pull request
   is the branch's, and check the branch like the `git` adapter does.
 - `git stack push` changes the base of the stack's open pull requests to match
-  their stack parents, e.g. to `main` once the parent PR was merged.
+  their stack parents, e.g. to `main` once the parent PR was merged. It does
+  that before pushing, so a pull request is never compared with its old base
+  after its branch was rebased onto the new one, which would show every commit
+  the new base gained since. (A parent that isn't on GitHub yet is pushed
+  first.)
 - git-stack doesn't open pull requests. For each pushed branch without one,
   `push` prints a link to GitHub's page for opening one against its stack
   parent, with the repository's pull request template filled in. (The link
