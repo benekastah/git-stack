@@ -107,16 +107,9 @@ class StackCore:
 
     def tracked_branches(self) -> Parents:
         """Return {branch: parent} for every tracked branch that still exists."""
-        out = self.git.run("config", "--null", "--get-regexp", rf"^branch\..*\.{PARENT_KEY.lower()}$",
-                           check=False)
-        suffix = f".{PARENT_KEY.lower()}"
-        parents = {}
-        for entry in filter(None, out.split("\0")):
-            key, _, value = entry.partition("\n")
-            branch = key[len("branch."):-len(suffix)]
-            if self.git.local_branch_exists(branch):
-                parents[branch] = value
-        return parents
+        existing = self.git.local_branches()
+        return {branch: parent for (branch, key), parent in self.git.branch_config().items()
+                if key == PARENT_KEY.lower() and branch in existing}
 
     def current_stacked_branch(self, parents: Parents, command: str, hint: str | None = None) -> str:
         """Return the current branch, refusing unless it's in a stack.

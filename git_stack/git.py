@@ -11,6 +11,10 @@ class GitClient:
 
     def __init__(self, directory: str | os.PathLike[str] = ".") -> None:
         self.directory = os.fspath(directory)
+        # See branch_config.
+        self._config_path: str | None = None
+        self._config_stat: tuple[int, int, int] | None = None
+        self._branch_config: dict[tuple[str, str], str] = {}
 
     def _command(self, *args: str) -> list[str]:
         return ["git", "-C", self.directory, *args]
@@ -30,9 +34,34 @@ class GitClient:
         """Run git with output going straight to the terminal."""
         return subprocess.run(self._command(*args)).returncode == 0
 
+    def branch_config(self) -> dict[tuple[str, str], str]:
+        """Every branch.<name>.<key> setting, as {(name, key in lower case): value}.
+
+        Read with one git call, and read again only once the repository's config
+        file has changed, which is whenever anything (us, a git command we run,
+        or another process) writes to it. Commands look up the same few keys of
+        every tracked branch over and over, and each git call is slow enough to
+        add up.
+        """
+        if self._config_path is None:
+            common_dir = self.run("rev-parse", "--path-format=absolute", "--git-common-dir")
+            self._config_path = os.path.join(common_dir, "config")
+        # Before reading, so a write that lands in between is read again next time.
+        st = os.stat(self._config_path)
+        stat = (st.st_ino, st.st_mtime_ns, st.st_size)
+        if stat != self._config_stat:
+            config = {}
+            for entry in filter(None, self.run("config", "--null", "--get-regexp", r"^branch\.",
+                                               check=False).split("\0")):
+                key, _, value = entry.partition("\n")
+                # Branch names can contain dots, but keys can't.
+                branch, _, name = key.removeprefix("branch.").rpartition(".")
+                config[branch, name] = value
+            self._branch_config, self._config_stat = config, stat
+        return self._branch_config
+
     def config_get(self, branch: str, key: str) -> str | None:
-        value = self.run("config", "--get", f"branch.{branch}.{key}", check=False)
-        return value or None
+        return self.branch_config().get((branch, key.lower())) or None
 
     def config_set(self, branch: str, key: str, value: str) -> None:
         self.run("config", f"branch.{branch}.{key}", value)
@@ -58,6 +87,9 @@ class GitClient:
     def local_branch_exists(self, name: str) -> bool:
         return self.ok("show-ref", "--verify", "--quiet", f"refs/heads/{name}")
 
+    def local_branches(self) -> set[str]:
+        return set(self.run("for-each-ref", "--format=%(refname:lstrip=2)", "refs/heads").splitlines())
+
     def switch(self, branch: str) -> None:
         self.run("switch", "--quiet", branch)
 
@@ -68,8 +100,10 @@ class GitClient:
         (e.g. because of an untracked file in the way) leaves only its
         sequencer state behind, not CHERRY_PICK_HEAD.
         """
-        return any(os.path.exists(self.run("rev-parse", "--path-format=absolute", "--git-path", name))
-                   for name in ("rebase-merge", "rebase-apply", "CHERRY_PICK_HEAD", "sequencer", "MERGE_HEAD"))
+        names = ("rebase-merge", "rebase-apply", "CHERRY_PICK_HEAD", "sequencer", "MERGE_HEAD")
+        paths = self.run("rev-parse", "--path-format=absolute",
+                         *(arg for name in names for arg in ("--git-path", name))).splitlines()
+        return any(os.path.exists(path) for path in paths)
 
     def has_conflicts(self) -> bool:
         """Whether the index has unmerged paths, i.e. a merge stopped on a conflict."""
