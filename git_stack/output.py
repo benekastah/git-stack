@@ -25,6 +25,10 @@ WARNINGS = (
 
 def message(event: events.Event) -> str:
     match event:
+        case events.Fetching():
+            return f"fetching {event.remote}, and pruning its deleted branches"
+        case events.LookingUpPullRequests():
+            return "looking up your open pull requests on GitHub"
         case events.Squashing():
             return f"squashing {event.count} commits on {event.branch}"
         case events.Restacking():

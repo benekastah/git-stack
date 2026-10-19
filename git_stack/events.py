@@ -9,6 +9,17 @@ from typing import TypeAlias
 
 
 @dataclass(frozen=True)
+class Fetching:
+    """remote is being fetched, with --prune."""
+    remote: str
+
+
+@dataclass(frozen=True)
+class LookingUpPullRequests:
+    """autocreate is searching GitHub for the user's open pull requests."""
+
+
+@dataclass(frozen=True)
 class Squashing:
     branch: str
     count: int
@@ -176,7 +187,9 @@ class PullRequestRetargeted:
 
 # Every event, so code that handles them can check it handles each one.
 Event: TypeAlias = (
-    Squashing
+    Fetching
+    | LookingUpPullRequests
+    | Squashing
     | Restacking
     | PullingUpstream
     | FastForwarded

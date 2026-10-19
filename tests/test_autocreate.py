@@ -2,6 +2,7 @@
 
 import pytest
 
+from git_stack import events
 from git_stack.errors import StackError
 from git_stack.stack import AutocreateAction, Autocreated, BranchStatus, StackClient
 from tests.helpers import FakeGitHub, Repo
@@ -37,6 +38,15 @@ def test_autocreate_creates_and_tracks_branches_of_open_prs(
     repo.assert_stacked("pr2", "pr1", ["pr2 c1"])
     assert repo.git("rev-parse", "--abbrev-ref", "pr2@{upstream}") == "origin/pr2"
     assert [b.status for b in client.info()] == [None, BranchStatus.UP_TO_DATE, BranchStatus.UP_TO_DATE]
+
+
+def test_autocreate_says_what_its_doing_before_the_slow_parts(
+        repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event]) -> None:
+    open_pr(repo, gh, 1, "pr1", "main")
+
+    client.autocreate()
+
+    assert emitted[:2] == [events.LookingUpPullRequests(), events.Fetching("origin")]
 
 
 def test_autocreate_dry_run_changes_nothing(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:

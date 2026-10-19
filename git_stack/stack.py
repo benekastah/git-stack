@@ -186,12 +186,13 @@ class StackClient(StackCore):
         if not isinstance(adapter, GitHubAdapter):
             raise StackError(f"autocreate finds stacks from pull requests on GitHub, but {remote} isn't a "
                              f"GitHub repository, gh isn't installed, or {ADAPTER_SETTING} is git")
+        self.emit(events.LookingUpPullRequests())
         try:
             prs = adapter.my_open_pull_requests()
         except StackError as e:
             raise StackError(f"couldn't look up your pull requests on GitHub; check `gh auth status` (and, for "
                              f"an organization with SSO, that gh's token is authorized for it): {e}")
-        git.fetch(remote)
+        self.fetch(remote)
         if not dry_run:
             # Bases are worked out from the local parents, so a stale main would
             # make them too old for branches built on a newer origin/main.
@@ -476,7 +477,7 @@ class StackClient(StackCore):
         # it left them.
         original = self.current_stacked_branch(parents, "sync")
         adapter = self.checked_adapter(remote)
-        git.fetch(remote)
+        self.fetch(remote)
         self.fast_forward_trunks([stack_root(original, parents)])
 
         # Parent-before-child, so by the time we reach a branch its parent is
@@ -532,7 +533,7 @@ class StackClient(StackCore):
         # detached at), or wherever deleting their branch left them.
         original = self.current_checkout()
         adapter = self.checked_adapter(remote)
-        git.fetch(remote)
+        self.fetch(remote)
         parents = self.tracked_branches()
         roots = sorted({stack_root(b, parents) for b in parents})
         self.fast_forward_trunks(roots)

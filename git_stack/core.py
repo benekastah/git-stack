@@ -385,6 +385,12 @@ class StackCore:
         return StackError(f"{what} stopped without a conflict; see git's output above (e.g. an untracked "
                           f"file is in the way: move or delete it). Fix that, run {carry_on}, then {then}")
 
+    def fetch(self, remote: str) -> None:
+        """Fetch remote with --prune, saying so first, since in a busy
+        repository it can take a while."""
+        self.emit(events.Fetching(remote))
+        self.git.fetch(remote)
+
     def fast_forward_trunks(self, roots: Iterable[str]) -> None:
         """Fast-forward untracked local parents (e.g. main) to their upstreams."""
         git = self.git
