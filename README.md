@@ -302,9 +302,11 @@ git stack info
   until you sort it out.
 - `(parent <name> missing)`: its parent branch was deleted by hand; fix it
   with `git stack track <parent>`.
-- `info` doesn't fetch, so merges on the remote only show up after a `sync`,
-  `clean` or `git fetch --prune`. For an up-to-date view without changing
-  anything, run `git fetch --prune && git stack info`.
+- `info` doesn't fetch, and compares each branch with its local parent, so a
+  merge on the remote only shows up once the local parent has it. `git fetch`
+  alone isn't enough, since it doesn't update `main`; run `git stack clean`
+  first, which fetches and fast-forwards `main` (and stops tracking merged
+  branches, but doesn't restack anything).
 - `--json` prints the same information for scripts: a list with an object for
   each branch, each stack's root first, parent before child. `parent` and
   `status` are `null` for a root, and `status` is one of `up-to-date`,
