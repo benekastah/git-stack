@@ -292,8 +292,7 @@ class StackCore:
             self.settle(branch)
             return True
         if git.operation_in_progress():
-            raise StackError(f"restacking {branch} stopped on a conflict. Resolve it, run "
-                             f"`git rebase --continue`, then rerun this command to finish the stack")
+            raise self.stopped(f"restacking {branch}", "rebase", "rerun this command to finish the stack")
         git.config_unset(branch, PENDING_PARENT_KEY)
         git.config_unset(branch, PENDING_BASE_KEY)
         raise StackError(f"restacking {branch} onto {parent} failed; see git's output above")
@@ -352,10 +351,28 @@ class StackCore:
         git.config_set(branch, PENDING_PULL_IDENTITIES_KEY,
                        "\n".join(sorted(git.identities("--no-walk", *commits))))
         git.switch(branch)
-        if not git.passthrough("cherry-pick", "--ff", *commits):
-            raise StackError(f"pulling upstream commits into {branch} stopped on a conflict. Resolve it, "
-                             f"run `git cherry-pick --continue`, then rerun `git stack sync`")
-        self.settle(branch)
+        if git.passthrough("cherry-pick", "--ff", *commits):
+            self.settle(branch)
+            return
+        if git.operation_in_progress():
+            raise self.stopped(f"pulling upstream commits into {branch}", "cherry-pick", "rerun `git stack sync`")
+        git.config_unset(branch, PENDING_PULLED_KEY)
+        git.config_unset(branch, PENDING_PULL_FROM_KEY)
+        git.config_unset(branch, PENDING_PULL_IDENTITIES_KEY)
+        raise StackError(f"pulling upstream commits into {branch} failed; see git's output above")
+
+    def stopped(self, what: str, command: str, then: str) -> StackError:
+        """The error for a rebase or cherry-pick (command) that stopped partway
+        through what, saying how to carry on."""
+        if self.git.has_conflicts():
+            return StackError(f"{what} stopped on a conflict. Resolve it, run `git {command} --continue`, "
+                              f"then {then}")
+        # `git rebase --continue` retries the commit that couldn't be applied,
+        # but `git cherry-pick --continue` skips it, so a cherry-pick has to be
+        # started over.
+        carry_on = "`git rebase --continue`" if command == "rebase" else f"`git {command} --abort`"
+        return StackError(f"{what} stopped without a conflict; see git's output above (e.g. an untracked "
+                          f"file is in the way: move or delete it). Fix that, run {carry_on}, then {then}")
 
     def fast_forward_trunks(self, roots: Iterable[str]) -> None:
         """Fast-forward untracked local parents (e.g. main) to their upstreams."""

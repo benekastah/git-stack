@@ -43,16 +43,6 @@ such command is between writing its pending keys and starting its rebase or
 cherry-pick, that rebase is never recorded, so the branch keeps its old base.
 There's no lock to stop two from running at once.
 
-## Untracked files aren't checked before restacking
-
-`restack`, `sync` and `clean` refuse to run with uncommitted changes, but
-ignore untracked files (`ensure_clean_worktree` passes
-`--untracked-files=no`). If a commit being replayed adds a file that's
-untracked in the worktree, git stops the rebase to avoid overwriting it, and
-git-stack reports it as a conflict ("stopped on a conflict. Resolve it, run
-`git rebase --continue`"), though there's nothing to resolve: the untracked
-file has to be moved out of the way first.
-
 ## Branch and parent names are resolved like any revision
 
 Most git calls pass bare names (`git rev-parse <parent>`,
