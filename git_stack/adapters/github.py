@@ -1,6 +1,7 @@
 import json
 import re
 import subprocess
+import threading
 import urllib.parse
 from dataclasses import dataclass, replace
 from typing import Self, TypeVar
@@ -98,6 +99,8 @@ class GitHubAdapter(GitAdapter):
         self.host, self.owner, self.name = host, owner, name
         self.repo = f"{host}/{owner}/{name}"
         self._pull_requests: dict[str, PullRequest] | None = None
+        # So branches checked in parallel (as info does) look them up only once.
+        self._pull_requests_lock = threading.Lock()
         self._default_branch: str | None = None
 
     def gh(self, *args: str) -> str:
@@ -118,13 +121,14 @@ class GitHubAdapter(GitAdapter):
         returns {}, so merges are only detected locally, unless
         ensure_available was called first.
         """
-        if self._pull_requests is None:
-            self._pull_requests = {}
-            try:
-                self._pull_requests = self.look_up_pull_requests()
-            except StackError as e:
-                self.core.emit(events.PullRequestLookupFailed(str(e)))
-        return self._pull_requests
+        with self._pull_requests_lock:
+            if self._pull_requests is None:
+                self._pull_requests = {}
+                try:
+                    self._pull_requests = self.look_up_pull_requests()
+                except StackError as e:
+                    self.core.emit(events.PullRequestLookupFailed(str(e)))
+            return self._pull_requests
 
     def ensure_available(self) -> None:
         """Look up pull requests now, failing if GitHub can't be asked (e.g. gh

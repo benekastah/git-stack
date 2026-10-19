@@ -1,5 +1,6 @@
 import enum
 from collections.abc import Iterable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
 from git_stack import events
@@ -410,10 +411,15 @@ class StackClient(StackCore):
                 return BranchStatus.NEEDS_RESTACK
             return BranchStatus.UP_TO_DATE
 
+        # Each status can take a few git calls, and checking whether a branch on
+        # main conflicts with it can take a second or more in a big repository
+        # if the branch is far behind, so they're worked out in parallel.
+        with ThreadPoolExecutor() as pool:
+            statuses = dict(zip(parents, pool.map(status, parents)))
         result = []
         for root in sorted({stack_root(b, parents) for b in parents}):
             result.append(BranchInfo(root, None, None, root == current))
-            result.extend(BranchInfo(b, parents[b], status(b), b == current)
+            result.extend(BranchInfo(b, parents[b], statuses[b], b == current)
                           for b in descendants(root, children))
         return result
 
