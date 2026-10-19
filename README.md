@@ -742,25 +742,35 @@ pipx install --editable /path/to/git-stack
 uv tool install --editable /path/to/git-stack
 ```
 
-Without pipx or uv, install it into a virtualenv and link its `git-stack`
-into a directory on your `PATH`:
+Without pipx or uv, install it into a virtualenv, then link the `git-stack`
+command into a directory on your `PATH`, and the man page into one `man`
+searches. Replace `/path/to/git-stack` with your clone's path:
 
 ```sh
 python3 -m venv ~/.local/share/git-stack/venv
 ~/.local/share/git-stack/venv/bin/pip install --editable /path/to/git-stack
-ln -s ~/.local/share/git-stack/venv/bin/git-stack ~/.local/bin/git-stack
+mkdir -p ~/.local/bin ~/.local/share/man/man1
+ln -s ~/.local/share/git-stack/venv/bin/git-stack ~/.local/bin/
+ln -s /path/to/git-stack/man/git-stack.1 ~/.local/share/man/man1/
 ```
+
+The man page is linked by hand because an editable install doesn't install
+it, with pipx and uv too: for those, run just the last two lines. The link
+points into your clone, so the page stays up to date with it.
+
+To check it worked, `git stack -h` should print git-stack's usage, and
+`git stack --help` should open the man page:
+
+- If `git stack` isn't found, `~/.local/bin` isn't on your `PATH`; add it in
+  your shell's startup file.
+- If `git stack --help` says "No manual entry for git-stack", `man` isn't
+  searching `~/.local/share/man`: check with `manpath`. Most systems add it
+  because `~/.local/bin` is on your `PATH`; otherwise, add
+  `export MANPATH="$HOME/.local/share/man:"` to your shell's startup file
+  (the trailing `:` keeps the system's manual directories too).
 
 Reinstall only when `pyproject.toml` changes, for example when a command-line
 entry point is added.
-
-An editable install doesn't install the man page, so link the clone's copy,
-which stays up to date with it:
-
-```sh
-mkdir -p ~/.local/share/man/man1
-ln -s /path/to/git-stack/man/git-stack.1 ~/.local/share/man/man1/
-```
 
 ## Development
 
