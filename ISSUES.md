@@ -2,13 +2,6 @@
 
 Most severe first.
 
-## Branches checked out in other worktrees
-
-Restacking, switching to or deleting a branch that's checked out in another
-worktree fails partway through a `sync`, `clean` or `restack`. (A stack's root,
-e.g. `main`, checked out elsewhere is left alone with a warning rather than
-fast-forwarded.)
-
 ## Fork workflows aren't supported
 
 - `sync` and `clean` fetch only `--remote` (default `origin`). If `main` tracks

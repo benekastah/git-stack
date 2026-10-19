@@ -8,6 +8,10 @@ from git_stack import events
 WARNINGS = (
     events.TrunkDiverged,
     events.TrunkInOtherWorktree,
+    events.NotRestackedInOtherWorktree,
+    events.NotSquashedInOtherWorktree,
+    events.NotPulledInOtherWorktree,
+    events.NotDeletedInOtherWorktree,
     events.SkippedMerged,
     events.RemoteBranchDeleteFailed,
     events.ParentSkipped,
@@ -34,6 +38,18 @@ def message(event: events.Event) -> str:
         case events.TrunkInOtherWorktree():
             return (f"{event.branch} is checked out in {event.path}; not fast-forwarding it to "
                     f"{event.upstream}. Run `git -C {event.path} merge --ff-only` to update it")
+        case events.NotRestackedInOtherWorktree():
+            return (f"skipping {event.branch}: it's checked out in {event.path}, so it can't be "
+                    f"restacked here. Switch that worktree to another branch, then rerun this command")
+        case events.NotSquashedInOtherWorktree():
+            return f"not squashing {event.branch}: it's checked out in {event.path}"
+        case events.NotPulledInOtherWorktree():
+            return (f"not pulling new commits from {event.branch}'s upstream: it's checked out in "
+                    f"{event.path}. Run `git stack sync` there, or switch that worktree to another "
+                    f"branch and rerun it here")
+        case events.NotDeletedInOtherWorktree():
+            return (f"not deleting {event.branch}: it's checked out in {event.path}. Delete it with "
+                    f"`git branch -D {event.branch}` once that worktree is on another branch")
         case events.SkippedMerged():
             return (f"{event.branch} looks merged into {event.parent}; skipping it and moving its "
                     f"children onto {event.parent}. Run `git stack sync` to remove it from the stack")

@@ -202,6 +202,9 @@ class StackCore:
         commits = git.run("rev-list", "--reverse", f"{base}..refs/heads/{branch}").split()
         if len(commits) < 2:
             return
+        if (worktree := git.other_worktree_of(branch)) is not None:
+            self.emit(events.NotSquashedInOtherWorktree(branch, worktree))
+            return
         self.emit(events.Squashing(branch, len(commits)))
         message = "\n\n".join(git.run("show", "--no-patch", "--format=%B", c) for c in commits)
         author, date = git.run("show", "--no-patch", "--format=%an <%ae>%x00%aI", commits[0]).split("\0")
@@ -210,11 +213,14 @@ class StackCore:
         git.run("commit", "--quiet", "--no-verify", "--cleanup=whitespace",
                 f"--author={author}", f"--date={date}", "--file=-", input=message)
 
-    def restack_branch(self, branch: str, parent: str) -> None:
+    def restack_branch(self, branch: str, parent: str) -> bool:
         """Rebase branch's own commits onto parent's current tip.
 
         parent may differ from the recorded one (restack --onto); it is recorded
         only once the rebase has finished.
+
+        Returns False, changing nothing, if branch needs rebasing but is checked
+        out in another worktree.
         """
         git = self.git
         parent_tip = git.rev(parent)
@@ -225,24 +231,35 @@ class StackCore:
         if base == parent_tip:
             # Nothing to replay, so there's no rebase to wait for.
             git.config_set(branch, PARENT_KEY, parent)
-            return
+            return True
+        if (worktree := git.other_worktree_of(branch)) is not None:
+            self.emit(events.NotRestackedInOtherWorktree(branch, worktree))
+            return False
         self.emit(events.Restacking(branch, parent))
         git.config_set(branch, PENDING_PARENT_KEY, parent)
         git.config_set(branch, PENDING_BASE_KEY, parent_tip)
         if git.passthrough("rebase", "--no-update-refs", "--onto", parent_tip, base, branch):
             self.settle(branch)
-        elif git.operation_in_progress():
+            return True
+        if git.operation_in_progress():
             raise StackError(f"restacking {branch} stopped on a conflict. Resolve it, run "
                              f"`git rebase --continue`, then rerun this command to finish the stack")
-        else:
-            git.config_unset(branch, PENDING_PARENT_KEY)
-            git.config_unset(branch, PENDING_BASE_KEY)
-            raise StackError(f"restacking {branch} onto {parent} failed; see git's output above")
+        git.config_unset(branch, PENDING_PARENT_KEY)
+        git.config_unset(branch, PENDING_BASE_KEY)
+        raise StackError(f"restacking {branch} onto {parent} failed; see git's output above")
 
     def restack_all(self, branches: Iterable[str], parents: Parents) -> None:
+        """Restack branches, parent-before-child, skipping those stacked on a
+        branch that couldn't be restacked."""
         original = self.git.current_branch()
+        skipped = set()
         for branch in branches:
-            self.restack_branch(branch, parents[branch])
+            parent = parents[branch]
+            if parent in skipped:
+                self.emit(events.ParentSkipped(branch, parent))
+                skipped.add(branch)
+            elif not self.restack_branch(branch, parent):
+                skipped.add(branch)
         if original and self.git.current_branch() != original:
             self.git.switch(original)
 
@@ -275,6 +292,9 @@ class StackCore:
             return
         commits = self.unpulled_commits(branch, parent, upstream_tip)
         if not commits:
+            return
+        if (worktree := git.other_worktree_of(branch)) is not None:
+            self.emit(events.NotPulledInOtherWorktree(branch, worktree))
             return
         self.emit(events.PullingUpstream(branch, len(commits)))
         git.config_set(branch, PENDING_PULL_FROM_KEY, git.tip(branch))
@@ -322,24 +342,28 @@ class StackCore:
     def remove_merged(self, branch: str, parents: Parents, delete: bool) -> None:
         """Move branch's children onto its parent, then stop tracking branch.
 
-        If delete is set, the branch itself is deleted too, and if it was checked
-        out, its first child (or, without children, its parent) is checked out
-        instead.
+        If delete is set, the branch itself is deleted too, unless it's checked
+        out in another worktree. If it was checked out here, its first child (or
+        its parent) that isn't checked out elsewhere is checked out instead, or
+        failing that, the parent's commit, detached.
         """
         git = self.git
         new_parent = parents[branch]
         children = tuple(drop_from_stack(branch, parents))
         for child in children:
             git.config_set(child, PARENT_KEY, new_parent)
+        if delete and (worktree := git.other_worktree_of(branch)) is not None:
+            self.emit(events.NotDeletedInOtherWorktree(branch, worktree))
+            delete = False
         if not delete:
             self.forget(branch)
             self.emit(events.Untracked(branch, new_parent, children, deleted_tip=None))
             return
         if git.current_branch() == branch:
-            if children:
-                git.switch(sorted(children)[0])
-            elif git.local_branch_exists(new_parent):
-                git.switch(new_parent)
+            target = next((b for b in (*sorted(children), new_parent)
+                           if git.local_branch_exists(b) and git.worktree_of(b) is None), None)
+            if target is not None:
+                git.switch(target)
             else:
                 git.run("switch", "--quiet", "--detach", new_parent)
         tip = git.tip(branch)
