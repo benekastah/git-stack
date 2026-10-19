@@ -259,7 +259,7 @@ class StackClient(StackCore):
         parents = self.settled_branches()
         current = git.current_branch()
         children = children_map(parents)
-        adapter = make_adapter(self, DEFAULT_REMOTE)
+        adapter = make_adapter(self, DEFAULT_REMOTE, fetch=False)
 
         def status(branch: str) -> BranchStatus:
             parent = parents[branch]
@@ -311,7 +311,8 @@ class StackClient(StackCore):
             self.ensure_local_branch_parent(onto)
             ensure_no_cycle(branch, onto, parents)
             parents[branch] = onto
-        branches = self.skip_merged(stack_of(branch, parents), parents, make_adapter(self, DEFAULT_REMOTE))
+        adapter = make_adapter(self, DEFAULT_REMOTE, fetch=False)
+        branches = self.skip_merged(stack_of(branch, parents), parents, adapter)
         if squash:
             for b in branches:
                 self.squash_branch(b, parents[b])
@@ -334,7 +335,7 @@ class StackClient(StackCore):
         # Where to leave the user afterwards: their branch, or wherever deleting
         # it left them.
         original = self.current_stacked_branch(parents, "sync")
-        adapter = make_adapter(self, remote)
+        adapter = make_adapter(self, remote, fetch=True)
         git.fetch(remote)
         self.fast_forward_trunks([stack_root(original, parents)])
 
@@ -390,7 +391,7 @@ class StackClient(StackCore):
         # Where to leave the user afterwards: their branch (or the commit they had
         # detached at), or wherever deleting their branch left them.
         original = self.current_checkout()
-        adapter = make_adapter(self, remote)
+        adapter = make_adapter(self, remote, fetch=True)
         git.fetch(remote)
         parents = self.tracked_branches()
         roots = sorted({stack_root(b, parents) for b in parents})
@@ -429,7 +430,7 @@ class StackClient(StackCore):
             branch = self.current_stacked_branch(parents, "push")
         elif branch not in parents:
             raise StackError(f"{branch} isn't in a stack")
-        adapter = make_adapter(self, remote)
+        adapter = make_adapter(self, remote, fetch=True)
         branches = self.skip_merged(stack_of(branch, parents), parents, adapter)
         if not branches:
             return []

@@ -82,9 +82,10 @@ class GitHubAdapter(GitAdapter):
     locally.
     """
 
-    def __init__(self, core: StackCore, remote: str, host: str, owner: str, name: str) -> None:
+    def __init__(self, core: StackCore, remote: str, host: str, owner: str, name: str, fetch: bool) -> None:
         super().__init__(core)
         self.remote = remote
+        self.fetch = fetch
         self.host, self.owner, self.name = host, owner, name
         self.repo = f"{host}/{owner}/{name}"
         self._pull_requests: dict[str, PullRequest] | None = None
@@ -171,8 +172,11 @@ class GitHubAdapter(GitAdapter):
         A pull request's last commit can be made on GitHub (e.g. by "Update
         branch") right before it's merged and its branch deleted, so we never
         fetch it. Without it, we can't tell the pull request is the branch's.
-        If the fetch fails, those pull requests are just ignored.
+        If the fetch fails, or the adapter may not fetch, those pull requests
+        are just ignored.
         """
+        if not self.fetch:
+            return
         refs = [f"refs/pull/{pr.number}/head" for pr in prs if not self.git.rev(pr.head_oid)]
         if refs:
             self.git.run("fetch", "--quiet", "--no-write-fetch-head", self.remote, *refs, check=False)

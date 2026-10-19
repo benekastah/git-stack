@@ -175,13 +175,12 @@ def test_sync_trusts_merged_pr_whose_merge_differs_from_branch(
     assert len(gh.calls("api", "graphql")) == 1
 
 
-def test_sync_fetches_head_of_merged_pr_whose_branch_was_deleted(
-        repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
-    repo.make_stack()
-    client.push()
-    # On GitHub: "Update branch" merges a new main into pr1, then pr1 is
-    # squash-merged with a tweak (so its changes don't match pr1's) and its
-    # branch deleted, all before we fetch the updated pr1.
+def merge_pr1_after_update_branch(repo: Repo, gh: FakeGitHub) -> str:
+    """On GitHub: "Update branch" merges a new main into pr1, then pr1 is
+    squash-merged as pull request #5 with a tweak (so its changes don't match
+    pr1's) and its branch deleted, all before we fetch the updated pr1.
+    Returns pr1's updated head."""
+    repo.client.push()
     repo.git("pull", "--quiet", cwd=repo.forge)
     repo.commit_on_forge("main", "d", "main moved\n", "main moved")
     repo.git("fetch", "--quiet", cwd=repo.forge)
@@ -197,11 +196,28 @@ def test_sync_fetches_head_of_merged_pr_whose_branch_was_deleted(
     repo.git("update-ref", "refs/pull/5/head", updated_head, cwd=repo.origin)
     gh.add_pr(number=5, state="MERGED", headRefName="pr1", headRefOid=updated_head, baseRefName="main",
               mergeCommit={"oid": repo.git("rev-parse", "HEAD", cwd=repo.forge)})
+    return updated_head
+
+
+def test_sync_fetches_head_of_merged_pr_whose_branch_was_deleted(
+        repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+    repo.make_stack()
+    merge_pr1_after_update_branch(repo, gh)
 
     client.sync()
 
     repo.assert_untracked("pr1")
     repo.assert_stacked("pr2", "main", ["pr2 c1"])
+
+
+def test_info_does_not_fetch_head_of_merged_pr(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+    repo.make_stack()
+    updated_head = merge_pr1_after_update_branch(repo, gh)
+    repo.git("fetch", "--quiet", "--prune")
+
+    client.info()
+
+    assert client.git.rev(updated_head) is None
 
 
 def test_restack_ignores_merged_pr_until_parent_has_the_merge(
