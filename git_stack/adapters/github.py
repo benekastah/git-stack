@@ -2,7 +2,6 @@ import json
 import re
 import subprocess
 import threading
-import urllib.parse
 from dataclasses import dataclass, replace
 from typing import Self, TypeVar
 
@@ -274,13 +273,14 @@ class GitHubAdapter(GitAdapter):
     def after_push(self, pushed: list[str], parents: Parents) -> None:
         """Point the open pull requests of pushed branches at their stack parents,
         if before_push couldn't because the parent wasn't on the remote yet, and
-        give a link to open one for each pushed branch that has none."""
+        say which pushed branches have none."""
         prs = self.pull_requests()
         for b in pushed:
             if b in prs:
                 self.retarget(b, parents[b])
-            else:
-                self.core.emit(events.NoPullRequest(b, self.compare_url(parents[b], b)))
+        without = tuple(b for b in pushed if b not in prs)
+        if without:
+            self.core.emit(events.NoPullRequests(without))
 
     def retarget(self, branch: str, base: str) -> None:
         """Point branch's pull request at base, if it's open and isn't already."""
@@ -317,12 +317,6 @@ class GitHubAdapter(GitAdapter):
         if not match:
             raise StackError(f"couldn't tell which pull request gh opened for {branch} from {url!r}")
         return int(match.group(1)), url
-
-    def compare_url(self, base: str, head: str) -> str:
-        """The page for opening a pull request of head into base, with the
-        repository's pull request template filled in."""
-        base, head = (urllib.parse.quote(ref, safe="/") for ref in (base, head))
-        return f"https://{self.host}/{self.owner}/{self.name}/compare/{base}...{head}?expand=1"
 
 
 def github_repo(git: GitClient, remote: str) -> tuple[str, str, str] | None:

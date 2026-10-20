@@ -485,9 +485,8 @@ git stack push --force          # drop commits on the remote you didn't pull
   usually a merged pull request `sync` hasn't seen yet. If it wasn't, run
   `git branch --unset-upstream <branch>` to push it again.
 - With the [GitHub adapter](#github), points each open pull request at its
-  stack parent (e.g. at `main` once the parent PR was merged), and prints a
-  link to open one for each branch that has none. To open them all at once,
-  run `git stack prs`.
+  stack parent (e.g. at `main` once the parent PR was merged), and lists the
+  branches that have none, which `git stack prs` opens.
 
 ### `git stack prs [--remote origin] [-n]`
 
@@ -495,8 +494,7 @@ Open a draft pull request on GitHub for each branch in the current stack that
 has none, into its stack parent, bottom-up.
 
 **When would I use it?** After pushing a new stack, or new branches in one,
-to open their pull requests with the right bases, rather than following each
-link `push` prints.
+to open their pull requests with the right bases.
 
 ```sh
 git stack push
@@ -652,7 +650,8 @@ git stack branch pr1-again
 git revert <the revert commit>     # or cherry-pick pr1's commits
 git switch pr2
 git stack restack --onto pr1-again
-git stack push                     # point pr2's pull request at pr1-again, and link to open one for it
+git stack push                     # point pr2's pull request at pr1-again
+git stack prs                      # open one for pr1-again
 ```
 
 `restack --onto` moves only the current branch, so if `pr1` had several
@@ -727,12 +726,10 @@ With the GitHub adapter:
   after its branch was rebased onto the new one, which would show every commit
   the new base gained since. (A parent that isn't on GitHub yet is pushed
   first.)
-- `git stack prs` opens draft pull requests; see its section. Otherwise, for
-  each pushed branch without one, `push` prints a link to GitHub's page for opening one against its stack
-  parent, with the repository's pull request template filled in. (The link
-  GitHub prints when a branch is first pushed targets the default branch
-  instead; `push` retargets a pull request opened from it the next time it
-  runs.)
+- `git stack prs` opens draft pull requests, into each branch's stack parent.
+  (The link GitHub prints when a branch is first pushed targets the default
+  branch instead; `push` retargets a pull request opened from it the next time
+  it runs.)
 - A pull request that GitHub says was merged counts as merged once its merge
   commit is in the local parent branch (`sync` fetches it), even if the parent
   changed the merged lines since, or the merge changed them.

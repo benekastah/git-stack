@@ -172,10 +172,9 @@ class PullRequestLookupFailed:
 
 
 @dataclass(frozen=True)
-class NoPullRequest:
-    """branch was pushed but has no pull request; url opens one."""
-    branch: str
-    url: str
+class NoPullRequests:
+    """branches were pushed but have no pull request."""
+    branches: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -210,6 +209,6 @@ Event: TypeAlias = (
     | BrokenBranch
     | ParentMissing
     | PullRequestLookupFailed
-    | NoPullRequest
+    | NoPullRequests
     | PullRequestRetargeted
 )

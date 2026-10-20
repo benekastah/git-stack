@@ -667,16 +667,14 @@ to push it again.
 .IP \(bu 2
 With the GitHub adapter, points each open pull request at its stack
 parent (e.g.
-at \f[CR]main\f[R] once the parent PR was merged), and prints a link to
-open one for each branch that has none.
-To open them all at once, run \f[CR]git stack prs\f[R].
+at \f[CR]main\f[R] once the parent PR was merged), and lists the
+branches that have none, which \f[CR]git stack prs\f[R] opens.
 .SS \f[CR]git stack prs [\-\-remote origin] [\-n]\f[R]
 Open a draft pull request on GitHub for each branch in the current stack
 that has none, into its stack parent, bottom\-up.
 .PP
 \f[B]When would I use it?\f[R] After pushing a new stack, or new
-branches in one, to open their pull requests with the right bases,
-rather than following each link \f[CR]push\f[R] prints.
+branches in one, to open their pull requests with the right bases.
 .IP
 .EX
 git stack push
@@ -855,7 +853,8 @@ git stack branch pr1\-again
 git revert <the revert commit>     \f[I]# or cherry\-pick pr1\(aqs commits\f[R]
 git switch pr2
 git stack restack \-\-onto pr1\-again
-git stack push                     \f[I]# point pr2\(aqs pull request at pr1\-again, and link to open one for it\f[R]
+git stack push                     \f[I]# point pr2\(aqs pull request at pr1\-again\f[R]
+git stack prs                      \f[I]# open one for pr1\-again\f[R]
 .EE
 .PP
 \f[CR]restack \-\-onto\f[R] moves only the current branch, so if
@@ -946,10 +945,8 @@ its old base after its branch was rebased onto the new one, which would
 show every commit the new base gained since.
 (A parent that isn\(aqt on GitHub yet is pushed first.)
 .IP \(bu 2
-\f[CR]git stack prs\f[R] opens draft pull requests; see its section.
-Otherwise, for each pushed branch without one, \f[CR]push\f[R] prints a
-link to GitHub\(aqs page for opening one against its stack parent, with
-the repository\(aqs pull request template filled in.
+\f[CR]git stack prs\f[R] opens draft pull requests, into each
+branch\(aqs stack parent.
 (The link GitHub prints when a branch is first pushed targets the
 default branch instead; \f[CR]push\f[R] retargets a pull request opened
 from it the next time it runs.)

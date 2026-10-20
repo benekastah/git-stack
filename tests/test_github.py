@@ -27,35 +27,24 @@ def merge_pr1_on_forge_with_a_tweak(repo: Repo, gh: FakeGitHub) -> None:
     gh.clear_calls()
 
 
-def compare_url(base: str, head: str) -> str:
-    return f"https://github.com/acme/widgets/compare/{base}...{head}?expand=1"
+def without_prs(emitted: list[events.Event]) -> list[str]:
+    """The branches push said have no pull request."""
+    return [b for e in emitted if isinstance(e, events.NoPullRequests) for b in e.branches]
 
 
-def test_push_links_to_opening_prs_for_branches_without_one(
+def test_push_says_which_branches_have_no_pr(
         repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event]) -> None:
     repo.make_stack()
     repo.git("switch", "--quiet", "pr2")
 
     client.push()
 
-    assert [e for e in emitted if isinstance(e, events.NoPullRequest)] == [
-        events.NoPullRequest("pr1", compare_url("main", "pr1")),
-        events.NoPullRequest("pr2", compare_url("pr1", "pr2")),
-        events.NoPullRequest("pr3", compare_url("pr2", "pr3"))]
+    assert [e for e in emitted if isinstance(e, events.NoPullRequests)] == [
+        events.NoPullRequests(("pr1", "pr2", "pr3"))]
     assert gh.calls("pr") == []
 
 
-def test_push_link_quotes_branch_names(
-        repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event]) -> None:
-    client.branch("feature/50%")
-    repo.commit("a", "feature\n", "feature c1")
-
-    client.push()
-
-    assert events.NoPullRequest("feature/50%", compare_url("main", "feature/50%25")) in emitted
-
-
-def test_push_retargets_pr_opened_elsewhere_instead_of_linking(
+def test_push_retargets_pr_opened_elsewhere(
         repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event]) -> None:
     repo.make_stack()
     client.push()
@@ -67,10 +56,10 @@ def test_push_retargets_pr_opened_elsewhere_instead_of_linking(
 
     assert events.PullRequestRetargeted("pr2", 7, "pr1") in emitted
     assert gh.load()["prs"][0]["baseRefName"] == "pr1"
-    assert [e.branch for e in emitted if isinstance(e, events.NoPullRequest)] == ["pr1", "pr3"]
+    assert without_prs(emitted) == ["pr1", "pr3"]
 
 
-def test_push_links_to_new_pr_for_branch_whose_pr_was_closed(
+def test_push_counts_branch_whose_pr_was_closed_as_without_one(
         repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event]) -> None:
     repo.make_stack()
     gh.add_pr(number=7, state="CLOSED", headRefName="pr3", headRefOid=repo.git("rev-parse", "main"), baseRefName="pr2",
@@ -78,7 +67,7 @@ def test_push_links_to_new_pr_for_branch_whose_pr_was_closed(
 
     client.push()
 
-    assert events.NoPullRequest("pr3", compare_url("pr2", "pr3")) in emitted
+    assert "pr3" in without_prs(emitted)
     assert gh.calls("pr", "edit") == []
 
 
@@ -90,7 +79,7 @@ def test_push_ignores_pr_from_fork_with_same_branch_name(
 
     client.push()
 
-    assert events.NoPullRequest("pr3", compare_url("pr2", "pr3")) in emitted
+    assert "pr3" in without_prs(emitted)
     assert gh.calls("pr", "edit") == []
 
 
@@ -112,7 +101,7 @@ def test_merged_pr_of_earlier_branch_with_same_name_is_ignored(
 
     assert not any(isinstance(event, events.MergedWithNewCommits) for event in emitted)
     repo.assert_stacked("pr1", "main", ["pr1 c2", "pr1 c1"])
-    assert events.NoPullRequest("pr1", compare_url("main", "pr1")) in emitted
+    assert "pr1" in without_prs(emitted)
 
 
 def test_merged_pr_from_someone_elses_branch_with_same_name_is_ignored(
