@@ -65,6 +65,7 @@ def stack() -> Any:
     (["push", "--force"], "push", (None,), {"remote": "origin", "force": True}),
     (["prs"], "prs", (), {"remote": "origin", "dry_run": False}),
     (["prs", "-n", "--remote", "upstream"], "prs", (), {"remote": "upstream", "dry_run": True}),
+    (["pr"], "prs", (), {"remote": "origin", "dry_run": False}),
     (["parent"], "parent", (None,), {}),
     (["parent", "pr1"], "parent", ("pr1",), {}),
     (["base"], "base", (None,), {}),

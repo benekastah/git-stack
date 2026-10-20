@@ -12,7 +12,7 @@ class Args(argparse.Namespace):
 
 
 def register(subparsers: Subparsers) -> None:
-    p = subparsers.add_parser("prs", help="open a draft pull request on GitHub for each branch in the current "
+    p = subparsers.add_parser("prs", aliases=["pr"], help="open a draft pull request on GitHub for each branch in the current "
                                           "stack that has none, into its stack parent")
     p.add_argument("--remote", default=DEFAULT_REMOTE)
     p.add_argument("-n", "--dry-run", action="store_true",

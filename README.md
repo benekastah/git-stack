@@ -517,6 +517,7 @@ git stack prs
 - If opening one fails, it says which it had opened already; rerun it once the
   problem is fixed to open the rest.
 - Needs the [GitHub adapter](#github).
+- `git stack pr` is an alias.
 - `-n`/`--dry-run` prints the pull requests it would open, with their titles,
   without opening them.
 
