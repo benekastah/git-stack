@@ -21,6 +21,7 @@ def stack() -> Any:
     """A mock StackClient whose methods check their arguments against the real ones."""
     stack = create_autospec(StackClient, instance=True)
     stack.git = create_autospec(GitClient, instance=True)
+    stack.git.run.return_value = ""  # e.g. git config --get of an unset setting
     stack.branch.return_value = "main"
     stack.track.return_value = []
     stack.autocreate.return_value = []
@@ -30,8 +31,8 @@ def stack() -> Any:
     stack.sync.return_value = []
     stack.push.return_value = ["pr1"]
     stack.prs.return_value = []
-    stack.up.return_value = "pr2"
-    stack.down.return_value = "main"
+    stack.next.return_value = "pr2"
+    stack.prev.return_value = "main"
     stack.parent.return_value = "main"
     stack.base.return_value = "a" * 40
     stack.show_stack.return_value = ["pr1", "pr2"]
@@ -52,8 +53,8 @@ def stack() -> Any:
     (["info"], "info", (), {"offline": False}),
     (["info", "--offline"], "info", (), {"offline": True}),
     (["info", "--json"], "info", (), {"offline": False}),
-    (["up"], "up", (), {}),
-    (["down"], "down", (), {}),
+    (["next"], "next", (), {}),
+    (["prev"], "prev", (), {}),
     (["restack"], "restack", (), {"onto": None, "squash": False, "latest": False}),
     (["restack", "--onto", "main", "--squash", "--latest"], "restack", (),
      {"onto": "main", "squash": True, "latest": True}),
@@ -199,7 +200,7 @@ def test_info_draws_each_stack_as_a_tree(stack: Any, capsys: pytest.CaptureFixtu
 
 
 def test_info_colors_each_part(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
-    stack.git.run.return_value = "true"  # git config --get-colorbool color.stack
+    stack.git.run.side_effect = lambda *args, check=True: "true" if "--get-colorbool" in args else ""
     stack.info.return_value = [
         BranchInfo("main", None, None, current=False),
         BranchInfo("pr1", "main", BranchStatus.MERGED, current=False,
@@ -218,6 +219,34 @@ def test_info_colors_each_part(stack: Any, capsys: pytest.CaptureFixture[str]) -
         "\033[2m    └── \033[m\033[1;32mpr2 *\033[m \033[33m(needs restack)\033[m"
         "  \033[34mhttps://github.com/acme/widgets/pull/2\033[m\n"
         "\033[2m        └── \033[mpr3" + " " * 16 + "\033[90mhttps://github.com/acme/widgets/pull/3\033[m\n")
+
+
+def test_info_can_draw_each_stack_with_its_root_at_the_bottom(
+        stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
+    stack.git.run.side_effect = lambda *args, check=True: "root-at-bottom" if "stack.orientation" in args else ""
+    stack.info.return_value = [
+        BranchInfo("main", None, None, current=False),
+        BranchInfo("pr1", "main", BranchStatus.UP_TO_DATE, current=False),
+        BranchInfo("pr2", "pr1", BranchStatus.UP_TO_DATE, current=True),
+        BranchInfo("pr2b", "pr1", BranchStatus.UP_TO_DATE, current=False),
+    ]
+
+    main(["info"], stack=stack)
+
+    assert capsys.readouterr().out == (
+        "    ┌── pr2b\n"
+        "    ├── pr2 *\n"
+        "┌── pr1\n"
+        "main\n")
+
+
+def test_info_refuses_an_unknown_orientation(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
+    stack.git.run.side_effect = lambda *args, check=True: "sideways" if "stack.orientation" in args else ""
+    stack.info.return_value = [BranchInfo("main", None, None, current=False)]
+
+    assert main(["info"], stack=stack) == 1
+
+    assert "stack.orientation must be root-at-top or root-at-bottom, not sideways" in capsys.readouterr().err
 
 
 def test_info_without_stacks(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
@@ -280,8 +309,8 @@ def test_info_json_lists_every_branch(stack: Any, capsys: pytest.CaptureFixture[
 
 
 @pytest.mark.parametrize(("argv", "out"), [
-    (["up"], "switched to pr2\n"),
-    (["down"], "switched to main\n"),
+    (["next"], "switched to pr2\n"),
+    (["prev"], "switched to main\n"),
     (["parent"], "main\n"),
     (["base"], "a" * 40 + "\n"),
     (["show-stack"], "pr1\npr2\n"),

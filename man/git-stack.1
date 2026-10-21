@@ -75,9 +75,9 @@ T}@T{
 \f[CR]git stack sync \-\-latest\f[R], then \f[CR]git stack push\f[R]
 T}
 T{
-move up or down the stack
+move to the next or previous branch in the stack
 T}@T{
-\f[CR]git stack up\f[R] / \f[CR]git stack down\f[R]
+\f[CR]git stack next\f[R] / \f[CR]git stack prev\f[R]
 T}
 T{
 build a PR on a different parent
@@ -370,7 +370,8 @@ open its pull request again.
 Delete the old remote branch yourself
 (\f[CR]git push origin :add\-api\f[R]) if you no longer want it.
 .SS \f[CR]git stack info [\-\-json] [\-\-offline]\f[R]
-Show every tracked stack as a tree.
+Show every tracked stack as a tree, with its root (e.g.
+\f[CR]main\f[R]) on top and the branches built on it below.
 .PP
 \f[B]When would I use it?\f[R] When you want to see your stacks and what
 needs doing: which branches depend on which, which need a restack, and
@@ -387,6 +388,20 @@ git stack info
 .EE
 .IP \(bu 2
 \f[CR]*\f[R] marks the current branch.
+.IP \(bu 2
+To draw each stack upside down, with its root at the bottom (as
+\f[CR]git log \-\-graph\f[R] and other stacking tools do), run
+\f[CR]git config \-\-global stack.orientation root\-at\-bottom\f[R].
+The default is \f[CR]root\-at\-top\f[R].
+.RS 2
+.IP
+.EX
+    ┌── docs (merged)
+    ├── use\-api (needs restack)
+┌── add\-api *
+main
+.EE
+.RE
 .IP \(bu 2
 \f[CR](needs restack)\f[R]: it\(aqs missing its parent\(aqs latest
 commits (or, for a branch on \f[CR]main\f[R], it conflicts with
@@ -453,17 +468,17 @@ branch\(aqs pull request, which takes about a second.
 \f[CR]git\f[R] adapter does, and shows no links.
 For a shell prompt or an editor, the scripting commands below only read
 git config, and are fast.
-.SS \f[CR]git stack up\f[R]
+.SS \f[CR]git stack next\f[R]
 Switch to the branch stacked on the current one.
 .PP
-\f[B]When would I use it?\f[R] To move up the stack, e.g.
+\f[B]When would I use it?\f[R] To move to the next PR in the stack, e.g.
 from PR 1 to PR 2 after committing to PR 1, without remembering the
 branch\(aqs name.
 .IP
 .EX
 git switch main
-git stack up                    \f[I]# to add\-api\f[R]
-git stack up                    \f[I]# to use\-api\f[R]
+git stack next                  \f[I]# to add\-api\f[R]
+git stack next                  \f[I]# to use\-api\f[R]
 .EE
 .IP \(bu 2
 If several branches are stacked on the current one, it lists them and
@@ -471,15 +486,16 @@ leaves you where you are; pick one with \f[CR]git switch\f[R].
 .IP \(bu 2
 Works from a stack\(aqs root (e.g.
 \f[CR]main\f[R]), as long as only one branch is stacked on it.
-.SS \f[CR]git stack down\f[R]
+.SS \f[CR]git stack prev\f[R]
 Switch to the branch the current one is stacked on.
 .PP
-\f[B]When would I use it?\f[R] To move down the stack, e.g.
+\f[B]When would I use it?\f[R] To move to the previous PR in the stack,
+e.g.
 back to PR 1 to address review feedback while you\(aqre working on PR 2.
 .IP
 .EX
-git stack down                  \f[I]# from use\-api to add\-api\f[R]
-git stack down                  \f[I]# to main\f[R]
+git stack prev                  \f[I]# from use\-api to add\-api\f[R]
+git stack prev                  \f[I]# to main\f[R]
 .EE
 .IP \(bu 2
 From the bottom of a stack, it switches to the stack\(aqs root (e.g.

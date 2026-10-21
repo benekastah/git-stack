@@ -35,7 +35,7 @@ git stack push                  # update the PRs
 | catch up after a PR merged, or `main` changed | `git stack sync`, then `git stack push` |
 | also delete merged branches | `git stack sync -d local` |
 | put the stack on the latest `main` | `git stack sync --latest`, then `git stack push` |
-| move up or down the stack | `git stack up` / `git stack down` |
+| move to the next or previous branch in the stack | `git stack next` / `git stack prev` |
 | build a PR on a different parent | `git stack restack --onto <parent>` |
 | use git-stack with branches I already have | `git stack track main <branch>...` |
 | set up stacks from my open PRs (e.g. in a new clone) | `git stack autocreate` |
@@ -255,7 +255,8 @@ git stack rename add-api api-v2
 
 ### `git stack info [--json] [--offline]`
 
-Show every tracked stack as a tree.
+Show every tracked stack as a tree, with its root (e.g. `main`) on top and
+the branches built on it below.
 
 **When would I use it?** When you want to see your stacks and what needs doing:
 which branches depend on which, which need a restack, and which were merged.
@@ -270,6 +271,17 @@ git stack info
 ```
 
 - `*` marks the current branch.
+- To draw each stack upside down, with its root at the bottom (as
+  `git log --graph` and other stacking tools do), run
+  `git config --global stack.orientation root-at-bottom`. The default is
+  `root-at-top`.
+
+  ```
+      ┌── docs (merged)
+      ├── use-api (needs restack)
+  ┌── add-api *
+  main
+  ```
 - `(needs restack)`: it's missing its parent's latest commits (or, for a
   branch on `main`, it conflicts with `main`). Run `git stack sync` or
   `git stack restack`.
@@ -316,17 +328,17 @@ git stack info
   prompt or an editor, the [scripting commands](#scripting) below only read
   git config, and are fast.
 
-### `git stack up`
+### `git stack next`
 
 Switch to the branch stacked on the current one.
 
-**When would I use it?** To move up the stack, e.g. from PR 1 to PR 2 after
-committing to PR 1, without remembering the branch's name.
+**When would I use it?** To move to the next PR in the stack, e.g. from PR 1
+to PR 2 after committing to PR 1, without remembering the branch's name.
 
 ```sh
 git switch main
-git stack up                    # to add-api
-git stack up                    # to use-api
+git stack next                  # to add-api
+git stack next                  # to use-api
 ```
 
 - If several branches are stacked on the current one, it lists them and
@@ -334,16 +346,16 @@ git stack up                    # to use-api
 - Works from a stack's root (e.g. `main`), as long as only one branch is
   stacked on it.
 
-### `git stack down`
+### `git stack prev`
 
 Switch to the branch the current one is stacked on.
 
-**When would I use it?** To move down the stack, e.g. back to PR 1 to address
-review feedback while you're working on PR 2.
+**When would I use it?** To move to the previous PR in the stack, e.g. back to
+PR 1 to address review feedback while you're working on PR 2.
 
 ```sh
-git stack down                  # from use-api to add-api
-git stack down                  # to main
+git stack prev                  # from use-api to add-api
+git stack prev                  # to main
 ```
 
 - From the bottom of a stack, it switches to the stack's root (e.g. `main`).

@@ -5,9 +5,9 @@ from git_stack.stack import StackClient
 
 
 def register(subparsers: Subparsers) -> None:
-    p = subparsers.add_parser("down", help="switch to the branch the current one is stacked on")
+    p = subparsers.add_parser("next", help="switch to the branch stacked on the current one")
     p.set_defaults(func=run)
 
 
 def run(stack: StackClient, args: argparse.Namespace) -> None:
-    print(f"switched to {stack.down()}")
+    print(f"switched to {stack.next()}")

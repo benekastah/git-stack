@@ -383,7 +383,7 @@ class StackClient(StackCore):
         parents = self.settled_branches()
         return stack_of(self.stacked_branch(branch, parents), parents)
 
-    def up(self) -> str:
+    def next(self) -> str:
         """Switch to the branch stacked on the current one, and return it."""
         current = self.git.current_branch()
         if current is None:
@@ -397,10 +397,10 @@ class StackClient(StackCore):
         self.switch_to(children[0])
         return children[0]
 
-    def down(self) -> str:
+    def prev(self) -> str:
         """Switch to the current branch's parent, and return it."""
         parents = self.settled_branches()
-        parent = parents[self.current_stacked_branch(parents, "", hint="there's no branch below it")]
+        parent = parents[self.current_stacked_branch(parents, "", hint="there's no previous branch")]
         if not self.git.local_branch_exists(parent):
             raise StackError(f"{parent} doesn't exist")
         self.switch_to(parent)

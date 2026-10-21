@@ -7,6 +7,7 @@ from typing import TypeAlias
 
 from git_stack.adapters.git import PullRequestState
 from git_stack.commands import Subparsers
+from git_stack.errors import StackError
 from git_stack.stack import BranchInfo, BranchStatus, StackClient
 
 NOTES: dict[BranchStatus, str | None] = {
@@ -15,6 +16,11 @@ NOTES: dict[BranchStatus, str | None] = {
     BranchStatus.MERGED: "(merged)",
     BranchStatus.MERGED_WITH_NEW_COMMITS: "(merged, with new commits)",
 }
+# Which way up info draws each stack. A root on top reads like a file tree;
+# a root at the bottom like a stack of commits, as in `git log --graph`.
+ORIENTATION_SETTING = "stack.orientation"
+ROOT_AT_TOP = "root-at-top"
+ROOT_AT_BOTTOM = "root-at-bottom"
 # ANSI SGR codes for each part of a line, when color is on.
 TREE = "2"  # dim
 ROOT = "1"  # bold
@@ -59,6 +65,15 @@ def use_color(stack: StackClient) -> bool:
     return stack.git.run("config", "--get-colorbool", "color.stack", tty, check=False) == "true"
 
 
+def root_at_bottom(stack: StackClient) -> bool:
+    """Whether to draw each stack with its root at the bottom, as
+    ORIENTATION_SETTING says (default: ROOT_AT_TOP)."""
+    setting = stack.git.run("config", "--get", ORIENTATION_SETTING, check=False) or ROOT_AT_TOP
+    if setting not in (ROOT_AT_TOP, ROOT_AT_BOTTOM):
+        raise StackError(f"{ORIENTATION_SETTING} must be {ROOT_AT_TOP} or {ROOT_AT_BOTTOM}, not {setting}")
+    return setting == ROOT_AT_BOTTOM
+
+
 def painter(color: bool) -> Paint:
     """paint(text, code): text in the ANSI color code, if color is on."""
     return lambda text, code: f"\033[{code}m{text}\033[m" if color and text else text
@@ -94,6 +109,7 @@ def run(stack: StackClient, args: Args) -> None:
         print("no tracked branches")
         return
     paint = painter(use_color(stack))
+    flip = root_at_bottom(stack)
     children: dict[str, list[BranchInfo]] = {}
     for branch in branches:
         if branch.parent is not None:
@@ -102,17 +118,19 @@ def run(stack: StackClient, args: Args) -> None:
     # (the tree drawn before branch, branch), in the order they're printed.
     rows: list[tuple[str, BranchInfo]] = []
 
-    def add(branch: BranchInfo, prefix: str) -> None:
+    def add(branch: BranchInfo, prefix: str, drawn: list[tuple[str, BranchInfo]]) -> None:
         kids = children.get(branch.name, [])
         for i, kid in enumerate(kids):
             last = i == len(kids) - 1
-            rows.append((f"{prefix}{'└── ' if last else '├── '}", kid))
-            add(kid, prefix + ("    " if last else "│   "))
+            drawn.append((f"{prefix}{('┌── ' if flip else '└── ') if last else '├── '}", kid))
+            add(kid, prefix + ("    " if last else "│   "), drawn)
 
     for branch in branches:
         if branch.parent is None:
-            rows.append(("", branch))
-            add(branch, "")
+            drawn = [("", branch)]
+            add(branch, "", drawn)
+            # Upside down, the tree reads the same, mirrored.
+            rows.extend(reversed(drawn) if flip else drawn)
     # Pull request links go in a right-aligned column after the longest line.
     widths = [len(tree) + len(label(branch, painter(False))) for tree, branch in rows]
     link_width = max(len(branch.pull_request.url) if branch.pull_request else 0 for _, branch in rows)
