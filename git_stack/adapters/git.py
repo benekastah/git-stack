@@ -2,7 +2,7 @@ import enum
 from dataclasses import dataclass
 
 from git_stack.adapters.merge_state import MergeState
-from git_stack.core import BASE_KEY, Parents, StackCore
+from git_stack.core import BASE_KEY, LANDED_CHECK_KEY, Parents, StackCore
 
 
 class PullRequestState(enum.Enum):
@@ -37,7 +37,7 @@ class GitAdapter:
         the merge make it MERGED_WITH_NEW_COMMITS, so they aren't dropped.
         """
         git = self.git
-        if not (git.contained_in(branch, parent) or self.landed_as_patches(branch, parent)):
+        if not self.landed(branch, parent):
             return MergeState.NOT_MERGED
         if git.upstream_gone(branch):
             return MergeState.MERGED
@@ -48,6 +48,17 @@ class GitAdapter:
                 and self.core.unpulled_commits(branch, parent, upstream_tip)):
             return MergeState.MERGED_WITH_NEW_COMMITS
         return MergeState.MERGED
+
+    def landed(self, branch: str, parent: str) -> bool:
+        """Whether parent has branch's changes, as a merge or as patches."""
+        git = self.git
+        parent_tip = git.rev(parent)
+        if parent_tip is None:
+            return False
+        tip = git.tip(branch)
+        return self.core.remembered(
+            branch, LANDED_CHECK_KEY, [tip, parent_tip, git.config_get(branch, BASE_KEY) or "-"],
+            lambda: git.contained_in(tip, parent_tip) or self.landed_as_patches(branch, parent_tip))
 
     def changes_something(self, branch: str) -> bool:
         """Whether branch's tree differs from its recorded base's.
@@ -82,6 +93,10 @@ class GitAdapter:
             return True
         own = git.patch_ids("log", "-p", "--no-merges", f"{base}..refs/heads/{branch}")
         return bool(own) and own <= landed
+
+    def prefetch(self) -> None:
+        """Look up whatever merge_state asks a remote service about, so it's
+        ready when needed. Runs alongside other work, so it must be thread-safe."""
 
     def pull_request_link(self, branch: str) -> PullRequestLink | None:
         """branch's pull request, open or merged, if the adapter knows of one."""

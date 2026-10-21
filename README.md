@@ -253,7 +253,7 @@ git stack rename add-api api-v2
   Delete the old remote branch yourself (`git push origin :add-api`) if you
   no longer want it.
 
-### `git stack info [--json]`
+### `git stack info [--json] [--offline]`
 
 Show every tracked stack as a tree.
 
@@ -311,8 +311,10 @@ git stack info
   ```
 
 - With the [GitHub adapter](#github), `info` asks GitHub about each branch's
-  pull request, so it can take a moment. For a shell prompt or an editor, the
-  [scripting commands](#scripting) below only read git config, and are fast.
+  pull request, which takes about a second. `--offline` skips that: it checks
+  for merges like the `git` adapter does, and shows no links. For a shell
+  prompt or an editor, the [scripting commands](#scripting) below only read
+  git config, and are fast.
 
 ### `git stack up`
 
@@ -708,6 +710,13 @@ changes either way, and leaving it alone means its CI doesn't rerun and its
 reviews aren't dismissed just because `main` moved on. Branches stacked on
 other branches are restacked whenever their parent changes, since they need
 its new commits.
+
+Checking whether a branch conflicts with its parent, and whether its changes
+already landed there, can take a second or more for a branch far behind
+`main` in a big repository. Since the answers only depend on the commits
+involved, git-stack remembers the last ones, with those commits, in
+`branch.<name>.stackConflictCheck` and `branch.<name>.stackLandedCheck`, and
+only checks again once one of them changes.
 
 ## GitHub
 

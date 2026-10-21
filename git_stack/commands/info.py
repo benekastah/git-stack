@@ -38,12 +38,15 @@ Paint: TypeAlias = Callable[[str, str], str]
 class Args(argparse.Namespace):
     """The arguments register's parser produces."""
     json: bool
+    offline: bool
 
 
 def register(subparsers: Subparsers) -> None:
     p = subparsers.add_parser("info", help="show all tracked stacks")
     p.add_argument("--json", action="store_true",
                    help="print a JSON list of every branch, each stack's root first, parent before child")
+    p.add_argument("--offline", action="store_true",
+                   help="don't ask GitHub about pull requests: check for merges locally, and show no links")
     p.set_defaults(func=run)
 
 
@@ -78,7 +81,7 @@ def label(branch: BranchInfo, paint: Paint) -> str:
 
 
 def run(stack: StackClient, args: Args) -> None:
-    branches = stack.info()
+    branches = stack.info(offline=args.offline)
     if args.json:
         print(json.dumps([{"name": b.name, "parent": b.parent,
                            "status": b.status.value if b.status else None, "current": b.current,

@@ -24,6 +24,11 @@ PENDING_BASE_KEY = "stackPendingBase"
 PENDING_PULL_FROM_KEY = "stackPendingPullFrom"
 PENDING_PULLED_KEY = "stackPendingPulled"
 PENDING_PULL_IDENTITIES_KEY = "stackPendingPullIdentities"
+# The last answers to whether the branch conflicts with its parent, and whether
+# its changes landed in its parent (see StackCore.remembered). Each can take a
+# second or more for a branch far behind main.
+CONFLICT_CHECK_KEY = "stackConflictCheck"
+LANDED_CHECK_KEY = "stackLandedCheck"
 
 # {branch: the branch it is stacked on}
 Parents: TypeAlias = dict[str, str]
@@ -255,8 +260,28 @@ class StackCore:
             return False
         if base is None or latest or self.git.config_get(parent, PARENT_KEY) is not None:
             return True
-        return (not self.git.is_ancestor(base, parent_tip)
-                or self.git.conflicts(f"refs/heads/{branch}", parent_tip))
+        return not self.git.is_ancestor(base, parent_tip) or self.conflicts(branch, parent_tip)
+
+    def conflicts(self, branch: str, parent_tip: str) -> bool:
+        """Whether merging branch into parent_tip would conflict."""
+        tip = self.git.tip(branch)
+        return self.remembered(branch, CONFLICT_CHECK_KEY, [tip, parent_tip],
+                               lambda: self.git.conflicts(tip, parent_tip))
+
+    def remembered(self, branch: str, key: str, inputs: list[str], check: Callable[[], bool]) -> bool:
+        """check(), which depends only on the commits inputs, remembered in
+        branch's key as "<inputs...> true|false", so it isn't run again until
+        one of them changes.
+
+        Failing to remember it (e.g. because another process holds the config
+        file's lock) only means checking again next time.
+        """
+        cached = (self.git.config_get(branch, key) or "").split()
+        if cached[:-1] == inputs and cached[-1:] in (["true"], ["false"]):
+            return cached[-1] == "true"
+        result = check()
+        self.git.run("config", f"branch.{branch}.{key}", " ".join([*inputs, str(result).lower()]), check=False)
+        return result
 
     def restack_branch(self, branch: str, parent: str, latest: bool = False) -> bool:
         """Rebase branch's own commits onto parent's current tip, if it needs it
@@ -413,7 +438,8 @@ class StackCore:
     def forget(self, branch: str) -> None:
         """Remove all of branch's stack metadata."""
         for key in (PARENT_KEY, BASE_KEY, PULLED_KEY, PENDING_PARENT_KEY, PENDING_BASE_KEY,
-                    PENDING_PULL_FROM_KEY, PENDING_PULLED_KEY, PENDING_PULL_IDENTITIES_KEY):
+                    PENDING_PULL_FROM_KEY, PENDING_PULLED_KEY, PENDING_PULL_IDENTITIES_KEY, CONFLICT_CHECK_KEY,
+                    LANDED_CHECK_KEY):
             self.git.config_unset(branch, key)
 
     def remove_merged(self, branch: str, parents: Parents, delete: bool) -> None:

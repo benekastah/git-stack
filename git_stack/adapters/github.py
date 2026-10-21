@@ -234,6 +234,9 @@ class GitHubAdapter(GitAdapter):
                 return prs
             after = field(page, "endCursor", str)
 
+    def prefetch(self) -> None:
+        self.pull_requests()
+
     def pull_request_link(self, branch: str) -> PullRequestLink | None:
         pr = self.pull_requests().get(branch)
         if pr is None:

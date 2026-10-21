@@ -369,7 +369,7 @@ The renamed branch\(aqs upstream is unset, so the next
 open its pull request again.
 Delete the old remote branch yourself
 (\f[CR]git push origin :add\-api\f[R]) if you no longer want it.
-.SS \f[CR]git stack info [\-\-json]\f[R]
+.SS \f[CR]git stack info [\-\-json] [\-\-offline]\f[R]
 Show every tracked stack as a tree.
 .PP
 \f[B]When would I use it?\f[R] When you want to see your stacks and what
@@ -448,7 +448,9 @@ git stack info \-\-json
 .RE
 .IP \(bu 2
 With the GitHub adapter, \f[CR]info\f[R] asks GitHub about each
-branch\(aqs pull request, so it can take a moment.
+branch\(aqs pull request, which takes about a second.
+\f[CR]\-\-offline\f[R] skips that: it checks for merges like the
+\f[CR]git\f[R] adapter does, and shows no links.
 For a shell prompt or an editor, the scripting commands below only read
 git config, and are fast.
 .SS \f[CR]git stack up\f[R]
@@ -922,6 +924,15 @@ leaving it alone means its CI doesn\(aqt rerun and its reviews aren\(aqt
 dismissed just because \f[CR]main\f[R] moved on.
 Branches stacked on other branches are restacked whenever their parent
 changes, since they need its new commits.
+.PP
+Checking whether a branch conflicts with its parent, and whether its
+changes already landed there, can take a second or more for a branch far
+behind \f[CR]main\f[R] in a big repository.
+Since the answers only depend on the commits involved, git\-stack
+remembers the last ones, with those commits, in
+\f[CR]branch.<name>.stackConflictCheck\f[R] and
+\f[CR]branch.<name>.stackLandedCheck\f[R], and only checks again once
+one of them changes.
 .SH GITHUB
 If your repository is on github.com and \c
 .UR https://cli.github.com

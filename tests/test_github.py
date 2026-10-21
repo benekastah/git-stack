@@ -272,6 +272,17 @@ def test_info_links_pull_requests(repo: Repo, gh: FakeGitHub, client: StackClien
         ("pr3", PullRequestLink(8, "https://github.com/acme/widgets/pull/8", PullRequestState.DRAFT))]
 
 
+def test_info_offline_does_not_ask_github(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+    repo.make_stack()
+    client.push()
+    gh.add_pr(number=7, state="OPEN", headRefName="pr2", headRefOid=repo.git("rev-parse", "pr2"),
+              baseRefName="pr1", mergeCommit=None)
+    gh.clear_calls()
+
+    assert [b.pull_request for b in client.info(offline=True)] == [None] * 4
+    assert gh.calls() == []
+
+
 def test_info_does_not_fetch_head_of_merged_pr(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
     repo.make_stack()
     updated_head = merge_pr1_after_update_branch(repo, gh)

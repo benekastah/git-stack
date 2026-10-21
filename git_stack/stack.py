@@ -411,34 +411,40 @@ class StackClient(StackCore):
         if not self.git.passthrough("switch", "--quiet", branch):
             raise StackError(f"switching to {branch} failed; see git's output above")
 
-    def info(self) -> list[BranchInfo]:
+    def info(self, offline: bool = False) -> list[BranchInfo]:
         """Every tracked stack, as a list of BranchInfo: each stack's root, then
-        its branches, parent-before-child."""
+        its branches, parent-before-child. offline checks for merges like the
+        git adapter does, without asking GitHub about pull requests."""
         git = self.git
         parents = self.settled_branches()
         current = git.current_branch()
         children = children_map(parents)
-        adapter = make_adapter(self, DEFAULT_REMOTE, fetch=False)
+        adapter = GitAdapter(self) if offline else make_adapter(self, DEFAULT_REMOTE, fetch=False)
 
         def status(branch: str) -> BranchStatus:
             parent = parents[branch]
             parent_tip = git.rev(parent)
             if parent_tip is None:
                 return BranchStatus.PARENT_MISSING
+            # Worked out before merge_state, which may wait for the adapter's
+            # lookup, so the two overlap. It's wasted on merged branches.
+            needs_restack = self.needs_restack(branch, parent, git.config_get(branch, BASE_KEY), parent_tip,
+                                               latest=False)
             state = adapter.merge_state(branch, parent)
             if state is MergeState.MERGED:
                 return BranchStatus.MERGED
             if state is MergeState.MERGED_WITH_NEW_COMMITS:
                 return BranchStatus.MERGED_WITH_NEW_COMMITS
-            if self.needs_restack(branch, parent, git.config_get(branch, BASE_KEY), parent_tip, latest=False):
-                return BranchStatus.NEEDS_RESTACK
-            return BranchStatus.UP_TO_DATE
+            return BranchStatus.NEEDS_RESTACK if needs_restack else BranchStatus.UP_TO_DATE
 
         # Each status can take a few git calls, and checking whether a branch on
         # main conflicts with it can take a second or more in a big repository
-        # if the branch is far behind, so they're worked out in parallel.
+        # if the branch is far behind, so they're worked out in parallel, while
+        # the adapter looks up pull requests (about a second on GitHub).
         with ThreadPoolExecutor() as pool:
+            prefetched = pool.submit(adapter.prefetch)
             statuses = dict(zip(parents, pool.map(status, parents)))
+            prefetched.result()
         result = []
         for root in sorted({stack_root(b, parents) for b in parents}):
             result.append(BranchInfo(root, None, None, root == current))
