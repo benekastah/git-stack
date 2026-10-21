@@ -2,12 +2,12 @@ import json
 import re
 import subprocess
 import threading
-from dataclasses import dataclass, replace
 from collections.abc import Iterable
+from dataclasses import dataclass, replace
 from typing import Self, TypeVar
 
 from git_stack import events, stack_section
-from git_stack.adapters.git import GitAdapter
+from git_stack.adapters.git import GitAdapter, PullRequestLink, PullRequestState
 from git_stack.adapters.merge_state import MergeState
 from git_stack.core import BASE_KEY, Parents, StackCore
 from git_stack.errors import StackError
@@ -16,7 +16,7 @@ from git_stack.git import GitClient
 # Matches https://host/owner/repo, ssh://user@host:port/owner/repo and
 # user@host:owner/repo, with or without .git.
 REMOTE_URL = re.compile(r"^(?:[a-z+]+://)?(?:[^@/]+@)?([^:/]+)(?::\d+)?[:/]([^/]+)/([^/]+?)(?:\.git)?/?$")
-PR_FIELDS = "number state isCrossRepository headRefOid baseRefName mergeCommit { oid }"
+PR_FIELDS = "number state isDraft isCrossRepository headRefOid baseRefName mergeCommit { oid }"
 # How many of a branch's pull requests to look at, newest first. More than one
 # only if its name was reused, or a pull request was closed and replaced.
 PRS_PER_BRANCH = 10
@@ -58,6 +58,7 @@ class PullRequest:
     """A pull request, with the fields in PR_FIELDS."""
     number: int
     state: str
+    draft: bool
     cross_repository: bool
     head_oid: str
     base: str
@@ -69,6 +70,7 @@ class PullRequest:
         return cls(
             number=field(data, "number", int),
             state=field(data, "state", str),
+            draft=field(data, "isDraft", bool),
             cross_repository=field(data, "isCrossRepository", bool),
             head_oid=field(data, "headRefOid", str),
             base=field(data, "baseRefName", str),
@@ -232,6 +234,14 @@ class GitHubAdapter(GitAdapter):
                 return prs
             after = field(page, "endCursor", str)
 
+    def pull_request_link(self, branch: str) -> PullRequestLink | None:
+        pr = self.pull_requests().get(branch)
+        if pr is None:
+            return None
+        state = (PullRequestState.MERGED if pr.state == "MERGED"
+                 else PullRequestState.DRAFT if pr.draft else PullRequestState.OPEN)
+        return PullRequestLink(pr.number, f"https://{self.host}/{self.owner}/{self.name}/pull/{pr.number}", state)
+
     def merge_state(self, branch: str, parent: str) -> MergeState:
         git = self.git
         pr = self.pull_requests().get(branch)
@@ -318,7 +328,7 @@ class GitHubAdapter(GitAdapter):
         if not match:
             raise StackError(f"couldn't tell which pull request gh opened for {branch} from {url!r}")
         number = int(match.group(1))
-        self.pull_requests()[branch] = PullRequest(number, "OPEN", False, self.git.tip(branch), base, None)
+        self.pull_requests()[branch] = PullRequest(number, "OPEN", True, False, self.git.tip(branch), base, None)
         return number, url
 
     def pull_request_fields(self, numbers: Iterable[int], fields: str) -> dict[int, object]:

@@ -6,6 +6,7 @@ import pathlib
 import pytest
 
 from git_stack import events
+from git_stack.adapters.git import PullRequestLink, PullRequestState
 from git_stack.adapters.github import github_repo
 from git_stack.errors import StackError
 from git_stack.git import GitClient
@@ -255,6 +256,20 @@ def test_sync_fetches_head_of_merged_pr_whose_branch_was_deleted(
 
     repo.assert_untracked("pr1")
     repo.assert_stacked("pr2", "main", ["pr2 c1"])
+
+
+def test_info_links_pull_requests(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+    repo.make_stack()
+    client.push()
+    gh.add_pr(number=7, state="OPEN", headRefName="pr2", headRefOid=repo.git("rev-parse", "pr2"),
+              baseRefName="pr1", mergeCommit=None)
+    gh.add_pr(number=8, state="OPEN", isDraft=True, headRefName="pr3", headRefOid=repo.git("rev-parse", "pr3"),
+              baseRefName="pr2", mergeCommit=None)
+
+    assert [(b.name, b.pull_request) for b in client.info()] == [
+        ("main", None), ("pr1", None),
+        ("pr2", PullRequestLink(7, "https://github.com/acme/widgets/pull/7", PullRequestState.OPEN)),
+        ("pr3", PullRequestLink(8, "https://github.com/acme/widgets/pull/8", PullRequestState.DRAFT))]
 
 
 def test_info_does_not_fetch_head_of_merged_pr(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:

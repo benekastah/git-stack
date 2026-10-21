@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 from git_stack import events
 from git_stack.adapters import ADAPTER_SETTING, make_adapter
-from git_stack.adapters.git import GitAdapter
+from git_stack.adapters.git import GitAdapter, PullRequestLink
 from git_stack.adapters.github import GitHubAdapter, OpenPullRequest
 from git_stack.adapters.merge_state import MergeState
 from git_stack.core import (BASE_KEY, PARENT_KEY, PULLED_KEY, Parents, StackCore, children_map,
@@ -26,11 +26,13 @@ class BranchStatus(enum.Enum):
 @dataclass(frozen=True)
 class BranchInfo:
     """A branch in info()'s listing. parent and status are None for a stack's
-    root (e.g. main), which isn't tracked."""
+    root (e.g. main), which isn't tracked. pull_request is None for a root and
+    for a branch without a pull request the adapter knows of."""
     name: str
     parent: str | None
     status: BranchStatus | None
     current: bool
+    pull_request: PullRequestLink | None = None
 
 
 @dataclass(frozen=True)
@@ -440,7 +442,7 @@ class StackClient(StackCore):
         result = []
         for root in sorted({stack_root(b, parents) for b in parents}):
             result.append(BranchInfo(root, None, None, root == current))
-            result.extend(BranchInfo(b, parents[b], statuses[b], b == current)
+            result.extend(BranchInfo(b, parents[b], statuses[b], b == current, adapter.pull_request_link(b))
                           for b in descendants(root, children))
         return result
 

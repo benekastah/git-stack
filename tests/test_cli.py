@@ -8,6 +8,7 @@ from unittest.mock import create_autospec
 
 import pytest
 
+from git_stack.adapters.git import PullRequestLink, PullRequestState
 from git_stack.cli import main
 from git_stack.errors import StackError
 from git_stack.git import GitClient
@@ -174,8 +175,10 @@ def test_rename_prints_moved_children_and_old_upstream(
 def test_info_draws_each_stack_as_a_tree(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
     stack.info.return_value = [
         BranchInfo("main", None, None, current=False),
-        BranchInfo("pr1", "main", BranchStatus.UP_TO_DATE, current=False),
-        BranchInfo("pr2", "pr1", BranchStatus.NEEDS_RESTACK, current=False),
+        BranchInfo("pr1", "main", BranchStatus.UP_TO_DATE, current=False,
+                   pull_request=PullRequestLink(9, "https://github.com/acme/widgets/pull/9", PullRequestState.OPEN)),
+        BranchInfo("pr2", "pr1", BranchStatus.NEEDS_RESTACK, current=False,
+                   pull_request=PullRequestLink(13, "https://github.com/acme/widgets/pull/13", PullRequestState.OPEN)),
         BranchInfo("pr2b", "pr1", BranchStatus.MERGED, current=False),
         BranchInfo("solo", "main", BranchStatus.MERGED_WITH_NEW_COMMITS, current=True),
         BranchInfo("release", None, None, current=False),
@@ -186,12 +189,34 @@ def test_info_draws_each_stack_as_a_tree(stack: Any, capsys: pytest.CaptureFixtu
 
     assert capsys.readouterr().out == (
         "main\n"
-        "├── pr1\n"
-        "│   ├── pr2 (needs restack)\n"
+        "├── pr1                                 https://github.com/acme/widgets/pull/9\n"
+        "│   ├── pr2 (needs restack)            https://github.com/acme/widgets/pull/13\n"
         "│   └── pr2b (merged)\n"
         "└── solo * (merged, with new commits)\n"
         "release\n"
         "└── hotfix (parent release missing)\n")
+
+
+def test_info_colors_each_part(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
+    stack.git.run.return_value = "true"  # git config --get-colorbool color.stack
+    stack.info.return_value = [
+        BranchInfo("main", None, None, current=False),
+        BranchInfo("pr1", "main", BranchStatus.MERGED, current=False,
+                   pull_request=PullRequestLink(1, "https://github.com/acme/widgets/pull/1", PullRequestState.MERGED)),
+        BranchInfo("pr2", "pr1", BranchStatus.NEEDS_RESTACK, current=True,
+                   pull_request=PullRequestLink(2, "https://github.com/acme/widgets/pull/2", PullRequestState.OPEN)),
+        BranchInfo("pr3", "pr2", BranchStatus.UP_TO_DATE, current=False,
+                   pull_request=PullRequestLink(3, "https://github.com/acme/widgets/pull/3", PullRequestState.DRAFT)),
+    ]
+
+    main(["info"], stack=stack)
+
+    assert capsys.readouterr().out == (
+        "\033[1mmain\033[m\n"
+        "\033[2m└── \033[mpr1 \033[36m(merged)\033[m" + " " * 15 + "\033[35mhttps://github.com/acme/widgets/pull/1\033[m\n"
+        "\033[2m    └── \033[m\033[1;32mpr2 *\033[m \033[33m(needs restack)\033[m"
+        "  \033[34mhttps://github.com/acme/widgets/pull/2\033[m\n"
+        "\033[2m        └── \033[mpr3" + " " * 16 + "\033[90mhttps://github.com/acme/widgets/pull/3\033[m\n")
 
 
 def test_info_without_stacks(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
@@ -240,14 +265,16 @@ def test_untrack_prints_branches_left_on_it(stack: Any, capsys: pytest.CaptureFi
 def test_info_json_lists_every_branch(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
     stack.info.return_value = [
         BranchInfo("main", None, None, current=False),
-        BranchInfo("pr1", "main", BranchStatus.NEEDS_RESTACK, current=True),
+        BranchInfo("pr1", "main", BranchStatus.NEEDS_RESTACK, current=True,
+                   pull_request=PullRequestLink(12, "https://github.com/acme/widgets/pull/12", PullRequestState.OPEN)),
     ]
 
     main(["info", "--json"], stack=stack)
 
     assert json.loads(capsys.readouterr().out) == [
-        {"name": "main", "parent": None, "status": None, "current": False},
-        {"name": "pr1", "parent": "main", "status": "needs-restack", "current": True},
+        {"name": "main", "parent": None, "status": None, "current": False, "pr": None},
+        {"name": "pr1", "parent": "main", "status": "needs-restack", "current": True,
+         "pr": {"number": 12, "url": "https://github.com/acme/widgets/pull/12", "state": "open"}},
     ]
 
 

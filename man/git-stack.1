@@ -381,9 +381,9 @@ It\(aqs a good first step before \f[CR]restack\f[R], \f[CR]sync\f[R] or
 .EX
 git stack info
 \f[I]# main\f[R]
-\f[I]# └── add\-api *\f[R]
-\f[I]#     ├── use\-api (needs restack)\f[R]
-\f[I]#     └── docs (merged)\f[R]
+\f[I]# └── add\-api *                   https://github.com/acme/widgets/pull/12\f[R]
+\f[I]#     ├── use\-api (needs restack) https://github.com/acme/widgets/pull/13\f[R]
+\f[I]#     └── docs (merged)           https://github.com/acme/widgets/pull/14\f[R]
 .EE
 .IP \(bu 2
 \f[CR]*\f[R] marks the current branch.
@@ -405,6 +405,16 @@ it out.
 \f[CR](parent <name> missing)\f[R]: its parent branch was deleted by
 hand; fix it with \f[CR]git stack track <parent>\f[R].
 .IP \(bu 2
+With the GitHub adapter, each branch\(aqs pull request (open or merged)
+is linked in a column at the end of its line: blue if it\(aqs open, grey
+if it\(aqs a draft, and magenta if it was merged.
+.IP \(bu 2
+On a terminal, the parts of each line are colored.
+Like git, it follows the \f[CR]color.stack\f[R] setting (or
+\f[CR]color.ui\f[R]): set it to \f[CR]never\f[R] to turn colors off, or
+\f[CR]always\f[R] to keep them when piping.
+\f[CR]NO_COLOR\f[R] also turns them off.
+.IP \(bu 2
 \f[CR]info\f[R] doesn\(aqt fetch, and compares each branch with its
 local parent, so a merge on the remote only shows up once the local
 parent has it.
@@ -420,13 +430,18 @@ child.
 and \f[CR]status\f[R] is one of \f[CR]up\-to\-date\f[R],
 \f[CR]needs\-restack\f[R], \f[CR]merged\f[R],
 \f[CR]merged\-with\-new\-commits\f[R] or \f[CR]parent\-missing\f[R].
+\f[CR]pr\f[R] is the branch\(aqs pull request\(aqs \f[CR]number\f[R],
+\f[CR]url\f[R] and \f[CR]state\f[R] (\f[CR]open\f[R], \f[CR]draft\f[R]
+or \f[CR]merged\f[R]), or \f[CR]null\f[R] if it has none (or for a root,
+or without the GitHub adapter).
 .RS 2
 .IP
 .EX
 git stack info \-\-json
 \f[I]# [\f[R]
-\f[I]#   {\(dqname\(dq: \(dqmain\(dq, \(dqparent\(dq: null, \(dqstatus\(dq: null, \(dqcurrent\(dq: false},\f[R]
-\f[I]#   {\(dqname\(dq: \(dqadd\-api\(dq, \(dqparent\(dq: \(dqmain\(dq, \(dqstatus\(dq: \(dqup\-to\-date\(dq, \(dqcurrent\(dq: true},\f[R]
+\f[I]#   {\(dqname\(dq: \(dqmain\(dq, \(dqparent\(dq: null, \(dqstatus\(dq: null, \(dqcurrent\(dq: false, \(dqpr\(dq: null},\f[R]
+\f[I]#   {\(dqname\(dq: \(dqadd\-api\(dq, \(dqparent\(dq: \(dqmain\(dq, \(dqstatus\(dq: \(dqup\-to\-date\(dq, \(dqcurrent\(dq: true,\f[R]
+\f[I]#    \(dqpr\(dq: {\(dqnumber\(dq: 12, \(dqurl\(dq: \(dqhttps://github.com/acme/widgets/pull/12\(dq, \(dqstate\(dq: \(dqopen\(dq}},\f[R]
 \f[I]#   ...\f[R]
 \f[I]# ]\f[R]
 .EE

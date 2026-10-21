@@ -1,5 +1,23 @@
+import enum
+from dataclasses import dataclass
+
 from git_stack.adapters.merge_state import MergeState
 from git_stack.core import BASE_KEY, Parents, StackCore
+
+
+class PullRequestState(enum.Enum):
+    """Values are what `git stack info --json` prints."""
+    OPEN = "open"
+    DRAFT = "draft"
+    MERGED = "merged"
+
+
+@dataclass(frozen=True)
+class PullRequestLink:
+    """A branch's pull request, as info shows it."""
+    number: int
+    url: str
+    state: PullRequestState
 
 
 class GitAdapter:
@@ -64,6 +82,10 @@ class GitAdapter:
             return True
         own = git.patch_ids("log", "-p", "--no-merges", f"{base}..refs/heads/{branch}")
         return bool(own) and own <= landed
+
+    def pull_request_link(self, branch: str) -> PullRequestLink | None:
+        """branch's pull request, open or merged, if the adapter knows of one."""
+        return None
 
     def ensure_available(self) -> None:
         """Fail now if whatever the adapter asks about merges can't answer,

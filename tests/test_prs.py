@@ -31,7 +31,7 @@ def body(gh: FakeGitHub, number: int) -> str:
 
 def opened(gh: FakeGitHub) -> list[tuple[str, str, str, str, bool]]:
     """(head, base, title, body, draft) of each pull request gh opened."""
-    return [(pr["headRefName"], pr["baseRefName"], pr["title"], pr["body"], pr["draft"])
+    return [(pr["headRefName"], pr["baseRefName"], pr["title"], pr["body"], pr["isDraft"])
             for pr in gh.load()["prs"] if "title" in pr]
 
 

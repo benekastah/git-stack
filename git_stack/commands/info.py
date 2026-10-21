@@ -1,6 +1,11 @@
 import argparse
 import json
+import os
+import sys
+from collections.abc import Callable
+from typing import TypeAlias
 
+from git_stack.adapters.git import PullRequestState
 from git_stack.commands import Subparsers
 from git_stack.stack import BranchInfo, BranchStatus, StackClient
 
@@ -10,6 +15,24 @@ NOTES: dict[BranchStatus, str | None] = {
     BranchStatus.MERGED: "(merged)",
     BranchStatus.MERGED_WITH_NEW_COMMITS: "(merged, with new commits)",
 }
+# ANSI SGR codes for each part of a line, when color is on.
+TREE = "2"  # dim
+ROOT = "1"  # bold
+CURRENT = "1;32"  # bold green, like `git branch`
+# Like GitHub's, except that open pull requests are blue rather than green.
+LINK_COLORS = {
+    PullRequestState.OPEN: "34",  # blue
+    PullRequestState.DRAFT: "90",  # grey
+    PullRequestState.MERGED: "35",  # magenta
+}
+STATUS_COLORS = {
+    BranchStatus.NEEDS_RESTACK: "33",  # yellow
+    BranchStatus.MERGED: "36",  # cyan
+    BranchStatus.MERGED_WITH_NEW_COMMITS: "33",
+    BranchStatus.PARENT_MISSING: "31",  # red
+}
+
+Paint: TypeAlias = Callable[[str, str], str]
 
 
 class Args(argparse.Namespace):
@@ -24,42 +47,75 @@ def register(subparsers: Subparsers) -> None:
     p.set_defaults(func=run)
 
 
-def label(branch: BranchInfo) -> str:
-    notes = []
-    if branch.current:
-        notes.append("*")
+def use_color(stack: StackClient) -> bool:
+    """Whether to color info's output: as git's color.stack (or color.ui)
+    setting says, by default only on a terminal, and never with NO_COLOR set."""
+    if os.environ.get("NO_COLOR"):
+        return False
+    tty = "true" if sys.stdout.isatty() else "false"
+    return stack.git.run("config", "--get-colorbool", "color.stack", tty, check=False) == "true"
+
+
+def painter(color: bool) -> Paint:
+    """paint(text, code): text in the ANSI color code, if color is on."""
+    return lambda text, code: f"\033[{code}m{text}\033[m" if color and text else text
+
+
+def label(branch: BranchInfo, paint: Paint) -> str:
+    if branch.parent is None:
+        parts = [paint(branch.name, ROOT)]
+    elif branch.current:
+        parts = [paint(f"{branch.name} *", CURRENT)]
+    else:
+        parts = [branch.name]
     if branch.status is BranchStatus.PARENT_MISSING:
-        notes.append(f"(parent {branch.parent} missing)")
+        parts.append(paint(f"(parent {branch.parent} missing)", STATUS_COLORS[branch.status]))
     elif branch.status is not None:
         note = NOTES[branch.status]
         if note:
-            notes.append(note)
-    return " ".join([branch.name, *notes])
+            parts.append(paint(note, STATUS_COLORS[branch.status]))
+    return " ".join(parts)
 
 
 def run(stack: StackClient, args: Args) -> None:
     branches = stack.info()
     if args.json:
         print(json.dumps([{"name": b.name, "parent": b.parent,
-                           "status": b.status.value if b.status else None, "current": b.current}
+                           "status": b.status.value if b.status else None, "current": b.current,
+                           "pr": {"number": b.pull_request.number, "url": b.pull_request.url,
+                                  "state": b.pull_request.state.value}
+                           if b.pull_request else None}
                           for b in branches], indent=2))
         return
     if not branches:
         print("no tracked branches")
         return
+    paint = painter(use_color(stack))
     children: dict[str, list[BranchInfo]] = {}
     for branch in branches:
         if branch.parent is not None:
             children.setdefault(branch.parent, []).append(branch)
 
-    def show(branch: BranchInfo, prefix: str) -> None:
+    # (the tree drawn before branch, branch), in the order they're printed.
+    rows: list[tuple[str, BranchInfo]] = []
+
+    def add(branch: BranchInfo, prefix: str) -> None:
         kids = children.get(branch.name, [])
         for i, kid in enumerate(kids):
             last = i == len(kids) - 1
-            print(f"{prefix}{'└── ' if last else '├── '}{label(kid)}")
-            show(kid, prefix + ("    " if last else "│   "))
+            rows.append((f"{prefix}{'└── ' if last else '├── '}", kid))
+            add(kid, prefix + ("    " if last else "│   "))
 
     for branch in branches:
         if branch.parent is None:
-            print(label(branch))
-            show(branch, "")
+            rows.append(("", branch))
+            add(branch, "")
+    # Pull request links go in a right-aligned column after the longest line.
+    widths = [len(tree) + len(label(branch, painter(False))) for tree, branch in rows]
+    link_width = max(len(branch.pull_request.url) if branch.pull_request else 0 for _, branch in rows)
+    for (tree, branch), width in zip(rows, widths):
+        line = paint(tree, TREE) + label(branch, paint)
+        if branch.pull_request:
+            link = branch.pull_request.url.rjust(link_width)
+            line += " " * (max(widths) - width + 2) + paint(link, LINK_COLORS[branch.pull_request.state])
+        print(line)

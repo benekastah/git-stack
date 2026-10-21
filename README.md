@@ -264,9 +264,9 @@ It's a good first step before `restack`, `sync` or `push`.
 ```sh
 git stack info
 # main
-# └── add-api *
-#     ├── use-api (needs restack)
-#     └── docs (merged)
+# └── add-api *                   https://github.com/acme/widgets/pull/12
+#     ├── use-api (needs restack) https://github.com/acme/widgets/pull/13
+#     └── docs (merged)           https://github.com/acme/widgets/pull/14
 ```
 
 - `*` marks the current branch.
@@ -281,6 +281,12 @@ git stack info
   until you sort it out.
 - `(parent <name> missing)`: its parent branch was deleted by hand; fix it
   with `git stack track <parent>`.
+- With the [GitHub adapter](#github), each branch's pull request (open or
+  merged) is linked in a column at the end of its line: blue if it's open,
+  grey if it's a draft, and magenta if it was merged.
+- On a terminal, the parts of each line are colored. Like git, it follows the
+  `color.stack` setting (or `color.ui`): set it to `never` to turn colors
+  off, or `always` to keep them when piping. `NO_COLOR` also turns them off.
 - `info` doesn't fetch, and compares each branch with its local parent, so a
   merge on the remote only shows up once the local parent has it. `git fetch`
   alone isn't enough, since it doesn't update `main`; run `git stack clean`
@@ -290,12 +296,16 @@ git stack info
   each branch, each stack's root first, parent before child. `parent` and
   `status` are `null` for a root, and `status` is one of `up-to-date`,
   `needs-restack`, `merged`, `merged-with-new-commits` or `parent-missing`.
+  `pr` is the branch's pull request's `number`, `url` and `state` (`open`,
+  `draft` or `merged`), or `null` if it has none (or for a root, or without
+  the GitHub adapter).
 
   ```sh
   git stack info --json
   # [
-  #   {"name": "main", "parent": null, "status": null, "current": false},
-  #   {"name": "add-api", "parent": "main", "status": "up-to-date", "current": true},
+  #   {"name": "main", "parent": null, "status": null, "current": false, "pr": null},
+  #   {"name": "add-api", "parent": "main", "status": "up-to-date", "current": true,
+  #    "pr": {"number": 12, "url": "https://github.com/acme/widgets/pull/12", "state": "open"}},
   #   ...
   # ]
   ```

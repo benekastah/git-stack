@@ -13,7 +13,7 @@ import re
 import sys
 from typing import Any
 
-PR_FIELDS = ("number", "state", "isCrossRepository", "headRefOid", "baseRefName", "mergeCommit")
+PR_FIELDS = ("number", "state", "isDraft", "isCrossRepository", "headRefOid", "baseRefName", "mergeCommit")
 
 
 def respond(args: list[str], prs: list[dict[str, Any]]) -> str | None:
@@ -47,13 +47,13 @@ def respond(args: list[str], prs: list[dict[str, Any]]) -> str | None:
             # Newest first, taking higher numbers as newer.
             matching = sorted((p for p in prs if p["headRefName"] == opt_value(variable)),
                               key=lambda p: p["number"], reverse=True)
-            found[alias] = {"nodes": [{k: p[k] for k in PR_FIELDS} for p in matching]}
+            found[alias] = {"nodes": [{"isDraft": False, **{k: p[k] for k in PR_FIELDS if k in p}} for p in matching]}
         return json.dumps({"data": {"repository": found}})
     if args[:2] == ["pr", "create"]:
         number = max((p["number"] for p in prs), default=0) + 1
         prs.append({"number": number, "state": "OPEN", "isCrossRepository": False, "headRefName": opt("--head"),
                     "headRefOid": "", "baseRefName": opt("--base"), "mergeCommit": None,
-                    "title": opt("--title"), "body": sys.stdin.read(), "draft": "--draft" in args})
+                    "title": opt("--title"), "body": sys.stdin.read(), "isDraft": "--draft" in args})
         return f"https://github.com/acme/widgets/pull/{number}"
     if args[:2] == ["pr", "edit"]:
         pr = next(p for p in prs if p["number"] == int(args[2]))
