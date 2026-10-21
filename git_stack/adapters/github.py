@@ -3,9 +3,10 @@ import re
 import subprocess
 import threading
 from dataclasses import dataclass, replace
+from collections.abc import Iterable
 from typing import Self, TypeVar
 
-from git_stack import events
+from git_stack import events, stack_section
 from git_stack.adapters.git import GitAdapter
 from git_stack.adapters.merge_state import MergeState
 from git_stack.core import BASE_KEY, Parents, StackCore
@@ -107,7 +108,7 @@ class GitHubAdapter(GitAdapter):
         self._default_branch: str | None = None
 
     def gh(self, *args: str, input: str | None = None) -> str:
-        result = subprocess.run(["gh", *args], capture_output=True, text=True, input=input)
+        result = subprocess.run(["gh", *args], capture_output=True, text=True, encoding="utf-8", input=input)
         if result.returncode != 0:
             raise StackError(f"gh {' '.join(args)} failed:\n{result.stderr.strip()}")
         return result.stdout.strip()
@@ -316,7 +317,57 @@ class GitHubAdapter(GitAdapter):
         match = re.search(r"/pull/(\d+)$", url)
         if not match:
             raise StackError(f"couldn't tell which pull request gh opened for {branch} from {url!r}")
-        return int(match.group(1)), url
+        number = int(match.group(1))
+        self.pull_requests()[branch] = PullRequest(number, "OPEN", False, self.git.tip(branch), base, None)
+        return number, url
+
+    def pull_request_fields(self, numbers: Iterable[int], fields: str) -> dict[int, object]:
+        """{number: its pull request's fields, a JSON object or None if there's
+        no such pull request} for the pull requests numbers."""
+        numbers = sorted(set(numbers))
+        if not numbers:
+            return {}
+        prs = " ".join(f"p{n}: pullRequest(number: {n}) {{ {fields} }}" for n in numbers)
+        query = f"query($owner: String!, $name: String!) {{ repository(owner: $owner, name: $name) {{ {prs} }} }}"
+        repository = field(field(parse_json(self.gh(
+            "api", "graphql", "--hostname", self.host, "-f", f"owner={self.owner}", "-f", f"name={self.name}",
+            "-f", f"query={query}")), "data", dict), "repository", dict)
+        return {n: repository.get(f"p{n}") for n in numbers}
+
+    def update_stack_sections(self, branches: list[str], parents: Parents) -> None:
+        """Make the stack section at the end of the description of each open
+        pull request of branches, a stack parent-before-child, show the stack,
+        marking that pull request (see git_stack.stack_section).
+
+        Merged pull requests the sections showed are kept, since branches no
+        longer has them. A stack with fewer than two pull requests gets no
+        section, but one it has isn't removed.
+        """
+        prs = self.pull_requests()
+        root = parents[branches[0]]
+
+        def node(branch: str) -> stack_section.Node:
+            return prs[branch].number if branch in prs else branch
+
+        current = {node(b): node(parents[b]) if parents[b] in branches else root for b in branches}
+        to_update = {b: prs[b].number for b in branches if b in prs and prs[b].state == "OPEN"}
+        bodies = {n: field(pr, "body", str)
+                  for n, pr in self.pull_request_fields(to_update.values(), "body").items()}
+        old: stack_section.Tree = {}
+        for body in bodies.values():
+            old = stack_section.find(body) | old
+        gone = [n for n in old if isinstance(n, int) and n not in current]
+        merged = {n for n, pr in self.pull_request_fields(gone, "state").items()
+                  if pr is not None and field(pr, "state", str) == "MERGED"}
+        if sum(isinstance(n, int) for n in current) + len(merged) < 2:
+            return
+        tree = stack_section.lay_out(root, current, old, merged)
+        for branch, number in to_update.items():
+            body = bodies[number]
+            new_body = stack_section.replace(body, stack_section.render(root, tree, merged, number))
+            if new_body != body:
+                self.gh("pr", "edit", str(number), "--repo", self.repo, "--body-file", "-", input=new_body)
+                self.core.emit(events.StackSectionUpdated(branch, number))
 
 
 def github_repo(git: GitClient, remote: str) -> tuple[str, str, str] | None:

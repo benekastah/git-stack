@@ -695,6 +695,29 @@ used, as GitHub only uses them when asked for by name.
 Branches that already have a pull request (open or merged), merged
 branches, and branches with no commits of their own are skipped.
 .IP \(bu 2
+Then it adds the stack to the end of each open pull request\(aqs
+description, as a tree from the stack\(aqs root, with that pull request
+marked, and keeps it up to date each time it runs.
+Pull requests merged since stay in it, as a history, though
+\f[CR]sync\f[R] stops tracking their branches.
+A stack with only one pull request gets none.
+Text you add outside the stack is kept, but edits to the stack itself
+are overwritten.
+.RS 2
+.IP
+.EX
+<!\-\- git\-stack \-\->
+<!\-\- Kept up to date by \(gagit stack prs\(ga, which overwrites any edits to this section. \-\->
+\-\-\-
+**Stack**
+\- \(gamain\(ga
+  \- #12 (merged)
+    \- #13 👈
+      \- #14
+<!\-\- /git\-stack \-\->
+.EE
+.RE
+.IP \(bu 2
 Refuses unless every branch in the stack has been pushed with
 \f[CR]git stack push\f[R] and matches its remote branch, so each pull
 request shows what you have locally, as of your last fetch.
@@ -948,7 +971,8 @@ show every commit the new base gained since.
 (A parent that isn\(aqt on GitHub yet is pushed first.)
 .IP \(bu 2
 \f[CR]git stack prs\f[R] opens draft pull requests, into each
-branch\(aqs stack parent.
+branch\(aqs stack parent, and keeps the stack in each open one\(aqs
+description.
 (The link GitHub prints when a branch is first pushed targets the
 default branch instead; \f[CR]push\f[R] retargets a pull request opened
 from it the next time it runs.)

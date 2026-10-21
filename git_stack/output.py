@@ -89,6 +89,8 @@ def message(event: events.Event) -> str:
             return f"{', '.join(event.branches)} {have} no pull request; open drafts with `git stack prs`"
         case events.PullRequestRetargeted():
             return f"changed the base of {event.branch}'s pull request #{event.number} to {event.base}"
+        case events.StackSectionUpdated():
+            return f"updated the stack in {event.branch}'s pull request #{event.number}"
         case _:
             assert_never(event)
 

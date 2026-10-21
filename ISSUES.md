@@ -2,6 +2,10 @@
 
 Most severe first.
 
+## Need to put pr links in `git stack info`
+
+`git stack info` should include pr links where prs exist.
+
 ## A reverted change can look merged
 
 A branch that was merged and then reverted on its parent still counts as

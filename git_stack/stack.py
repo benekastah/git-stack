@@ -660,12 +660,14 @@ class StackClient(StackCore):
         """Open a draft pull request into its stack parent for each unmerged
         branch in the current stack that has none, bottom-up. Its title is the
         branch's oldest commit's subject, and its body the repository's pull
-        request template.
+        request template. Then rewrites the stack section in each open pull
+        request's description that's out of date (see
+        GitHubAdapter.update_stack_sections).
 
         Refuses unless every unmerged branch in the stack was pushed with `git
         stack push` and matches its remote branch, so each pull request shows
         what's local. Returns a PullRequestStep for each branch. With dry_run, nothing
-        is opened.
+        is opened or rewritten.
         """
         git = self.git
         self.ensure_no_operation_in_progress()
@@ -712,4 +714,9 @@ class StackClient(StackCore):
                 raise StackError(f"opening a pull request for {b} failed"
                                  f"{f' (after opening {opened})' if opened else ''}: {e}")
             steps.append(PullRequestStep(b, parent, PullRequestAction.OPEN, title=title, number=number, url=url))
+        if branches and not dry_run:
+            try:
+                adapter.update_stack_sections(branches, parents)
+            except StackError as e:
+                raise StackError(f"updating the stack in pull request descriptions failed: {e}")
         return steps

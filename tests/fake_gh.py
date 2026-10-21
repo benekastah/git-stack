@@ -32,6 +32,14 @@ def respond(args: list[str], prs: list[dict[str, Any]]) -> str | None:
         nodes = [{k: p[k] for k in ("number", "headRefName", "baseRefName", "isCrossRepository")} for p in mine]
         return json.dumps({"data": {"search": {"pageInfo": {"hasNextPage": False, "endCursor": None},
                                                "nodes": nodes}}})
+    if args[:2] == ["api", "graphql"] and "pullRequest(number:" in opt_value("query"):
+        # Fields of pull requests by number.
+        by_alias: dict[str, Any] = {}
+        for alias, number, fields in re.findall(r"(\w+): pullRequest\(number: (\d+)\) \{ ([^}]*) \}",
+                                                opt_value("query")):
+            pr = next((p for p in prs if p["number"] == int(number)), None)
+            by_alias[alias] = None if pr is None else {f: pr.get(f, "") for f in fields.split()}
+        return json.dumps({"data": {"repository": by_alias}})
     if args[:2] == ["api", "graphql"]:
         query = opt_value("query")
         found: dict[str, Any] = {"defaultBranchRef": {"name": "main"}}
@@ -48,7 +56,11 @@ def respond(args: list[str], prs: list[dict[str, Any]]) -> str | None:
                     "title": opt("--title"), "body": sys.stdin.read(), "draft": "--draft" in args})
         return f"https://github.com/acme/widgets/pull/{number}"
     if args[:2] == ["pr", "edit"]:
-        next(p for p in prs if p["number"] == int(args[2]))["baseRefName"] = opt("--base")
+        pr = next(p for p in prs if p["number"] == int(args[2]))
+        if "--base" in args:
+            pr["baseRefName"] = opt("--base")
+        if "--body-file" in args:
+            pr["body"] = sys.stdin.read()
         return None
     sys.exit(f"fake gh: unexpected {args}")
 

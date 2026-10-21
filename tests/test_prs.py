@@ -2,6 +2,7 @@
 
 import pytest
 
+from git_stack import stack_section
 from git_stack.errors import StackError
 from git_stack.stack import PullRequestAction, PullRequestStep, StackClient
 from tests.helpers import FakeGitHub, Repo
@@ -17,6 +18,15 @@ def add_template(repo: Repo, path: str, content: str = TEMPLATE) -> None:
     repo.git("add", path)
     repo.git("commit", "--quiet", "-m", f"add {path}")
     repo.git("push", "--quiet")
+
+
+def stack(*lines: str) -> str:
+    """The stack section showing lines, each a list item."""
+    return "\n".join(["<!-- git-stack -->", stack_section.NOTE, "---", "**Stack**", *lines, "<!-- /git-stack -->"])
+
+
+def body(gh: FakeGitHub, number: int) -> str:
+    return str(next(pr for pr in gh.load()["prs"] if pr["number"] == number)["body"])
 
 
 def opened(gh: FakeGitHub) -> list[tuple[str, str, str, str, bool]]:
@@ -38,9 +48,12 @@ def test_prs_opens_drafts_for_the_whole_stack_into_stack_parents(
         PullRequestStep("pr1", "main", PullRequestAction.OPEN, "pr1 c1", 1, "https://github.com/acme/widgets/pull/1"),
         PullRequestStep("pr2", "pr1", PullRequestAction.OPEN, "pr2 c1", 2, "https://github.com/acme/widgets/pull/2"),
         PullRequestStep("pr3", "pr2", PullRequestAction.OPEN, "pr3 c1", 3, "https://github.com/acme/widgets/pull/3")]
-    assert opened(gh) == [("pr1", "main", "pr1 c1", TEMPLATE, True),
-                          ("pr2", "pr1", "pr2 c1", TEMPLATE, True),
-                          ("pr3", "pr2", "pr3 c1", TEMPLATE, True)]
+    assert [pr[:3] + pr[4:] for pr in opened(gh)] == [("pr1", "main", "pr1 c1", True),
+                                                      ("pr2", "pr1", "pr2 c1", True),
+                                                      ("pr3", "pr2", "pr3 c1", True)]
+    assert body(gh, 2) == f"{TEMPLATE}\n\n" + stack("- `main`", "  - #1", "    - #2 👈", "      - #3")
+    assert [body(gh, n).count("👈") for n in (1, 3)] == [1, 1]
+    assert "- #1 👈" in body(gh, 1) and "- #3 👈" in body(gh, 3)
 
 
 def test_prs_skips_branches_with_a_pull_request(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
@@ -134,6 +147,57 @@ def test_prs_says_which_it_opened_when_one_fails(repo: Repo, gh: FakeGitHub, cli
     with pytest.raises(StackError, match=r"opening a pull request for pr2 failed \(after opening #1 for pr1\): "):
         client.prs()
     assert [head for head, *_ in opened(gh)] == ["pr1"]
+
+
+def test_prs_adds_new_pull_requests_to_the_stack_of_existing_ones(
+        repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+    client.branch("pr1")
+    repo.commit("a", "pr1\n", "pr1 c1")
+    client.push()
+    client.prs()
+    assert body(gh, 1) == ""  # a stack of one pull request gets no section
+    client.branch("pr2")
+    repo.commit("b", "pr2\n", "pr2 c1")
+    client.push()
+
+    client.prs()
+
+    assert body(gh, 1) == stack("- `main`", "  - #1 👈", "    - #2")
+
+
+def test_prs_keeps_merged_pull_requests_in_the_stack(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+    repo.make_stack()
+    client.push()
+    client.prs()
+    repo.squash_merge_on_forge("pr1")
+    state = gh.load()
+    state["prs"][0] |= {"state": "MERGED", "headRefOid": repo.git("rev-parse", "pr1"),
+                        "mergeCommit": {"oid": repo.git("rev-parse", "HEAD", cwd=repo.forge)}}
+    gh.save(state)
+    client.sync()
+    client.branch("pr4")
+    repo.commit("c", "pr4\n", "pr4 c1")
+    client.push()
+
+    client.prs()
+
+    assert body(gh, 2) == stack("- `main`", "  - #1 (merged)", "    - #2 👈", "      - #3", "        - #4")
+    assert "#4" not in body(gh, 1)  # merged pull requests are left alone
+
+
+def test_prs_moves_the_stack_to_the_end_keeping_the_rest(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+    repo.make_stack()
+    client.push()
+    client.prs()
+    state = gh.load()
+    state["prs"][0]["body"] = f"{body(gh, 1)}\n\nadded later"
+    gh.save(state)
+    gh.clear_calls()
+
+    client.prs()
+
+    assert body(gh, 1) == "added later\n\n" + stack("- `main`", "  - #1 👈", "    - #2", "      - #3")
+    assert [call[2] for call in gh.calls("pr", "edit")] == ["1"]  # the rest were up to date
 
 
 def test_prs_needs_github(repo: Repo, client: StackClient) -> None:

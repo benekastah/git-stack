@@ -511,6 +511,25 @@ git stack prs
   aren't used, as GitHub only uses them when asked for by name.
 - Branches that already have a pull request (open or merged), merged branches,
   and branches with no commits of their own are skipped.
+- Then it adds the stack to the end of each open pull request's description,
+  as a tree from the stack's root, with that pull request marked, and keeps
+  it up to date each time it runs. Pull requests merged since stay in it, as
+  a history, though `sync` stops tracking their branches. A stack with only
+  one pull request gets none. Text you add outside the stack is kept, but
+  edits to the stack itself are overwritten.
+
+  ```
+  <!-- git-stack -->
+  <!-- Kept up to date by `git stack prs`, which overwrites any edits to this section. -->
+  ---
+  **Stack**
+  - `main`
+    - #12 (merged)
+      - #13 👈
+        - #14
+  <!-- /git-stack -->
+  ```
+
 - Refuses unless every branch in the stack has been pushed with
   `git stack push` and matches its remote branch, so each pull request shows
   what you have locally, as of your last fetch.
@@ -727,7 +746,8 @@ With the GitHub adapter:
   after its branch was rebased onto the new one, which would show every commit
   the new base gained since. (A parent that isn't on GitHub yet is pushed
   first.)
-- `git stack prs` opens draft pull requests, into each branch's stack parent.
+- `git stack prs` opens draft pull requests, into each branch's stack parent,
+  and keeps the stack in each open one's description.
   (The link GitHub prints when a branch is first pushed targets the default
   branch instead; `push` retargets a pull request opened from it the next time
   it runs.)
