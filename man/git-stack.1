@@ -727,6 +727,9 @@ used, as GitHub only uses them when asked for by name.
 .IP \(bu 2
 Branches that already have a pull request (open or merged), merged
 branches, and branches with no commits of their own are skipped.
+An open pull request that isn\(aqt into its branch\(aqs stack parent
+(say it was opened from the link GitHub prints on push, which targets
+\f[CR]main\f[R]) is pointed at it, as \f[CR]push\f[R] does.
 .IP \(bu 2
 Then it adds the stack to the end of each open pull request\(aqs
 description, as a tree from the stack\(aqs root, with that pull request
@@ -1013,11 +1016,11 @@ show every commit the new base gained since.
 (A parent that isn\(aqt on GitHub yet is pushed first.)
 .IP \(bu 2
 \f[CR]git stack prs\f[R] opens draft pull requests, into each
-branch\(aqs stack parent, and keeps the stack in each open one\(aqs
-description.
+branch\(aqs stack parent, points the existing open ones at their stack
+parents too, and keeps the stack in each open one\(aqs description.
 (The link GitHub prints when a branch is first pushed targets the
-default branch instead; \f[CR]push\f[R] retargets a pull request opened
-from it the next time it runs.)
+default branch instead; the next \f[CR]prs\f[R] or \f[CR]push\f[R]
+retargets a pull request opened from it.)
 .IP \(bu 2
 A pull request that GitHub says was merged counts as merged once its
 merge commit is in the local parent branch (\f[CR]sync\f[R] fetches it),

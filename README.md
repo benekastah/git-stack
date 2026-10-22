@@ -534,7 +534,10 @@ git stack prs
   remote's default branch. Templates in a `PULL_REQUEST_TEMPLATE/` directory
   aren't used, as GitHub only uses them when asked for by name.
 - Branches that already have a pull request (open or merged), merged branches,
-  and branches with no commits of their own are skipped.
+  and branches with no commits of their own are skipped. An open pull request
+  that isn't into its branch's stack parent (say it was opened from the link
+  GitHub prints on push, which targets `main`) is pointed at it, as `push`
+  does.
 - Then it adds the stack to the end of each open pull request's description,
   as a tree from the stack's root, with that pull request marked, and keeps
   it up to date each time it runs. Pull requests merged since stay in it, as
@@ -778,10 +781,10 @@ With the GitHub adapter:
   the new base gained since. (A parent that isn't on GitHub yet is pushed
   first.)
 - `git stack prs` opens draft pull requests, into each branch's stack parent,
-  and keeps the stack in each open one's description.
-  (The link GitHub prints when a branch is first pushed targets the default
-  branch instead; `push` retargets a pull request opened from it the next time
-  it runs.)
+  points the existing open ones at their stack parents too, and keeps the
+  stack in each open one's description. (The link GitHub prints when a branch
+  is first pushed targets the default branch instead; the next `prs` or
+  `push` retargets a pull request opened from it.)
 - A pull request that GitHub says was merged counts as merged once its merge
   commit is in the local parent branch (`sync` fetches it), even if the parent
   changed the merged lines since, or the merge changed them.

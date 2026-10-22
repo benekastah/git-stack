@@ -722,14 +722,15 @@ class StackClient(StackCore):
         """Open a draft pull request into its stack parent for each unmerged
         branch in the current stack that has none, bottom-up. Its title is the
         branch's oldest commit's subject, and its body the repository's pull
-        request template. Then rewrites the stack section in each open pull
-        request's description that's out of date (see
-        GitHubAdapter.update_stack_sections).
+        request template. Points the other open ones at their stack parents, as
+        push does, in case one was opened or retargeted elsewhere since. Then
+        rewrites the stack section in each open pull request's description
+        that's out of date (see GitHubAdapter.update_stack_sections).
 
         Refuses unless every unmerged branch in the stack was pushed with `git
         stack push` and matches its remote branch, so each pull request shows
         what's local. Returns a PullRequestStep for each branch. With dry_run, nothing
-        is opened or rewritten.
+        is opened, retargeted or rewritten.
         """
         git = self.git
         self.ensure_no_operation_in_progress()
@@ -765,6 +766,8 @@ class StackClient(StackCore):
             parent = parents[b]
             pr = prs.get(b)
             if pr is not None:
+                if not dry_run:
+                    adapter.retarget(b, parent)
                 steps.append(PullRequestStep(b, parent, PullRequestAction.EXISTS, number=pr.number))
                 continue
             base = self.recorded_base(b, parent)

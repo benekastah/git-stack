@@ -2,7 +2,7 @@
 
 import pytest
 
-from git_stack import stack_section
+from git_stack import events, stack_section
 from git_stack.errors import StackError
 from git_stack.stack import PullRequestAction, PullRequestStep, StackClient
 from tests.helpers import FakeGitHub, Repo
@@ -83,6 +83,27 @@ def test_prs_skips_branches_with_a_pull_request(repo: Repo, gh: FakeGitHub, clie
         ("pr3", PullRequestAction.OPEN, 9),
     ]
     assert [head for head, *_ in opened(gh)] == ["pr1", "pr3"]
+
+
+def test_prs_retargets_existing_pull_requests(
+    repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event]
+) -> None:
+    repo.make_stack()
+    client.push()
+    # Opened from the link GitHub prints on push, which targets the default branch.
+    gh.add_pr(
+        number=7,
+        state="OPEN",
+        headRefName="pr2",
+        headRefOid=repo.git("rev-parse", "pr2"),
+        baseRefName="main",
+        mergeCommit=None,
+    )
+
+    client.prs()
+
+    assert events.PullRequestRetargeted("pr2", 7, "pr1") in emitted
+    assert gh.load()["prs"][0]["baseRefName"] == "pr1"
 
 
 def test_prs_skips_branches_without_commits(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
