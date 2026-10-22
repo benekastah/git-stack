@@ -3,21 +3,13 @@
 # formatted (fix it with `.venv/bin/ruff format`), the type checker, then the
 # tests.
 #
-# The first run creates .venv with the dev dependencies from pyproject.toml,
-# and later runs reinstall them whenever pyproject.toml changes.
+# Runs dev-venv.sh first, so .venv has the dev dependencies they need.
 
 set -eu
 
 cd "$(dirname "$0")"
 
-if [ ! -x .venv/bin/python ]; then
-    python3 -m venv .venv
-fi
-if [ ! -f .venv/installed ] || [ pyproject.toml -nt .venv/installed ]; then
-    .venv/bin/python -m pip install --quiet --upgrade pip
-    .venv/bin/python -m pip install --quiet --group dev
-    touch .venv/installed
-fi
+./dev-venv.sh
 
 git ls-files -z '*.sh' 'git_hooks/*' | xargs -0 .venv/bin/shellcheck
 .venv/bin/ruff format --check --quiet

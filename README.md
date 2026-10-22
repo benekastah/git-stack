@@ -876,12 +876,11 @@ they're merged, see [Development](#development).
 
 ### Setting up
 
-Clone the repository, then run `dev-install.sh` and `check.sh` from it:
+Clone the repository, then run its `dev-install.sh`:
 
 ```sh
 git clone https://github.com/benekastah/git-stack ~/src/git-stack
 ~/src/git-stack/dev-install.sh
-~/src/git-stack/check.sh
 ```
 
 `dev-install.sh` installs git-stack in editable mode into a virtualenv in
@@ -890,11 +889,10 @@ reinstalling. It links the `git-stack` command into `~/.local/bin` and the man
 page into `~/.local/share/man/man1` (an editable install doesn't install it),
 makes the clone use the [git hooks](#git-hooks) in `git_hooks/`, and makes
 `git blame` skip [reformatting commits](#skipping-reformatting-in-git-blame).
-It's safe to rerun, and only needs rerunning when `pyproject.toml` changes, for example
-when a command-line entry point is added.
-
-`check.sh` runs the [checks](#checks), and the first time, sets up the
-virtualenv they and the git hooks use.
+It also sets up the clone's own virtualenv, `.venv`, with the dev
+dependencies (e.g. Ruff and mypy) that the [checks](#checks) and the hooks
+use. It's safe to rerun, e.g. when `pyproject.toml` changes, to pick up a new
+command-line entry point.
 
 To check the install worked, `git stack -h` should print git-stack's usage,
 and `git stack --help` should open the man page. `dev-install.sh` warns if
@@ -924,10 +922,10 @@ If the formatting check fails, format the code with:
 .venv/bin/ruff format
 ```
 
-The first run creates a virtualenv in `.venv` and installs the `dev`
-dependency group from `pyproject.toml` into it (with `pip install --group dev`,
-which needs pip 25.1+). Later runs reinstall it whenever `pyproject.toml`
-changes. Arguments are passed to pytest, so `./check.sh -k sync` runs only the
+It runs `dev-venv.sh` first, which creates `.venv` if it's missing and installs
+the `dev` dependency group from `pyproject.toml` into it (with
+`pip install --group dev`, which needs pip 25.1+), and reinstalls it whenever
+`pyproject.toml` has changed since. Arguments are passed to pytest, so `./check.sh -k sync` runs only the
 tests whose names contain `sync`. git-stack itself still has no runtime
 dependencies.
 
@@ -939,8 +937,10 @@ at a time, e.g. to debug a failing test.
 ### Git hooks
 
 `dev-install.sh` makes the clone use the hooks in `git_hooks/`. To turn them on
-without it, run `git config core.hooksPath git_hooks`. Both need `.venv`, so
-run `./check.sh` once first.
+without it, run `git config core.hooksPath git_hooks`. They bring `.venv` up to
+date with `dev-venv.sh` when they need it, so a new dev dependency (say, after
+pulling a change that adds one) is installed by the next commit or push that
+uses it.
 
 - `pre-commit` formats the staged Python files with Ruff, and regenerates the
   man page, `man/git-stack.1`, and adds it to any commit that changes this

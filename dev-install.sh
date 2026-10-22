@@ -5,7 +5,8 @@
 # effect without reinstalling, links the `git-stack` command into ~/.local/bin
 # and the man page into ~/.local/share/man/man1, makes this repository use the
 # hooks in git_hooks/, and makes `git blame` in it skip the commits listed in
-# .git-blame-ignore-revs. Safe to rerun, e.g. after pyproject.toml changes.
+# .git-blame-ignore-revs. It also sets up the clone's .venv, which the hooks
+# use, with dev-venv.sh. Safe to rerun, e.g. after pyproject.toml changes.
 
 set -eu
 
@@ -34,6 +35,8 @@ mkdir -p "$bin_dir" "$man_dir"
 link "$venv/bin/git-stack" "$bin_dir/git-stack"
 link "$clone/man/git-stack.1" "$man_dir/git-stack.1"
 
+"$clone/dev-venv.sh"
+echo "set up $clone/.venv with the dev dependencies"
 git -C "$clone" config core.hooksPath git_hooks
 echo "set this repository's hooks to git_hooks/"
 
