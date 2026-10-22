@@ -111,7 +111,9 @@ class GitHubAdapter(GitAdapter):
         self._default_branch: str | None = None
 
     def gh(self, *args: str, input: str | None = None) -> str:
-        result = subprocess.run(["gh", *args], capture_output=True, text=True, encoding="utf-8", input=input)
+        result = subprocess.run(
+            ["gh", *args], capture_output=True, text=True, encoding="utf-8", input=input, check=False
+        )
         if result.returncode != 0:
             raise StackError(f"gh {' '.join(args)} failed:\n{result.stderr.strip()}")
         return result.stdout.strip()
@@ -477,7 +479,9 @@ def ssh_hostname(host: str) -> str:
     """The host ssh connects to for host, after ~/.ssh/config's Host aliases, or
     host itself if ssh can't tell."""
     try:
-        result = subprocess.run(["ssh", "-G", host], capture_output=True, text=True, stdin=subprocess.DEVNULL)
+        result = subprocess.run(
+            ["ssh", "-G", host], capture_output=True, text=True, stdin=subprocess.DEVNULL, check=False
+        )
     except OSError:
         return host
     for line in result.stdout.splitlines() if result.returncode == 0 else ():

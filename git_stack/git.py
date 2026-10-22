@@ -21,18 +21,18 @@ class GitClient:
 
     def run(self, *args: str, check: bool = True, input: str | None = None) -> str:
         """Run git and return stripped stdout."""
-        result = subprocess.run(self._command(*args), capture_output=True, text=True, input=input)
+        result = subprocess.run(self._command(*args), capture_output=True, text=True, input=input, check=False)
         if check and result.returncode != 0:
             raise StackError(f"git {' '.join(args)} failed:\n{result.stderr.strip()}")
         return result.stdout.strip()
 
     def ok(self, *args: str) -> bool:
         """Run git and report whether it succeeded."""
-        return subprocess.run(self._command(*args), capture_output=True).returncode == 0
+        return subprocess.run(self._command(*args), capture_output=True, check=False).returncode == 0
 
     def passthrough(self, *args: str) -> bool:
         """Run git with output going straight to the terminal."""
-        return subprocess.run(self._command(*args)).returncode == 0
+        return subprocess.run(self._command(*args), check=False).returncode == 0
 
     def branch_config(self) -> dict[tuple[str, str], str]:
         """Every branch.<name>.<key> setting, as {(name, key in lower case): value}.
@@ -125,9 +125,9 @@ class GitClient:
         for line in self.run("worktree", "list", "--porcelain").splitlines():
             if line.startswith("worktree "):
                 path = line.removeprefix("worktree ")
-            elif line == f"branch refs/heads/{branch}":
-                return path
-            elif line == "detached" and path is not None and self.rebasing_in(path) == branch:
+            elif line == f"branch refs/heads/{branch}" or (
+                line == "detached" and path is not None and self.rebasing_in(path) == branch
+            ):
                 return path
         return None
 
@@ -191,7 +191,10 @@ class GitClient:
     def conflicts(self, branch: str, target: str) -> bool:
         """Whether merging branch into target would conflict."""
         result = subprocess.run(
-            self._command("merge-tree", "--write-tree", "--name-only", target, branch), capture_output=True, text=True
+            self._command("merge-tree", "--write-tree", "--name-only", target, branch),
+            capture_output=True,
+            text=True,
+            check=False,
         )
         if result.returncode not in (0, 1):
             raise StackError(f"git merge-tree {target} {branch} failed:\n{result.stderr.strip()}")
@@ -204,7 +207,7 @@ class GitClient:
         in target's history.
         """
         result = subprocess.run(
-            self._command("merge-tree", "--write-tree", target, branch), capture_output=True, text=True
+            self._command("merge-tree", "--write-tree", target, branch), capture_output=True, text=True, check=False
         )
         if result.returncode != 0:
             return False

@@ -912,8 +912,8 @@ either won't work:
 ### Checks
 
 Run every check (shellcheck on the shell scripts, that the Python code is
-formatted with [Ruff](https://docs.astral.sh/ruff/), mypy in strict mode, then
-the tests) with:
+formatted with [Ruff](https://docs.astral.sh/ruff/), Ruff's linter with its
+default rules, mypy in strict mode, then the tests) with:
 
 ```sh
 ./check.sh
@@ -924,6 +924,8 @@ If the formatting check fails, format the code with:
 ```sh
 .venv/bin/ruff format
 ```
+
+If the linter fails, `.venv/bin/ruff check --fix` fixes what it can.
 
 It runs `dev-venv.sh` first, which creates `.venv` if it's missing and installs
 the `dev` dependency group from `pyproject.toml` into it (with

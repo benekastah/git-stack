@@ -123,8 +123,10 @@ def test_autocreate_says_what_it_did_for_each_pull_request(
         f"{created} pr1 from origin/pr1, tracking it on main (#1)",
         f"{tracking} pr2 on pr1 (#2)",
         "pr3 is already tracked on pr2 (#3)",
-        "pr4 is tracked on main, but #4 merges it into pr2; leaving it (to follow GitHub, run "
-        "`git stack track pr2 pr4`)",
+        (
+            "pr4 is tracked on main, but #4 merges it into pr2; leaving it (to follow GitHub, run "
+            "`git stack track pr2 pr4`)"
+        ),
         "skipping pr5 (#5): theirs isn't a local branch",
     ]
 

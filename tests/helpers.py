@@ -33,7 +33,7 @@ class Repo:
         self.client = StackClient(GitClient(self.path), on_event=self.emitted.append)
 
     def git(self, *args: str, cwd: pathlib.Path | None = None) -> str:
-        result = subprocess.run(["git", *args], cwd=cwd or self.path, capture_output=True, text=True)
+        result = subprocess.run(["git", *args], cwd=cwd or self.path, capture_output=True, text=True, check=False)
         if result.returncode != 0:
             pytest.fail(f"git {' '.join(args)} failed:\n{result.stderr}")
         return result.stdout.strip()
@@ -47,6 +47,7 @@ class Repo:
             capture_output=True,
             text=True,
             timeout=60,
+            check=False,
         )
         if expect_success and result.returncode != 0:
             pytest.fail(f"git stack {' '.join(args)} failed:\n{result.stdout}{result.stderr}")
@@ -115,7 +116,9 @@ class Repo:
 
     def config_exists(self, branch: str, key: str) -> bool:
         return (
-            subprocess.run(["git", "config", f"branch.{branch}.{key}"], cwd=self.path, capture_output=True).returncode
+            subprocess.run(
+                ["git", "config", f"branch.{branch}.{key}"], cwd=self.path, capture_output=True, check=False
+            ).returncode
             == 0
         )
 
