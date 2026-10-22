@@ -18,17 +18,20 @@ PAGE = ROOT / "man" / "git-stack.1"
 
 
 def render(readme: pathlib.Path) -> str:
-    page: str = pypandoc.convert_file(str(readme), "man", format="gfm",
-                                      extra_args=["--standalone", f"--lua-filter={FILTER}"])
+    page: str = pypandoc.convert_file(
+        str(readme), "man", format="gfm", extra_args=["--standalone", f"--lua-filter={FILTER}"]
+    )
     return page
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--check", action="store_true",
-                        help="don't write the page; fail if it's out of date with README.md")
-    parser.add_argument("--readme", type=pathlib.Path, default=README,
-                        help="generate the page from this file instead of README.md")
+    parser.add_argument(
+        "--check", action="store_true", help="don't write the page; fail if it's out of date with README.md"
+    )
+    parser.add_argument(
+        "--readme", type=pathlib.Path, default=README, help="generate the page from this file instead of README.md"
+    )
     args = parser.parse_args()
     page = render(args.readme)
     if not args.check:

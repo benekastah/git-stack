@@ -48,8 +48,14 @@ def test_info_remembers_whether_a_branch_landed_in_its_parent(repo: Repo, client
     repo.commit("a", "pr1\n", "pr1 c1")
     assert repo.branch_info("pr1").status is BranchStatus.UP_TO_DATE
     cached = repo.git("config", "branch.pr1.stackLandedCheck")
-    assert cached == " ".join([repo.git("rev-parse", "pr1"), repo.git("rev-parse", "main"),
-                               repo.git("config", "branch.pr1.stackBase"), "false"])
+    assert cached == " ".join(
+        [
+            repo.git("rev-parse", "pr1"),
+            repo.git("rev-parse", "main"),
+            repo.git("config", "branch.pr1.stackBase"),
+            "false",
+        ]
+    )
 
     repo.git("config", "branch.pr1.stackLandedCheck", cached.replace("false", "true"))
     assert repo.branch_info("pr1").status is BranchStatus.MERGED

@@ -18,8 +18,9 @@ def git_exec_path() -> pathlib.Path:
     binary itself rather than any wrapper (such as git-ai) or shim on PATH.
     Wrappers can make each of the tests' many git processes several times
     slower."""
-    return pathlib.Path(subprocess.run(["git", "--exec-path"], check=True, capture_output=True,
-                                       text=True).stdout.strip())
+    return pathlib.Path(
+        subprocess.run(["git", "--exec-path"], check=True, capture_output=True, text=True).stdout.strip()
+    )
 
 
 @pytest.fixture
@@ -37,8 +38,7 @@ def repo(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, git_exec_path:
     # through a symlink is bin_dir, so point it at the real ones.
     (bin_dir / "git").symlink_to((git_exec_path / "git").resolve())
     monkeypatch.setenv("GIT_EXEC_PATH", str(git_exec_path))
-    monkeypatch.setenv("GIT_TEMPLATE_DIR",
-                       str(git_exec_path.parent.parent / "share" / "git-core" / "templates"))
+    monkeypatch.setenv("GIT_TEMPLATE_DIR", str(git_exec_path.parent.parent / "share" / "git-core" / "templates"))
     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
     global_config = tmp_path / "gitconfig"
     global_config.write_text("[init]\n\tdefaultBranch = main\n")
@@ -54,8 +54,7 @@ def repo(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, git_exec_path:
     }.items():
         monkeypatch.setenv(name, value)
 
-    repo = Repo(path=tmp_path / "local", origin=tmp_path / "origin.git", forge=tmp_path / "forge",
-                tmp=tmp_path)
+    repo = Repo(path=tmp_path / "local", origin=tmp_path / "origin.git", forge=tmp_path / "forge", tmp=tmp_path)
     subprocess.run(["git", "init", "--quiet", "--bare", repo.origin], check=True)
     subprocess.run(["git", "clone", "--quiet", repo.origin, repo.path], check=True, capture_output=True)
     for name in ("a", "b", "c"):

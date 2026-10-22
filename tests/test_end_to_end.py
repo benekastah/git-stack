@@ -59,7 +59,10 @@ def test_each_directory_is_relative_to_the_one_before(repo: Repo) -> None:
 
     result = subprocess.run(
         [sys.executable, "-m", "git_stack", "-C", "elsewhere", "-C", "../local", "track", "main"],
-        cwd=repo.tmp, capture_output=True, text=True)
+        cwd=repo.tmp,
+        capture_output=True,
+        text=True,
+    )
 
     assert result.returncode == 0, result.stderr
     assert repo.config("pr1", "stackParent") == "main"

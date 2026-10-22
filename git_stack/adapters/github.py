@@ -41,8 +41,7 @@ def field(data: object, key: str, kind: type[T]) -> T:
     """data[key], checking that data is a JSON object and the value a kind."""
     value = data.get(key) if isinstance(data, dict) else None
     if not isinstance(value, kind):
-        raise StackError(f"unexpected response from GitHub: expected {key} to be a "
-                         f"{kind.__name__} in {data!r}")
+        raise StackError(f"unexpected response from GitHub: expected {key} to be a {kind.__name__} in {data!r}")
     return value
 
 
@@ -56,6 +55,7 @@ def optional_field(data: object, key: str, kind: type[T]) -> T | None:
 @dataclass(frozen=True)
 class PullRequest:
     """A pull request, with the fields in PR_FIELDS."""
+
     number: int
     state: str
     draft: bool
@@ -82,6 +82,7 @@ class PullRequest:
 class OpenPullRequest:
     """An open (or draft) pull request of head, a branch in the repository,
     into base."""
+
     number: int
     head: str
     base: str
@@ -145,22 +146,38 @@ class GitHubAdapter(GitAdapter):
         try:
             self._pull_requests = self.look_up_pull_requests()
         except StackError as e:
-            raise StackError(f"couldn't look up pull requests on GitHub; check `gh auth status` (and, for "
-                             f"an organization with SSO, that gh's token is authorized for it): {e}")
+            raise StackError(
+                f"couldn't look up pull requests on GitHub; check `gh auth status` (and, for "
+                f"an organization with SSO, that gh's token is authorized for it): {e}"
+            )
 
     def look_up_pull_requests(self) -> dict[str, PullRequest]:
         branches = [b for b in self.core.tracked_branches() if self.git.tracks_same_name(b, self.remote)]
         if not branches:
             return {}
         # Branch names are passed as variables, so they needn't be escaped.
-        fields = " ".join(f"b{i}: pullRequests(headRefName: $b{i}, first: {PRS_PER_BRANCH}, "
-                          f"orderBy: {{field: CREATED_AT, direction: DESC}}) {{ nodes {{ {PR_FIELDS} }} }}"
-                          for i in range(len(branches)))
+        fields = " ".join(
+            f"b{i}: pullRequests(headRefName: $b{i}, first: {PRS_PER_BRANCH}, "
+            f"orderBy: {{field: CREATED_AT, direction: DESC}}) {{ nodes {{ {PR_FIELDS} }} }}"
+            for i in range(len(branches))
+        )
         variables = "".join(f", $b{i}: String!" for i in range(len(branches)))
-        query = (f"query($owner: String!, $name: String!{variables}) {{ repository(owner: $owner, name: $name) "
-                 f"{{ defaultBranchRef {{ name }} {fields} }} }}")
-        args = ["api", "graphql", "--hostname", self.host, "-f", f"owner={self.owner}",
-                "-f", f"name={self.name}", "-f", f"query={query}"]
+        query = (
+            f"query($owner: String!, $name: String!{variables}) {{ repository(owner: $owner, name: $name) "
+            f"{{ defaultBranchRef {{ name }} {fields} }} }}"
+        )
+        args = [
+            "api",
+            "graphql",
+            "--hostname",
+            self.host,
+            "-f",
+            f"owner={self.owner}",
+            "-f",
+            f"name={self.name}",
+            "-f",
+            f"query={query}",
+        ]
         for i, branch in enumerate(branches):
             args += ["-f", f"b{i}={branch}"]
         repository = field(field(parse_json(self.gh(*args)), "data", dict), "repository", dict)
@@ -192,8 +209,9 @@ class GitHubAdapter(GitAdapter):
             return None
         merged = [pr for pr in prs if pr.state == "MERGED"]
         self.fetch_missing_heads(merged)
-        return next((pr for pr in merged if self.git.rev(pr.head_oid) and self.git.is_ancestor(base, pr.head_oid)),
-                    None)
+        return next(
+            (pr for pr in merged if self.git.rev(pr.head_oid) and self.git.is_ancestor(base, pr.head_oid)), None
+        )
 
     def fetch_missing_heads(self, prs: list[PullRequest]) -> None:
         """Fetch the head commits of prs that we don't have, which GitHub keeps
@@ -214,21 +232,34 @@ class GitHubAdapter(GitAdapter):
     def my_open_pull_requests(self) -> list[OpenPullRequest]:
         """The gh user's open pull requests, drafts included, from branches in
         the repository (not forks)."""
-        query = ("query($q: String!, $after: String) { search(query: $q, type: ISSUE, first: 100, after: $after) "
-                 "{ pageInfo { hasNextPage endCursor } "
-                 "nodes { ... on PullRequest { number headRefName baseRefName isCrossRepository } } } }")
+        query = (
+            "query($q: String!, $after: String) { search(query: $q, type: ISSUE, first: 100, after: $after) "
+            "{ pageInfo { hasNextPage endCursor } "
+            "nodes { ... on PullRequest { number headRefName baseRefName isCrossRepository } } } }"
+        )
         prs = []
         after = None
         while True:
-            args = ["api", "graphql", "--hostname", self.host,
-                    "-f", f"q=repo:{self.owner}/{self.name} is:pr is:open author:@me", "-f", f"query={query}"]
+            args = [
+                "api",
+                "graphql",
+                "--hostname",
+                self.host,
+                "-f",
+                f"q=repo:{self.owner}/{self.name} is:pr is:open author:@me",
+                "-f",
+                f"query={query}",
+            ]
             if after is not None:
                 args += ["-f", f"after={after}"]
             search = field(field(parse_json(self.gh(*args)), "data", dict), "search", dict)
             for node in field(search, "nodes", list):
                 if not field(node, "isCrossRepository", bool):
-                    prs.append(OpenPullRequest(field(node, "number", int), field(node, "headRefName", str),
-                                               field(node, "baseRefName", str)))
+                    prs.append(
+                        OpenPullRequest(
+                            field(node, "number", int), field(node, "headRefName", str), field(node, "baseRefName", str)
+                        )
+                    )
             page = field(search, "pageInfo", dict)
             if not field(page, "hasNextPage", bool):
                 return prs
@@ -241,8 +272,13 @@ class GitHubAdapter(GitAdapter):
         pr = self.pull_requests().get(branch)
         if pr is None:
             return None
-        state = (PullRequestState.MERGED if pr.state == "MERGED"
-                 else PullRequestState.DRAFT if pr.draft else PullRequestState.OPEN)
+        state = (
+            PullRequestState.MERGED
+            if pr.state == "MERGED"
+            else PullRequestState.DRAFT
+            if pr.draft
+            else PullRequestState.OPEN
+        )
         return PullRequestLink(pr.number, f"https://{self.host}/{self.owner}/{self.name}/pull/{pr.number}", state)
 
     def merge_state(self, branch: str, parent: str) -> MergeState:
@@ -259,17 +295,16 @@ class GitHubAdapter(GitAdapter):
         if not (merge and git.rev(merge) and git.is_ancestor(merge, parent) and git.rev(head)):
             return super().merge_state(branch, parent)
         upstream_tip = git.rev(f"{branch}@{{upstream}}")
-        if (self.unmerged_commits(f"refs/heads/{branch}", head, parent)
-                or (upstream_tip and self.unmerged_commits(upstream_tip, head, parent))):
+        if self.unmerged_commits(f"refs/heads/{branch}", head, parent) or (
+            upstream_tip and self.unmerged_commits(upstream_tip, head, parent)
+        ):
             return MergeState.MERGED_WITH_NEW_COMMITS
         return MergeState.MERGED
 
     def unmerged_commits(self, ref: str, merged_head: str, parent: str) -> set[str]:
         """Non-merge commits on ref that aren't in parent and don't match a commit on merged_head."""
-        unmatched = self.git.run("rev-list", "--cherry-pick", "--right-only", "--no-merges",
-                                 f"{merged_head}...{ref}")
-        return (set(unmatched.split())
-                & set(self.git.run("rev-list", "--no-merges", ref, "--not", parent).split()))
+        unmatched = self.git.run("rev-list", "--cherry-pick", "--right-only", "--no-merges", f"{merged_head}...{ref}")
+        return set(unmatched.split()) & set(self.git.run("rev-list", "--no-merges", ref, "--not", parent).split())
 
     def before_push(self, to_push: list[str], parents: Parents) -> None:
         """Point the open pull requests of branches about to be pushed at their
@@ -325,8 +360,22 @@ class GitHubAdapter(GitAdapter):
 
     def open_pull_request(self, branch: str, base: str, title: str, body: str) -> tuple[int, str]:
         """Open a draft pull request of branch into base. Returns its number and URL."""
-        url = self.gh("pr", "create", "--repo", self.repo, "--draft", "--base", base, "--head", branch,
-                      "--title", title, "--body-file", "-", input=body).splitlines()[-1]
+        url = self.gh(
+            "pr",
+            "create",
+            "--repo",
+            self.repo,
+            "--draft",
+            "--base",
+            base,
+            "--head",
+            branch,
+            "--title",
+            title,
+            "--body-file",
+            "-",
+            input=body,
+        ).splitlines()[-1]
         match = re.search(r"/pull/(\d+)$", url)
         if not match:
             raise StackError(f"couldn't tell which pull request gh opened for {branch} from {url!r}")
@@ -342,9 +391,28 @@ class GitHubAdapter(GitAdapter):
             return {}
         prs = " ".join(f"p{n}: pullRequest(number: {n}) {{ {fields} }}" for n in numbers)
         query = f"query($owner: String!, $name: String!) {{ repository(owner: $owner, name: $name) {{ {prs} }} }}"
-        repository = field(field(parse_json(self.gh(
-            "api", "graphql", "--hostname", self.host, "-f", f"owner={self.owner}", "-f", f"name={self.name}",
-            "-f", f"query={query}")), "data", dict), "repository", dict)
+        repository = field(
+            field(
+                parse_json(
+                    self.gh(
+                        "api",
+                        "graphql",
+                        "--hostname",
+                        self.host,
+                        "-f",
+                        f"owner={self.owner}",
+                        "-f",
+                        f"name={self.name}",
+                        "-f",
+                        f"query={query}",
+                    )
+                ),
+                "data",
+                dict,
+            ),
+            "repository",
+            dict,
+        )
         return {n: repository.get(f"p{n}") for n in numbers}
 
     def update_stack_sections(self, branches: list[str], parents: Parents) -> None:
@@ -364,14 +432,16 @@ class GitHubAdapter(GitAdapter):
 
         current = {node(b): node(parents[b]) if parents[b] in branches else root for b in branches}
         to_update = {b: prs[b].number for b in branches if b in prs and prs[b].state == "OPEN"}
-        bodies = {n: field(pr, "body", str)
-                  for n, pr in self.pull_request_fields(to_update.values(), "body").items()}
+        bodies = {n: field(pr, "body", str) for n, pr in self.pull_request_fields(to_update.values(), "body").items()}
         old: stack_section.Tree = {}
         for body in bodies.values():
             old = stack_section.find(body) | old
         gone = [n for n in old if isinstance(n, int) and n not in current]
-        merged = {n for n, pr in self.pull_request_fields(gone, "state").items()
-                  if pr is not None and field(pr, "state", str) == "MERGED"}
+        merged = {
+            n
+            for n, pr in self.pull_request_fields(gone, "state").items()
+            if pr is not None and field(pr, "state", str) == "MERGED"
+        }
         if sum(isinstance(n, int) for n in current) + len(merged) < 2:
             return
         tree = stack_section.lay_out(root, current, old, merged)
@@ -390,8 +460,10 @@ def github_repo(git: GitClient, remote: str) -> tuple[str, str, str] | None:
     SSH URL, host is the one ssh connects to, so a Host alias in ~/.ssh/config
     (e.g. github-work for github.com) is resolved.
     """
-    for url in (git.run("config", "--get", f"remote.{remote}.url", check=False),
-                git.run("remote", "get-url", remote, check=False)):
+    for url in (
+        git.run("config", "--get", f"remote.{remote}.url", check=False),
+        git.run("remote", "get-url", remote, check=False),
+    ):
         match = REMOTE_URL.match(url)
         if match:
             host, owner, name = match.groups()

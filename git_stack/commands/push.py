@@ -7,19 +7,26 @@ from git_stack.stack import StackClient
 
 class Args(argparse.Namespace):
     """The arguments register's parser produces."""
+
     branch: str | None
     remote: str
     force: bool
 
 
 def register(subparsers: Subparsers) -> None:
-    p = subparsers.add_parser("push", help="force-push (with lease) every branch in the current stack (or "
-                                           "BRANCH's), refusing if that would drop commits on the remote")
+    p = subparsers.add_parser(
+        "push",
+        help="force-push (with lease) every branch in the current stack (or "
+        "BRANCH's), refusing if that would drop commits on the remote",
+    )
     p.add_argument("branch", nargs="?", help="push BRANCH's stack instead of the current branch's")
     p.add_argument("--remote", default=DEFAULT_REMOTE)
-    p.add_argument("--force", action="store_true",
-                   help="push even if that drops commits on a remote branch that the local one doesn't "
-                        "have. Still fails if a remote branch changed since the last fetch")
+    p.add_argument(
+        "--force",
+        action="store_true",
+        help="push even if that drops commits on a remote branch that the local one doesn't "
+        "have. Still fails if a remote branch changed since the last fetch",
+    )
     p.set_defaults(func=run)
 
 

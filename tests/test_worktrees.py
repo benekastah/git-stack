@@ -19,7 +19,8 @@ def add_worktree(repo: Repo, branch: str) -> pathlib.Path:
 
 
 def test_restack_skips_branch_in_other_worktree_and_its_children(
-        repo: Repo, client: StackClient, emitted: list[events.Event]) -> None:
+    repo: Repo, client: StackClient, emitted: list[events.Event]
+) -> None:
     repo.make_stack()
     worktree = add_worktree(repo, "pr2")
     repo.git("switch", "--quiet", "pr1")
@@ -49,7 +50,8 @@ def test_restack_finishes_once_other_worktree_moves_on(repo: Repo, client: Stack
 
 
 def test_branch_in_other_worktree_that_needs_no_restack_is_left_quietly(
-        repo: Repo, client: StackClient, emitted: list[events.Event]) -> None:
+    repo: Repo, client: StackClient, emitted: list[events.Event]
+) -> None:
     repo.make_stack()
     add_worktree(repo, "pr2")
     repo.commit("c", "pr3 more\n", "pr3 c2")
@@ -60,7 +62,8 @@ def test_branch_in_other_worktree_that_needs_no_restack_is_left_quietly(
 
 
 def test_sync_skips_branch_in_other_worktree_and_restacks_the_rest(
-        repo: Repo, client: StackClient, emitted: list[events.Event]) -> None:
+    repo: Repo, client: StackClient, emitted: list[events.Event]
+) -> None:
     repo.make_stack()
     client.push()
     worktree = add_worktree(repo, "pr2")
@@ -76,7 +79,8 @@ def test_sync_skips_branch_in_other_worktree_and_restacks_the_rest(
 
 
 def test_sync_leaves_upstream_commits_for_branch_in_other_worktree(
-        repo: Repo, client: StackClient, emitted: list[events.Event]) -> None:
+    repo: Repo, client: StackClient, emitted: list[events.Event]
+) -> None:
     repo.make_stack()
     client.push()
     worktree = add_worktree(repo, "pr1")
@@ -90,7 +94,8 @@ def test_sync_leaves_upstream_commits_for_branch_in_other_worktree(
 
 
 def test_sync_delete_untracks_but_keeps_merged_branch_in_other_worktree(
-        repo: Repo, client: StackClient, emitted: list[events.Event]) -> None:
+    repo: Repo, client: StackClient, emitted: list[events.Event]
+) -> None:
     repo.make_stack()
     client.push()
     worktree = add_worktree(repo, "pr1")
@@ -118,7 +123,8 @@ def test_deleting_current_branch_skips_child_in_other_worktree(repo: Repo, clien
 
 
 def test_restack_squash_skips_branch_in_other_worktree(
-        repo: Repo, client: StackClient, emitted: list[events.Event]) -> None:
+    repo: Repo, client: StackClient, emitted: list[events.Event]
+) -> None:
     repo.make_stack()
     worktree = add_worktree(repo, "pr1")
     repo.git("switch", "--quiet", "pr2")
@@ -130,7 +136,8 @@ def test_restack_squash_skips_branch_in_other_worktree(
 
 
 def test_restack_stopped_in_other_worktree_is_left_to_finish_there(
-        repo: Repo, client: StackClient, emitted: list[events.Event]) -> None:
+    repo: Repo, client: StackClient, emitted: list[events.Event]
+) -> None:
     repo.make_stack()
     repo.git("switch", "--quiet", "pr1")
     repo.commit("b", "pr1 b\n", "pr1 c3")  # conflicts with pr2 c1

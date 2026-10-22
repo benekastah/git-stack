@@ -7,16 +7,24 @@ from git_stack.stack import AutocreateAction, Autocreated, StackClient
 
 class Args(argparse.Namespace):
     """The arguments register's parser produces."""
+
     remote: str
     dry_run: bool
 
 
 def register(subparsers: Subparsers) -> None:
-    p = subparsers.add_parser("autocreate", help="track your open pull requests on GitHub (drafts included) as "
-                                                 "stacks, creating local branches for them where needed")
+    p = subparsers.add_parser(
+        "autocreate",
+        help="track your open pull requests on GitHub (drafts included) as "
+        "stacks, creating local branches for them where needed",
+    )
     p.add_argument("--remote", default=DEFAULT_REMOTE)
-    p.add_argument("-n", "--dry-run", action="store_true",
-                   help="print what it would do, without changing anything (besides fetching)")
+    p.add_argument(
+        "-n",
+        "--dry-run",
+        action="store_true",
+        help="print what it would do, without changing anything (besides fetching)",
+    )
     p.set_defaults(func=run)
 
 
@@ -31,8 +39,10 @@ def describe(step: Autocreated, remote: str, dry_run: bool) -> str:
         case AutocreateAction.ALREADY_TRACKED:
             return f"{step.branch} is already tracked on {step.parent} ({pr})"
         case AutocreateAction.PARENT_DIFFERS:
-            return (f"{step.branch} is tracked on {step.tracked_parent}, but {pr} merges it into {step.parent}; "
-                    f"leaving it (to follow GitHub, run `git stack track {step.parent} {step.branch}`)")
+            return (
+                f"{step.branch} is tracked on {step.tracked_parent}, but {pr} merges it into {step.parent}; "
+                f"leaving it (to follow GitHub, run `git stack track {step.parent} {step.branch}`)"
+            )
         case AutocreateAction.SKIP:
             return f"skipping {step.branch} ({pr}): {step.reason}"
 

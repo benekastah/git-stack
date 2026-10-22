@@ -23,8 +23,14 @@ def merge_pr1_on_forge_with_a_tweak(repo: Repo, gh: FakeGitHub) -> None:
     (repo.forge / "a").write_text("tweaked by the maintainer\n")
     repo.git("commit", "--quiet", "-am", "pr1 (squashed)", cwd=repo.forge)
     repo.git("push", "--quiet", "origin", "main", ":pr1", cwd=repo.forge)
-    gh.add_pr(number=5, state="MERGED", headRefName="pr1", headRefOid=repo.git("rev-parse", "pr1"),
-              baseRefName="main", mergeCommit={"oid": repo.git("rev-parse", "HEAD", cwd=repo.forge)})
+    gh.add_pr(
+        number=5,
+        state="MERGED",
+        headRefName="pr1",
+        headRefOid=repo.git("rev-parse", "pr1"),
+        baseRefName="main",
+        mergeCommit={"oid": repo.git("rev-parse", "HEAD", cwd=repo.forge)},
+    )
     gh.clear_calls()
 
 
@@ -34,24 +40,33 @@ def without_prs(emitted: list[events.Event]) -> list[str]:
 
 
 def test_push_says_which_branches_have_no_pr(
-        repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event]) -> None:
+    repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event]
+) -> None:
     repo.make_stack()
     repo.git("switch", "--quiet", "pr2")
 
     client.push()
 
     assert [e for e in emitted if isinstance(e, events.NoPullRequests)] == [
-        events.NoPullRequests(("pr1", "pr2", "pr3"))]
+        events.NoPullRequests(("pr1", "pr2", "pr3"))
+    ]
     assert gh.calls("pr") == []
 
 
 def test_push_retargets_pr_opened_elsewhere(
-        repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event]) -> None:
+    repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event]
+) -> None:
     repo.make_stack()
     client.push()
     emitted.clear()
-    gh.add_pr(number=7, state="OPEN", headRefName="pr2", headRefOid=repo.git("rev-parse", "pr2"), baseRefName="main",
-              mergeCommit=None)
+    gh.add_pr(
+        number=7,
+        state="OPEN",
+        headRefName="pr2",
+        headRefOid=repo.git("rev-parse", "pr2"),
+        baseRefName="main",
+        mergeCommit=None,
+    )
 
     client.push()
 
@@ -61,10 +76,17 @@ def test_push_retargets_pr_opened_elsewhere(
 
 
 def test_push_counts_branch_whose_pr_was_closed_as_without_one(
-        repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event]) -> None:
+    repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event]
+) -> None:
     repo.make_stack()
-    gh.add_pr(number=7, state="CLOSED", headRefName="pr3", headRefOid=repo.git("rev-parse", "main"), baseRefName="pr2",
-              mergeCommit=None)
+    gh.add_pr(
+        number=7,
+        state="CLOSED",
+        headRefName="pr3",
+        headRefOid=repo.git("rev-parse", "main"),
+        baseRefName="pr2",
+        mergeCommit=None,
+    )
 
     client.push()
 
@@ -73,10 +95,18 @@ def test_push_counts_branch_whose_pr_was_closed_as_without_one(
 
 
 def test_push_ignores_pr_from_fork_with_same_branch_name(
-        repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event]) -> None:
+    repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event]
+) -> None:
     repo.make_stack()
-    gh.add_pr(number=7, state="OPEN", isCrossRepository=True, headRefName="pr3", headRefOid=repo.git("rev-parse", "main"),
-              baseRefName="main", mergeCommit=None)
+    gh.add_pr(
+        number=7,
+        state="OPEN",
+        isCrossRepository=True,
+        headRefName="pr3",
+        headRefOid=repo.git("rev-parse", "main"),
+        baseRefName="main",
+        mergeCommit=None,
+    )
 
     client.push()
 
@@ -85,13 +115,20 @@ def test_push_ignores_pr_from_fork_with_same_branch_name(
 
 
 def test_merged_pr_of_earlier_branch_with_same_name_is_ignored(
-        repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event]) -> None:
+    repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event]
+) -> None:
     repo.commit("a", "old pr1\n", "old pr1")
     old_pr1 = repo.git("rev-parse", "HEAD")
     repo.commit("a", "later\n", "later")
     repo.git("push", "--quiet")
-    gh.add_pr(number=3, state="MERGED", headRefName="pr1", headRefOid=old_pr1, baseRefName="main",
-              mergeCommit={"oid": old_pr1})
+    gh.add_pr(
+        number=3,
+        state="MERGED",
+        headRefName="pr1",
+        headRefOid=old_pr1,
+        baseRefName="main",
+        mergeCommit={"oid": old_pr1},
+    )
     repo.make_stack()
     repo.git("switch", "--quiet", "pr1")
     client.push()
@@ -106,14 +143,16 @@ def test_merged_pr_of_earlier_branch_with_same_name_is_ignored(
 
 
 def test_merged_pr_from_someone_elses_branch_with_same_name_is_ignored(
-        repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event]) -> None:
+    repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event]
+) -> None:
     client.branch("fix")
     repo.commit("a", "mine\n", "mine")
     repo.push_someone_elses_branch("fix")
     theirs = repo.git("rev-parse", "origin/fix")
     repo.git("push", "--quiet", "origin", "fix:main", cwd=repo.forge)
-    gh.add_pr(number=9, state="MERGED", headRefName="fix", headRefOid=theirs, baseRefName="main",
-              mergeCommit={"oid": theirs})
+    gh.add_pr(
+        number=9, state="MERGED", headRefName="fix", headRefOid=theirs, baseRefName="main", mergeCommit={"oid": theirs}
+    )
 
     client.sync()
 
@@ -136,12 +175,19 @@ def test_push_refuses_when_pr_lookup_fails(repo: Repo, gh: FakeGitHub, client: S
 
 
 def test_push_retargets_pr_whose_parent_changed(
-        repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event]) -> None:
+    repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event]
+) -> None:
     repo.make_stack()
     repo.git("switch", "--quiet", "pr2")
     client.push()
-    gh.add_pr(number=1, state="OPEN", headRefName="pr2", headRefOid=repo.git("rev-parse", "pr2"),
-              baseRefName="pr1", mergeCommit=None)
+    gh.add_pr(
+        number=1,
+        state="OPEN",
+        headRefName="pr2",
+        headRefOid=repo.git("rev-parse", "pr2"),
+        baseRefName="pr1",
+        mergeCommit=None,
+    )
     repo.squash_merge_on_forge("pr1")
     client.sync()
 
@@ -175,12 +221,19 @@ def record_retargets_and_pushes(repo: Repo, monkeypatch: pytest.MonkeyPatch) -> 
 
 
 def test_push_retargets_pr_before_pushing_when_parent_was_merged(
-        repo: Repo, gh: FakeGitHub, client: StackClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo: Repo, gh: FakeGitHub, client: StackClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     repo.make_stack()
     repo.git("switch", "--quiet", "pr2")
     client.push()
-    gh.add_pr(number=1, state="OPEN", headRefName="pr2", headRefOid=repo.git("rev-parse", "pr2"),
-              baseRefName="pr1", mergeCommit=None)
+    gh.add_pr(
+        number=1,
+        state="OPEN",
+        headRefName="pr2",
+        headRefOid=repo.git("rev-parse", "pr2"),
+        baseRefName="pr1",
+        mergeCommit=None,
+    )
     repo.squash_merge_on_forge("pr1", delete_branch=False)
     client.sync()
     order = record_retargets_and_pushes(repo, monkeypatch)
@@ -192,11 +245,18 @@ def test_push_retargets_pr_before_pushing_when_parent_was_merged(
 
 
 def test_push_retargets_pr_after_pushing_new_parent(
-        repo: Repo, gh: FakeGitHub, client: StackClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo: Repo, gh: FakeGitHub, client: StackClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     repo.make_stack()
     client.push()
-    gh.add_pr(number=1, state="OPEN", headRefName="pr2", headRefOid=repo.git("rev-parse", "pr2"),
-              baseRefName="pr1", mergeCommit=None)
+    gh.add_pr(
+        number=1,
+        state="OPEN",
+        headRefName="pr2",
+        headRefOid=repo.git("rev-parse", "pr2"),
+        baseRefName="pr1",
+        mergeCommit=None,
+    )
     repo.git("switch", "--quiet", "main")
     client.branch("other")
     repo.commit("a", "other\n", "other c1")
@@ -210,8 +270,7 @@ def test_push_retargets_pr_after_pushing_new_parent(
     assert gh.load()["prs"][0]["baseRefName"] == "other"
 
 
-def test_sync_trusts_merged_pr_whose_merge_differs_from_branch(
-        repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+def test_sync_trusts_merged_pr_whose_merge_differs_from_branch(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
     repo.make_stack()
     merge_pr1_on_forge_with_a_tweak(repo, gh)
 
@@ -242,13 +301,20 @@ def merge_pr1_after_update_branch(repo: Repo, gh: FakeGitHub) -> str:
     repo.git("commit", "--quiet", "-am", "pr1 (squashed)", cwd=repo.forge)
     repo.git("push", "--quiet", "origin", "main", ":pr1", cwd=repo.forge)
     repo.git("update-ref", "refs/pull/5/head", updated_head, cwd=repo.origin)
-    gh.add_pr(number=5, state="MERGED", headRefName="pr1", headRefOid=updated_head, baseRefName="main",
-              mergeCommit={"oid": repo.git("rev-parse", "HEAD", cwd=repo.forge)})
+    gh.add_pr(
+        number=5,
+        state="MERGED",
+        headRefName="pr1",
+        headRefOid=updated_head,
+        baseRefName="main",
+        mergeCommit={"oid": repo.git("rev-parse", "HEAD", cwd=repo.forge)},
+    )
     return updated_head
 
 
 def test_sync_fetches_head_of_merged_pr_whose_branch_was_deleted(
-        repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+    repo: Repo, gh: FakeGitHub, client: StackClient
+) -> None:
     repo.make_stack()
     merge_pr1_after_update_branch(repo, gh)
 
@@ -261,22 +327,43 @@ def test_sync_fetches_head_of_merged_pr_whose_branch_was_deleted(
 def test_info_links_pull_requests(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
     repo.make_stack()
     client.push()
-    gh.add_pr(number=7, state="OPEN", headRefName="pr2", headRefOid=repo.git("rev-parse", "pr2"),
-              baseRefName="pr1", mergeCommit=None)
-    gh.add_pr(number=8, state="OPEN", isDraft=True, headRefName="pr3", headRefOid=repo.git("rev-parse", "pr3"),
-              baseRefName="pr2", mergeCommit=None)
+    gh.add_pr(
+        number=7,
+        state="OPEN",
+        headRefName="pr2",
+        headRefOid=repo.git("rev-parse", "pr2"),
+        baseRefName="pr1",
+        mergeCommit=None,
+    )
+    gh.add_pr(
+        number=8,
+        state="OPEN",
+        isDraft=True,
+        headRefName="pr3",
+        headRefOid=repo.git("rev-parse", "pr3"),
+        baseRefName="pr2",
+        mergeCommit=None,
+    )
 
     assert [(b.name, b.pull_request) for b in client.info()] == [
-        ("main", None), ("pr1", None),
+        ("main", None),
+        ("pr1", None),
         ("pr2", PullRequestLink(7, "https://github.com/acme/widgets/pull/7", PullRequestState.OPEN)),
-        ("pr3", PullRequestLink(8, "https://github.com/acme/widgets/pull/8", PullRequestState.DRAFT))]
+        ("pr3", PullRequestLink(8, "https://github.com/acme/widgets/pull/8", PullRequestState.DRAFT)),
+    ]
 
 
 def test_info_offline_does_not_ask_github(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
     repo.make_stack()
     client.push()
-    gh.add_pr(number=7, state="OPEN", headRefName="pr2", headRefOid=repo.git("rev-parse", "pr2"),
-              baseRefName="pr1", mergeCommit=None)
+    gh.add_pr(
+        number=7,
+        state="OPEN",
+        headRefName="pr2",
+        headRefOid=repo.git("rev-parse", "pr2"),
+        baseRefName="pr1",
+        mergeCommit=None,
+    )
     gh.clear_calls()
 
     assert [b.pull_request for b in client.info(offline=True)] == [None] * 4
@@ -294,7 +381,8 @@ def test_info_does_not_fetch_head_of_merged_pr(repo: Repo, gh: FakeGitHub, clien
 
 
 def test_restack_ignores_merged_pr_until_parent_has_the_merge(
-        repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event]) -> None:
+    repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event]
+) -> None:
     repo.make_stack()
     merge_pr1_on_forge_with_a_tweak(repo, gh)
     repo.git("fetch", "--quiet")
@@ -308,7 +396,8 @@ def test_restack_ignores_merged_pr_until_parent_has_the_merge(
 
 
 def test_sync_skips_merged_pr_with_local_commits_after_merge(
-        repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event]) -> None:
+    repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event]
+) -> None:
     repo.make_stack()
     merge_pr1_on_forge_with_a_tweak(repo, gh)
     repo.git("switch", "--quiet", "pr1")
@@ -320,12 +409,17 @@ def test_sync_skips_merged_pr_with_local_commits_after_merge(
     assert repo.config("pr1", "stackParent") == "main"
 
 
-def test_open_pr_on_default_branch_overrides_local_detection(
-        repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+def test_open_pr_on_default_branch_overrides_local_detection(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
     repo.make_stack()
     client.push()
-    gh.add_pr(number=5, state="OPEN", headRefName="pr1", headRefOid=repo.git("rev-parse", "pr1"),
-              baseRefName="main", mergeCommit=None)
+    gh.add_pr(
+        number=5,
+        state="OPEN",
+        headRefName="pr1",
+        headRefOid=repo.git("rev-parse", "pr1"),
+        baseRefName="main",
+        mergeCommit=None,
+    )
     repo.git("switch", "--quiet", "main")
     repo.git("merge", "--quiet", "--squash", "pr1")
     repo.git("commit", "--quiet", "-m", "pr1 (squashed)")
@@ -335,11 +429,18 @@ def test_open_pr_on_default_branch_overrides_local_detection(
 
 
 def test_open_pr_on_stacked_parent_falls_back_to_local_detection(
-        repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+    repo: Repo, gh: FakeGitHub, client: StackClient
+) -> None:
     repo.make_stack()
     client.push()
-    gh.add_pr(number=6, state="OPEN", headRefName="pr2", headRefOid=repo.git("rev-parse", "pr2"),
-              baseRefName="pr1", mergeCommit=None)
+    gh.add_pr(
+        number=6,
+        state="OPEN",
+        headRefName="pr2",
+        headRefOid=repo.git("rev-parse", "pr2"),
+        baseRefName="pr1",
+        mergeCommit=None,
+    )
     repo.git("switch", "--quiet", "pr1")
     repo.git("merge", "--quiet", "--squash", "pr2")
     repo.git("commit", "--quiet", "-m", "pr2 (squashed)")
@@ -353,7 +454,8 @@ def test_open_pr_on_stacked_parent_falls_back_to_local_detection(
 
 @pytest.mark.parametrize("command", ["sync", "clean"])
 def test_refuses_to_change_anything_when_pr_lookup_fails(
-        repo: Repo, gh: FakeGitHub, client: StackClient, command: str) -> None:
+    repo: Repo, gh: FakeGitHub, client: StackClient, command: str
+) -> None:
     repo.make_stack()
     client.push()
     repo.squash_merge_on_forge("pr1")
@@ -368,19 +470,18 @@ def test_refuses_to_change_anything_when_pr_lookup_fails(
     assert repo.config("pr2", "stackParent") == "pr1"
 
 
-def test_refuses_to_sync_when_pr_lookup_answer_is_malformed(
-        repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+def test_refuses_to_sync_when_pr_lookup_answer_is_malformed(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
     repo.make_stack()
     client.push()
-    gh.add_pr(number=5, state="MERGED", headRefName="pr1", headRefOid=None, baseRefName="main",
-              mergeCommit=None)
+    gh.add_pr(number=5, state="MERGED", headRefName="pr1", headRefOid=None, baseRefName="main", mergeCommit=None)
 
     with pytest.raises(StackError, match="expected headRefOid to be a str"):
         client.sync()
 
 
 def test_info_falls_back_to_local_detection_when_pr_lookup_fails(
-        repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event]) -> None:
+    repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event]
+) -> None:
     repo.make_stack()
     client.push()
     repo.squash_merge_on_forge("pr1")
@@ -408,8 +509,10 @@ def fake_ssh(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
     bin_dir = tmp_path / "ssh-bin"
     bin_dir.mkdir()
     ssh = bin_dir / "ssh"
-    ssh.write_text('#!/bin/sh\n[ "$1" = -G ] || exit 255\n'
-                   'if [ "$2" = github-work ]; then echo "hostname github.com"; else echo "hostname $2"; fi\n')
+    ssh.write_text(
+        '#!/bin/sh\n[ "$1" = -G ] || exit 255\n'
+        'if [ "$2" = github-work ]; then echo "hostname github.com"; else echo "hostname $2"; fi\n'
+    )
     ssh.chmod(0o755)
     monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
 

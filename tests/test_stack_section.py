@@ -11,7 +11,11 @@ def test_find_reads_back_a_branching_tree() -> None:
 
 def test_render_nests_siblings_pull_requests_first() -> None:
     assert stack_section.render("main", {"pr2b": 1, 3: 1, 1: "main"}, set(), "pr2b").splitlines()[4:-1] == [
-        "- `main`", "  - #1", "    - #3", "    - `pr2b` 👈"]
+        "- `main`",
+        "  - #1",
+        "    - #3",
+        "    - `pr2b` 👈",
+    ]
 
 
 def test_lay_out_puts_merged_pull_requests_back() -> None:

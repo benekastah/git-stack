@@ -7,16 +7,22 @@ from git_stack.stack import PullRequestAction, PullRequestStep, StackClient
 
 class Args(argparse.Namespace):
     """The arguments register's parser produces."""
+
     remote: str
     dry_run: bool
 
 
 def register(subparsers: Subparsers) -> None:
-    p = subparsers.add_parser("prs", aliases=["pr"], help="open a draft pull request on GitHub for each branch in the current "
-                                          "stack that has none, into its stack parent")
+    p = subparsers.add_parser(
+        "prs",
+        aliases=["pr"],
+        help="open a draft pull request on GitHub for each branch in the current "
+        "stack that has none, into its stack parent",
+    )
     p.add_argument("--remote", default=DEFAULT_REMOTE)
-    p.add_argument("-n", "--dry-run", action="store_true",
-                   help="print the pull requests it would open, without opening them")
+    p.add_argument(
+        "-n", "--dry-run", action="store_true", help="print the pull requests it would open, without opening them"
+    )
     p.set_defaults(func=run)
 
 

@@ -66,7 +66,8 @@ def test_sync_delete_local_lands_on_parent_of_childless_branch(repo: Repo, clien
 
 
 def test_sync_after_parent_squash_merged_with_remote_branch_kept(
-        repo: Repo, client: StackClient, emitted: list[events.Event]) -> None:
+    repo: Repo, client: StackClient, emitted: list[events.Event]
+) -> None:
     repo.make_stack()
     client.push()
     repo.squash_merge_on_forge("pr1", delete_branch=False)
@@ -136,7 +137,8 @@ def test_sync_after_local_fast_forward_merge_of_unpushed_branch(repo: Repo, clie
 
 @pytest.mark.parametrize("delete_branch", [True, False], ids=["remote branch deleted", "remote branch kept"])
 def test_sync_after_squash_merge_followed_by_edit_to_same_lines(
-        repo: Repo, delete_branch: bool, client: StackClient) -> None:
+    repo: Repo, delete_branch: bool, client: StackClient
+) -> None:
     repo.make_stack()
     client.push()
     repo.squash_merge_on_forge("pr1", delete_branch=delete_branch)
@@ -170,7 +172,8 @@ def test_sync_after_rebase_merge_followed_by_edit_to_same_lines(repo: Repo, clie
 
 
 def test_sync_skips_merged_branch_with_commits_pushed_after_merge(
-        repo: Repo, client: StackClient, emitted: list[events.Event]) -> None:
+    repo: Repo, client: StackClient, emitted: list[events.Event]
+) -> None:
     repo.make_stack()
     client.push()
     repo.squash_merge_on_forge("pr1", delete_branch=False)
@@ -214,7 +217,8 @@ def test_sync_after_two_levels_squash_merged(repo: Repo, client: StackClient) ->
 
 
 def test_sync_keeps_branch_deleted_without_merging(
-        repo: Repo, client: StackClient, emitted: list[events.Event]) -> None:
+    repo: Repo, client: StackClient, emitted: list[events.Event]
+) -> None:
     repo.make_stack()
     client.push()
     repo.git("push", "--quiet", "origin", ":pr1", cwd=repo.forge)
@@ -254,7 +258,8 @@ def test_sync_fast_forwards_branch_to_commits_pushed_by_others(repo: Repo, clien
 
 
 def test_sync_records_pull_despite_info_run_before_it(
-        repo: Repo, client: StackClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo: Repo, client: StackClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     repo.make_stack()
     client.push()
     repo.commit_on_forge("pr1", "d", "collab\n", "collab")
@@ -324,7 +329,8 @@ def test_sync_pull_conflict_resolved_with_cherry_pick_continue(repo: Repo, clien
 
 
 def test_sync_pull_stopped_by_untracked_file_is_retried_after_cherry_pick_abort(
-        repo: Repo, client: StackClient) -> None:
+    repo: Repo, client: StackClient
+) -> None:
     repo.make_stack()
     client.push()
     repo.commit_on_forge("pr1", "d", "collab\n", "collab")
@@ -364,7 +370,8 @@ def test_sync_pull_aborted_then_committed_over_is_not_pulled(repo: Repo, client:
 
 
 def test_sync_pull_aborted_then_committed_over_in_same_second_by_same_author_is_not_pulled(
-        repo: Repo, client: StackClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo: Repo, client: StackClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     repo.make_stack()
     client.push()
     monkeypatch.setenv("GIT_AUTHOR_DATE", "1700000000 +0000")
@@ -383,7 +390,8 @@ def test_sync_pull_aborted_then_committed_over_in_same_second_by_same_author_is_
 
 
 def test_sync_skips_branches_above_a_missing_parent(
-        repo: Repo, client: StackClient, emitted: list[events.Event]) -> None:
+    repo: Repo, client: StackClient, emitted: list[events.Event]
+) -> None:
     repo.make_stack()
     repo.git("switch", "--quiet", "main")
     repo.git("branch", "--quiet", "-D", "pr1")
@@ -391,8 +399,12 @@ def test_sync_skips_branches_above_a_missing_parent(
 
     client.sync()
 
-    assert any(isinstance(event, events.BrokenBranch) and event.branch == "pr2"
-               and "pr2's parent pr1 doesn't exist" in event.reason for event in emitted)
+    assert any(
+        isinstance(event, events.BrokenBranch)
+        and event.branch == "pr2"
+        and "pr2's parent pr1 doesn't exist" in event.reason
+        for event in emitted
+    )
     assert events.ParentSkipped("pr3", "pr2") in emitted
 
 
@@ -426,8 +438,7 @@ def test_sync_refuses_outside_a_stack(repo: Repo, client: StackClient) -> None:
     assert repo.git("rev-parse", "main") != repo.git("rev-parse", "main", cwd=repo.origin)
 
 
-def test_sync_leaves_diverged_trunk_alone(
-        repo: Repo, client: StackClient, emitted: list[events.Event]) -> None:
+def test_sync_leaves_diverged_trunk_alone(repo: Repo, client: StackClient, emitted: list[events.Event]) -> None:
     repo.commit_on_forge("main", "d", "upstream\n", "upstream change")
     repo.commit("a", "local\n", "local change")
     client.branch("pr1")
@@ -440,7 +451,8 @@ def test_sync_leaves_diverged_trunk_alone(
 
 
 def test_sync_leaves_trunk_checked_out_in_another_worktree_alone(
-        repo: Repo, client: StackClient, emitted: list[events.Event]) -> None:
+    repo: Repo, client: StackClient, emitted: list[events.Event]
+) -> None:
     repo.make_stack()
     worktree = repo.tmp / "main-worktree"
     repo.git("worktree", "add", "--quiet", str(worktree), "main")
@@ -468,8 +480,7 @@ def test_sync_ignores_old_copies_of_rebased_commits_missing_from_reflog(repo: Re
     assert (repo.path / "a").read_text() == "pr1 second, reworked\n"
 
 
-def test_sync_leaves_branch_on_main_alone_when_main_moves_without_conflict(
-        repo: Repo, client: StackClient) -> None:
+def test_sync_leaves_branch_on_main_alone_when_main_moves_without_conflict(repo: Repo, client: StackClient) -> None:
     repo.make_stack()
     client.push()
     tips = {branch: repo.git("rev-parse", branch) for branch in ("pr1", "pr2", "pr3")}

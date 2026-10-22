@@ -44,7 +44,6 @@ def test_rename_missing_branch_fails(repo: Repo, client: StackClient) -> None:
         client.rename("other", old="nope")
 
 
-
 def test_rename_pushed_branch_unsets_old_upstream(repo: Repo, client: StackClient) -> None:
     repo.make_stack()
     client.push()

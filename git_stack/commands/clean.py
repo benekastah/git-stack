@@ -7,13 +7,13 @@ from git_stack.stack import StackClient
 
 class Args(argparse.Namespace):
     """The arguments register's parser produces."""
+
     remote: str
     delete: str | None
 
 
 def register(subparsers: Subparsers) -> None:
-    p = subparsers.add_parser("clean", help="fetch and untrack merged branches in every stack, "
-                                            "without restacking")
+    p = subparsers.add_parser("clean", help="fetch and untrack merged branches in every stack, without restacking")
     p.add_argument("--remote", default=DEFAULT_REMOTE)
     add_delete_argument(p)
     p.set_defaults(func=run)

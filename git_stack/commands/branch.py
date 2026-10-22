@@ -6,6 +6,7 @@ from git_stack.stack import StackClient
 
 class Args(argparse.Namespace):
     """The arguments register's parser produces."""
+
     name: str
 
 

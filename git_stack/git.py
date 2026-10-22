@@ -51,8 +51,9 @@ class GitClient:
         stat = (st.st_ino, st.st_mtime_ns, st.st_size)
         if stat != self._config_stat:
             config = {}
-            for entry in filter(None, self.run("config", "--null", "--get-regexp", r"^branch\.",
-                                               check=False).split("\0")):
+            for entry in filter(
+                None, self.run("config", "--null", "--get-regexp", r"^branch\.", check=False).split("\0")
+            ):
                 key, _, value = entry.partition("\n")
                 # Branch names can contain dots, but keys can't.
                 branch, _, name = key.removeprefix("branch.").rpartition(".")
@@ -68,8 +69,14 @@ class GitClient:
 
     def config_unset(self, branch: str, key: str, value: str | None = None) -> None:
         """Unset branch's key, or, if value is given, only if it's still value."""
-        self.run("config", "--unset", *(("--fixed-value",) if value is not None else ()),
-                 f"branch.{branch}.{key}", *((value,) if value is not None else ()), check=False)
+        self.run(
+            "config",
+            "--unset",
+            *(("--fixed-value",) if value is not None else ()),
+            f"branch.{branch}.{key}",
+            *((value,) if value is not None else ()),
+            check=False,
+        )
 
     def rev(self, ref: str) -> str | None:
         return self.run("rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}", check=False) or None
@@ -101,8 +108,9 @@ class GitClient:
         sequencer state behind, not CHERRY_PICK_HEAD.
         """
         names = ("rebase-merge", "rebase-apply", "CHERRY_PICK_HEAD", "sequencer", "MERGE_HEAD")
-        paths = self.run("rev-parse", "--path-format=absolute",
-                         *(arg for name in names for arg in ("--git-path", name))).splitlines()
+        paths = self.run(
+            "rev-parse", "--path-format=absolute", *(arg for name in names for arg in ("--git-path", name))
+        ).splitlines()
         return any(os.path.exists(path) for path in paths)
 
     def has_conflicts(self) -> bool:
@@ -155,8 +163,9 @@ class GitClient:
     def tracks_same_name(self, branch: str, remote: str) -> bool:
         """Whether branch's upstream is the branch of the same name on remote,
         which is how `git stack push` (or `git push -u`) sets it up."""
-        return (self.config_get(branch, "remote") == remote
-                and self.config_get(branch, "merge") == f"refs/heads/{branch}")
+        return (
+            self.config_get(branch, "remote") == remote and self.config_get(branch, "merge") == f"refs/heads/{branch}"
+        )
 
     def remote_branch(self, branch: str) -> tuple[str, str, str] | None:
         """Return (remote, ref, tip) for branch's upstream on a remote, or None."""
@@ -182,8 +191,8 @@ class GitClient:
     def conflicts(self, branch: str, target: str) -> bool:
         """Whether merging branch into target would conflict."""
         result = subprocess.run(
-            self._command("merge-tree", "--write-tree", "--name-only", target, branch),
-            capture_output=True, text=True)
+            self._command("merge-tree", "--write-tree", "--name-only", target, branch), capture_output=True, text=True
+        )
         if result.returncode not in (0, 1):
             raise StackError(f"git merge-tree {target} {branch} failed:\n{result.stderr.strip()}")
         return result.returncode == 1
@@ -195,7 +204,8 @@ class GitClient:
         in target's history.
         """
         result = subprocess.run(
-            self._command("merge-tree", "--write-tree", target, branch), capture_output=True, text=True)
+            self._command("merge-tree", "--write-tree", target, branch), capture_output=True, text=True
+        )
         if result.returncode != 0:
             return False
         merged_tree = result.stdout.splitlines()[0]
@@ -205,8 +215,7 @@ class GitClient:
         """The patch-ids of the commits or diff that `git <args>` prints."""
         command, *rest = args
         patches = self.run("--literal-pathspecs", command, "--no-color", "--no-ext-diff", *rest)
-        return {line.split()[0]
-                for line in self.run("patch-id", "--stable", input=patches + "\n").splitlines()}
+        return {line.split()[0] for line in self.run("patch-id", "--stable", input=patches + "\n").splitlines()}
 
     def identities(self, *args: str) -> set[str]:
         """The author, author date and subject of each commit `git log <args>`

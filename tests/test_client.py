@@ -8,8 +8,8 @@ from tests.helpers import Repo
 
 
 def test_client_reports_through_events_without_printing(
-        repo: Repo, client: StackClient, emitted: list[events.Event],
-        capsys: pytest.CaptureFixture[str]) -> None:
+    repo: Repo, client: StackClient, emitted: list[events.Event], capsys: pytest.CaptureFixture[str]
+) -> None:
     repo.make_stack()
     client.push()
     repo.squash_merge_on_forge("pr1")

@@ -6,7 +6,8 @@ from tests.helpers import Repo
 
 
 def test_clean_untracks_merged_branches_in_every_stack_without_restacking(
-        repo: Repo, client: StackClient, emitted: list[events.Event]) -> None:
+    repo: Repo, client: StackClient, emitted: list[events.Event]
+) -> None:
     repo.make_stack()
     client.push()
     repo.git("switch", "--quiet", "main")

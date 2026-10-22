@@ -12,8 +12,18 @@ from git_stack.adapters.git import PullRequestLink, PullRequestState
 from git_stack.cli import main
 from git_stack.errors import StackError
 from git_stack.git import GitClient
-from git_stack.stack import (AutocreateAction, Autocreated, BranchInfo, BranchStatus, PullRequestAction,
-                             PullRequestStep, Renamed, StackClient, Tracked, Untracked)
+from git_stack.stack import (
+    AutocreateAction,
+    Autocreated,
+    BranchInfo,
+    BranchStatus,
+    PullRequestAction,
+    PullRequestStep,
+    Renamed,
+    StackClient,
+    Tracked,
+    Untracked,
+)
 
 
 @pytest.fixture
@@ -39,45 +49,56 @@ def stack() -> Any:
     return stack
 
 
-@pytest.mark.parametrize(("argv", "method", "args", "kwargs"), [
-    (["branch", "pr1"], "branch", ("pr1",), {}),
-    (["track", "main"], "track", ("main", []), {"base": None}),
-    (["track", "main", "pr1", "pr2", "--base", "abc123"], "track", ("main", ["pr1", "pr2"]),
-     {"base": "abc123"}),
-    (["autocreate"], "autocreate", (), {"remote": "origin", "dry_run": False}),
-    (["autocreate", "-n", "--remote", "upstream"], "autocreate", (), {"remote": "upstream", "dry_run": True}),
-    (["untrack"], "untrack", ([],), {}),
-    (["untrack", "pr1", "pr2"], "untrack", (["pr1", "pr2"],), {}),
-    (["rename", "new"], "rename", ("new",), {"old": None}),
-    (["rename", "old", "new"], "rename", ("new",), {"old": "old"}),
-    (["info"], "info", (), {"offline": False}),
-    (["info", "--offline"], "info", (), {"offline": True}),
-    (["info", "--json"], "info", (), {"offline": False}),
-    (["next"], "next", (), {}),
-    (["prev"], "prev", (), {}),
-    (["restack"], "restack", (), {"onto": None, "squash": False, "latest": False}),
-    (["restack", "--onto", "main", "--squash", "--latest"], "restack", (),
-     {"onto": "main", "squash": True, "latest": True}),
-    (["sync"], "sync", (), {"remote": "origin", "delete": None, "latest": False}),
-    (["sync", "--remote", "upstream", "-d", "local", "--latest"], "sync", (),
-     {"remote": "upstream", "delete": "local", "latest": True}),
-    (["clean"], "clean", (), {"remote": "origin", "delete": None}),
-    (["clean", "--delete", "both"], "clean", (), {"remote": "origin", "delete": "both"}),
-    (["push"], "push", (None,), {"remote": "origin", "force": False}),
-    (["push", "pr1", "--remote", "upstream"], "push", ("pr1",), {"remote": "upstream", "force": False}),
-    (["push", "--force"], "push", (None,), {"remote": "origin", "force": True}),
-    (["prs"], "prs", (), {"remote": "origin", "dry_run": False}),
-    (["prs", "-n", "--remote", "upstream"], "prs", (), {"remote": "upstream", "dry_run": True}),
-    (["pr"], "prs", (), {"remote": "origin", "dry_run": False}),
-    (["parent"], "parent", (None,), {}),
-    (["parent", "pr1"], "parent", ("pr1",), {}),
-    (["base"], "base", (None,), {}),
-    (["base", "pr1"], "base", ("pr1",), {}),
-    (["show-stack"], "show_stack", (None,), {}),
-    (["show-stack", "-q", "pr1"], "show_stack", ("pr1",), {}),
-])
+@pytest.mark.parametrize(
+    ("argv", "method", "args", "kwargs"),
+    [
+        (["branch", "pr1"], "branch", ("pr1",), {}),
+        (["track", "main"], "track", ("main", []), {"base": None}),
+        (["track", "main", "pr1", "pr2", "--base", "abc123"], "track", ("main", ["pr1", "pr2"]), {"base": "abc123"}),
+        (["autocreate"], "autocreate", (), {"remote": "origin", "dry_run": False}),
+        (["autocreate", "-n", "--remote", "upstream"], "autocreate", (), {"remote": "upstream", "dry_run": True}),
+        (["untrack"], "untrack", ([],), {}),
+        (["untrack", "pr1", "pr2"], "untrack", (["pr1", "pr2"],), {}),
+        (["rename", "new"], "rename", ("new",), {"old": None}),
+        (["rename", "old", "new"], "rename", ("new",), {"old": "old"}),
+        (["info"], "info", (), {"offline": False}),
+        (["info", "--offline"], "info", (), {"offline": True}),
+        (["info", "--json"], "info", (), {"offline": False}),
+        (["next"], "next", (), {}),
+        (["prev"], "prev", (), {}),
+        (["restack"], "restack", (), {"onto": None, "squash": False, "latest": False}),
+        (
+            ["restack", "--onto", "main", "--squash", "--latest"],
+            "restack",
+            (),
+            {"onto": "main", "squash": True, "latest": True},
+        ),
+        (["sync"], "sync", (), {"remote": "origin", "delete": None, "latest": False}),
+        (
+            ["sync", "--remote", "upstream", "-d", "local", "--latest"],
+            "sync",
+            (),
+            {"remote": "upstream", "delete": "local", "latest": True},
+        ),
+        (["clean"], "clean", (), {"remote": "origin", "delete": None}),
+        (["clean", "--delete", "both"], "clean", (), {"remote": "origin", "delete": "both"}),
+        (["push"], "push", (None,), {"remote": "origin", "force": False}),
+        (["push", "pr1", "--remote", "upstream"], "push", ("pr1",), {"remote": "upstream", "force": False}),
+        (["push", "--force"], "push", (None,), {"remote": "origin", "force": True}),
+        (["prs"], "prs", (), {"remote": "origin", "dry_run": False}),
+        (["prs", "-n", "--remote", "upstream"], "prs", (), {"remote": "upstream", "dry_run": True}),
+        (["pr"], "prs", (), {"remote": "origin", "dry_run": False}),
+        (["parent"], "parent", (None,), {}),
+        (["parent", "pr1"], "parent", ("pr1",), {}),
+        (["base"], "base", (None,), {}),
+        (["base", "pr1"], "base", ("pr1",), {}),
+        (["show-stack"], "show_stack", (None,), {}),
+        (["show-stack", "-q", "pr1"], "show_stack", ("pr1",), {}),
+    ],
+)
 def test_command_calls_its_client_method(
-        stack: Any, argv: list[str], method: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> None:
+    stack: Any, argv: list[str], method: str, args: tuple[Any, ...], kwargs: dict[str, Any]
+) -> None:
     assert main(argv, stack=stack) == 0
 
     getattr(stack, method).assert_called_once_with(*args, **kwargs)
@@ -85,7 +106,8 @@ def test_command_calls_its_client_method(
 
 @pytest.mark.parametrize("dry_run", [False, True])
 def test_autocreate_says_what_it_did_for_each_pull_request(
-        stack: Any, capsys: pytest.CaptureFixture[str], dry_run: bool) -> None:
+    stack: Any, capsys: pytest.CaptureFixture[str], dry_run: bool
+) -> None:
     stack.autocreate.return_value = [
         Autocreated("pr1", "main", 1, AutocreateAction.CREATE, base="a" * 40),
         Autocreated("pr2", "pr1", 2, AutocreateAction.TRACK, base="b" * 40),
@@ -114,8 +136,7 @@ def test_autocreate_without_pull_requests_says_so(stack: Any, capsys: pytest.Cap
 
 
 @pytest.mark.parametrize("dry_run", [False, True])
-def test_prs_says_what_it_did_for_each_branch(
-        stack: Any, capsys: pytest.CaptureFixture[str], dry_run: bool) -> None:
+def test_prs_says_what_it_did_for_each_branch(stack: Any, capsys: pytest.CaptureFixture[str], dry_run: bool) -> None:
     url = "https://github.com/acme/widgets/pull/1"
     stack.prs.return_value = [
         PullRequestStep("pr1", "main", PullRequestAction.OPEN, "Add the API", *((None, None) if dry_run else (1, url))),
@@ -126,7 +147,8 @@ def test_prs_says_what_it_did_for_each_branch(
     main(["prs", *(["--dry-run"] if dry_run else [])], stack=stack)
 
     assert capsys.readouterr().out.splitlines() == [
-        "would open a draft pull request for pr1 into main: Add the API" if dry_run
+        "would open a draft pull request for pr1 into main: Add the API"
+        if dry_run
         else f"opened draft pull request #1 for pr1 into main: {url}",
         "pr2 already has pull request #7",
         "skipping pr3: it has no commits of its own",
@@ -159,12 +181,11 @@ def test_track_prints_each_branch(stack: Any, capsys: pytest.CaptureFixture[str]
     main(["track", "main", "pr1", "pr2"], stack=stack)
 
     assert capsys.readouterr().out == (
-        f"tracking pr1 on top of main (base {'a' * 12})\n"
-        f"tracking pr2 on top of pr1 (base {'b' * 12})\n")
+        f"tracking pr1 on top of main (base {'a' * 12})\ntracking pr2 on top of pr1 (base {'b' * 12})\n"
+    )
 
 
-def test_rename_prints_moved_children_and_old_upstream(
-        stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
+def test_rename_prints_moved_children_and_old_upstream(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
     stack.rename.return_value = Renamed("pr1", "first", children=("pr2", "pr2b"), upstream="origin/pr1")
 
     main(["rename", "pr1", "first"], stack=stack)
@@ -177,10 +198,20 @@ def test_rename_prints_moved_children_and_old_upstream(
 def test_info_draws_each_stack_as_a_tree(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
     stack.info.return_value = [
         BranchInfo("main", None, None, current=False),
-        BranchInfo("pr1", "main", BranchStatus.UP_TO_DATE, current=False,
-                   pull_request=PullRequestLink(9, "https://github.com/acme/widgets/pull/9", PullRequestState.OPEN)),
-        BranchInfo("pr2", "pr1", BranchStatus.NEEDS_RESTACK, current=False,
-                   pull_request=PullRequestLink(13, "https://github.com/acme/widgets/pull/13", PullRequestState.OPEN)),
+        BranchInfo(
+            "pr1",
+            "main",
+            BranchStatus.UP_TO_DATE,
+            current=False,
+            pull_request=PullRequestLink(9, "https://github.com/acme/widgets/pull/9", PullRequestState.OPEN),
+        ),
+        BranchInfo(
+            "pr2",
+            "pr1",
+            BranchStatus.NEEDS_RESTACK,
+            current=False,
+            pull_request=PullRequestLink(13, "https://github.com/acme/widgets/pull/13", PullRequestState.OPEN),
+        ),
         BranchInfo("pr2b", "pr1", BranchStatus.MERGED, current=False),
         BranchInfo("solo", "main", BranchStatus.MERGED_WITH_NEW_COMMITS, current=True),
         BranchInfo("release", None, None, current=False),
@@ -196,33 +227,52 @@ def test_info_draws_each_stack_as_a_tree(stack: Any, capsys: pytest.CaptureFixtu
         "│   └── pr2b (merged)\n"
         "└── solo * (merged, with new commits)\n"
         "release\n"
-        "└── hotfix (parent release missing)\n")
+        "└── hotfix (parent release missing)\n"
+    )
 
 
 def test_info_colors_each_part(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
     stack.git.run.side_effect = lambda *args, check=True: "true" if "--get-colorbool" in args else ""
     stack.info.return_value = [
         BranchInfo("main", None, None, current=False),
-        BranchInfo("pr1", "main", BranchStatus.MERGED, current=False,
-                   pull_request=PullRequestLink(1, "https://github.com/acme/widgets/pull/1", PullRequestState.MERGED)),
-        BranchInfo("pr2", "pr1", BranchStatus.NEEDS_RESTACK, current=True,
-                   pull_request=PullRequestLink(2, "https://github.com/acme/widgets/pull/2", PullRequestState.OPEN)),
-        BranchInfo("pr3", "pr2", BranchStatus.UP_TO_DATE, current=False,
-                   pull_request=PullRequestLink(3, "https://github.com/acme/widgets/pull/3", PullRequestState.DRAFT)),
+        BranchInfo(
+            "pr1",
+            "main",
+            BranchStatus.MERGED,
+            current=False,
+            pull_request=PullRequestLink(1, "https://github.com/acme/widgets/pull/1", PullRequestState.MERGED),
+        ),
+        BranchInfo(
+            "pr2",
+            "pr1",
+            BranchStatus.NEEDS_RESTACK,
+            current=True,
+            pull_request=PullRequestLink(2, "https://github.com/acme/widgets/pull/2", PullRequestState.OPEN),
+        ),
+        BranchInfo(
+            "pr3",
+            "pr2",
+            BranchStatus.UP_TO_DATE,
+            current=False,
+            pull_request=PullRequestLink(3, "https://github.com/acme/widgets/pull/3", PullRequestState.DRAFT),
+        ),
     ]
 
     main(["info"], stack=stack)
 
     assert capsys.readouterr().out == (
         "\033[1mmain\033[m\n"
-        "\033[2m└── \033[mpr1 \033[36m(merged)\033[m" + " " * 15 + "\033[35mhttps://github.com/acme/widgets/pull/1\033[m\n"
+        "\033[2m└── \033[mpr1 \033[36m(merged)\033[m"
+        + " "
+        * 15
+        + "\033[35mhttps://github.com/acme/widgets/pull/1\033[m\n"
         "\033[2m    └── \033[m\033[1;32mpr2 *\033[m \033[33m(needs restack)\033[m"
         "  \033[34mhttps://github.com/acme/widgets/pull/2\033[m\n"
-        "\033[2m        └── \033[mpr3" + " " * 16 + "\033[90mhttps://github.com/acme/widgets/pull/3\033[m\n")
+        "\033[2m        └── \033[mpr3" + " " * 16 + "\033[90mhttps://github.com/acme/widgets/pull/3\033[m\n"
+    )
 
 
-def test_info_can_draw_each_stack_with_its_root_at_the_bottom(
-        stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
+def test_info_can_draw_each_stack_with_its_root_at_the_bottom(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
     stack.git.run.side_effect = lambda *args, check=True: "root-at-bottom" if "stack.orientation" in args else ""
     stack.info.return_value = [
         BranchInfo("main", None, None, current=False),
@@ -233,11 +283,7 @@ def test_info_can_draw_each_stack_with_its_root_at_the_bottom(
 
     main(["info"], stack=stack)
 
-    assert capsys.readouterr().out == (
-        "    ┌── pr2b\n"
-        "    ├── pr2 *\n"
-        "┌── pr1\n"
-        "main\n")
+    assert capsys.readouterr().out == ("    ┌── pr2b\n    ├── pr2 *\n┌── pr1\nmain\n")
 
 
 def test_info_refuses_an_unknown_orientation(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
@@ -261,9 +307,8 @@ def test_sync_lists_branches_left_to_push(stack: Any, capsys: pytest.CaptureFixt
     main(["sync"], stack=stack)
 
     assert capsys.readouterr().out == (
-        "note: run `git stack push` to update the remote branches and pull requests of:\n"
-        "  pr2\n"
-        "  pr3\n")
+        "note: run `git stack push` to update the remote branches and pull requests of:\n  pr2\n  pr3\n"
+    )
 
 
 def test_sync_with_nothing_to_push_prints_nothing(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
@@ -289,48 +334,59 @@ def test_untrack_prints_branches_left_on_it(stack: Any, capsys: pytest.CaptureFi
     assert capsys.readouterr().out == (
         "stopped tracking pr1\n"
         "note: pr2, pr2b still stacked on pr1, which is now the bottom of their stack. "
-        "Move them with `git stack restack --onto <parent>`\n")
+        "Move them with `git stack restack --onto <parent>`\n"
+    )
 
 
 def test_info_json_lists_every_branch(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
     stack.info.return_value = [
         BranchInfo("main", None, None, current=False),
-        BranchInfo("pr1", "main", BranchStatus.NEEDS_RESTACK, current=True,
-                   pull_request=PullRequestLink(12, "https://github.com/acme/widgets/pull/12", PullRequestState.OPEN)),
+        BranchInfo(
+            "pr1",
+            "main",
+            BranchStatus.NEEDS_RESTACK,
+            current=True,
+            pull_request=PullRequestLink(12, "https://github.com/acme/widgets/pull/12", PullRequestState.OPEN),
+        ),
     ]
 
     main(["info", "--json"], stack=stack)
 
     assert json.loads(capsys.readouterr().out) == [
         {"name": "main", "parent": None, "status": None, "current": False, "pr": None},
-        {"name": "pr1", "parent": "main", "status": "needs-restack", "current": True,
-         "pr": {"number": 12, "url": "https://github.com/acme/widgets/pull/12", "state": "open"}},
+        {
+            "name": "pr1",
+            "parent": "main",
+            "status": "needs-restack",
+            "current": True,
+            "pr": {"number": 12, "url": "https://github.com/acme/widgets/pull/12", "state": "open"},
+        },
     ]
 
 
-@pytest.mark.parametrize(("argv", "out"), [
-    (["next"], "switched to pr2\n"),
-    (["prev"], "switched to main\n"),
-    (["parent"], "main\n"),
-    (["base"], "a" * 40 + "\n"),
-    (["show-stack"], "pr1\npr2\n"),
-])
-def test_command_prints_its_result(
-        stack: Any, capsys: pytest.CaptureFixture[str], argv: list[str], out: str) -> None:
+@pytest.mark.parametrize(
+    ("argv", "out"),
+    [
+        (["next"], "switched to pr2\n"),
+        (["prev"], "switched to main\n"),
+        (["parent"], "main\n"),
+        (["base"], "a" * 40 + "\n"),
+        (["show-stack"], "pr1\npr2\n"),
+    ],
+)
+def test_command_prints_its_result(stack: Any, capsys: pytest.CaptureFixture[str], argv: list[str], out: str) -> None:
     assert main(argv, stack=stack) == 0
 
     assert capsys.readouterr().out == out
 
 
-def test_show_stack_quiet_prints_nothing_for_a_stacked_branch(
-        stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
+def test_show_stack_quiet_prints_nothing_for_a_stacked_branch(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["show-stack", "--quiet"], stack=stack) == 0
 
     assert capsys.readouterr() == ("", "")
 
 
-def test_show_stack_quiet_fails_silently_outside_a_stack(
-        stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
+def test_show_stack_quiet_fails_silently_outside_a_stack(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
     stack.show_stack.side_effect = StackError("main isn't in a stack")
 
     assert main(["show-stack", "--quiet"], stack=stack) == 1

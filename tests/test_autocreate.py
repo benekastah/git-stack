@@ -17,23 +17,31 @@ def open_pr(repo: Repo, gh: FakeGitHub, number: int, branch: str, base: str, aut
     repo.git("add", branch, cwd=repo.forge)
     repo.git("commit", "--quiet", "-m", f"{branch} c1", cwd=repo.forge)
     repo.git("push", "--quiet", "origin", branch, cwd=repo.forge)
-    gh.add_pr(number=number, state="OPEN", author=author, headRefName=branch, baseRefName=base,
-              headRefOid=repo.git("rev-parse", "HEAD", cwd=repo.forge), mergeCommit=None)
+    gh.add_pr(
+        number=number,
+        state="OPEN",
+        author=author,
+        headRefName=branch,
+        baseRefName=base,
+        headRefOid=repo.git("rev-parse", "HEAD", cwd=repo.forge),
+        mergeCommit=None,
+    )
 
 
 def actions(steps: list[Autocreated]) -> list[tuple[str, AutocreateAction]]:
     return [(step.branch, step.action) for step in steps]
 
 
-def test_autocreate_creates_and_tracks_branches_of_open_prs(
-        repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+def test_autocreate_creates_and_tracks_branches_of_open_prs(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
     open_pr(repo, gh, 1, "pr1", "main")
     open_pr(repo, gh, 2, "pr2", "pr1")
 
     steps = client.autocreate()
 
     assert [(s.branch, s.parent, s.number, s.action) for s in steps] == [
-        ("pr1", "main", 1, AutocreateAction.CREATE), ("pr2", "pr1", 2, AutocreateAction.CREATE)]
+        ("pr1", "main", 1, AutocreateAction.CREATE),
+        ("pr2", "pr1", 2, AutocreateAction.CREATE),
+    ]
     repo.assert_stacked("pr1", "main", ["pr1 c1"])
     repo.assert_stacked("pr2", "pr1", ["pr2 c1"])
     assert repo.git("rev-parse", "--abbrev-ref", "pr2@{upstream}") == "origin/pr2"
@@ -41,7 +49,8 @@ def test_autocreate_creates_and_tracks_branches_of_open_prs(
 
 
 def test_autocreate_says_what_its_doing_before_the_slow_parts(
-        repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event]) -> None:
+    repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event]
+) -> None:
     open_pr(repo, gh, 1, "pr1", "main")
 
     client.autocreate()
@@ -61,7 +70,8 @@ def test_autocreate_dry_run_changes_nothing(repo: Repo, gh: FakeGitHub, client: 
 
 
 def test_autocreate_tracks_existing_local_branch_and_sets_its_upstream(
-        repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+    repo: Repo, gh: FakeGitHub, client: StackClient
+) -> None:
     open_pr(repo, gh, 1, "pr1", "main")
     repo.git("fetch", "--quiet")
     repo.git("branch", "--quiet", "--no-track", "pr1", "origin/pr1")
@@ -73,8 +83,7 @@ def test_autocreate_tracks_existing_local_branch_and_sets_its_upstream(
     assert repo.git("rev-parse", "--abbrev-ref", "pr1@{upstream}") == "origin/pr1"
 
 
-def test_autocreate_fast_forwards_main_before_finding_bases(
-        repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+def test_autocreate_fast_forwards_main_before_finding_bases(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
     repo.commit_on_forge("main", "d", "main\n", "main c1")
     open_pr(repo, gh, 1, "pr1", "main")  # built on the new origin/main, which main lacks
 

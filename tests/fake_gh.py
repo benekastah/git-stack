@@ -30,13 +30,13 @@ def respond(args: list[str], prs: list[dict[str, Any]]) -> str | None:
         # The gh user's open pull requests, all on one page.
         mine = [p for p in prs if p["state"] == "OPEN" and p.get("author", "me") == "me"]
         nodes = [{k: p[k] for k in ("number", "headRefName", "baseRefName", "isCrossRepository")} for p in mine]
-        return json.dumps({"data": {"search": {"pageInfo": {"hasNextPage": False, "endCursor": None},
-                                               "nodes": nodes}}})
+        return json.dumps({"data": {"search": {"pageInfo": {"hasNextPage": False, "endCursor": None}, "nodes": nodes}}})
     if args[:2] == ["api", "graphql"] and "pullRequest(number:" in opt_value("query"):
         # Fields of pull requests by number.
         by_alias: dict[str, Any] = {}
-        for alias, number, fields in re.findall(r"(\w+): pullRequest\(number: (\d+)\) \{ ([^}]*) \}",
-                                                opt_value("query")):
+        for alias, number, fields in re.findall(
+            r"(\w+): pullRequest\(number: (\d+)\) \{ ([^}]*) \}", opt_value("query")
+        ):
             pr = next((p for p in prs if p["number"] == int(number)), None)
             by_alias[alias] = None if pr is None else {f: pr.get(f, "") for f in fields.split()}
         return json.dumps({"data": {"repository": by_alias}})
@@ -45,15 +45,27 @@ def respond(args: list[str], prs: list[dict[str, Any]]) -> str | None:
         found: dict[str, Any] = {"defaultBranchRef": {"name": "main"}}
         for alias, variable in re.findall(r"(\w+): pullRequests\(headRefName: \$(\w+)", query):
             # Newest first, taking higher numbers as newer.
-            matching = sorted((p for p in prs if p["headRefName"] == opt_value(variable)),
-                              key=lambda p: p["number"], reverse=True)
+            matching = sorted(
+                (p for p in prs if p["headRefName"] == opt_value(variable)), key=lambda p: p["number"], reverse=True
+            )
             found[alias] = {"nodes": [{"isDraft": False, **{k: p[k] for k in PR_FIELDS if k in p}} for p in matching]}
         return json.dumps({"data": {"repository": found}})
     if args[:2] == ["pr", "create"]:
         number = max((p["number"] for p in prs), default=0) + 1
-        prs.append({"number": number, "state": "OPEN", "isCrossRepository": False, "headRefName": opt("--head"),
-                    "headRefOid": "", "baseRefName": opt("--base"), "mergeCommit": None,
-                    "title": opt("--title"), "body": sys.stdin.read(), "isDraft": "--draft" in args})
+        prs.append(
+            {
+                "number": number,
+                "state": "OPEN",
+                "isCrossRepository": False,
+                "headRefName": opt("--head"),
+                "headRefOid": "",
+                "baseRefName": opt("--base"),
+                "mergeCommit": None,
+                "title": opt("--title"),
+                "body": sys.stdin.read(),
+                "isDraft": "--draft" in args,
+            }
+        )
         return f"https://github.com/acme/widgets/pull/{number}"
     if args[:2] == ["pr", "edit"]:
         pr = next(p for p in prs if p["number"] == int(args[2]))
@@ -71,8 +83,9 @@ def main() -> None:
         state = json.load(f)
     args = sys.argv[1:]
     state["calls"].append(args)
-    failing = args[0] in state["fail"] or (args[:2] == ["pr", "create"]
-                                          and args[args.index("--head") + 1] in state.get("fail_heads", []))
+    failing = args[0] in state["fail"] or (
+        args[:2] == ["pr", "create"] and args[args.index("--head") + 1] in state.get("fail_heads", [])
+    )
     out = None if failing else respond(args, state["prs"])
     with open(path, "w") as f:
         json.dump(state, f)

@@ -77,7 +77,8 @@ def test_push_force_refuses_when_remote_moved_since_last_fetch(repo: Repo, clien
 
 @pytest.mark.parametrize("force", [False, True])
 def test_push_refuses_to_overwrite_someone_elses_branch_of_the_same_name(
-        repo: Repo, client: StackClient, force: bool) -> None:
+    repo: Repo, client: StackClient, force: bool
+) -> None:
     client.branch("fix")
     repo.commit("a", "mine\n", "mine")
     repo.push_someone_elses_branch("fix")
@@ -105,8 +106,7 @@ def test_push_refuses_untracked_branch(repo: Repo, client: StackClient) -> None:
         client.push("main")
 
 
-def test_push_skips_branch_merged_locally(
-        repo: Repo, client: StackClient, emitted: list[events.Event]) -> None:
+def test_push_skips_branch_merged_locally(repo: Repo, client: StackClient, emitted: list[events.Event]) -> None:
     repo.make_stack()
     repo.git("switch", "--quiet", "main")
     repo.git("merge", "--quiet", "--squash", "pr1")

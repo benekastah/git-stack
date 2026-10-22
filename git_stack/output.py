@@ -40,44 +40,56 @@ def message(event: events.Event) -> str:
         case events.TrunkDiverged():
             return f"{event.branch} has diverged from {event.upstream}; not updating it"
         case events.TrunkInOtherWorktree():
-            return (f"{event.branch} is checked out in {event.path}; not fast-forwarding it to "
-                    f"{event.upstream}. Run `git -C {event.path} merge --ff-only` to update it")
+            return (
+                f"{event.branch} is checked out in {event.path}; not fast-forwarding it to "
+                f"{event.upstream}. Run `git -C {event.path} merge --ff-only` to update it"
+            )
         case events.NotRestackedInOtherWorktree():
-            return (f"skipping {event.branch}: it's checked out in {event.path}, so it can't be "
-                    f"restacked here. Switch that worktree to another branch, then rerun this command")
+            return (
+                f"skipping {event.branch}: it's checked out in {event.path}, so it can't be "
+                f"restacked here. Switch that worktree to another branch, then rerun this command"
+            )
         case events.NotSquashedInOtherWorktree():
             return f"not squashing {event.branch}: it's checked out in {event.path}"
         case events.NotPulledInOtherWorktree():
-            return (f"not pulling new commits from {event.branch}'s upstream: it's checked out in "
-                    f"{event.path}. Run `git stack sync` there, or switch that worktree to another "
-                    f"branch and rerun it here")
+            return (
+                f"not pulling new commits from {event.branch}'s upstream: it's checked out in "
+                f"{event.path}. Run `git stack sync` there, or switch that worktree to another "
+                f"branch and rerun it here"
+            )
         case events.NotDeletedInOtherWorktree():
-            return (f"not deleting {event.branch}: it's checked out in {event.path}. Delete it with "
-                    f"`git branch -D {event.branch}` once that worktree is on another branch")
+            return (
+                f"not deleting {event.branch}: it's checked out in {event.path}. Delete it with "
+                f"`git branch -D {event.branch}` once that worktree is on another branch"
+            )
         case events.SkippedMerged():
-            return (f"{event.branch} looks merged into {event.parent}; skipping it and moving its "
-                    f"children onto {event.parent}. Run `git stack sync` to remove it from the stack")
+            return (
+                f"{event.branch} looks merged into {event.parent}; skipping it and moving its "
+                f"children onto {event.parent}. Run `git stack sync` to remove it from the stack"
+            )
         case events.Untracked():
             moved = f" and moved {', '.join(event.children)} onto {event.parent}" if event.children else ""
             if event.deleted_tip is None:
                 return f"{event.branch} was merged into {event.parent}; stopped tracking it{moved}"
-            return (f"{event.branch} was merged into {event.parent}; "
-                    f"deleted it (was {event.deleted_tip[:12]}){moved}")
+            return f"{event.branch} was merged into {event.parent}; deleted it (was {event.deleted_tip[:12]}){moved}"
         case events.RemoteBranchDeleted():
             return f"deleted {event.upstream}"
         case events.RemoteBranchDeleteFailed():
             return f"couldn't delete {event.upstream}; leaving {event.branch} alone"
         case events.RemoteBranchKept():
-            return (f"note: {event.upstream} still exists; delete it with "
-                    f"`git push {event.remote} --delete {event.name}`, or pass `--delete remote`")
+            return (
+                f"note: {event.upstream} still exists; delete it with "
+                f"`git push {event.remote} --delete {event.name}`, or pass `--delete remote`"
+            )
         case events.ParentSkipped():
             return f"skipping {event.branch} because its parent {event.parent} was skipped"
         case events.MergedWithNewCommits():
-            return (f"skipping {event.branch}: it was merged into {event.parent}, but it or its "
-                    f"remote branch has commits that {event.parent} doesn't")
+            return (
+                f"skipping {event.branch}: it was merged into {event.parent}, but it or its "
+                f"remote branch has commits that {event.parent} doesn't"
+            )
         case events.UpstreamGone():
-            return (f"{event.branch}'s remote branch is gone but its changes aren't in "
-                    f"{event.parent}; leaving it alone")
+            return f"{event.branch}'s remote branch is gone but its changes aren't in {event.parent}; leaving it alone"
         case events.BrokenBranch():
             return f"skipping {event.branch}: {event.reason}"
         case events.ParentMissing():

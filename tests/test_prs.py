@@ -31,12 +31,16 @@ def body(gh: FakeGitHub, number: int) -> str:
 
 def opened(gh: FakeGitHub) -> list[tuple[str, str, str, str, bool]]:
     """(head, base, title, body, draft) of each pull request gh opened."""
-    return [(pr["headRefName"], pr["baseRefName"], pr["title"], pr["body"], pr["isDraft"])
-            for pr in gh.load()["prs"] if "title" in pr]
+    return [
+        (pr["headRefName"], pr["baseRefName"], pr["title"], pr["body"], pr["isDraft"])
+        for pr in gh.load()["prs"]
+        if "title" in pr
+    ]
 
 
 def test_prs_opens_drafts_for_the_whole_stack_into_stack_parents(
-        repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+    repo: Repo, gh: FakeGitHub, client: StackClient
+) -> None:
     add_template(repo, ".github/PULL_REQUEST_TEMPLATE.md")
     repo.make_stack()
     client.push()
@@ -47,10 +51,13 @@ def test_prs_opens_drafts_for_the_whole_stack_into_stack_parents(
     assert steps == [
         PullRequestStep("pr1", "main", PullRequestAction.OPEN, "pr1 c1", 1, "https://github.com/acme/widgets/pull/1"),
         PullRequestStep("pr2", "pr1", PullRequestAction.OPEN, "pr2 c1", 2, "https://github.com/acme/widgets/pull/2"),
-        PullRequestStep("pr3", "pr2", PullRequestAction.OPEN, "pr3 c1", 3, "https://github.com/acme/widgets/pull/3")]
-    assert [pr[:3] + pr[4:] for pr in opened(gh)] == [("pr1", "main", "pr1 c1", True),
-                                                      ("pr2", "pr1", "pr2 c1", True),
-                                                      ("pr3", "pr2", "pr3 c1", True)]
+        PullRequestStep("pr3", "pr2", PullRequestAction.OPEN, "pr3 c1", 3, "https://github.com/acme/widgets/pull/3"),
+    ]
+    assert [pr[:3] + pr[4:] for pr in opened(gh)] == [
+        ("pr1", "main", "pr1 c1", True),
+        ("pr2", "pr1", "pr2 c1", True),
+        ("pr3", "pr2", "pr3 c1", True),
+    ]
     assert body(gh, 2) == f"{TEMPLATE}\n\n" + stack("- `main`", "  - #1", "    - #2 👈", "      - #3")
     assert [body(gh, n).count("👈") for n in (1, 3)] == [1, 1]
     assert "- #1 👈" in body(gh, 1) and "- #3 👈" in body(gh, 3)
@@ -59,13 +66,22 @@ def test_prs_opens_drafts_for_the_whole_stack_into_stack_parents(
 def test_prs_skips_branches_with_a_pull_request(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
     repo.make_stack()
     client.push()
-    gh.add_pr(number=7, state="OPEN", headRefName="pr2", headRefOid=repo.git("rev-parse", "pr2"),
-              baseRefName="pr1", mergeCommit=None)
+    gh.add_pr(
+        number=7,
+        state="OPEN",
+        headRefName="pr2",
+        headRefOid=repo.git("rev-parse", "pr2"),
+        baseRefName="pr1",
+        mergeCommit=None,
+    )
 
     steps = client.prs()
 
     assert [(s.branch, s.action, s.number) for s in steps] == [
-        ("pr1", PullRequestAction.OPEN, 8), ("pr2", PullRequestAction.EXISTS, 7), ("pr3", PullRequestAction.OPEN, 9)]
+        ("pr1", PullRequestAction.OPEN, 8),
+        ("pr2", PullRequestAction.EXISTS, 7),
+        ("pr3", PullRequestAction.OPEN, 9),
+    ]
     assert [head for head, *_ in opened(gh)] == ["pr1", "pr3"]
 
 
@@ -78,8 +94,7 @@ def test_prs_skips_branches_without_commits(repo: Repo, gh: FakeGitHub, client: 
 
 
 @pytest.mark.parametrize("path", ["pull_request_template.md", "docs/Pull_Request_Template.md"])
-def test_prs_finds_the_template_where_github_does(
-        repo: Repo, gh: FakeGitHub, client: StackClient, path: str) -> None:
+def test_prs_finds_the_template_where_github_does(repo: Repo, gh: FakeGitHub, client: StackClient, path: str) -> None:
     add_template(repo, path)
     client.branch("pr1")
     repo.commit("a", "pr1\n", "pr1 c1")
@@ -101,8 +116,7 @@ def test_prs_ignores_named_templates(repo: Repo, gh: FakeGitHub, client: StackCl
     assert [body for *_, body, _ in opened(gh)] == [""]
 
 
-def test_prs_takes_the_template_from_the_remote_default_branch(
-        repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+def test_prs_takes_the_template_from_the_remote_default_branch(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
     add_template(repo, ".github/pull_request_template.md")
     client.branch("pr1")
     repo.commit(".github/pull_request_template.md", "changed on pr1\n", "pr1 c1")
@@ -114,7 +128,8 @@ def test_prs_takes_the_template_from_the_remote_default_branch(
 
 
 def test_prs_refuses_unless_every_branch_matches_its_remote_branch(
-        repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+    repo: Repo, gh: FakeGitHub, client: StackClient
+) -> None:
     repo.make_stack()
     client.push()
     repo.commit("c", "pr3 again\n", "pr3 c2")
@@ -134,8 +149,10 @@ def test_prs_dry_run_opens_nothing(repo: Repo, gh: FakeGitHub, client: StackClie
     steps = client.prs(dry_run=True)
 
     assert [(s.branch, s.action, s.title, s.number) for s in steps] == [
-        ("pr1", PullRequestAction.OPEN, "pr1 c1", None), ("pr2", PullRequestAction.OPEN, "pr2 c1", None),
-        ("pr3", PullRequestAction.OPEN, "pr3 c1", None)]
+        ("pr1", PullRequestAction.OPEN, "pr1 c1", None),
+        ("pr2", PullRequestAction.OPEN, "pr2 c1", None),
+        ("pr3", PullRequestAction.OPEN, "pr3 c1", None),
+    ]
     assert gh.calls("pr") == []
 
 
@@ -150,7 +167,8 @@ def test_prs_says_which_it_opened_when_one_fails(repo: Repo, gh: FakeGitHub, cli
 
 
 def test_prs_adds_new_pull_requests_to_the_stack_of_existing_ones(
-        repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+    repo: Repo, gh: FakeGitHub, client: StackClient
+) -> None:
     client.branch("pr1")
     repo.commit("a", "pr1\n", "pr1 c1")
     client.push()
@@ -171,8 +189,11 @@ def test_prs_keeps_merged_pull_requests_in_the_stack(repo: Repo, gh: FakeGitHub,
     client.prs()
     repo.squash_merge_on_forge("pr1")
     state = gh.load()
-    state["prs"][0] |= {"state": "MERGED", "headRefOid": repo.git("rev-parse", "pr1"),
-                        "mergeCommit": {"oid": repo.git("rev-parse", "HEAD", cwd=repo.forge)}}
+    state["prs"][0] |= {
+        "state": "MERGED",
+        "headRefOid": repo.git("rev-parse", "pr1"),
+        "mergeCommit": {"oid": repo.git("rev-parse", "HEAD", cwd=repo.forge)},
+    }
     gh.save(state)
     client.sync()
     client.branch("pr4")

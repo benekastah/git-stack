@@ -7,14 +7,16 @@ from git_stack.stack import StackClient
 
 class Args(argparse.Namespace):
     """The arguments register's parser produces."""
+
     remote: str
     delete: str | None
     latest: bool
 
 
 def register(subparsers: Subparsers) -> None:
-    p = subparsers.add_parser("sync", help="fetch, untrack the current stack's merged branches, "
-                                           "restack it, and pull in commits others pushed")
+    p = subparsers.add_parser(
+        "sync", help="fetch, untrack the current stack's merged branches, restack it, and pull in commits others pushed"
+    )
     p.add_argument("--remote", default=DEFAULT_REMOTE)
     add_delete_argument(p)
     add_latest_argument(p)

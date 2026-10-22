@@ -3,16 +3,48 @@ import os
 import sys
 
 import git_stack
-from git_stack.commands import (autocreate, base, branch, clean, info, next_branch, parent, prev_branch, prs, push,
-                                rename, restack, show_stack, sync, track, untrack)
+from git_stack.commands import (
+    autocreate,
+    base,
+    branch,
+    clean,
+    info,
+    next_branch,
+    parent,
+    prev_branch,
+    prs,
+    push,
+    rename,
+    restack,
+    show_stack,
+    sync,
+    track,
+    untrack,
+)
 from git_stack.errors import StackError
 from git_stack.git import GitClient
 from git_stack.output import print_event
 from git_stack.stack import StackClient
 
 # In the order `git stack -h` lists them.
-COMMANDS = (branch, track, autocreate, untrack, rename, info, next_branch, prev_branch, restack, sync, clean, push,
-            prs, parent, base, show_stack)
+COMMANDS = (
+    branch,
+    track,
+    autocreate,
+    untrack,
+    rename,
+    info,
+    next_branch,
+    prev_branch,
+    restack,
+    sync,
+    clean,
+    push,
+    prs,
+    parent,
+    base,
+    show_stack,
+)
 
 
 def main(argv: list[str] | None = None, stack: StackClient | None = None) -> int:
@@ -20,9 +52,15 @@ def main(argv: list[str] | None = None, stack: StackClient | None = None) -> int
     a StackClient working in the directory -C names, or the current one,
     printing what it reports). Returns the exit status."""
     parser = argparse.ArgumentParser(prog="git stack", description=git_stack.__doc__.splitlines()[0])
-    parser.add_argument("-C", dest="directories", action="append", default=[], metavar="path",
-                        help="run as if started in path instead of the current directory. Like "
-                             "git's -C, each one after the first is relative to the one before")
+    parser.add_argument(
+        "-C",
+        dest="directories",
+        action="append",
+        default=[],
+        metavar="path",
+        help="run as if started in path instead of the current directory. Like "
+        "git's -C, each one after the first is relative to the one before",
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
     for command in COMMANDS:
         command.register(subparsers)

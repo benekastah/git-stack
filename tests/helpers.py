@@ -22,6 +22,7 @@ class Repo:
     git, git stack and client run in path, with the isolated environment the
     repo fixture sets. emitted collects client's events.
     """
+
     path: pathlib.Path
     origin: pathlib.Path
     forge: pathlib.Path
@@ -40,8 +41,13 @@ class Repo:
     def stack(self, *args: str, expect_success: bool = True) -> subprocess.CompletedProcess[str]:
         """Run `git stack <args>` as a separate process, failing the test unless it
         succeeds (or, with expect_success=False, fails)."""
-        result = subprocess.run([sys.executable, "-m", "git_stack", "-C", str(self.path), *args],
-                                cwd=self.tmp, capture_output=True, text=True, timeout=60)
+        result = subprocess.run(
+            [sys.executable, "-m", "git_stack", "-C", str(self.path), *args],
+            cwd=self.tmp,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
         if expect_success and result.returncode != 0:
             pytest.fail(f"git stack {' '.join(args)} failed:\n{result.stdout}{result.stderr}")
         if not expect_success and result.returncode == 0:
@@ -70,19 +76,23 @@ class Repo:
         self.git("pull", "--quiet", cwd=self.forge)
         self.git("merge", "--quiet", "--squash", f"origin/{branch}", cwd=self.forge)
         self.git("commit", "--quiet", "-m", f"{branch} (squashed)", cwd=self.forge)
-        self.git("push", "--quiet", "origin", "main", *([f":{branch}"] if delete_branch else []),
-                 cwd=self.forge)
+        self.git("push", "--quiet", "origin", "main", *([f":{branch}"] if delete_branch else []), cwd=self.forge)
 
-    def commit_on_forge(self, branch: str, name: str, content: str, message: str,
-                        author: str = "Collaborator <collaborator@example.com>") -> None:
+    def commit_on_forge(
+        self,
+        branch: str,
+        name: str,
+        content: str,
+        message: str,
+        author: str = "Collaborator <collaborator@example.com>",
+    ) -> None:
         """Push a commit to origin/<branch>, as a collaborator (or author, from
         another machine) would."""
         self.git("fetch", "--quiet", cwd=self.forge)
         self.git("switch", "--quiet", "-C", branch, f"origin/{branch}", cwd=self.forge)
         (self.forge / name).write_text(content)
         self.git("add", name, cwd=self.forge)
-        self.git("commit", "--quiet", f"--author={author}", "-m", message,
-                 cwd=self.forge)
+        self.git("commit", "--quiet", f"--author={author}", "-m", message, cwd=self.forge)
         self.git("push", "--quiet", "origin", branch, cwd=self.forge)
 
     def push_someone_elses_branch(self, branch: str) -> None:
@@ -104,8 +114,10 @@ class Repo:
         return self.git("config", f"branch.{branch}.{key}")
 
     def config_exists(self, branch: str, key: str) -> bool:
-        return subprocess.run(["git", "config", f"branch.{branch}.{key}"], cwd=self.path,
-                              capture_output=True).returncode == 0
+        return (
+            subprocess.run(["git", "config", f"branch.{branch}.{key}"], cwd=self.path, capture_output=True).returncode
+            == 0
+        )
 
     def own_commits(self, branch: str, parent: str) -> list[str]:
         return self.git("log", "--format=%s", f"{parent}..{branch}").splitlines()
@@ -130,6 +142,7 @@ class Repo:
 @dataclass
 class FakeGitHub:
     """The state of tests/fake_gh.py, which stands in for the gh CLI."""
+
     state_path: pathlib.Path
 
     def load(self) -> dict[str, Any]:
@@ -146,7 +159,7 @@ class FakeGitHub:
 
     def calls(self, *prefix: str) -> list[list[str]]:
         """The gh commands run so far that start with prefix."""
-        return [call for call in self.load()["calls"] if call[:len(prefix)] == list(prefix)]
+        return [call for call in self.load()["calls"] if call[: len(prefix)] == list(prefix)]
 
     def clear_calls(self) -> None:
         state = self.load()

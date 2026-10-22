@@ -37,6 +37,7 @@ Parents: TypeAlias = dict[str, str]
 # The functions below work on a {branch: parent} map like the one
 # StackCore.tracked_branches returns, without touching the repository.
 
+
 def children_map(parents: Parents) -> dict[str, list[str]]:
     children: dict[str, list[str]] = {}
     for branch, parent in sorted(parents.items()):
@@ -113,8 +114,11 @@ class StackCore:
     def tracked_branches(self) -> Parents:
         """Return {branch: parent} for every tracked branch that still exists."""
         existing = self.git.local_branches()
-        return {branch: parent for (branch, key), parent in self.git.branch_config().items()
-                if key == PARENT_KEY.lower() and branch in existing}
+        return {
+            branch: parent
+            for (branch, key), parent in self.git.branch_config().items()
+            if key == PARENT_KEY.lower() and branch in existing
+        }
 
     def current_stacked_branch(self, parents: Parents, command: str, hint: str | None = None) -> str:
         """Return the current branch, refusing unless it's in a stack.
@@ -135,8 +139,10 @@ class StackCore:
 
     def ensure_no_operation_in_progress(self) -> None:
         if self.git.operation_in_progress():
-            raise StackError("a rebase, cherry-pick or merge is in progress; finish it with "
-                             "`--continue` (or `--abort`), then rerun this command")
+            raise StackError(
+                "a rebase, cherry-pick or merge is in progress; finish it with "
+                "`--continue` (or `--abort`), then rerun this command"
+            )
 
     def ensure_clean_worktree(self) -> None:
         if self.git.run("status", "--porcelain", "--untracked-files=no"):
@@ -193,8 +199,12 @@ class StackCore:
         picked = set((identities or "").splitlines())
         # Cherry-picking keeps each commit's author, date and subject, even
         # when the user resolves a conflict.
-        if (pull_from and picked and git.is_ancestor(pull_from, branch)
-                and picked <= git.identities(f"{pull_from}..refs/heads/{branch}")):
+        if (
+            pull_from
+            and picked
+            and git.is_ancestor(pull_from, branch)
+            and picked <= git.identities(f"{pull_from}..refs/heads/{branch}")
+        ):
             git.config_set(branch, PULLED_KEY, pending_pulled)
         elif not forget_unfinished or git.other_worktree_of(branch) is not None:
             return
@@ -210,8 +220,10 @@ class StackCore:
         """Return branch's base, checking that it is still in the branch's history."""
         base = self.git.config_get(branch, BASE_KEY)
         if base is None or not self.git.is_ancestor(base, branch):
-            raise BrokenStackError(f"{branch}'s recorded base isn't in its history (was it rebased by hand?); "
-                                   f"fix it with `git stack track {parent} --base <sha>`")
+            raise BrokenStackError(
+                f"{branch}'s recorded base isn't in its history (was it rebased by hand?); "
+                f"fix it with `git stack track {parent} --base <sha>`"
+            )
         return base
 
     def squash_branch(self, branch: str, parent: str) -> None:
@@ -240,8 +252,14 @@ class StackCore:
             message_file = os.path.join(directory, "message")
             with open(message_file, "w") as f:
                 f.write(message)
-            committed = git.passthrough("commit", "--quiet", "--cleanup=whitespace", f"--author={author}",
-                                        f"--date={date}", f"--file={message_file}")
+            committed = git.passthrough(
+                "commit",
+                "--quiet",
+                "--cleanup=whitespace",
+                f"--author={author}",
+                f"--date={date}",
+                f"--file={message_file}",
+            )
         if not committed:
             git.run("reset", "--quiet", "--soft", tip)
             raise StackError(f"squashing {branch} failed, so it was left as it was; see git's output above")
@@ -265,8 +283,9 @@ class StackCore:
     def conflicts(self, branch: str, parent_tip: str) -> bool:
         """Whether merging branch into parent_tip would conflict."""
         tip = self.git.tip(branch)
-        return self.remembered(branch, CONFLICT_CHECK_KEY, [tip, parent_tip],
-                               lambda: self.git.conflicts(tip, parent_tip))
+        return self.remembered(
+            branch, CONFLICT_CHECK_KEY, [tip, parent_tip], lambda: self.git.conflicts(tip, parent_tip)
+        )
 
     def remembered(self, branch: str, key: str, inputs: list[str], check: Callable[[], bool]) -> bool:
         """check(), which depends only on the commits inputs, remembered in
@@ -296,8 +315,9 @@ class StackCore:
         git = self.git
         parent_tip = git.rev(parent)
         if parent_tip is None:
-            raise BrokenStackError(f"{branch}'s parent {parent} doesn't exist; "
-                                   f"retarget it with `git stack track <parent> --base <sha>`")
+            raise BrokenStackError(
+                f"{branch}'s parent {parent} doesn't exist; retarget it with `git stack track <parent> --base <sha>`"
+            )
         base = self.recorded_base(branch, parent)
         if not self.needs_restack(branch, parent, base, parent_tip, latest):
             # There's no rebase to wait for.
@@ -350,8 +370,15 @@ class StackCore:
         unknown = set(git.run("rev-list", "--no-merges", upstream_tip, "--not", *known).split())
         if not unknown:
             return []
-        new_patches = git.run("rev-list", "--reverse", "--topo-order", "--no-merges", "--cherry-pick",
-                              "--right-only", f"refs/heads/{branch}...{upstream_tip}").split()
+        new_patches = git.run(
+            "rev-list",
+            "--reverse",
+            "--topo-order",
+            "--no-merges",
+            "--cherry-pick",
+            "--right-only",
+            f"refs/heads/{branch}...{upstream_tip}",
+        ).split()
         return [commit for commit in new_patches if commit in unknown]
 
     def pull_upstream(self, branch: str, parent: str, remote: str) -> None:
@@ -377,8 +404,7 @@ class StackCore:
         self.emit(events.PullingUpstream(branch, len(commits)))
         git.config_set(branch, PENDING_PULL_FROM_KEY, git.tip(branch))
         git.config_set(branch, PENDING_PULLED_KEY, upstream_tip)
-        git.config_set(branch, PENDING_PULL_IDENTITIES_KEY,
-                       "\n".join(sorted(git.identities("--no-walk", *commits))))
+        git.config_set(branch, PENDING_PULL_IDENTITIES_KEY, "\n".join(sorted(git.identities("--no-walk", *commits))))
         git.switch(branch)
         if git.passthrough("cherry-pick", "--ff", *commits):
             self.settle(branch)
@@ -394,14 +420,15 @@ class StackCore:
         """The error for a rebase or cherry-pick (command) that stopped partway
         through what, saying how to carry on."""
         if self.git.has_conflicts():
-            return StackError(f"{what} stopped on a conflict. Resolve it, run `git {command} --continue`, "
-                              f"then {then}")
+            return StackError(f"{what} stopped on a conflict. Resolve it, run `git {command} --continue`, then {then}")
         # `git rebase --continue` retries the commit that couldn't be applied,
         # but `git cherry-pick --continue` skips it, so a cherry-pick has to be
         # started over.
         carry_on = "`git rebase --continue`" if command == "rebase" else f"`git {command} --abort`"
-        return StackError(f"{what} stopped without a conflict; see git's output above (e.g. an untracked "
-                          f"file is in the way: move or delete it). Fix that, run {carry_on}, then {then}")
+        return StackError(
+            f"{what} stopped without a conflict; see git's output above (e.g. an untracked "
+            f"file is in the way: move or delete it). Fix that, run {carry_on}, then {then}"
+        )
 
     def fetch(self, remote: str) -> None:
         """Fetch remote with --prune, saying so first, since in a busy
@@ -437,9 +464,18 @@ class StackCore:
 
     def forget(self, branch: str) -> None:
         """Remove all of branch's stack metadata."""
-        for key in (PARENT_KEY, BASE_KEY, PULLED_KEY, PENDING_PARENT_KEY, PENDING_BASE_KEY,
-                    PENDING_PULL_FROM_KEY, PENDING_PULLED_KEY, PENDING_PULL_IDENTITIES_KEY, CONFLICT_CHECK_KEY,
-                    LANDED_CHECK_KEY):
+        for key in (
+            PARENT_KEY,
+            BASE_KEY,
+            PULLED_KEY,
+            PENDING_PARENT_KEY,
+            PENDING_BASE_KEY,
+            PENDING_PULL_FROM_KEY,
+            PENDING_PULLED_KEY,
+            PENDING_PULL_IDENTITIES_KEY,
+            CONFLICT_CHECK_KEY,
+            LANDED_CHECK_KEY,
+        ):
             self.git.config_unset(branch, key)
 
     def remove_merged(self, branch: str, parents: Parents, delete: bool) -> None:
@@ -463,8 +499,14 @@ class StackCore:
             self.emit(events.Untracked(branch, new_parent, children, deleted_tip=None))
             return
         if git.current_branch() == branch:
-            target = next((b for b in (*sorted(children), new_parent)
-                           if git.local_branch_exists(b) and git.worktree_of(b) is None), None)
+            target = next(
+                (
+                    b
+                    for b in (*sorted(children), new_parent)
+                    if git.local_branch_exists(b) and git.worktree_of(b) is None
+                ),
+                None,
+            )
             if target is not None:
                 git.switch(target)
             else:

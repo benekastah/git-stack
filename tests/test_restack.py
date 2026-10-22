@@ -24,7 +24,8 @@ def test_restack_moves_whole_stack_after_parent_changes(repo: Repo, client: Stac
 
 
 def test_restack_survives_scripting_command_run_before_each_rebase(
-        repo: Repo, client: StackClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo: Repo, client: StackClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     repo.make_stack()
     repo.git("switch", "--quiet", "pr1")
     repo.commit("a", "pr1 review fix\n", "pr1 review fix")
@@ -60,8 +61,7 @@ def test_restack_onto_retargets_after_local_squash_merge(repo: Repo, client: Sta
     repo.assert_stacked("pr3", "pr2", ["pr3 c1"])
 
 
-def test_restack_skips_branch_merged_locally(
-        repo: Repo, client: StackClient, emitted: list[events.Event]) -> None:
+def test_restack_skips_branch_merged_locally(repo: Repo, client: StackClient, emitted: list[events.Event]) -> None:
     repo.make_stack()
     repo.git("switch", "--quiet", "main")
     repo.git("merge", "--quiet", "--squash", "pr1")
@@ -169,8 +169,7 @@ def test_restack_onto_rejects_cycle(repo: Repo, target: str, client: StackClient
     assert repo.config("pr1", "stackParent") == "main"
 
 
-def test_restack_failure_without_conflict_is_not_reported_as_conflict(
-        repo: Repo, client: StackClient) -> None:
+def test_restack_failure_without_conflict_is_not_reported_as_conflict(repo: Repo, client: StackClient) -> None:
     repo.make_stack()
     hook = repo.path / ".git" / "hooks" / "pre-rebase"
     hook.write_text("#!/bin/sh\nexit 1\n")
@@ -258,7 +257,6 @@ def test_restack_onto_suggests_tracking_untracked_branch(repo: Repo, client: Sta
 
     with pytest.raises(StackError, match="loose isn't in a stack; use `git stack track` first"):
         client.restack(onto="main")
-
 
 
 def test_restack_refuses_outside_a_stack(repo: Repo, client: StackClient) -> None:

@@ -7,6 +7,7 @@ from git_stack.core import BASE_KEY, LANDED_CHECK_KEY, Parents, StackCore
 
 class PullRequestState(enum.Enum):
     """Values are what `git stack info --json` prints."""
+
     OPEN = "open"
     DRAFT = "draft"
     MERGED = "merged"
@@ -15,6 +16,7 @@ class PullRequestState(enum.Enum):
 @dataclass(frozen=True)
 class PullRequestLink:
     """A branch's pull request, as info shows it."""
+
     number: int
     url: str
     state: PullRequestState
@@ -44,8 +46,11 @@ class GitAdapter:
         if not self.changes_something(branch):
             return MergeState.NOT_MERGED
         upstream_tip = git.rev(f"{branch}@{{upstream}}")
-        if (upstream_tip and not git.contained_in(upstream_tip, parent)
-                and self.core.unpulled_commits(branch, parent, upstream_tip)):
+        if (
+            upstream_tip
+            and not git.contained_in(upstream_tip, parent)
+            and self.core.unpulled_commits(branch, parent, upstream_tip)
+        ):
             return MergeState.MERGED_WITH_NEW_COMMITS
         return MergeState.MERGED
 
@@ -57,8 +62,11 @@ class GitAdapter:
             return False
         tip = git.tip(branch)
         return self.core.remembered(
-            branch, LANDED_CHECK_KEY, [tip, parent_tip, git.config_get(branch, BASE_KEY) or "-"],
-            lambda: git.contained_in(tip, parent_tip) or self.landed_as_patches(branch, parent_tip))
+            branch,
+            LANDED_CHECK_KEY,
+            [tip, parent_tip, git.config_get(branch, BASE_KEY) or "-"],
+            lambda: git.contained_in(tip, parent_tip) or self.landed_as_patches(branch, parent_tip),
+        )
 
     def changes_something(self, branch: str) -> bool:
         """Whether branch's tree differs from its recorded base's.
@@ -87,8 +95,9 @@ class GitAdapter:
         if not files:
             return False
         # Only parent's commits that touch the same files can match.
-        landed = git.patch_ids("log", "-p", "--no-merges", "--full-diff", parent,
-                               "--not", f"refs/heads/{branch}", "--", *files)
+        landed = git.patch_ids(
+            "log", "-p", "--no-merges", "--full-diff", parent, "--not", f"refs/heads/{branch}", "--", *files
+        )
         if git.patch_ids("diff", base, f"refs/heads/{branch}") & landed:
             return True
         own = git.patch_ids("log", "-p", "--no-merges", f"{base}..refs/heads/{branch}")

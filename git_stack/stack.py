@@ -8,14 +8,26 @@ from git_stack.adapters import ADAPTER_SETTING, make_adapter
 from git_stack.adapters.git import GitAdapter, PullRequestLink
 from git_stack.adapters.github import GitHubAdapter, OpenPullRequest
 from git_stack.adapters.merge_state import MergeState
-from git_stack.core import (BASE_KEY, PARENT_KEY, PULLED_KEY, Parents, StackCore, children_map,
-                            descendants, drop_from_stack, ensure_no_cycle, stack_of, stack_root)
+from git_stack.core import (
+    BASE_KEY,
+    PARENT_KEY,
+    PULLED_KEY,
+    Parents,
+    StackCore,
+    children_map,
+    descendants,
+    drop_from_stack,
+    ensure_no_cycle,
+    stack_of,
+    stack_root,
+)
 from git_stack.errors import BrokenStackError, StackError
 from git_stack.git import DEFAULT_REMOTE
 
 
 class BranchStatus(enum.Enum):
     """Values are what `git stack info --json` prints."""
+
     UP_TO_DATE = "up-to-date"
     NEEDS_RESTACK = "needs-restack"
     PARENT_MISSING = "parent-missing"
@@ -28,6 +40,7 @@ class BranchInfo:
     """A branch in info()'s listing. parent and status are None for a stack's
     root (e.g. main), which isn't tracked. pull_request is None for a root and
     for a branch without a pull request the adapter knows of."""
+
     name: str
     parent: str | None
     status: BranchStatus | None
@@ -46,6 +59,7 @@ class Tracked:
 class Untracked:
     """children are the branches still stacked on branch, which is now the
     bottom of their stack."""
+
     branch: str
     children: tuple[str, ...]
 
@@ -54,6 +68,7 @@ class Untracked:
 class Renamed:
     """upstream is the remote branch old was pushed to, if any. It isn't
     renamed, and new no longer tracks it."""
+
     old: str
     new: str
     children: tuple[str, ...]
@@ -76,6 +91,7 @@ class Autocreated:
     base is the commit branch is tracked as built on (CREATE and TRACK),
     tracked_parent the parent it's already tracked on instead
     (PARENT_DIFFERS), and reason why it was skipped (SKIP)."""
+
     branch: str
     parent: str
     number: int
@@ -98,6 +114,7 @@ class PullRequestStep:
     title is the pull request's title (OPEN). number is its number, and url
     its URL, for one that was opened (OPEN, unless a dry run) or already
     existed (EXISTS, number only)."""
+
     branch: str
     parent: str
     action: PullRequestAction
@@ -160,8 +177,9 @@ class StackClient(StackCore):
             ensure_no_cycle(branch, parent, parents)
             base = git.rev(base_arg) if base_arg else self.fork_point(parent, branch)
             if base is None:
-                raise StackError(f"{base_arg} isn't a commit" if base_arg
-                                 else f"{branch} has no history in common with {parent}")
+                raise StackError(
+                    f"{base_arg} isn't a commit" if base_arg else f"{branch} has no history in common with {parent}"
+                )
             if not git.is_ancestor(base, branch):
                 raise StackError(f"{base_arg} isn't in {branch}'s history")
             parents[branch] = parent
@@ -181,17 +199,22 @@ class StackClient(StackCore):
         built on rather than their (older) merge-base.
         """
         git = self.git
-        return (git.run("merge-base", "--fork-point", parent, branch, check=False)
-                or git.run("merge-base", parent, branch, check=False) or None)
+        return (
+            git.run("merge-base", "--fork-point", parent, branch, check=False)
+            or git.run("merge-base", parent, branch, check=False)
+            or None
+        )
 
     def ensure_name_free_on_remotes(self, name: str) -> None:
         """Refuse a new branch name that a remote already has a branch of, which
         is most likely someone else's: pushing ours would overwrite it."""
         for remote in self.git.remotes():
             if self.git.rev(f"refs/remotes/{remote}/{name}") is not None:
-                raise StackError(f"{remote}/{name} already exists, so {name} is probably someone else's "
-                                 f"branch; pick another name. To work on {remote}/{name} itself, "
-                                 f"`git switch {name}` and track it with `git stack track <parent>`")
+                raise StackError(
+                    f"{remote}/{name} already exists, so {name} is probably someone else's "
+                    f"branch; pick another name. To work on {remote}/{name} itself, "
+                    f"`git switch {name}` and track it with `git stack track <parent>`"
+                )
 
     def autocreate(self, remote: str = DEFAULT_REMOTE, dry_run: bool = False) -> list[Autocreated]:
         """Track the gh user's open pull requests on GitHub, drafts included, as
@@ -208,14 +231,18 @@ class StackClient(StackCore):
         self.settle_all()
         adapter = make_adapter(self, remote, fetch=True)
         if not isinstance(adapter, GitHubAdapter):
-            raise StackError(f"autocreate finds stacks from pull requests on GitHub, but {remote} isn't a "
-                             f"GitHub repository, gh isn't installed, or {ADAPTER_SETTING} is git")
+            raise StackError(
+                f"autocreate finds stacks from pull requests on GitHub, but {remote} isn't a "
+                f"GitHub repository, gh isn't installed, or {ADAPTER_SETTING} is git"
+            )
         self.emit(events.LookingUpPullRequests())
         try:
             prs = adapter.my_open_pull_requests()
         except StackError as e:
-            raise StackError(f"couldn't look up your pull requests on GitHub; check `gh auth status` (and, for "
-                             f"an organization with SSO, that gh's token is authorized for it): {e}")
+            raise StackError(
+                f"couldn't look up your pull requests on GitHub; check `gh auth status` (and, for "
+                f"an organization with SSO, that gh's token is authorized for it): {e}"
+            )
         self.fetch(remote)
         if not dry_run:
             # Bases are worked out from the local parents, so a stale main would
@@ -227,10 +254,12 @@ class StackClient(StackCore):
             for step in plan:
                 if step.action is AutocreateAction.CREATE:
                     git.run("branch", "--quiet", "--track", step.branch, f"refs/remotes/{remote}/{step.branch}")
-                elif (step.action is AutocreateAction.TRACK and git.config_get(step.branch, "remote") is None
-                      and git.rev(f"refs/remotes/{remote}/{step.branch}") is not None):
-                    git.run("branch", "--quiet", f"--set-upstream-to=refs/remotes/{remote}/{step.branch}",
-                            step.branch)
+                elif (
+                    step.action is AutocreateAction.TRACK
+                    and git.config_get(step.branch, "remote") is None
+                    and git.rev(f"refs/remotes/{remote}/{step.branch}") is not None
+                ):
+                    git.run("branch", "--quiet", f"--set-upstream-to=refs/remotes/{remote}/{step.branch}", step.branch)
                 if step.base is not None:
                     git.config_set(step.branch, PARENT_KEY, step.parent)
                     git.config_set(step.branch, BASE_KEY, step.base)
@@ -261,8 +290,9 @@ class StackClient(StackCore):
             if branch in parents:
                 if parents[branch] == parent:
                     return Autocreated(branch, parent, pr.number, AutocreateAction.ALREADY_TRACKED)
-                return Autocreated(branch, parent, pr.number, AutocreateAction.PARENT_DIFFERS,
-                                   tracked_parent=parents[branch])
+                return Autocreated(
+                    branch, parent, pr.number, AutocreateAction.PARENT_DIFFERS, tracked_parent=parents[branch]
+                )
             remote_ref = f"refs/remotes/{remote}/{branch}"
             local = git.local_branch_exists(branch)
             if not local and git.rev(remote_ref) is None:
@@ -276,8 +306,10 @@ class StackClient(StackCore):
             elif git.local_branch_exists(parent):
                 parent_ref = parent
             else:
-                return skip(f"{parent}, which it merges into, isn't a local branch; create it with "
-                            f"`git switch {parent}` and rerun")
+                return skip(
+                    f"{parent}, which it merges into, isn't a local branch; create it with "
+                    f"`git switch {parent}` and rerun"
+                )
             try:
                 ensure_no_cycle(branch, parent, parents)
             except StackError as e:
@@ -298,8 +330,10 @@ class StackClient(StackCore):
         root, and pull requests are based on the parent, which both need a
         branch."""
         if not self.git.local_branch_exists(parent):
-            raise StackError(f"{parent} isn't a local branch; branches can only be stacked on local "
-                             f"branches (e.g. branch, not origin/branch)")
+            raise StackError(
+                f"{parent} isn't a local branch; branches can only be stacked on local "
+                f"branches (e.g. branch, not origin/branch)"
+            )
 
     def untrack(self, branches: Iterable[str] = ()) -> list[Untracked]:
         """Stop tracking branches (default: the current branch), leaving the
@@ -312,17 +346,22 @@ class StackClient(StackCore):
         self.ensure_no_operation_in_progress()
         self.settle_all()
         parents = self.tracked_branches()
-        branches = list(branches) or [self.current_stacked_branch(parents, "untrack",
-                                                                 hint="name the branches to untrack")]
+        branches = list(branches) or [
+            self.current_stacked_branch(parents, "untrack", hint="name the branches to untrack")
+        ]
         for branch in branches:
             if branch not in parents:
                 raise StackError(f"{branch} isn't in a stack")
         for branch in branches:
             self.forget(branch)
         # Children untracked along with their parent aren't still stacked on it.
-        return [Untracked(branch, tuple(child for child, parent in sorted(parents.items())
-                                        if parent == branch and child not in branches))
-                for branch in dict.fromkeys(branches)]
+        return [
+            Untracked(
+                branch,
+                tuple(child for child, parent in sorted(parents.items()) if parent == branch and child not in branches),
+            )
+            for branch in dict.fromkeys(branches)
+        ]
 
     def rename(self, new: str, old: str | None = None) -> Renamed:
         """Rename old (default: the current branch) to new, keeping the branches
@@ -392,8 +431,9 @@ class StackClient(StackCore):
         if not children:
             raise StackError(f"no branch is stacked on {current}")
         if len(children) > 1:
-            raise StackError(f"several branches are stacked on {current}: {', '.join(children)}; "
-                             f"switch to one with `git switch`")
+            raise StackError(
+                f"several branches are stacked on {current}: {', '.join(children)}; switch to one with `git switch`"
+            )
         self.switch_to(children[0])
         return children[0]
 
@@ -428,8 +468,9 @@ class StackClient(StackCore):
                 return BranchStatus.PARENT_MISSING
             # Worked out before merge_state, which may wait for the adapter's
             # lookup, so the two overlap. It's wasted on merged branches.
-            needs_restack = self.needs_restack(branch, parent, git.config_get(branch, BASE_KEY), parent_tip,
-                                               latest=False)
+            needs_restack = self.needs_restack(
+                branch, parent, git.config_get(branch, BASE_KEY), parent_tip, latest=False
+            )
             state = adapter.merge_state(branch, parent)
             if state is MergeState.MERGED:
                 return BranchStatus.MERGED
@@ -448,8 +489,10 @@ class StackClient(StackCore):
         result = []
         for root in sorted({stack_root(b, parents) for b in parents}):
             result.append(BranchInfo(root, None, None, root == current))
-            result.extend(BranchInfo(b, parents[b], statuses[b], b == current, adapter.pull_request_link(b))
-                          for b in descendants(root, children))
+            result.extend(
+                BranchInfo(b, parents[b], statuses[b], b == current, adapter.pull_request_link(b))
+                for b in descendants(root, children)
+            )
         return result
 
     def checked_adapter(self, remote: str) -> GitAdapter:
@@ -461,8 +504,10 @@ class StackClient(StackCore):
         try:
             adapter.ensure_available()
         except StackError as e:
-            raise StackError(f"{e}\nNothing was changed. To only check for merges locally, run "
-                             f"`git -c {ADAPTER_SETTING}=git stack ...`")
+            raise StackError(
+                f"{e}\nNothing was changed. To only check for merges locally, run "
+                f"`git -c {ADAPTER_SETTING}=git stack ...`"
+            )
         return adapter
 
     def skip_merged(self, branches: Iterable[str], parents: Parents, adapter: GitAdapter) -> list[str]:
@@ -490,8 +535,7 @@ class StackClient(StackCore):
         self.ensure_clean_worktree()
         self.settle_all()
         parents = self.tracked_branches()
-        branch = self.current_stacked_branch(
-            parents, "restack", hint="use `git stack track` first" if onto else None)
+        branch = self.current_stacked_branch(parents, "restack", hint="use `git stack track` first" if onto else None)
         if onto:
             self.ensure_local_branch_parent(onto)
             ensure_no_cycle(branch, onto, parents)
@@ -623,16 +667,20 @@ class StackClient(StackCore):
         # its pull request was merged, so pushing it again would recreate it.
         for b in branches:
             if git.upstream_gone(b):
-                raise StackError(f"{b}'s remote branch was deleted; run `git stack sync` to stop tracking "
-                                 f"it if it was merged, or `git branch --unset-upstream {b}` to push it "
-                                 f"again")
+                raise StackError(
+                    f"{b}'s remote branch was deleted; run `git stack sync` to stop tracking "
+                    f"it if it was merged, or `git branch --unset-upstream {b}` to push it "
+                    f"again"
+                )
             # Someone else's branch of the same name. Overwriting it isn't what
             # --force is for, so it doesn't override this.
             if git.rev(f"refs/remotes/{remote}/{b}") is not None and not git.tracks_same_name(b, remote):
-                raise StackError(f"{remote}/{b} exists but isn't {b}'s upstream, so it's probably someone "
-                                 f"else's branch; rename yours with `git stack rename {b} <new>`. If "
-                                 f"{remote}/{b} is yours, run `git branch --set-upstream-to {remote}/{b} {b}` "
-                                 f"and `git stack sync` first")
+                raise StackError(
+                    f"{remote}/{b} exists but isn't {b}'s upstream, so it's probably someone "
+                    f"else's branch; rename yours with `git stack rename {b} <new>`. If "
+                    f"{remote}/{b} is yours, run `git branch --set-upstream-to {remote}/{b} {b}` "
+                    f"and `git stack sync` first"
+                )
 
         # Force-pushing is only safe if we've seen everything on the remote branch.
         # Refuse if we know of commits we haven't pulled (unless told to drop
@@ -642,26 +690,32 @@ class StackClient(StackCore):
         for b in branches:
             remote_tip = git.rev(f"refs/remotes/{remote}/{b}")
             if remote_tip and not force and self.unpulled_commits(b, parents[b], remote_tip):
-                raise StackError(f"{remote}/{b} has commits that {b} doesn't; run `git stack sync` "
-                                 f"to pull them in first, or push with --force to drop them")
+                raise StackError(
+                    f"{remote}/{b} has commits that {b} doesn't; run `git stack sync` "
+                    f"to pull them in first, or push with --force to drop them"
+                )
             leases.append(f"--force-with-lease={b}:{remote_tip or ''}")
         try:
             adapter.before_push(branches, parents)
         except StackError as e:
-            raise StackError(f"updating pull requests failed, so nothing was pushed (set {ADAPTER_SETTING} "
-                             f"to git to stop using GitHub): {e}")
+            raise StackError(
+                f"updating pull requests failed, so nothing was pushed (set {ADAPTER_SETTING} "
+                f"to git to stop using GitHub): {e}"
+            )
         # Atomic, so a branch that can't be pushed doesn't leave the rest of the
         # stack pushed without it, and its pull requests not retargeted.
         if not git.passthrough("push", "--atomic", *leases, "--set-upstream", remote, *branches):
-            raise StackError("push failed, so nothing was pushed; if the remote has new commits, run "
-                             "`git stack sync` and try again")
+            raise StackError(
+                "push failed, so nothing was pushed; if the remote has new commits, run `git stack sync` and try again"
+            )
         for b in branches:
             git.config_set(b, PULLED_KEY, git.tip(b))
         try:
             adapter.after_push(branches, parents)
         except StackError as e:
-            raise StackError(f"pushed, but updating pull requests failed (set {ADAPTER_SETTING} to git "
-                             f"to stop using GitHub): {e}")
+            raise StackError(
+                f"pushed, but updating pull requests failed (set {ADAPTER_SETTING} to git to stop using GitHub): {e}"
+            )
         return branches
 
     def prs(self, remote: str = DEFAULT_REMOTE, dry_run: bool = False) -> list[PullRequestStep]:
@@ -684,15 +738,22 @@ class StackClient(StackCore):
         branch = self.current_stacked_branch(parents, "open pull requests for")
         adapter = make_adapter(self, remote, fetch=True)
         if not isinstance(adapter, GitHubAdapter):
-            raise StackError(f"prs opens pull requests on GitHub, but {remote} isn't a GitHub repository, gh "
-                             f"isn't installed, or {ADAPTER_SETTING} is git")
+            raise StackError(
+                f"prs opens pull requests on GitHub, but {remote} isn't a GitHub repository, gh "
+                f"isn't installed, or {ADAPTER_SETTING} is git"
+            )
         adapter.ensure_available()
         branches = self.skip_merged(stack_of(branch, parents), parents, adapter)
-        unpushed = [b for b in branches
-                    if not git.tracks_same_name(b, remote) or git.rev(f"refs/remotes/{remote}/{b}") != git.tip(b)]
+        unpushed = [
+            b
+            for b in branches
+            if not git.tracks_same_name(b, remote) or git.rev(f"refs/remotes/{remote}/{b}") != git.tip(b)
+        ]
         if unpushed:
-            raise StackError(f"these branches aren't pushed, or differ from their remote branches: "
-                             f"{', '.join(unpushed)}; run `git stack push` first")
+            raise StackError(
+                f"these branches aren't pushed, or differ from their remote branches: "
+                f"{', '.join(unpushed)}; run `git stack push` first"
+            )
         root = stack_root(branch, parents)
         if git.rev(f"refs/remotes/{remote}/{root}") is None:
             raise StackError(f"{root} isn't on {remote}, so pull requests can't merge into it")
@@ -719,8 +780,9 @@ class StackClient(StackCore):
                 number, url = adapter.open_pull_request(b, parent, title, template)
             except StackError as e:
                 opened = ", ".join(f"#{s.number} for {s.branch}" for s in steps if s.action is PullRequestAction.OPEN)
-                raise StackError(f"opening a pull request for {b} failed"
-                                 f"{f' (after opening {opened})' if opened else ''}: {e}")
+                raise StackError(
+                    f"opening a pull request for {b} failed{f' (after opening {opened})' if opened else ''}: {e}"
+                )
             steps.append(PullRequestStep(b, parent, PullRequestAction.OPEN, title=title, number=number, url=url))
         if branches and not dry_run:
             try:

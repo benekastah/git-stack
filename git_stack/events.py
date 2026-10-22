@@ -11,6 +11,7 @@ from typing import TypeAlias
 @dataclass(frozen=True)
 class Fetching:
     """remote is being fetched, with --prune."""
+
     remote: str
 
 
@@ -46,6 +47,7 @@ class FastForwarded:
 @dataclass(frozen=True)
 class TrunkDiverged:
     """branch wasn't fast-forwarded because it has commits upstream doesn't."""
+
     branch: str
     upstream: str
 
@@ -54,6 +56,7 @@ class TrunkDiverged:
 class TrunkInOtherWorktree:
     """branch wasn't fast-forwarded to upstream because it's checked out in the
     worktree at path."""
+
     branch: str
     upstream: str
     path: str
@@ -63,6 +66,7 @@ class TrunkInOtherWorktree:
 class NotRestackedInOtherWorktree:
     """branch needed restacking, but was skipped (along with the branches stacked
     on it) because it's checked out in the worktree at path."""
+
     branch: str
     path: str
 
@@ -77,6 +81,7 @@ class NotSquashedInOtherWorktree:
 class NotPulledInOtherWorktree:
     """branch's upstream has new commits, but they weren't pulled because branch
     is checked out in the worktree at path."""
+
     branch: str
     path: str
 
@@ -85,6 +90,7 @@ class NotPulledInOtherWorktree:
 class NotDeletedInOtherWorktree:
     """branch was merged and untracked, but not deleted because it's checked out
     in the worktree at path."""
+
     branch: str
     path: str
 
@@ -93,6 +99,7 @@ class NotDeletedInOtherWorktree:
 class SkippedMerged:
     """branch looks merged, so it was left out and its children moved onto parent,
     without changing the stack's metadata."""
+
     branch: str
     parent: str
 
@@ -104,6 +111,7 @@ class Untracked:
     deleted_tip is the commit the branch pointed at if it was deleted, or None
     if it was kept.
     """
+
     branch: str
     parent: str
     children: tuple[str, ...]
@@ -118,6 +126,7 @@ class RemoteBranchDeleted:
 @dataclass(frozen=True)
 class RemoteBranchDeleteFailed:
     """upstream couldn't be deleted, so branch was left alone."""
+
     branch: str
     upstream: str
 
@@ -125,6 +134,7 @@ class RemoteBranchDeleteFailed:
 @dataclass(frozen=True)
 class RemoteBranchKept:
     """A merged branch was untracked, but its remote branch still exists."""
+
     upstream: str
     remote: str
     name: str
@@ -140,6 +150,7 @@ class ParentSkipped:
 class MergedWithNewCommits:
     """branch was merged into parent, but it or its remote branch has commits
     that weren't, so it was left alone."""
+
     branch: str
     parent: str
 
@@ -147,6 +158,7 @@ class MergedWithNewCommits:
 @dataclass(frozen=True)
 class UpstreamGone:
     """branch's remote branch was deleted, but it wasn't merged into parent."""
+
     branch: str
     parent: str
 
@@ -154,6 +166,7 @@ class UpstreamGone:
 @dataclass(frozen=True)
 class BrokenBranch:
     """branch was skipped because its metadata doesn't match the repository."""
+
     branch: str
     reason: str
 
@@ -168,12 +181,14 @@ class ParentMissing:
 class PullRequestLookupFailed:
     """GitHub couldn't be asked about pull requests, so merges are only
     detected locally."""
+
     error: str
 
 
 @dataclass(frozen=True)
 class NoPullRequests:
     """branches were pushed but have no pull request."""
+
     branches: tuple[str, ...]
 
 
@@ -184,10 +199,10 @@ class PullRequestRetargeted:
     base: str
 
 
-
 @dataclass(frozen=True)
 class StackSectionUpdated:
     """The stack section in branch's pull request's description was rewritten."""
+
     branch: str
     number: int
 
