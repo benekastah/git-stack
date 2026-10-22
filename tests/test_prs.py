@@ -177,6 +177,23 @@ def test_prs_dry_run_opens_nothing(repo: Repo, gh: FakeGitHub, client: StackClie
     assert gh.calls("pr") == []
 
 
+def test_prs_dry_run_retargets_nothing(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+    repo.make_stack()
+    client.push()
+    gh.add_pr(
+        number=7,
+        state="OPEN",
+        headRefName="pr2",
+        headRefOid=repo.git("rev-parse", "pr2"),
+        baseRefName="main",
+        mergeCommit=None,
+    )
+
+    client.prs(dry_run=True)
+
+    assert gh.load()["prs"][0]["baseRefName"] == "main"
+
+
 def test_prs_says_which_it_opened_when_one_fails(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
     repo.make_stack()
     client.push()
