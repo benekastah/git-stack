@@ -1,22 +1,48 @@
 #!/bin/sh
-# Regenerate man/git-stack.1 when a commit changes README.md (or how the page
-# is built), and add it to the same commit. The page is built from the staged
-# README, so it matches what's committed even if only part of the README is.
+# Before each commit:
+#
+# - Format the staged Python files with Ruff. The staged version of each file is
+#   formatted and staged in its place, so a file that's only partly staged
+#   commits just its staged part, formatted; the working copy is formatted too.
+# - Regenerate man/git-stack.1 when the commit changes README.md (or how the
+#   page is built), and add it to the same commit. The page is built from the
+#   staged README, so it matches what's committed even if only part of the
+#   README is.
 #
 # dev-install.sh makes git use this directory's hooks, with
 # `git config core.hooksPath git_hooks`.
 
 set -eu
 
-if ! git diff --cached --quiet -- README.md man/git-stack.lua man/build.py; then
+# Fail unless .venv, which ./check.sh creates, exists to do what $1 says.
+require_venv() {
     if [ ! -x .venv/bin/python ]; then
-        echo "pre-commit: README.md changed, but regenerating man/git-stack.1 needs .venv;" \
-             "run ./check.sh once to create it" >&2
+        echo "pre-commit: $1 needs .venv; run ./check.sh once to create it" >&2
         exit 1
     fi
-    readme=$(mktemp)
-    trap 'rm -f "$readme"' EXIT
-    git show :README.md > "$readme"
-    .venv/bin/python man/build.py --readme "$readme"
+}
+
+scratch=$(mktemp)
+trap 'rm -f "$scratch"' EXIT
+
+staged_python=$(git diff --cached --name-only --diff-filter=ACMR -- '*.py')
+if [ -n "$staged_python" ]; then
+    require_venv "formatting the staged Python files"
+    echo "$staged_python" | while IFS= read -r path; do
+        # Into a file first, so a file Ruff can't format (e.g. a syntax error)
+        # stops the commit rather than being staged empty.
+        git show ":$path" | .venv/bin/ruff format --quiet --stdin-filename "$path" - > "$scratch"
+        mode=$(git ls-files --stage -- "$path" | cut -d ' ' -f 1)
+        git update-index --cacheinfo "$mode,$(git hash-object -w "$scratch"),$path"
+        if [ -f "$path" ]; then
+            .venv/bin/ruff format --quiet -- "$path"
+        fi
+    done
+fi
+
+if ! git diff --cached --quiet -- README.md man/git-stack.lua man/build.py; then
+    require_venv "regenerating man/git-stack.1 from README.md"
+    git show :README.md > "$scratch"
+    .venv/bin/python man/build.py --readme "$scratch"
     git add man/git-stack.1
 fi

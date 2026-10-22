@@ -3,8 +3,9 @@
 #
 # Installs it in editable mode into a virtualenv, so changes to the clone take
 # effect without reinstalling, links the `git-stack` command into ~/.local/bin
-# and the man page into ~/.local/share/man/man1, and makes this repository use
-# the hooks in git_hooks/. Safe to rerun, e.g. after pyproject.toml changes.
+# and the man page into ~/.local/share/man/man1, makes this repository use the
+# hooks in git_hooks/, and makes `git blame` in it skip the commits listed in
+# .git-blame-ignore-revs. Safe to rerun, e.g. after pyproject.toml changes.
 
 set -eu
 
@@ -35,6 +36,16 @@ link "$clone/man/git-stack.1" "$man_dir/git-stack.1"
 
 git -C "$clone" config core.hooksPath git_hooks
 echo "set this repository's hooks to git_hooks/"
+
+# `git blame` fails if the file is missing (e.g. with an older commit checked
+# out), unless its git supports marking the path :(optional).
+if git -C "$clone" -c blame.ignoreRevsFile=":(optional)$clone/no-such-file" \
+        blame -L 1,1 -- dev-install.sh > /dev/null 2>&1; then
+    git -C "$clone" config blame.ignoreRevsFile ':(optional).git-blame-ignore-revs'
+else
+    git -C "$clone" config blame.ignoreRevsFile .git-blame-ignore-revs
+fi
+echo "made git blame skip the commits in .git-blame-ignore-revs"
 
 case ":$PATH:" in
     *":$bin_dir:"*) ;;

@@ -888,8 +888,9 @@ git clone https://github.com/benekastah/git-stack ~/src/git-stack
 `~/.local/share/git-stack/venv`, so changes to the clone take effect without
 reinstalling. It links the `git-stack` command into `~/.local/bin` and the man
 page into `~/.local/share/man/man1` (an editable install doesn't install it),
-and makes the clone use the [git hooks](#git-hooks) in `git_hooks/`. It's safe
-to rerun, and only needs rerunning when `pyproject.toml` changes, for example
+makes the clone use the [git hooks](#git-hooks) in `git_hooks/`, and makes
+`git blame` skip [reformatting commits](#skipping-reformatting-in-git-blame).
+It's safe to rerun, and only needs rerunning when `pyproject.toml` changes, for example
 when a command-line entry point is added.
 
 `check.sh` runs the [checks](#checks), and the first time, sets up the
@@ -941,10 +942,28 @@ at a time, e.g. to debug a failing test.
 without it, run `git config core.hooksPath git_hooks`. Both need `.venv`, so
 run `./check.sh` once first.
 
-- `pre-commit` regenerates the man page, `man/git-stack.1`, and adds it to any
-  commit that changes this README.
+- `pre-commit` formats the staged Python files with Ruff, and regenerates the
+  man page, `man/git-stack.1`, and adds it to any commit that changes this
+  README. It works on what's staged, so a partly staged file commits just its
+  staged part, formatted.
 - `pre-push` runs `./check.sh` before every push that pushes commits. Skip it
   with `git push --no-verify`.
+
+### Skipping reformatting in `git blame`
+
+`.git-blame-ignore-revs` lists commits that only reformat code, so `git blame`
+attributes their lines to the commits before them. GitHub's blame view reads
+it by itself; `dev-install.sh` sets `blame.ignoreRevsFile` so git does too. To
+set it without `dev-install.sh`, run:
+
+```sh
+git config blame.ignoreRevsFile ':(optional).git-blame-ignore-revs'
+```
+
+(Leave out `:(optional)` if your git doesn't support it. Then `git blame` fails
+with a commit from before the file existed checked out.) A commit listed there
+only matches if it keeps its hash when merged, so merge a reformatting pull
+request with a merge commit rather than squashing it.
 
 ### Generating the man page
 
