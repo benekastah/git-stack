@@ -1,5 +1,6 @@
 #!/bin/sh
-# Run every check: shellcheck on the shell scripts, the type checker, then the
+# Run every check: shellcheck on the shell scripts, that the Python code is
+# formatted (fix it with `.venv/bin/ruff format`), the type checker, then the
 # tests.
 #
 # The first run creates .venv with the dev dependencies from pyproject.toml,
@@ -19,5 +20,6 @@ if [ ! -f .venv/installed ] || [ pyproject.toml -nt .venv/installed ]; then
 fi
 
 git ls-files -z '*.sh' 'git_hooks/*' | xargs -0 .venv/bin/shellcheck
+.venv/bin/ruff format --check --quiet
 .venv/bin/python -m mypy
 .venv/bin/python -m pytest "$@"

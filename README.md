@@ -909,11 +909,18 @@ either won't work:
 
 ### Checks
 
-Run every check (shellcheck on the shell scripts, mypy in strict mode, then
+Run every check (shellcheck on the shell scripts, that the Python code is
+formatted with [Ruff](https://docs.astral.sh/ruff/), mypy in strict mode, then
 the tests) with:
 
 ```sh
 ./check.sh
+```
+
+If the formatting check fails, format the code with:
+
+```sh
+.venv/bin/ruff format
 ```
 
 The first run creates a virtualenv in `.venv` and installs the `dev`

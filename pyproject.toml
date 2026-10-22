@@ -12,7 +12,7 @@ requires-python = ">=3.11"
 [dependency-groups]
 # pypandoc_binary is pinned because man/build.py --check (and so the tests) compares
 # its pandoc's exact output with the committed man/git-stack.1.
-dev = ["mypy>=2.4.0", "pypandoc_binary==1.17", "pytest>=9.1.1", "pytest-xdist>=3.8.0", "shellcheck-py>=0.11.0.1"]
+dev = ["mypy>=2.4.0", "pypandoc_binary==1.17", "pytest>=9.1.1", "pytest-xdist>=3.8.0", "ruff>=0.17.1", "shellcheck-py>=0.11.0.1"]
 
 [project.scripts]
 git-stack = "git_stack.cli:main"
@@ -26,6 +26,9 @@ include = ["git_stack*"]
 [tool.pytest]
 testpaths = ["tests"]
 addopts = ["-n", "auto"]
+
+[tool.ruff]
+line-length = 120
 
 [tool.mypy]
 strict = true
