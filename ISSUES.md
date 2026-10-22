@@ -81,6 +81,31 @@ regenerated file. `sync` and `clean` then untrack the branch, and delete it
 with `-d local`, though its pull request was never merged. Its changes are in
 the parent, but its own commits and messages are dropped.
 
+## `info` can make a concurrent command fail to lock git config
+
+`info` remembers whether each branch conflicts with its parent and whether its
+changes landed there (`StackCore.remembered`), by writing
+`branch.<name>.stackConflictCheck` and `branch.<name>.stackLandedCheck` with
+`git config`, which locks `.git/config` while it writes. `git config` doesn't
+wait for a lock: any other `git config` write at that moment fails with "could
+not lock config file". `info` ignores that for its own writes, but every other
+command treats a failed write as an error, so `sync`, `restack`, `push` or
+`clean` running while `info` does (e.g. from an editor or a status bar that
+refreshes it, or in another terminal) can stop partway with that error.
+
+Reproduced by holding `.git/config.lock` while running `git stack restack`: it
+stopped before rebasing with `git config branch.pr1.stackPendingParent main
+failed: could not lock config file`. Where the write fails decides what's
+left: before a rebase, nothing has changed; after one, the pending keys are
+still there and the next command records it; partway through `sync` moving a
+merged branch's children, some children are moved and the rest are moved by
+the next `sync`. Rerunning the command recovers in each case, but the error
+doesn't say so.
+
+Possible fixes: keep the remembered answers somewhere other than git config
+(a file under `.git/`, written with an atomic rename), or retry a write that
+fails on the lock.
+
 ## Two commands that restack at once can corrupt each other's records
 
 Each command that restacks or pulls (`restack`, `sync`, and the others that
@@ -89,6 +114,20 @@ restack or pull it finds unfinished as aborted, and discards it. If another
 such command is between writing its pending keys and starting its rebase or
 cherry-pick, that rebase is never recorded, so the branch keeps its old base.
 There's no lock to stop two from running at once.
+
+## The branch config cache could miss a write
+
+`GitClient.branch_config` rereads `.git/config` only when its inode, mtime or
+size has changed since it last read it. `git config` writes a new file and
+renames it into place, so each write normally gets a new inode. But a
+filesystem that reuses inode numbers (e.g. ext4) could give the file the inode
+it had two writes earlier, and two writes in the same timestamp tick that
+leave the file the same size (e.g. overwriting a commit ID with another) would
+then look like no change, and git-stack would keep using the old values. Not
+reproduced; on btrfs, where inode numbers aren't reused, it can't happen.
+
+Comparing the file's contents (or a hash of them) instead of its metadata
+would rule it out at little cost, since the file is small.
 
 ## Branch and parent names are resolved like any revision
 
