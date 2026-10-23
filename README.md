@@ -21,8 +21,7 @@ git stack prs                   # open draft PRs for both, each into the branch 
 After that, day to day:
 
 ```sh
-git stack sync                  # catch up: drop merged PRs, rebase what's left
-git stack push                  # update the PRs
+git stack sync                  # catch up: drop merged PRs, rebase what's left, push
 ```
 
 ## Cheat sheet
@@ -32,9 +31,9 @@ git stack push                  # update the PRs
 | start a PR | `git stack branch <name>`, from `main` or from the PR it builds on |
 | see my stacks and what needs doing | `git stack info` |
 | update the PRs above one I just changed | `git stack restack`, then `git stack push` |
-| catch up after a PR merged, or `main` changed | `git stack sync`, then `git stack push` |
+| catch up after a PR merged, or `main` changed | `git stack sync` |
 | also delete merged branches | `git stack sync -d local` |
-| put the stack on the latest `main` | `git stack sync --latest`, then `git stack push` |
+| put the stack on the latest `main` | `git stack sync --latest` |
 | move to the next or previous branch in the stack | `git stack next` / `git stack prev` |
 | build a PR on a different parent | `git stack restack --onto <parent>` |
 | use git-stack with branches I already have | `git stack track main <branch>...` |
@@ -87,8 +86,7 @@ git stack push
 Once PR 1 is merged:
 
 ```sh
-git stack sync -d local         # delete add-api, rebase use-api onto main, switch to it
-git stack push
+git stack sync -d local         # delete add-api, rebase use-api onto main, switch to it, push
 ```
 
 `sync` only touches the current stack. To untrack (or delete) merged branches
@@ -403,7 +401,7 @@ git stack restack --latest              # also move the stack onto main's latest
 - A branch checked out in another worktree is skipped, with a warning; see
   [Branches checked out in other worktrees](#branches-checked-out-in-other-worktrees).
 
-### `git stack sync [--remote origin] [-d local|remote|both] [--latest]`
+### `git stack sync [--remote origin] [-d local|remote|both] [--latest] [--no-push]`
 
 Bring the current stack up to date with the remote:
 
@@ -415,11 +413,14 @@ Bring the current stack up to date with the remote:
    it conflicts with the root's new commits, or with `--latest`.
 5. Pull in commits others pushed to its branches (see
    [Pulling commits others pushed](#pulling-commits-others-pushed)).
+6. Push the branches that differ from the remote branch they already have,
+   like `push` does.
 
 **When would I use it?** Your everyday command for catching up: after a pull
 request in the stack was merged, when `main` changed in a way that conflicts
-with your stack, or when someone else pushed to one of your branches. Follow
-it with `git stack push`.
+with your stack, or when someone else pushed to one of your branches. It
+pushes at the end, so there's nothing to follow it with. To catch up locally
+without touching the remote, use `restack`, or `sync --no-push`.
 
 ```sh
 git stack sync
@@ -435,9 +436,15 @@ git stack sync -d both          # ...and their remote branches
   it deleted. Deleting a remote branch is leased to the fetched tip, so it
   fails rather than deleting commits pushed since. Deleting the branch you're
   on switches to its first child, or to its parent if it has none.
-- Nothing is pushed. Pull requests show the old commits until you
-  `git stack push`, and `sync` ends by listing the branches whose remote
-  branch is out of date.
+- Only branches that already have a remote branch of the same name, as
+  `git stack push` sets it, are pushed. A branch that was never pushed isn't,
+  and no pull requests are opened: use `git stack push` and `git stack prs`
+  for those. It never forces, so it fails if `push` would refuse. As with
+  `push`, the branches are pushed in one atomic push.
+- Nothing is pushed if a restack or pull stops on a conflict; rerun `sync`
+  once it's resolved.
+- `--no-push` leaves the remote alone, and ends by listing the branches whose
+  remote branch is out of date.
 - A branch whose remote branch was deleted without being merged (e.g. a
   closed pull request) is kept, with a warning, rather than dropping its
   commits.
@@ -451,6 +458,8 @@ git stack sync -d both          # ...and their remote branches
   warns instead.
 - Branches checked out in another worktree are left alone, with a warning;
   see [Branches checked out in other worktrees](#branches-checked-out-in-other-worktrees).
+  `sync` pushes the rest, then fails, listing the branches it couldn't push
+  for that reason (unless it was run with `--no-push`).
 - Needs a clean worktree, and refuses to run outside a stack.
 
 ### `git stack clean [--remote origin] [-d local|remote|both]`
@@ -480,8 +489,9 @@ Force-push (with lease) every branch in the current stack, or in `<branch>`'s,
 and set each one's upstream.
 
 **When would I use it?** Whenever the remote should match your local branches:
-after committing, and after a `restack` or `sync`. Use it instead of
-`git push`, since restacking rewrites the branches' history. It also keeps pull
+after committing, after a `restack`, and for a branch `sync` doesn't push
+because it was never pushed. Use it instead of `git push`, since restacking
+rewrites the branches' history. It also keeps pull
 requests pointed at the right base, and records what it pushed, so `sync` won't
 pull the old copies of your rebased commits back in.
 
@@ -653,6 +663,8 @@ such a branch alone, with a warning, and carries on with the rest:
 
 - A branch that needs restacking is skipped, along with the branches stacked
   on it. A branch that's already up to date isn't a problem.
+- `sync` doesn't push a branch it skipped for this reason, and fails once it
+  has pushed the rest.
 - `sync` doesn't pull new commits from its upstream into it, and
   `restack --squash` doesn't squash it.
 - `sync -d local` and `clean -d local` stop tracking it once it's merged, but

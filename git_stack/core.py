@@ -381,26 +381,29 @@ class StackCore:
         ).split()
         return [commit for commit in new_patches if commit in unknown]
 
-    def pull_upstream(self, branch: str, parent: str, remote: str) -> None:
+    def pull_upstream(self, branch: str, parent: str, remote: str) -> bool:
         """Cherry-pick commits that others pushed to branch's upstream onto branch.
 
         Only an upstream that's the branch of the same name on remote, as
         `git stack push` sets it, is pulled from. Any other (e.g. origin/main,
         for a branch made with `git switch -c <branch> origin/main`) isn't
         branch's own remote branch, and its commits aren't branch's to take.
+
+        Returns False, changing nothing, if there are commits to pull but branch
+        is checked out in another worktree.
         """
         git = self.git
         if not git.tracks_same_name(branch, remote):
-            return
+            return True
         upstream_tip = git.rev(f"{branch}@{{upstream}}")
         if upstream_tip is None:
-            return
+            return True
         commits = self.unpulled_commits(branch, parent, upstream_tip)
         if not commits:
-            return
+            return True
         if (worktree := git.other_worktree_of(branch)) is not None:
             self.emit(events.NotPulledInOtherWorktree(branch, worktree))
-            return
+            return False
         self.emit(events.PullingUpstream(branch, len(commits)))
         git.config_set(branch, PENDING_PULL_FROM_KEY, git.tip(branch))
         git.config_set(branch, PENDING_PULLED_KEY, upstream_tip)
@@ -408,7 +411,7 @@ class StackCore:
         git.switch(branch)
         if git.passthrough("cherry-pick", "--ff", *commits):
             self.settle(branch)
-            return
+            return True
         if git.operation_in_progress():
             raise self.stopped(f"pulling upstream commits into {branch}", "cherry-pick", "rerun `git stack sync`")
         git.config_unset(branch, PENDING_PULLED_KEY)

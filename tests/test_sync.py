@@ -29,7 +29,7 @@ def test_sync_returns_restacked_branches_to_push(repo: Repo, client: StackClient
     client.push()
     repo.squash_merge_on_forge("pr1")
 
-    assert client.sync() == ["pr2", "pr3"]
+    assert client.sync(push=False) == ["pr2", "pr3"]
 
 
 def test_sync_returns_nothing_to_push_when_up_to_date(repo: Repo, client: StackClient) -> None:
@@ -516,3 +516,48 @@ def test_sync_latest_moves_branch_on_main_onto_its_tip(repo: Repo, client: Stack
     repo.assert_stacked("pr1", "main", ["pr1 c2", "pr1 c1"])
     repo.assert_stacked("pr2", "pr1", ["pr2 c1"])
     repo.assert_stacked("pr3", "pr2", ["pr3 c1"])
+
+
+def test_sync_pushes_the_branches_it_restacked(repo: Repo, client: StackClient) -> None:
+    repo.make_stack()
+    client.push()
+    repo.squash_merge_on_forge("pr1")
+
+    assert client.sync() == []
+
+    assert repo.git("rev-parse", "origin/pr2") == repo.git("rev-parse", "pr2")
+    assert repo.git("rev-parse", "origin/pr3") == repo.git("rev-parse", "pr3")
+
+
+def test_sync_does_not_push_a_branch_without_an_upstream(repo: Repo, client: StackClient) -> None:
+    repo.make_stack()
+    client.push()
+    repo.git("switch", "--quiet", "pr3")
+    client.branch("pr4")
+    repo.commit("a", "pr4\n", "pr4 c1")
+    repo.squash_merge_on_forge("pr1")
+
+    client.sync()
+
+    assert repo.git("rev-parse", "origin/pr3") == repo.git("rev-parse", "pr3")
+    assert repo.git("branch", "--remotes", "--list", "origin/pr4") == ""
+
+
+def test_sync_stopped_on_a_conflict_pushes_nothing_until_rerun(repo: Repo, client: StackClient) -> None:
+    repo.make_stack()
+    client.push()
+    pushed = repo.git("rev-parse", "origin/pr2")
+    repo.commit_on_forge("pr1", "a", "collab\n", "collab")
+    repo.git("switch", "--quiet", "pr1")
+    repo.commit("a", "pr1 third\n", "pr1 c3")
+
+    with pytest.raises(StackError, match="stopped on a conflict"):
+        client.sync()
+    assert repo.git("rev-parse", "origin/pr2") == pushed
+    repo.write("a", "resolved\n")
+    repo.git("add", "a")
+    repo.git("cherry-pick", "--continue")
+    client.sync()
+
+    assert repo.git("rev-parse", "origin/pr1") == repo.git("rev-parse", "pr1")
+    assert repo.git("rev-parse", "origin/pr2") == repo.git("rev-parse", "pr2")

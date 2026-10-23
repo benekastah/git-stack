@@ -235,7 +235,7 @@ def test_push_retargets_pr_before_pushing_when_parent_was_merged(
         mergeCommit=None,
     )
     repo.squash_merge_on_forge("pr1", delete_branch=False)
-    client.sync()
+    client.sync(push=False)
     order = record_retargets_and_pushes(repo, monkeypatch)
 
     client.push()

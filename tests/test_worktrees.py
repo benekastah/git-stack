@@ -70,7 +70,7 @@ def test_sync_skips_branch_in_other_worktree_and_restacks_the_rest(
     repo.git("switch", "--quiet", "pr1")
     repo.commit("a", "pr1 third\n", "pr1 c3")
 
-    client.sync()
+    client.sync(push=False)
 
     repo.assert_stacked("pr1", "main", ["pr1 c3", "pr1 c2", "pr1 c1"])
     assert events.NotRestackedInOtherWorktree("pr2", str(worktree)) in emitted
@@ -86,7 +86,7 @@ def test_sync_leaves_upstream_commits_for_branch_in_other_worktree(
     worktree = add_worktree(repo, "pr1")
     repo.commit_on_forge("pr1", "d", "collab\n", "collab")
 
-    client.sync()
+    client.sync(push=False)
 
     assert events.NotPulledInOtherWorktree("pr1", str(worktree)) in emitted
     assert repo.own_commits("pr1", "main") == ["pr1 c2", "pr1 c1"]
@@ -116,7 +116,7 @@ def test_deleting_current_branch_skips_child_in_other_worktree(repo: Repo, clien
     repo.git("switch", "--quiet", "pr1")
     repo.squash_merge_on_forge("pr1")
 
-    client.sync(delete="local")
+    client.sync(delete="local", push=False)
 
     assert repo.git("branch", "--show-current") == "main"
     assert not repo.git("branch", "--list", "pr1")
@@ -156,3 +156,29 @@ def test_restack_stopped_in_other_worktree_is_left_to_finish_there(
     repo.git("rebase", "--continue", cwd=worktree)
     worktree_client.restack()
     repo.assert_stacked("pr2", "pr1", ["pr2 c1"])
+
+
+def test_sync_pushes_the_rest_then_fails_for_branch_in_other_worktree(repo: Repo, client: StackClient) -> None:
+    repo.make_stack()
+    client.push()
+    add_worktree(repo, "pr2")
+    repo.git("switch", "--quiet", "pr1")
+    repo.commit("a", "pr1 third\n", "pr1 c3")
+
+    with pytest.raises(StackError, match="didn't push pr2, pr3"):
+        client.sync()
+
+    assert repo.git("rev-parse", "origin/pr1") == repo.git("rev-parse", "pr1")
+    assert repo.git("rev-parse", "origin/pr2") != repo.git("rev-parse", "pr1")
+
+
+def test_sync_fails_when_upstream_commits_cant_be_pulled_into_branch_in_other_worktree(
+    repo: Repo, client: StackClient
+) -> None:
+    repo.make_stack()
+    client.push()
+    add_worktree(repo, "pr1")
+    repo.commit_on_forge("pr1", "d", "collab\n", "collab")
+
+    with pytest.raises(StackError, match="didn't push pr1:"):
+        client.sync()

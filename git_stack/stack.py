@@ -549,12 +549,21 @@ class StackClient(StackCore):
                 git.switch(branch)
         self.restack_all(branches, parents, latest)
 
-    def sync(self, remote: str = DEFAULT_REMOTE, delete: str | None = None, latest: bool = False) -> list[str]:
+    def sync(
+        self, remote: str = DEFAULT_REMOTE, delete: str | None = None, latest: bool = False, push: bool = True
+    ) -> list[str]:
         """Fetch, untrack the current stack's merged branches (deleting what
         delete, "local", "remote" or "both", says), restack it (see restack for
-        latest), and pull in commits others pushed.
+        latest), and pull in commits others pushed. Then, if push is set, push
+        the branches that differ from the upstream they already have on remote.
+        Branches with no such upstream are never pushed.
 
-        Returns the branches that now differ from their remote branch.
+        Returns the branches that now differ from their remote branch, which
+        with push are only those it didn't push.
+
+        Raises StackError, after pushing the rest, if push is set and a branch
+        couldn't be restacked or pulled into because it's checked out in
+        another worktree, or is stacked on one that couldn't.
         """
         git = self.git
         self.ensure_no_operation_in_progress()
@@ -573,12 +582,17 @@ class StackClient(StackCore):
         # in `parents`), and the rest have been restacked and pulled.
         order = stack_of(original, parents)
         skipped = set()
+        # Skipped because of another worktree, so a push can't include them.
+        blocked = []
         unpushed = []
+        pushable = []
         for branch in order:
             parent = parents[branch]
             if parent in skipped:
                 self.emit(events.ParentSkipped(branch, parent))
                 skipped.add(branch)
+                if parent in blocked:
+                    blocked.append(branch)
                 continue
             state = adapter.merge_state(branch, parent)
             if state is MergeState.MERGED:
@@ -601,13 +615,26 @@ class StackClient(StackCore):
                 restacked = False
             if not restacked:
                 skipped.add(branch)
+                # Restacking only fails without an error for another worktree.
+                if git.other_worktree_of(branch) is not None:
+                    blocked.append(branch)
                 continue
-            self.pull_upstream(branch, parent, remote)
+            if not self.pull_upstream(branch, parent, remote):
+                blocked.append(branch)
+                continue
             upstream_tip = git.rev(f"{branch}@{{upstream}}")
             if upstream_tip and upstream_tip != git.rev(branch):
-                unpushed.append(branch)
+                if push and git.tracks_same_name(branch, remote):
+                    pushable.append(branch)
+                else:
+                    unpushed.append(branch)
 
         self.restore_checkout(original)
+        self.push_branches(pushable, parents, adapter, remote)
+        if push and blocked:
+            raise StackError(
+                f"didn't push {', '.join(blocked)}: checked out in another worktree, or stacked on a branch that is"
+            )
         return unpushed
 
     def clean(self, remote: str = DEFAULT_REMOTE, delete: str | None = None) -> None:
