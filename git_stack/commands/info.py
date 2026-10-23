@@ -156,7 +156,7 @@ def run(stack: StackClient, args: Args) -> None:
     # Pull request links go in a right-aligned column after the longest line.
     widths = [len(tree) + len(label(branch, painter(False))) for tree, branch in rows]
     link_width = max(len(branch.pull_request.url) if branch.pull_request else 0 for _, branch in rows)
-    for (tree, branch), width in zip(rows, widths):
+    for (tree, branch), width in zip(rows, widths, strict=True):
         line = paint(tree, TREE) + label(branch, paint)
         if branch.pull_request:
             link = branch.pull_request.url.rjust(link_width)

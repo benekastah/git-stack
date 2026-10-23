@@ -33,7 +33,7 @@ def parse_json(out: str) -> object:
     try:
         parsed: object = json.loads(out)
     except ValueError as e:
-        raise StackError(f"unexpected response from GitHub: {e}")
+        raise StackError(f"unexpected response from GitHub: {e}") from e
     return parsed
 
 
@@ -151,7 +151,7 @@ class GitHubAdapter(GitAdapter):
             raise StackError(
                 f"couldn't look up pull requests on GitHub; check `gh auth status` (and, for "
                 f"an organization with SSO, that gh's token is authorized for it): {e}"
-            )
+            ) from e
 
     def look_up_pull_requests(self) -> dict[str, PullRequest]:
         branches = [b for b in self.core.tracked_branches() if self.git.tracks_same_name(b, self.remote)]
@@ -239,7 +239,7 @@ class GitHubAdapter(GitAdapter):
             "{ pageInfo { hasNextPage endCursor } "
             "nodes { ... on PullRequest { number headRefName baseRefName isCrossRepository } } } }"
         )
-        prs = []
+        prs: list[OpenPullRequest] = []
         after = None
         while True:
             args = [
@@ -255,13 +255,13 @@ class GitHubAdapter(GitAdapter):
             if after is not None:
                 args += ["-f", f"after={after}"]
             search = field(field(parse_json(self.gh(*args)), "data", dict), "search", dict)
-            for node in field(search, "nodes", list):
-                if not field(node, "isCrossRepository", bool):
-                    prs.append(
-                        OpenPullRequest(
-                            field(node, "number", int), field(node, "headRefName", str), field(node, "baseRefName", str)
-                        )
-                    )
+            prs.extend(
+                OpenPullRequest(
+                    field(node, "number", int), field(node, "headRefName", str), field(node, "baseRefName", str)
+                )
+                for node in field(search, "nodes", list)
+                if not field(node, "isCrossRepository", bool)
+            )
             page = field(search, "pageInfo", dict)
             if not field(page, "hasNextPage", bool):
                 return prs

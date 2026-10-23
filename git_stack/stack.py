@@ -242,7 +242,7 @@ class StackClient(StackCore):
             raise StackError(
                 f"couldn't look up your pull requests on GitHub; check `gh auth status` (and, for "
                 f"an organization with SSO, that gh's token is authorized for it): {e}"
-            )
+            ) from e
         self.fetch(remote)
         if not dry_run:
             # Bases are worked out from the local parents, so a stale main would
@@ -484,7 +484,7 @@ class StackClient(StackCore):
         # the adapter looks up pull requests (about a second on GitHub).
         with ThreadPoolExecutor() as pool:
             prefetched = pool.submit(adapter.prefetch)
-            statuses = dict(zip(parents, pool.map(status, parents)))
+            statuses = dict(zip(parents, pool.map(status, parents), strict=True))
             prefetched.result()
         result = []
         for root in sorted({stack_root(b, parents) for b in parents}):
@@ -507,7 +507,7 @@ class StackClient(StackCore):
             raise StackError(
                 f"{e}\nNothing was changed. To only check for merges locally, run "
                 f"`git -c {ADAPTER_SETTING}=git stack ...`"
-            )
+            ) from e
         return adapter
 
     def skip_merged(self, branches: Iterable[str], parents: Parents, adapter: GitAdapter) -> list[str]:
@@ -701,7 +701,7 @@ class StackClient(StackCore):
             raise StackError(
                 f"updating pull requests failed, so nothing was pushed (set {ADAPTER_SETTING} "
                 f"to git to stop using GitHub): {e}"
-            )
+            ) from e
         # Atomic, so a branch that can't be pushed doesn't leave the rest of the
         # stack pushed without it, and its pull requests not retargeted.
         if not git.passthrough("push", "--atomic", *leases, "--set-upstream", remote, *branches):
@@ -715,7 +715,7 @@ class StackClient(StackCore):
         except StackError as e:
             raise StackError(
                 f"pushed, but updating pull requests failed (set {ADAPTER_SETTING} to git to stop using GitHub): {e}"
-            )
+            ) from e
         return branches
 
     def prs(self, remote: str = DEFAULT_REMOTE, dry_run: bool = False) -> list[PullRequestStep]:
@@ -785,11 +785,11 @@ class StackClient(StackCore):
                 opened = ", ".join(f"#{s.number} for {s.branch}" for s in steps if s.action is PullRequestAction.OPEN)
                 raise StackError(
                     f"opening a pull request for {b} failed{f' (after opening {opened})' if opened else ''}: {e}"
-                )
+                ) from e
             steps.append(PullRequestStep(b, parent, PullRequestAction.OPEN, title=title, number=number, url=url))
         if branches and not dry_run:
             try:
                 adapter.update_stack_sections(branches, parents)
             except StackError as e:
-                raise StackError(f"updating the stack in pull request descriptions failed: {e}")
+                raise StackError(f"updating the stack in pull request descriptions failed: {e}") from e
         return steps
