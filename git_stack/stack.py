@@ -651,7 +651,6 @@ class StackClient(StackCore):
         force is set. Either way, the push fails if a remote branch changed
         since it was last fetched.
         """
-        git = self.git
         self.ensure_no_operation_in_progress()
         self.settle_all()
         parents = self.tracked_branches()
@@ -661,6 +660,17 @@ class StackClient(StackCore):
             raise StackError(f"{branch} isn't in a stack")
         adapter = self.checked_adapter(remote)
         branches = self.skip_merged(stack_of(branch, parents), parents, adapter)
+        return self.push_branches(branches, parents, adapter, remote, force)
+
+    def push_branches(
+        self, branches: list[str], parents: Parents, adapter: GitAdapter, remote: str, force: bool = False
+    ) -> list[str]:
+        """Force-push (with lease) branches, which must be unmerged, in one atomic
+        push, then let the adapter update their pull requests. Returns branches.
+
+        Checks and fails as push does.
+        """
+        git = self.git
         if not branches:
             return []
         # A remote branch deleted since we pushed it was most likely deleted when
