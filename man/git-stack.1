@@ -26,6 +26,14 @@ git stack push                  \f[I]# push both\f[R]
 git stack prs                   \f[I]# open draft PRs for both, each into the branch it\(aqs built on\f[R]
 .EE
 .PP
+Already have pull requests open, e.g.
+in a fresh clone or from before you used git\-stack?
+Track them as stacks instead:
+.IP
+.EX
+git stack autocreate            \f[I]# track your open PRs, each on the branch it merges into\f[R]
+.EE
+.PP
 After that, day to day:
 .IP
 .EX
@@ -131,8 +139,8 @@ git\-stack doesn\(aqt manage it, but \f[CR]sync\f[R] keeps it up to
 date.
 .IP \(bu 2
 \f[B]tracked\f[R]: a branch git\-stack knows about, because you made it
-with \f[CR]git stack branch\f[R] or added it with
-\f[CR]git stack track\f[R].
+with \f[CR]git stack branch\f[R], or added it with
+\f[CR]git stack track\f[R] or \f[CR]git stack autocreate\f[R].
 .IP \(bu 2
 \f[B]restack\f[R]: rebase a branch onto its parent\(aqs latest commit,
 replaying only the branch\(aqs own commits.
@@ -452,9 +460,24 @@ or without the GitHub adapter).
 .EX
 git stack info \-\-json
 \f[I]# [\f[R]
-\f[I]#   {\(dqname\(dq: \(dqmain\(dq, \(dqparent\(dq: null, \(dqstatus\(dq: null, \(dqcurrent\(dq: false, \(dqpr\(dq: null},\f[R]
-\f[I]#   {\(dqname\(dq: \(dqadd\-api\(dq, \(dqparent\(dq: \(dqmain\(dq, \(dqstatus\(dq: \(dqup\-to\-date\(dq, \(dqcurrent\(dq: true,\f[R]
-\f[I]#    \(dqpr\(dq: {\(dqnumber\(dq: 12, \(dqurl\(dq: \(dqhttps://github.com/acme/widgets/pull/12\(dq, \(dqstate\(dq: \(dqopen\(dq}},\f[R]
+\f[I]#   {\f[R]
+\f[I]#     \(dqname\(dq: \(dqmain\(dq,\f[R]
+\f[I]#     \(dqparent\(dq: null,\f[R]
+\f[I]#     \(dqstatus\(dq: null,\f[R]
+\f[I]#     \(dqcurrent\(dq: false,\f[R]
+\f[I]#     \(dqpr\(dq: null\f[R]
+\f[I]#   },\f[R]
+\f[I]#   {\f[R]
+\f[I]#     \(dqname\(dq: \(dqadd\-api\(dq,\f[R]
+\f[I]#     \(dqparent\(dq: \(dqmain\(dq,\f[R]
+\f[I]#     \(dqstatus\(dq: \(dqup\-to\-date\(dq,\f[R]
+\f[I]#     \(dqcurrent\(dq: true,\f[R]
+\f[I]#     \(dqpr\(dq: {\f[R]
+\f[I]#       \(dqnumber\(dq: 12,\f[R]
+\f[I]#       \(dqurl\(dq: \(dqhttps://github.com/acme/widgets/pull/12\(dq,\f[R]
+\f[I]#       \(dqstate\(dq: \(dqopen\(dq\f[R]
+\f[I]#     }\f[R]
+\f[I]#   },\f[R]
 \f[I]#   ...\f[R]
 \f[I]# ]\f[R]
 .EE
@@ -565,16 +588,20 @@ Fetch with \f[CR]\-\-prune\f[R].
 Fast\-forward the stack\(aqs root (e.g.
 \f[CR]main\f[R]) to its upstream.
 .IP "3." 3
-Stop tracking the stack\(aqs merged branches, moving their children onto
-their parent.
-.IP "4." 3
-Restack the rest, like \f[CR]restack\f[R] does: a branch on the root
+Go through the stack\(aqs branches, each before the branches stacked on
+it:
+.RS 4
+.IP \(bu 2
+stop tracking a merged one, moving its children onto its parent;
+.IP \(bu 2
+restack the rest, like \f[CR]restack\f[R] does: a branch on the root
 only moves if it conflicts with the root\(aqs new commits, or with
-\f[CR]\-\-latest\f[R].
-.IP "5." 3
-Pull in commits others pushed to its branches (see Pulling commits
-others pushed).
-.IP "6." 3
+\f[CR]\-\-latest\f[R];
+.IP \(bu 2
+and pull in commits others pushed to it (see Pulling commits others
+pushed).
+.RE
+.IP "4." 3
 Push the branches that differ from the remote branch they already have,
 like \f[CR]push\f[R] does.
 .PP
@@ -772,6 +799,9 @@ are overwritten.
 Refuses unless every branch in the stack has been pushed with
 \f[CR]git stack push\f[R] and matches its remote branch, so each pull
 request shows what you have locally, as of your last fetch.
+Also refuses if the stack\(aqs root (e.g.
+\f[CR]main\f[R]) isn\(aqt on the remote, since the pull requests at the
+bottom of the stack merge into it.
 .IP \(bu 2
 If opening one fails, it says which it had opened already; rerun it once
 the problem is fixed to open the rest.
@@ -1031,7 +1061,8 @@ to \f[CR]main\f[R] once the parent PR was merged.
 It does that before pushing, so a pull request is never compared with
 its old base after its branch was rebased onto the new one, which would
 show every commit the new base gained since.
-(A parent that isn\(aqt on GitHub yet is pushed first.)
+(A pull request whose parent isn\(aqt on GitHub yet is pointed at it
+after the push instead.)
 .IP \(bu 2
 \f[CR]git stack prs\f[R] opens draft pull requests, into each
 branch\(aqs stack parent, points the existing open ones at their stack

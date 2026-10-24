@@ -18,6 +18,13 @@ git stack push                  # push both
 git stack prs                   # open draft PRs for both, each into the branch it's built on
 ```
 
+Already have pull requests open, e.g. in a fresh clone or from before you used
+git-stack? Track them as stacks instead:
+
+```sh
+git stack autocreate            # track your open PRs, each on the branch it merges into
+```
+
 After that, day to day:
 
 ```sh
@@ -51,7 +58,8 @@ git stack sync                  # catch up: drop merged PRs, rebase what's left,
 - **root**: the branch at the bottom of a stack, usually `main`. git-stack
   doesn't manage it, but `sync` keeps it up to date.
 - **tracked**: a branch git-stack knows about, because you made it with
-  `git stack branch` or added it with `git stack track`.
+  `git stack branch`, or added it with `git stack track` or
+  `git stack autocreate`.
 - **restack**: rebase a branch onto its parent's latest commit, replaying only
   the branch's own commits.
 - **the current stack**: the whole stack the branch you're on is part of,
@@ -313,9 +321,24 @@ git stack info
   ```sh
   git stack info --json
   # [
-  #   {"name": "main", "parent": null, "status": null, "current": false, "pr": null},
-  #   {"name": "add-api", "parent": "main", "status": "up-to-date", "current": true,
-  #    "pr": {"number": 12, "url": "https://github.com/acme/widgets/pull/12", "state": "open"}},
+  #   {
+  #     "name": "main",
+  #     "parent": null,
+  #     "status": null,
+  #     "current": false,
+  #     "pr": null
+  #   },
+  #   {
+  #     "name": "add-api",
+  #     "parent": "main",
+  #     "status": "up-to-date",
+  #     "current": true,
+  #     "pr": {
+  #       "number": 12,
+  #       "url": "https://github.com/acme/widgets/pull/12",
+  #       "state": "open"
+  #     }
+  #   },
   #   ...
   # ]
   ```
@@ -407,13 +430,13 @@ Bring the current stack up to date with the remote:
 
 1. Fetch with `--prune`.
 2. Fast-forward the stack's root (e.g. `main`) to its upstream.
-3. Stop tracking the stack's merged branches, moving their children onto their
-   parent.
-4. Restack the rest, like `restack` does: a branch on the root only moves if
-   it conflicts with the root's new commits, or with `--latest`.
-5. Pull in commits others pushed to its branches (see
-   [Pulling commits others pushed](#pulling-commits-others-pushed)).
-6. Push the branches that differ from the remote branch they already have,
+3. Go through the stack's branches, each before the branches stacked on it:
+   - stop tracking a merged one, moving its children onto its parent;
+   - restack the rest, like `restack` does: a branch on the root only moves
+     if it conflicts with the root's new commits, or with `--latest`;
+   - and pull in commits others pushed to it (see
+     [Pulling commits others pushed](#pulling-commits-others-pushed)).
+4. Push the branches that differ from the remote branch they already have,
    like `push` does.
 
 **When would I use it?** Your everyday command for catching up: after a pull
@@ -569,7 +592,9 @@ git stack prs
 
 - Refuses unless every branch in the stack has been pushed with
   `git stack push` and matches its remote branch, so each pull request shows
-  what you have locally, as of your last fetch.
+  what you have locally, as of your last fetch. Also refuses if the stack's
+  root (e.g. `main`) isn't on the remote, since the pull requests at the
+  bottom of the stack merge into it.
 - If opening one fails, it says which it had opened already; rerun it once the
   problem is fixed to open the rest.
 - Needs the [GitHub adapter](#github).
@@ -790,8 +815,8 @@ With the GitHub adapter:
   their stack parents, e.g. to `main` once the parent PR was merged. It does
   that before pushing, so a pull request is never compared with its old base
   after its branch was rebased onto the new one, which would show every commit
-  the new base gained since. (A parent that isn't on GitHub yet is pushed
-  first.)
+  the new base gained since. (A pull request whose parent isn't on GitHub
+  yet is pointed at it after the push instead.)
 - `git stack prs` opens draft pull requests, into each branch's stack parent,
   points the existing open ones at their stack parents too, and keeps the
   stack in each open one's description. (The link GitHub prints when a branch
