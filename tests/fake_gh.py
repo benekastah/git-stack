@@ -16,65 +16,86 @@ from typing import Any
 PR_FIELDS = ("number", "state", "isDraft", "isCrossRepository", "headRefOid", "baseRefName", "mergeCommit")
 
 
+def opt(args: list[str], name: str) -> str:
+    """The value of the `name value` option in args."""
+    return args[args.index(name) + 1]
+
+
+def opt_value(args: list[str], key: str) -> str:
+    """The value of the -f key=value argument in args."""
+    return next(a for a in args if a.startswith(f"{key}=")).removeprefix(f"{key}=")
+
+
 def respond(args: list[str], prs: list[dict[str, Any]]) -> str | None:
     """Handle the gh command args, updating prs. Return what gh would print, or None."""
-
-    def opt(name: str) -> str:
-        return args[args.index(name) + 1]
-
-    def opt_value(key: str) -> str:
-        """The value of the -f key=value argument."""
-        return next(a for a in args if a.startswith(f"{key}=")).removeprefix(f"{key}=")
-
-    if args[:2] == ["api", "graphql"] and "search(" in opt_value("query"):
-        # The gh user's open pull requests, all on one page.
-        mine = [p for p in prs if p["state"] == "OPEN" and p.get("author", "me") == "me"]
-        nodes = [{k: p[k] for k in ("number", "headRefName", "baseRefName", "isCrossRepository")} for p in mine]
-        return json.dumps({"data": {"search": {"pageInfo": {"hasNextPage": False, "endCursor": None}, "nodes": nodes}}})
-    if args[:2] == ["api", "graphql"] and "pullRequest(number:" in opt_value("query"):
-        # Fields of pull requests by number.
-        by_alias: dict[str, Any] = {}
-        for alias, number, fields in re.findall(
-            r"(\w+): pullRequest\(number: (\d+)\) \{ ([^}]*) \}", opt_value("query")
-        ):
-            pr = next((p for p in prs if p["number"] == int(number)), None)
-            by_alias[alias] = None if pr is None else {f: pr.get(f, "") for f in fields.split()}
-        return json.dumps({"data": {"repository": by_alias}})
     if args[:2] == ["api", "graphql"]:
-        query = opt_value("query")
-        found: dict[str, Any] = {"defaultBranchRef": {"name": "main"}}
-        for alias, variable in re.findall(r"(\w+): pullRequests\(headRefName: \$(\w+)", query):
-            # Newest first, taking higher numbers as newer.
-            matching = sorted(
-                (p for p in prs if p["headRefName"] == opt_value(variable)), key=lambda p: p["number"], reverse=True
-            )
-            found[alias] = {"nodes": [{"isDraft": False, **{k: p[k] for k in PR_FIELDS if k in p}} for p in matching]}
-        return json.dumps({"data": {"repository": found}})
+        query = opt_value(args, "query")
+        if "search(" in query:
+            return my_open_pull_requests(prs)
+        if "pullRequest(number:" in query:
+            return pull_requests_by_number(query, prs)
+        return pull_requests_by_head(args, query, prs)
     if args[:2] == ["pr", "create"]:
-        number = max((p["number"] for p in prs), default=0) + 1
-        prs.append(
-            {
-                "number": number,
-                "state": "OPEN",
-                "isCrossRepository": False,
-                "headRefName": opt("--head"),
-                "headRefOid": "",
-                "baseRefName": opt("--base"),
-                "mergeCommit": None,
-                "title": opt("--title"),
-                "body": sys.stdin.read(),
-                "isDraft": "--draft" in args,
-            }
-        )
-        return f"https://github.com/acme/widgets/pull/{number}"
+        return create_pull_request(args, prs)
     if args[:2] == ["pr", "edit"]:
-        pr = next(p for p in prs if p["number"] == int(args[2]))
-        if "--base" in args:
-            pr["baseRefName"] = opt("--base")
-        if "--body-file" in args:
-            pr["body"] = sys.stdin.read()
+        edit_pull_request(args, prs)
         return None
     sys.exit(f"fake gh: unexpected {args}")
+
+
+def my_open_pull_requests(prs: list[dict[str, Any]]) -> str:
+    """The gh user's open pull requests, all on one page."""
+    mine = [p for p in prs if p["state"] == "OPEN" and p.get("author", "me") == "me"]
+    nodes = [{k: p[k] for k in ("number", "headRefName", "baseRefName", "isCrossRepository")} for p in mine]
+    return json.dumps({"data": {"search": {"pageInfo": {"hasNextPage": False, "endCursor": None}, "nodes": nodes}}})
+
+
+def pull_requests_by_number(query: str, prs: list[dict[str, Any]]) -> str:
+    """The fields query asks for of the pull requests it names by number."""
+    by_alias: dict[str, Any] = {}
+    for alias, number, fields in re.findall(r"(\w+): pullRequest\(number: (\d+)\) \{ ([^}]*) \}", query):
+        pr = next((p for p in prs if p["number"] == int(number)), None)
+        by_alias[alias] = None if pr is None else {f: pr.get(f, "") for f in fields.split()}
+    return json.dumps({"data": {"repository": by_alias}})
+
+
+def pull_requests_by_head(args: list[str], query: str, prs: list[dict[str, Any]]) -> str:
+    """The pull requests of the branches query names, and the default branch."""
+    found: dict[str, Any] = {"defaultBranchRef": {"name": "main"}}
+    for alias, variable in re.findall(r"(\w+): pullRequests\(headRefName: \$(\w+)", query):
+        # Newest first, taking higher numbers as newer.
+        matching = sorted(
+            (p for p in prs if p["headRefName"] == opt_value(args, variable)), key=lambda p: p["number"], reverse=True
+        )
+        found[alias] = {"nodes": [{"isDraft": False, **{k: p[k] for k in PR_FIELDS if k in p}} for p in matching]}
+    return json.dumps({"data": {"repository": found}})
+
+
+def create_pull_request(args: list[str], prs: list[dict[str, Any]]) -> str:
+    number = max((p["number"] for p in prs), default=0) + 1
+    prs.append(
+        {
+            "number": number,
+            "state": "OPEN",
+            "isCrossRepository": False,
+            "headRefName": opt(args, "--head"),
+            "headRefOid": "",
+            "baseRefName": opt(args, "--base"),
+            "mergeCommit": None,
+            "title": opt(args, "--title"),
+            "body": sys.stdin.read(),
+            "isDraft": "--draft" in args,
+        }
+    )
+    return f"https://github.com/acme/widgets/pull/{number}"
+
+
+def edit_pull_request(args: list[str], prs: list[dict[str, Any]]) -> None:
+    pr = next(p for p in prs if p["number"] == int(args[2]))
+    if "--base" in args:
+        pr["baseRefName"] = opt(args, "--base")
+    if "--body-file" in args:
+        pr["body"] = sys.stdin.read()
 
 
 def main() -> None:

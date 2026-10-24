@@ -105,31 +105,40 @@ def label(branch: BranchInfo, paint: Paint) -> str:
 def run(stack: StackClient, args: Args) -> None:
     branches = stack.info(offline=args.offline)
     if args.json:
-        print(
-            json.dumps(
-                [
-                    {
-                        "name": b.name,
-                        "parent": b.parent,
-                        "status": b.status.value if b.status else None,
-                        "current": b.current,
-                        "pr": {
-                            "number": b.pull_request.number,
-                            "url": b.pull_request.url,
-                            "state": b.pull_request.state.value,
-                        }
-                        if b.pull_request
-                        else None,
-                    }
-                    for b in branches
-                ],
-                indent=2,
-            )
-        )
-        return
-    if not branches:
+        print_json(branches)
+    elif not branches:
         print("no tracked branches")
-        return
+    else:
+        print_tree(stack, branches)
+
+
+def print_json(branches: list[BranchInfo]) -> None:
+    print(
+        json.dumps(
+            [
+                {
+                    "name": b.name,
+                    "parent": b.parent,
+                    "status": b.status.value if b.status else None,
+                    "current": b.current,
+                    "pr": {
+                        "number": b.pull_request.number,
+                        "url": b.pull_request.url,
+                        "state": b.pull_request.state.value,
+                    }
+                    if b.pull_request
+                    else None,
+                }
+                for b in branches
+            ],
+            indent=2,
+        )
+    )
+
+
+def print_tree(stack: StackClient, branches: list[BranchInfo]) -> None:
+    """Print branches, which isn't empty, as a tree for each stack, with each
+    branch's pull request linked at the end of its line."""
     paint = painter(use_color(stack))
     flip = root_at_bottom(stack)
     children: dict[str, list[BranchInfo]] = {}

@@ -1,7 +1,7 @@
 import enum
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from git_stack import events
 from git_stack.adapters import ADAPTER_SETTING, make_adapter
@@ -121,6 +121,31 @@ class PullRequestStep:
     title: str | None = None
     number: int | None = None
     url: str | None = None
+
+
+@dataclass
+class SyncState:
+    """A sync's options, and how far it got, as it goes through the stack.
+
+    original is where to leave the user afterwards: their branch, or wherever
+    deleting it left them. parents is the tracked branches, without the merged
+    ones untracked so far. skipped are the branches left alone, whose children
+    are left alone too. blocked are those that couldn't be restacked or pulled
+    into because of another worktree (or are stacked on one), which a push
+    can't include. pushable are the branches to push, and unpushed those that
+    differ from their remote branch but won't be pushed.
+    """
+
+    original: str
+    parents: Parents
+    remote: str
+    delete: str | None
+    latest: bool
+    push: bool
+    skipped: set[str] = field(default_factory=set)
+    blocked: list[str] = field(default_factory=list)
+    pushable: list[str] = field(default_factory=list)
+    unpushed: list[str] = field(default_factory=list)
 
 
 class StackClient(StackCore):
@@ -249,7 +274,7 @@ class StackClient(StackCore):
             # make them too old for branches built on a newer origin/main.
             heads, parents = {pr.head for pr in prs}, self.tracked_branches()
             self.fast_forward_trunks(sorted({pr.base for pr in prs if pr.base not in heads | parents.keys()}))
-        plan = self.plan_autocreate(prs, remote)
+        plan = AutocreatePlanner(self, prs, remote).plan_all()
         if not dry_run:
             for step in plan:
                 if step.action is AutocreateAction.CREATE:
@@ -264,66 +289,6 @@ class StackClient(StackCore):
                     git.config_set(step.branch, PARENT_KEY, step.parent)
                     git.config_set(step.branch, BASE_KEY, step.base)
         return plan
-
-    def plan_autocreate(self, prs: list[OpenPullRequest], remote: str) -> list[Autocreated]:
-        """What autocreate should do for prs, parents before children, without
-        changing anything."""
-        git = self.git
-        parents = self.tracked_branches()
-        by_head = {pr.head: pr for pr in prs}
-        planned: dict[str, Autocreated] = {}
-        visiting = set()
-
-        def plan(pr: OpenPullRequest) -> Autocreated:
-            if pr.head not in planned:
-                visiting.add(pr.head)
-                planned[pr.head] = plan_one(pr)
-                visiting.discard(pr.head)
-            return planned[pr.head]
-
-        def plan_one(pr: OpenPullRequest) -> Autocreated:
-            branch, parent = pr.head, pr.base
-
-            def skip(reason: str) -> Autocreated:
-                return Autocreated(branch, parent, pr.number, AutocreateAction.SKIP, reason=reason)
-
-            if branch in parents:
-                if parents[branch] == parent:
-                    return Autocreated(branch, parent, pr.number, AutocreateAction.ALREADY_TRACKED)
-                return Autocreated(
-                    branch, parent, pr.number, AutocreateAction.PARENT_DIFFERS, tracked_parent=parents[branch]
-                )
-            remote_ref = f"refs/remotes/{remote}/{branch}"
-            local = git.local_branch_exists(branch)
-            if not local and git.rev(remote_ref) is None:
-                return skip(f"{remote}/{branch} doesn't exist")
-            if parent in by_head:
-                if parent in visiting:
-                    return skip("the pull requests it's based on are based on it")
-                if plan(by_head[parent]).action is AutocreateAction.SKIP:
-                    return skip(f"{parent}, which it merges into, was skipped")
-                parent_ref = parent if git.local_branch_exists(parent) else f"refs/remotes/{remote}/{parent}"
-            elif git.local_branch_exists(parent):
-                parent_ref = parent
-            else:
-                return skip(
-                    f"{parent}, which it merges into, isn't a local branch; create it with "
-                    f"`git switch {parent}` and rerun"
-                )
-            try:
-                ensure_no_cycle(branch, parent, parents)
-            except StackError as e:
-                return skip(str(e))
-            base = self.fork_point(parent_ref, branch if local else remote_ref)
-            if base is None:
-                return skip(f"it has no history in common with {parent}")
-            parents[branch] = parent
-            action = AutocreateAction.TRACK if local else AutocreateAction.CREATE
-            return Autocreated(branch, parent, pr.number, action, base=base)
-
-        for pr in prs:
-            plan(pr)
-        return list(planned.values())
 
     def ensure_local_branch_parent(self, parent: str) -> None:
         """Refuse a parent that isn't a local branch: sync fast-forwards a stack's
@@ -565,77 +530,80 @@ class StackClient(StackCore):
         couldn't be restacked or pulled into because it's checked out in
         another worktree, or is stacked on one that couldn't.
         """
-        git = self.git
         self.ensure_no_operation_in_progress()
         self.ensure_clean_worktree()
         self.settle_all()
         parents = self.tracked_branches()
-        # Where to leave the user afterwards: their branch, or wherever deleting
-        # it left them.
         original = self.current_stacked_branch(parents, "sync")
         adapter = self.checked_adapter(remote)
         self.fetch(remote)
         self.fast_forward_trunks([stack_root(original, parents)])
 
+        state = SyncState(original, parents, remote, delete, latest, push)
         # Parent-before-child, so by the time we reach a branch its parent is
         # final: merged branches have been removed (and their children reparented
         # in `parents`), and the rest have been restacked and pulled.
-        order = stack_of(original, parents)
-        skipped = set()
-        # Skipped because of another worktree, so a push can't include them.
-        blocked = []
-        unpushed = []
-        pushable = []
-        for branch in order:
-            parent = parents[branch]
-            if parent in skipped:
-                self.emit(events.ParentSkipped(branch, parent))
-                skipped.add(branch)
-                if parent in blocked:
-                    blocked.append(branch)
-                continue
-            state = adapter.merge_state(branch, parent)
-            if state is MergeState.MERGED:
-                if not self.untrack_merged(branch, parents, delete):
-                    skipped.add(branch)
-                elif branch == original:
-                    original = self.current_checkout()
-                continue
-            if state is MergeState.MERGED_WITH_NEW_COMMITS:
-                # Restacking would replay the merged commits onto parent.
-                self.emit(events.MergedWithNewCommits(branch, parent))
-                skipped.add(branch)
-                continue
-            if git.upstream_gone(branch):
-                self.emit(events.UpstreamGone(branch, parent))
-            try:
-                restacked = self.restack_branch(branch, parent, latest)
-            except BrokenStackError as e:
-                self.emit(events.BrokenBranch(branch, str(e)))
-                restacked = False
-            if not restacked:
-                skipped.add(branch)
-                # Restacking only fails without an error for another worktree.
-                if git.other_worktree_of(branch) is not None:
-                    blocked.append(branch)
-                continue
-            if not self.pull_upstream(branch, parent, remote):
-                blocked.append(branch)
-                continue
-            upstream_tip = git.rev(f"{branch}@{{upstream}}")
-            if upstream_tip and upstream_tip != git.rev(branch):
-                if push and git.tracks_same_name(branch, remote):
-                    pushable.append(branch)
-                else:
-                    unpushed.append(branch)
+        for branch in stack_of(original, parents):
+            self.sync_branch(branch, adapter, state)
 
-        self.restore_checkout(original)
-        self.push_branches(pushable, parents, adapter, remote)
-        if push and blocked:
+        self.restore_checkout(state.original)
+        self.push_branches(state.pushable, parents, adapter, remote)
+        if push and state.blocked:
             raise StackError(
-                f"didn't push {', '.join(blocked)}: checked out in another worktree, or stacked on a branch that is"
+                f"didn't push {', '.join(state.blocked)}: checked out in another worktree, or stacked on a branch "
+                f"that is"
             )
-        return unpushed
+        return state.unpushed
+
+    def sync_branch(self, branch: str, adapter: GitAdapter, state: SyncState) -> None:
+        """Untrack branch if it was merged, and otherwise bring it up to date (see
+        sync_unmerged), unless its parent was skipped."""
+        parent = state.parents[branch]
+        if parent in state.skipped:
+            self.emit(events.ParentSkipped(branch, parent))
+            state.skipped.add(branch)
+            if parent in state.blocked:
+                state.blocked.append(branch)
+            return
+        merge_state = adapter.merge_state(branch, parent)
+        if merge_state is MergeState.MERGED:
+            if not self.untrack_merged(branch, state.parents, state.delete):
+                state.skipped.add(branch)
+            elif branch == state.original:
+                state.original = self.current_checkout()
+        elif merge_state is MergeState.MERGED_WITH_NEW_COMMITS:
+            # Restacking would replay the merged commits onto parent.
+            self.emit(events.MergedWithNewCommits(branch, parent))
+            state.skipped.add(branch)
+        else:
+            self.sync_unmerged(branch, parent, state)
+
+    def sync_unmerged(self, branch: str, parent: str, state: SyncState) -> None:
+        """Restack branch, which isn't merged, onto parent and pull in commits
+        others pushed to it, then note whether it needs pushing."""
+        git = self.git
+        if git.upstream_gone(branch):
+            self.emit(events.UpstreamGone(branch, parent))
+        try:
+            restacked = self.restack_branch(branch, parent, state.latest)
+        except BrokenStackError as e:
+            self.emit(events.BrokenBranch(branch, str(e)))
+            restacked = False
+        if not restacked:
+            state.skipped.add(branch)
+            # Restacking only fails without an error for another worktree.
+            if git.other_worktree_of(branch) is not None:
+                state.blocked.append(branch)
+            return
+        if not self.pull_upstream(branch, parent, state.remote):
+            state.blocked.append(branch)
+            return
+        upstream_tip = git.rev(f"{branch}@{{upstream}}")
+        if upstream_tip and upstream_tip != git.rev(branch):
+            if state.push and git.tracks_same_name(branch, state.remote):
+                state.pushable.append(branch)
+            else:
+                state.unpushed.append(branch)
 
     def clean(self, remote: str = DEFAULT_REMOTE, delete: str | None = None) -> None:
         """Fetch and untrack merged branches in every stack, deleting what delete
@@ -700,24 +668,7 @@ class StackClient(StackCore):
         git = self.git
         if not branches:
             return []
-        # A remote branch deleted since we pushed it was most likely deleted when
-        # its pull request was merged, so pushing it again would recreate it.
-        for b in branches:
-            if git.upstream_gone(b):
-                raise StackError(
-                    f"{b}'s remote branch was deleted; run `git stack sync` to stop tracking "
-                    f"it if it was merged, or `git branch --unset-upstream {b}` to push it "
-                    f"again"
-                )
-            # Someone else's branch of the same name. Overwriting it isn't what
-            # --force is for, so it doesn't override this.
-            if git.rev(f"refs/remotes/{remote}/{b}") is not None and not git.tracks_same_name(b, remote):
-                raise StackError(
-                    f"{remote}/{b} exists but isn't {b}'s upstream, so it's probably someone "
-                    f"else's branch; rename yours with `git stack rename {b} <new>`. If "
-                    f"{remote}/{b} is yours, run `git branch --set-upstream-to {remote}/{b} {b}` "
-                    f"and `git stack sync` first"
-                )
+        self.ensure_remote_branches_ours(branches, remote)
 
         # Force-pushing is only safe if we've seen everything on the remote branch.
         # Refuse if we know of commits we haven't pulled (unless told to drop
@@ -755,6 +706,29 @@ class StackClient(StackCore):
             ) from e
         return branches
 
+    def ensure_remote_branches_ours(self, branches: list[str], remote: str) -> None:
+        """Refuse to push a branch whose remote branch was deleted, or is someone
+        else's branch of the same name."""
+        git = self.git
+        for b in branches:
+            # A remote branch deleted since we pushed it was most likely deleted
+            # when its pull request was merged, so pushing it again would recreate it.
+            if git.upstream_gone(b):
+                raise StackError(
+                    f"{b}'s remote branch was deleted; run `git stack sync` to stop tracking "
+                    f"it if it was merged, or `git branch --unset-upstream {b}` to push it "
+                    f"again"
+                )
+            # Someone else's branch of the same name. Overwriting it isn't what
+            # --force is for, so it doesn't override this.
+            if git.rev(f"refs/remotes/{remote}/{b}") is not None and not git.tracks_same_name(b, remote):
+                raise StackError(
+                    f"{remote}/{b} exists but isn't {b}'s upstream, so it's probably someone "
+                    f"else's branch; rename yours with `git stack rename {b} <new>`. If "
+                    f"{remote}/{b} is yours, run `git branch --set-upstream-to {remote}/{b} {b}` "
+                    f"and `git stack sync` first"
+                )
+
     def prs(self, remote: str = DEFAULT_REMOTE, dry_run: bool = False) -> list[PullRequestStep]:
         """Open a draft pull request into its stack parent for each unmerged
         branch in the current stack that has none, bottom-up. Its title is the
@@ -782,19 +756,7 @@ class StackClient(StackCore):
             )
         adapter.ensure_available()
         branches = self.skip_merged(stack_of(branch, parents), parents, adapter)
-        unpushed = [
-            b
-            for b in branches
-            if not git.tracks_same_name(b, remote) or git.rev(f"refs/remotes/{remote}/{b}") != git.tip(b)
-        ]
-        if unpushed:
-            raise StackError(
-                f"these branches aren't pushed, or differ from their remote branches: "
-                f"{', '.join(unpushed)}; run `git stack push` first"
-            )
-        root = stack_root(branch, parents)
-        if git.rev(f"refs/remotes/{remote}/{root}") is None:
-            raise StackError(f"{root} isn't on {remote}, so pull requests can't merge into it")
+        self.ensure_on_remote(branches, stack_root(branch, parents), remote)
 
         prs = adapter.pull_requests()
         template = adapter.pull_request_template() or ""
@@ -830,3 +792,97 @@ class StackClient(StackCore):
             except StackError as e:
                 raise StackError(f"updating the stack in pull request descriptions failed: {e}") from e
         return steps
+
+    def ensure_on_remote(self, branches: list[str], root: str, remote: str) -> None:
+        """Refuse unless each of branches was pushed with `git stack push` and
+        matches its remote branch, and their stack's root is on remote, so pull
+        requests can be opened for them that show what's local."""
+        git = self.git
+        unpushed = [
+            b
+            for b in branches
+            if not git.tracks_same_name(b, remote) or git.rev(f"refs/remotes/{remote}/{b}") != git.tip(b)
+        ]
+        if unpushed:
+            raise StackError(
+                f"these branches aren't pushed, or differ from their remote branches: "
+                f"{', '.join(unpushed)}; run `git stack push` first"
+            )
+        if git.rev(f"refs/remotes/{remote}/{root}") is None:
+            raise StackError(f"{root} isn't on {remote}, so pull requests can't merge into it")
+
+
+class AutocreatePlanner:
+    """Works out what autocreate should do for prs, without changing anything."""
+
+    def __init__(self, stack: StackClient, prs: list[OpenPullRequest], remote: str) -> None:
+        self.stack = stack
+        self.git = stack.git
+        self.prs = prs
+        self.remote = remote
+        # The tracked branches, and the ones planned to be tracked so far.
+        self.parents = stack.tracked_branches()
+        self.by_head = {pr.head: pr for pr in prs}
+        self.planned: dict[str, Autocreated] = {}
+        # Branches whose plan is being worked out, to catch a cycle of pull requests.
+        self.visiting: set[str] = set()
+
+    def plan_all(self) -> list[Autocreated]:
+        """An Autocreated for each pull request, parents before children."""
+        for pr in self.prs:
+            self.plan(pr)
+        return list(self.planned.values())
+
+    def plan(self, pr: OpenPullRequest) -> Autocreated:
+        """pr's plan, working it out (after its parent's) if it hasn't been yet."""
+        if pr.head not in self.planned:
+            self.visiting.add(pr.head)
+            self.planned[pr.head] = self.plan_one(pr)
+            self.visiting.discard(pr.head)
+        return self.planned[pr.head]
+
+    def plan_one(self, pr: OpenPullRequest) -> Autocreated:
+        branch, parent = pr.head, pr.base
+        if branch not in self.parents:
+            return self.plan_untracked(pr)
+        if self.parents[branch] == parent:
+            return Autocreated(branch, parent, pr.number, AutocreateAction.ALREADY_TRACKED)
+        return Autocreated(
+            branch, parent, pr.number, AutocreateAction.PARENT_DIFFERS, tracked_parent=self.parents[branch]
+        )
+
+    def plan_untracked(self, pr: OpenPullRequest) -> Autocreated:
+        """The plan for pr, whose branch isn't tracked: track it, creating it
+        first if there's no local branch, unless it has to be skipped."""
+        git, remote = self.git, self.remote
+        branch, parent = pr.head, pr.base
+        remote_ref = f"refs/remotes/{remote}/{branch}"
+        local = git.local_branch_exists(branch)
+        if not local and git.rev(remote_ref) is None:
+            return self.skip(pr, f"{remote}/{branch} doesn't exist")
+        if parent in self.by_head:
+            if parent in self.visiting:
+                return self.skip(pr, "the pull requests it's based on are based on it")
+            if self.plan(self.by_head[parent]).action is AutocreateAction.SKIP:
+                return self.skip(pr, f"{parent}, which it merges into, was skipped")
+            parent_ref = parent if git.local_branch_exists(parent) else f"refs/remotes/{remote}/{parent}"
+        elif git.local_branch_exists(parent):
+            parent_ref = parent
+        else:
+            return self.skip(
+                pr,
+                f"{parent}, which it merges into, isn't a local branch; create it with `git switch {parent}` and rerun",
+            )
+        try:
+            ensure_no_cycle(branch, parent, self.parents)
+        except StackError as e:
+            return self.skip(pr, str(e))
+        base = self.stack.fork_point(parent_ref, branch if local else remote_ref)
+        if base is None:
+            return self.skip(pr, f"it has no history in common with {parent}")
+        self.parents[branch] = parent
+        action = AutocreateAction.TRACK if local else AutocreateAction.CREATE
+        return Autocreated(branch, parent, pr.number, action, base=base)
+
+    def skip(self, pr: OpenPullRequest, reason: str) -> Autocreated:
+        return Autocreated(pr.head, pr.base, pr.number, AutocreateAction.SKIP, reason=reason)

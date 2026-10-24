@@ -23,7 +23,8 @@ WARNINGS = (
 )
 
 
-def message(event: events.Event) -> str:
+# Complex only because it has a case for every event, which reads best in one place.
+def message(event: events.Event) -> str:  # noqa: C901
     match event:
         case events.Fetching():
             return f"fetching {event.remote}, and pruning its deleted branches"

@@ -950,7 +950,8 @@ either won't work:
 
 Run every check (shellcheck on the shell scripts, that the Python code is
 formatted with [Ruff](https://docs.astral.sh/ruff/), Ruff's linter with its
-default rules, mypy in strict mode, then the tests) with:
+default rules plus the ones `pyproject.toml` adds (e.g. a limit on functions'
+cyclomatic complexity), mypy in strict mode, then the tests) with:
 
 ```sh
 ./check.sh

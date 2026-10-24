@@ -31,7 +31,7 @@ addopts = ["-n", "auto"]
 line-length = 120
 
 [tool.ruff.lint]
-extend-select = ["B904", "B905", "PERF401"]
+extend-select = ["B904", "B905", "C901", "PERF401"]
 
 [tool.mypy]
 strict = true
