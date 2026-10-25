@@ -22,5 +22,16 @@ def add_latest_argument(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def add_selectors_argument(parser: argparse.ArgumentParser, verb: str) -> None:
+    parser.add_argument(
+        "selectors",
+        nargs="*",
+        metavar="branch|group|glob",
+        help=f"{verb} the stacks of these branches, of the branches in these groups, or of the "
+        "branches these globs match (quote them, so the shell doesn't expand them), instead "
+        "of the current stack",
+    )
+
+
 def add_delete_argument(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("-d", "--delete", choices=("local", "remote", "both"), help=DELETE_HELP)

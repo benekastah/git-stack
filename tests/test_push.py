@@ -102,8 +102,8 @@ def test_push_refuses_outside_a_stack(repo: Repo, client: StackClient) -> None:
 def test_push_refuses_untracked_branch(repo: Repo, client: StackClient) -> None:
     repo.make_stack()
 
-    with pytest.raises(StackError, match="main isn't in a stack"):
-        client.push("main")
+    with pytest.raises(StackError, match="main isn't a tracked branch or a group"):
+        client.push(["main"])
 
 
 def test_push_skips_branch_merged_locally(repo: Repo, client: StackClient, emitted: list[events.Event]) -> None:
@@ -149,7 +149,7 @@ def test_push_named_branch_pushes_its_stack(repo: Repo, client: StackClient) -> 
     repo.make_stack()
     repo.git("switch", "--quiet", "main")
 
-    client.push("pr2")
+    client.push(["pr2"])
 
     for branch in ("pr1", "pr2", "pr3"):
         assert repo.git("rev-parse", f"origin/{branch}") == repo.git("rev-parse", branch)

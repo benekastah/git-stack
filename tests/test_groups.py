@@ -139,3 +139,125 @@ def test_group_spans_stacks_on_different_roots(repo: Repo, client: StackClient) 
     assert repo.git("rev-parse", "release") == repo.git("rev-parse", "origin/release")
     assert repo.branch_info("b").group == "a"
     assert repo.branch_info("c").group == "a"
+
+
+def two_stacks(repo: Repo, client: StackClient) -> None:
+    """main <- feat-a, main <- feat-b and main <- other, each with a commit, then
+    a new commit on main, so each needs restacking (with --latest)."""
+    for name in ("feat-a", "feat-b", "other"):
+        repo.git("switch", "--quiet", "main")
+        client.branch(name)
+        repo.commit("c", f"{name}\n", f"{name} c1")
+    repo.git("switch", "--quiet", "main")
+    repo.commit("a", "main again\n", "main c2")
+
+
+def test_restack_takes_branches_globs_and_groups(repo: Repo, client: StackClient) -> None:
+    two_stacks(repo, client)
+    main = repo.git("rev-parse", "main")
+
+    client.restack(["feat-*"], latest=True)
+
+    assert repo.config("feat-a", "stackBase") == main
+    assert repo.config("feat-b", "stackBase") == main
+    assert repo.config("other", "stackBase") != main
+    assert repo.git("branch", "--show-current") == "main"
+
+
+def test_group_add_puts_stacks_in_a_group_that_commands_then_cover(repo: Repo, client: StackClient) -> None:
+    two_stacks(repo, client)
+
+    assert client.group_add("feat", ["feat-*"]) == ["feat-a", "feat-b"]
+
+    assert client.show_stack("feat-a") == ["feat-a", "feat-b"]
+    assert repo.branch_info("feat-b").group == "feat"
+    client.restack(["feat"], latest=True)
+    assert repo.config("feat-b", "stackBase") == repo.git("rev-parse", "main")
+    assert repo.config("other", "stackBase") != repo.git("rev-parse", "main")
+
+
+def test_group_add_takes_a_stack_by_its_bottom_branch(repo: Repo, client: StackClient) -> None:
+    two_stacks(repo, client)
+    repo.git("switch", "--quiet", "feat-a")
+    client.branch("feat-a2")
+
+    client.group_add("feat")
+
+    assert repo.config("feat-a", "stackGroup") == "feat"
+    assert not repo.config_exists("feat-a2", "stackGroup")
+
+
+@pytest.mark.parametrize("name", ["", "has space", "glob*", "other"])
+def test_group_add_refuses_names_arguments_couldnt_name(repo: Repo, client: StackClient, name: str) -> None:
+    two_stacks(repo, client)
+
+    with pytest.raises(StackError, match="can't be a group name"):
+        client.group_add(name, ["feat-a"])
+
+
+def test_group_remove_takes_stacks_out_of_their_group(repo: Repo, client: StackClient) -> None:
+    two_stacks(repo, client)
+    client.group_add("feat", ["feat-*"])
+
+    assert client.group_remove(["feat-b", "other"]) == [("feat-b", "feat")]
+
+    assert client.show_stack("feat-a") == ["feat-a"]
+    assert repo.branch_info("feat-a").group is None
+
+
+def test_group_rename_renames_the_current_stacks_group(repo: Repo, client: StackClient) -> None:
+    two_stacks(repo, client)
+    client.group_add("feat", ["feat-*"])
+    repo.git("switch", "--quiet", "feat-b")
+
+    assert client.group_rename("features") == ("feat", ["feat-a", "feat-b"])
+
+    assert repo.config("feat-a", "stackGroup") == "features"
+    assert client.show_stack("feat-a") == ["feat-a", "feat-b"]
+
+
+def test_group_rename_refuses_to_merge_into_an_existing_group(repo: Repo, client: StackClient) -> None:
+    two_stacks(repo, client)
+    client.group_add("feat", ["feat-*"])
+    client.group_add("misc", ["other"])
+
+    with pytest.raises(
+        StackError, match="group misc already exists; to merge feat into it, run `git stack group add misc feat`"
+    ):
+        client.group_rename("misc", old="feat")
+
+
+def test_group_rename_refuses_stack_without_a_group(repo: Repo, client: StackClient) -> None:
+    two_stacks(repo, client)
+    repo.git("switch", "--quiet", "other")
+
+    with pytest.raises(StackError, match="other's stack isn't in a group"):
+        client.group_rename("misc")
+
+
+def test_unknown_argument_names_nothing(repo: Repo, client: StackClient) -> None:
+    two_stacks(repo, client)
+
+    with pytest.raises(StackError, match="nope isn't a tracked branch or a group"):
+        client.restack(["nope"])
+    with pytest.raises(StackError, match="nope-\\* matches no tracked branch"):
+        client.restack(["nope-*"])
+
+
+def test_restack_onto_refuses_branch_arguments(repo: Repo, client: StackClient) -> None:
+    two_stacks(repo, client)
+
+    with pytest.raises(StackError, match="--onto moves the current branch"):
+        client.restack(["feat-a"], onto="main")
+
+
+def test_sync_from_main_syncs_the_stacks_named(repo: Repo, client: StackClient) -> None:
+    make_siblings(repo, client)
+    repo.git("switch", "--quiet", "main")
+
+    client.sync(["b"])
+
+    repo.assert_untracked("a")
+    repo.assert_stacked("b", "main", ["b c1"])
+    repo.assert_stacked("c", "main", ["c c1"])
+    assert repo.git("branch", "--show-current") == "main"

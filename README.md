@@ -47,6 +47,7 @@ git stack sync                  # catch up: drop merged PRs, rebase what's left,
 | set up stacks from my open PRs (e.g. in a new clone) | `git stack autocreate` |
 | open draft PRs for my stack | `git stack push`, then `git stack prs` |
 | rename a branch in a stack | `git stack rename <new>` |
+| sync several stacks at once | `git stack group add <name> <branch-or-glob>...`, then `git stack sync <name>` |
 | clean up merged branches in every stack | `git stack clean` |
 | bring back a PR whose merge was reverted | `git stack unrevert <branch>` |
 | read all of this in the terminal | `git stack --help` |
@@ -144,6 +145,19 @@ main
   just a stack.
 - A branch leaves its group when it's untracked, so a group ends once its last
   branch is untracked.
+- [`git stack group`](#git-stack-group-add-name-branchgroupglob)
+  puts stacks in a group by hand, takes them out, or renames a group.
+
+`restack`, `sync` and `push` act on other stacks instead of the current one
+when you name them, from any branch: each argument can be a branch (its
+stack), a group (its stacks), or a glob of branch names, matched like
+`git branch --list` does (the stacks of the branches it matches). Quote a
+glob, so the shell doesn't expand it:
+
+```sh
+git stack sync pr2b                 # pr2b's stack
+git stack restack search 'fix-*'    # the search group, and every fix-* branch's stack
+```
 
 Like git, every command accepts `-C <path>` before it to run as if started in
 `<path>`, e.g. `git stack -C ~/src/app info`, and `git -C <path> stack ...`
@@ -426,9 +440,10 @@ git stack prev                  # to main
 
 - From the bottom of a stack, it switches to the stack's root (e.g. `main`).
 
-### `git stack restack [--onto <parent>] [--squash] [--latest]`
+### `git stack restack [<branch|group|glob>...] [--onto <parent>] [--squash] [--latest]`
 
-Rebase every branch in the current stack onto its parent, bottom-up, except
+Rebase every branch in the current stack (or the ones named, see
+[Groups](#groups)) onto its parent, bottom-up, except
 that a branch on the stack's root (e.g. `main`) only moves if it conflicts
 with the root's latest commit.
 
@@ -469,9 +484,10 @@ git stack restack --latest              # also move the stack onto main's latest
 - A branch checked out in another worktree is skipped, with a warning; see
   [Branches checked out in other worktrees](#branches-checked-out-in-other-worktrees).
 
-### `git stack sync [--remote origin] [-d local|remote|both] [--latest] [--no-push]`
+### `git stack sync [<branch|group|glob>...] [--remote origin] [-d local|remote|both] [--latest] [--no-push]`
 
-Bring the current stack up to date with the remote:
+Bring the current stack (or the ones named, see [Groups](#groups)) up to date
+with the remote:
 
 1. Fetch with `--prune`.
 2. Fast-forward the stack's root (e.g. `main`) to its upstream.
@@ -551,10 +567,10 @@ git stack clean -d local
 - Runs from any branch, even one that isn't in a stack. Needs a clean
   worktree.
 
-### `git stack push [<branch>] [--remote origin] [--force]`
+### `git stack push [<branch|group|glob>...] [--remote origin] [--force]`
 
-Force-push (with lease) every branch in the current stack, or in `<branch>`'s,
-and set each one's upstream.
+Force-push (with lease) every branch in the current stack (or the ones named,
+see [Groups](#groups)), and set each one's upstream.
 
 **When would I use it?** Whenever the remote should match your local branches:
 after committing, after a `restack`, and for a branch `sync` doesn't push
@@ -566,6 +582,7 @@ pull the old copies of your rebased commits back in.
 ```sh
 git stack push
 git stack push use-api          # push use-api's stack from anywhere
+git stack push 'search-*'       # the stacks of every search-* branch
 git stack push --force          # drop commits on the remote you didn't pull
 ```
 
@@ -589,6 +606,34 @@ git stack push --force          # drop commits on the remote you didn't pull
 - With the [GitHub adapter](#github), points each open pull request at its
   stack parent (e.g. at `main` once the parent PR was merged), and lists the
   branches that have none, which `git stack prs` opens.
+
+### `git stack group add <name> [<branch|group|glob>...]`
+
+Put stacks (default: the current one) in group `<name>`, so `restack`, `sync`,
+`push` and `prs` on one of them cover them all, and so you can name them all
+at once (see [Groups](#groups)). `git stack group remove` takes stacks out of
+their groups, and `git stack group rename [<old>] <new>` renames a group
+(default: the current stack's).
+
+**When would I use it?** When you work on several stacks together, e.g. a
+feature split across stacks that don't depend on each other, or to rename a
+group `sync` made after a merge.
+
+```sh
+git stack group add search 'search-*'   # the stacks of every search-* branch
+git stack sync search                   # from anywhere
+git stack group rename search find      # or, from one of its stacks, `group rename find`
+git stack group remove search-ui        # take search-ui's stack back out
+```
+
+- Each argument names stacks as for `sync` (a branch, a group or a glob), and
+  each stack goes in by its bottom branch, the one on its root. A stack
+  that's in another group leaves it.
+- A group name can't be a tracked branch's name, have spaces, or have `*`,
+  `?` or `[` in it, since an argument with those is a glob.
+- `rename` refuses a name another group has, so two groups aren't merged by
+  mistake. To merge them, run `git stack group add <name> <other group>`.
+- `info` shows a group once it has two or more stacks.
 
 ### `git stack prs [--remote origin] [-n]`
 

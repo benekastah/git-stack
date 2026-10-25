@@ -1,5 +1,5 @@
 import enum
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 
@@ -20,6 +20,7 @@ from git_stack.core import (
     MergedParent,
     Parents,
     StackCore,
+    ancestry,
     children_map,
     descendants,
     drop_from_stack,
@@ -324,6 +325,69 @@ class StackClient(StackCore):
                 f"{parent} isn't a local branch; branches can only be stacked on local "
                 f"branches (e.g. branch, not origin/branch)"
             )
+
+    def group_add(self, name: str, selectors: Sequence[str] = ()) -> list[str]:
+        """Put the stacks of the branches selectors name (see selected; default:
+        the current branch), each by its bottom branch, in the group name, out
+        of any group they were in. Returns those bottom branches."""
+        self.ensure_no_operation_in_progress()
+        self.settle_all()
+        parents = self.tracked_branches()
+        self.ensure_group_name(name, parents)
+        bottoms = self.selected_bottoms(selectors, parents, "group")
+        for bottom in bottoms:
+            self.git.config_set(bottom, GROUP_KEY, name)
+        return bottoms
+
+    def group_remove(self, selectors: Sequence[str] = ()) -> list[tuple[str, str]]:
+        """Take the stacks of the branches selectors name (see selected;
+        default: the current branch), each by its bottom branch, out of their
+        groups. Returns (bottom branch, its old group) for those that were in one."""
+        self.ensure_no_operation_in_progress()
+        self.settle_all()
+        parents = self.tracked_branches()
+        removed = []
+        for bottom in self.selected_bottoms(selectors, parents, "ungroup"):
+            if (group := self.git.config_get(bottom, GROUP_KEY)) is not None:
+                self.git.config_unset(bottom, GROUP_KEY)
+                removed.append((bottom, group))
+        return removed
+
+    def group_rename(self, new: str, old: str | None = None) -> tuple[str, list[str]]:
+        """Rename the group old (default: the current branch's stack's) to new.
+        Returns old and the branches that were in it. Refuses if a branch is in
+        new already, so groups aren't merged by mistake."""
+        self.ensure_no_operation_in_progress()
+        self.settle_all()
+        parents = self.tracked_branches()
+        if old is None:
+            current = self.current_stacked_branch(parents, "rename", hint="name the group to rename")
+            bottom = ancestry(current, parents)[-2]
+            old = self.git.config_get(bottom, GROUP_KEY)
+            if old is None:
+                raise StackError(f"{bottom}'s stack isn't in a group; name the group to rename")
+        self.ensure_group_name(new, parents)
+        groups = self.groups(parents)
+        if new in groups.values():
+            raise StackError(
+                f"group {new} already exists; to merge {old} into it, run `git stack group add {new} {old}`"
+            )
+        # Including branches no longer at the bottom of a stack, so the group
+        # they'd go back to if their parent merged is renamed too.
+        members = [b for b, g in groups.items() if g == old]
+        if not members:
+            raise StackError(f"there's no group {old}")
+        for branch in members:
+            self.git.config_set(branch, GROUP_KEY, new)
+        return old, members
+
+    def ensure_group_name(self, name: str, parents: Parents) -> None:
+        """Refuse a group name that a branch, group or glob argument (see
+        selected) couldn't name."""
+        if not name or any(c.isspace() or c in "*?[" for c in name):
+            raise StackError(f"{name!r} can't be a group name: it can't be empty, or have spaces or *, ? or [ in it")
+        if name in parents:
+            raise StackError(f"{name} is a tracked branch, so it can't be a group name too")
 
     def untrack(self, branches: Iterable[str] = ()) -> list[Untracked]:
         """Stop tracking branches (default: the current branch), leaving the
@@ -642,39 +706,51 @@ class StackClient(StackCore):
                 remaining.append(branch)
         return remaining
 
-    def restack(self, onto: str | None = None, squash: bool = False, latest: bool = False) -> None:
-        """Rebase every branch in the current stack that needs it onto its
-        parent, bottom-up (see needs_restack).
+    def restack(
+        self, selectors: Sequence[str] = (), onto: str | None = None, squash: bool = False, latest: bool = False
+    ) -> None:
+        """Rebase every branch that needs it onto its parent, bottom-up (see
+        needs_restack), in the current stack, or in the stacks of the branches
+        selectors name (see selected).
 
-        onto first retargets the current branch; squash first squashes each
-        branch into one commit; latest moves branches on the stack's root onto
-        its tip even if they don't conflict with it.
+        onto first retargets the current branch, so it can't be combined with
+        selectors; squash first squashes each branch into one commit; latest
+        moves branches on a stack's root onto its tip even if they don't
+        conflict with it.
         """
-        git = self.git
+        if onto and selectors:
+            raise StackError("--onto moves the current branch, so it can't be combined with branches to restack")
         self.ensure_no_operation_in_progress()
         self.ensure_clean_worktree()
         self.settle_all()
         parents = self.tracked_branches()
-        branch = self.current_stacked_branch(parents, "restack", hint="use `git stack track` first" if onto else None)
+        original = self.current_checkout()
         if onto:
+            branch = self.current_stacked_branch(parents, "restack", hint="use `git stack track` first")
             self.ensure_local_branch_parent(onto)
             ensure_no_cycle(branch, onto, parents)
             parents[branch] = onto
         adapter = make_adapter(self, DEFAULT_REMOTE, fetch=False)
-        branches = self.skip_merged(self.stack(branch, parents), parents, adapter)
+        branches = self.skip_merged(self.selected_stacks(selectors, parents, "restack"), parents, adapter)
         if squash:
             for b in branches:
                 self.squash_branch(b, parents[b])
-            if git.current_branch() != branch:
-                git.switch(branch)
+            self.restore_checkout(original)
         self.restack_all(branches, parents, latest)
+        self.restore_checkout(original)
 
     def sync(
-        self, remote: str = DEFAULT_REMOTE, delete: str | None = None, latest: bool = False, push: bool = True
+        self,
+        selectors: Sequence[str] = (),
+        remote: str = DEFAULT_REMOTE,
+        delete: str | None = None,
+        latest: bool = False,
+        push: bool = True,
     ) -> list[str]:
-        """Fetch, untrack the current stack's merged branches (deleting what
-        delete, "local", "remote" or "both", says), restack it (see restack for
-        latest), and pull in commits others pushed. Then, if push is set, push
+        """Fetch, untrack the merged branches in the current stack, or in the
+        stacks of the branches selectors name (see selected), deleting what
+        delete, "local", "remote" or "both", says, restack them (see restack
+        for latest), and pull in commits others pushed. Then, if push is set, push
         the branches that differ from the upstream they already have on remote.
         Branches with no such upstream are never pushed.
 
@@ -689,10 +765,10 @@ class StackClient(StackCore):
         self.ensure_clean_worktree()
         self.settle_all()
         parents = self.tracked_branches()
-        original = self.current_stacked_branch(parents, "sync")
+        stack = self.selected_stacks(selectors, parents, "sync")
+        original = self.current_checkout()
         adapter = self.checked_adapter(remote)
         self.fetch(remote)
-        stack = self.stack(original, parents)
         # A group's stacks can be on different roots.
         self.fast_forward_trunks(sorted({stack_root(b, parents) for b in stack}))
 
@@ -807,10 +883,11 @@ class StackClient(StackCore):
                 self.warn_if_merged_parent_reverted(branch, adapter)
         self.restore_checkout(original)
 
-    def push(self, branch: str | None = None, remote: str = DEFAULT_REMOTE, force: bool = False) -> list[str]:
-        """Force-push (with lease) every unmerged branch in branch's stack (default:
-        the current branch's), then let the adapter update their pull requests.
-        Returns the pushed branches, which is empty if every branch looks merged.
+    def push(self, selectors: Sequence[str] = (), remote: str = DEFAULT_REMOTE, force: bool = False) -> list[str]:
+        """Force-push (with lease) every unmerged branch in the current stack, or
+        in the stacks of the branches selectors name (see selected), then let
+        the adapter update their pull requests. Returns the pushed branches,
+        which is empty if every branch looks merged.
 
         Refuses if a remote branch has commits the local one doesn't, unless
         force is set. Either way, the push fails if a remote branch changed
@@ -819,12 +896,9 @@ class StackClient(StackCore):
         self.ensure_no_operation_in_progress()
         self.settle_all()
         parents = self.tracked_branches()
-        if branch is None:
-            branch = self.current_stacked_branch(parents, "push")
-        elif branch not in parents:
-            raise StackError(f"{branch} isn't in a stack")
+        stack = self.selected_stacks(selectors, parents, "push")
         adapter = self.checked_adapter(remote)
-        branches = self.skip_merged(self.stack(branch, parents), parents, adapter)
+        branches = self.skip_merged(stack, parents, adapter)
         return self.push_branches(branches, parents, adapter, remote, force)
 
     def push_branches(

@@ -1,6 +1,7 @@
+import fnmatch
 import os
 import tempfile
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from typing import TypeAlias
 
@@ -183,6 +184,50 @@ class StackCore:
     def stack(self, branch: str, parents: Parents) -> list[str]:
         """stack_of, with the branches' groups."""
         return stack_of(branch, parents, self.groups(parents))
+
+    def selected(self, selector: str, parents: Parents) -> list[str]:
+        """The tracked branches selector names: a branch, a group (its bottom
+        branches), or a glob (the branches it matches, as `git branch --list`
+        would). Fails if it names none."""
+        if selector in parents:
+            return [selector]
+        if any(c in selector for c in "*?["):
+            matches = [b for b in parents if fnmatch.fnmatchcase(b, selector)]
+            if not matches:
+                raise StackError(f"{selector} matches no tracked branch")
+            return matches
+        bottoms = [b for b, g in self.groups(parents).items() if g == selector and parents[b] not in parents]
+        if not bottoms:
+            raise StackError(f"{selector} isn't a tracked branch or a group")
+        return bottoms
+
+    def selected_stacks(self, selectors: Sequence[str], parents: Parents, command: str) -> list[str]:
+        """The branches in the stacks (see stack) of the branches selectors
+        name (see selected), or with none, in the current stack. Each stack is
+        parent-before-child."""
+        if not selectors:
+            return self.stack(self.current_stacked_branch(parents, command), parents)
+        result: list[str] = []
+        for selector in selectors:
+            for branch in self.selected(selector, parents):
+                # Stacks never overlap, so one with branch in it is already all there.
+                if branch not in result:
+                    result.extend(self.stack(branch, parents))
+        return result
+
+    def selected_bottoms(self, selectors: Sequence[str], parents: Parents, command: str) -> list[str]:
+        """The bottom branches (on a stack's root) of the branches selectors
+        name (see selected), or with none, of the current branch. Unlike
+        selected_stacks, a branch's group doesn't add the group's other stacks."""
+        if not selectors:
+            selectors = [self.current_stacked_branch(parents, command)]
+        bottoms: list[str] = []
+        for selector in selectors:
+            for branch in self.selected(selector, parents):
+                bottom = ancestry(branch, parents)[-2]
+                if bottom not in bottoms:
+                    bottoms.append(bottom)
+        return bottoms
 
     def current_stacked_branch(self, parents: Parents, command: str, hint: str | None = None) -> str:
         """Return the current branch, refusing unless it's in a stack.
