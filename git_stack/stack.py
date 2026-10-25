@@ -10,6 +10,7 @@ from git_stack.adapters.github import GitHubAdapter, OpenPullRequest
 from git_stack.adapters.merge_state import MergeState
 from git_stack.core import (
     BASE_KEY,
+    GROUP_KEY,
     MERGED_PARENT_KEY,
     MERGED_PARENT_REVERTED_CHECK_KEY,
     PARENT_KEY,
@@ -23,7 +24,7 @@ from git_stack.core import (
     descendants,
     drop_from_stack,
     ensure_no_cycle,
-    stack_of,
+    group_bottoms,
     stack_root,
 )
 from git_stack.errors import BrokenStackError, StackError
@@ -47,7 +48,9 @@ class BranchInfo:
     root (e.g. main), which isn't tracked. pull_request is None for a root and
     for a branch without a pull request the adapter knows of. reverted_parent
     is the branch it was stacked on until it merged, if that has since been
-    reverted (see GitAdapter.reverted_merged_parent)."""
+    reverted (see GitAdapter.reverted_merged_parent). group is the group of a
+    branch on a stack's root, if another branch on a stack's root (this one or
+    another) is in it too (see GROUP_KEY)."""
 
     name: str
     parent: str | None
@@ -55,6 +58,7 @@ class BranchInfo:
     current: bool
     pull_request: PullRequestLink | None = None
     reverted_parent: str | None = None
+    group: str | None = None
 
 
 @dataclass(frozen=True)
@@ -416,6 +420,10 @@ class StackClient(StackCore):
                 git.run("branch", "--quiet", branch, retrack.tip)
             git.config_set(branch, PARENT_KEY, parent)
             git.config_set(branch, BASE_KEY, retrack.base)
+        # So it stays in the group they were in, with the other stacks in it.
+        group = next((g for child, _ in orphans if (g := git.config_get(child, GROUP_KEY))), None)
+        if group and not git.config_get(branch, GROUP_KEY):
+            git.config_set(branch, GROUP_KEY, group)
         # They keep their bases, which the rebuilt branch has in its history, so
         # the next restack moves them onto it.
         for child, _ in orphans:
@@ -505,7 +513,7 @@ class StackClient(StackCore):
         """The branches in branch's (default: the current branch's) stack,
         parent-before-child."""
         parents = self.settled_branches()
-        return stack_of(self.stacked_branch(branch, parents), parents)
+        return self.stack(self.stacked_branch(branch, parents), parents)
 
     def next(self) -> str:
         """Switch to the branch stacked on the current one, and return it."""
@@ -574,6 +582,10 @@ class StackClient(StackCore):
             statuses = dict(zip(parents, pool.map(status, parents), strict=True))
             reverted_parents = dict(zip(parents, pool.map(adapter.reverted_merged_parent, parents), strict=True))
             prefetched.result()
+        groups = self.groups(parents)
+        shown_groups = {
+            b: g for b, g in groups.items() if parents[b] not in parents and len(group_bottoms(b, parents, groups)) > 1
+        }
         result = []
         for root in sorted({stack_root(b, parents) for b in parents}):
             result.append(BranchInfo(root, None, None, root == current))
@@ -585,6 +597,7 @@ class StackClient(StackCore):
                     b == current,
                     adapter.pull_request_link(b),
                     merged.name if (merged := reverted_parents[b]) else None,
+                    shown_groups.get(b),
                 )
                 for b in descendants(root, children)
             )
@@ -648,7 +661,7 @@ class StackClient(StackCore):
             ensure_no_cycle(branch, onto, parents)
             parents[branch] = onto
         adapter = make_adapter(self, DEFAULT_REMOTE, fetch=False)
-        branches = self.skip_merged(stack_of(branch, parents), parents, adapter)
+        branches = self.skip_merged(self.stack(branch, parents), parents, adapter)
         if squash:
             for b in branches:
                 self.squash_branch(b, parents[b])
@@ -679,13 +692,15 @@ class StackClient(StackCore):
         original = self.current_stacked_branch(parents, "sync")
         adapter = self.checked_adapter(remote)
         self.fetch(remote)
-        self.fast_forward_trunks([stack_root(original, parents)])
+        stack = self.stack(original, parents)
+        # A group's stacks can be on different roots.
+        self.fast_forward_trunks(sorted({stack_root(b, parents) for b in stack}))
 
         state = SyncState(original, parents, remote, delete, latest, push)
         # Parent-before-child, so by the time we reach a branch its parent is
         # final: merged branches have been removed (and their children reparented
         # in `parents`), and the rest have been restacked and pulled.
-        for branch in stack_of(original, parents):
+        for branch in stack:
             self.sync_branch(branch, adapter, state)
 
         self.restore_checkout(state.original)
@@ -809,7 +824,7 @@ class StackClient(StackCore):
         elif branch not in parents:
             raise StackError(f"{branch} isn't in a stack")
         adapter = self.checked_adapter(remote)
-        branches = self.skip_merged(stack_of(branch, parents), parents, adapter)
+        branches = self.skip_merged(self.stack(branch, parents), parents, adapter)
         return self.push_branches(branches, parents, adapter, remote, force)
 
     def push_branches(
@@ -910,8 +925,8 @@ class StackClient(StackCore):
                 f"isn't installed, or {ADAPTER_SETTING} is git"
             )
         adapter.ensure_available()
-        branches = self.skip_merged(stack_of(branch, parents), parents, adapter)
-        self.ensure_on_remote(branches, stack_root(branch, parents), remote)
+        branches = self.skip_merged(self.stack(branch, parents), parents, adapter)
+        self.ensure_on_remote(branches, sorted({stack_root(b, parents) for b in branches}), remote)
 
         prs = adapter.pull_requests()
         template = adapter.pull_request_template() or ""
@@ -942,16 +957,23 @@ class StackClient(StackCore):
                 ) from e
             steps.append(PullRequestStep(b, parent, PullRequestAction.OPEN, title=title, number=number, url=url))
         if branches and not dry_run:
-            try:
-                adapter.update_stack_sections(branches, parents)
-            except StackError as e:
-                raise StackError(f"updating the stack in pull request descriptions failed: {e}") from e
+            self.update_stack_sections(branches, parents, adapter)
         return steps
 
-    def ensure_on_remote(self, branches: list[str], root: str, remote: str) -> None:
+    def update_stack_sections(self, branches: list[str], parents: Parents, adapter: GitHubAdapter) -> None:
+        """Update the stack sections of branches' pull requests (see
+        GitHubAdapter.update_stack_sections), one for each root, since a
+        group's stacks can be on several."""
+        try:
+            for root in sorted({stack_root(b, parents) for b in branches}):
+                adapter.update_stack_sections([b for b in branches if stack_root(b, parents) == root], parents)
+        except StackError as e:
+            raise StackError(f"updating the stack in pull request descriptions failed: {e}") from e
+
+    def ensure_on_remote(self, branches: list[str], roots: list[str], remote: str) -> None:
         """Refuse unless each of branches was pushed with `git stack push` and
-        matches its remote branch, and their stack's root is on remote, so pull
-        requests can be opened for them that show what's local."""
+        matches its remote branch, and their stacks' roots are on remote, so
+        pull requests can be opened for them that show what's local."""
         git = self.git
         unpushed = [
             b
@@ -963,8 +985,9 @@ class StackClient(StackCore):
                 f"these branches aren't pushed, or differ from their remote branches: "
                 f"{', '.join(unpushed)}; run `git stack push` first"
             )
-        if git.rev(f"refs/remotes/{remote}/{root}") is None:
-            raise StackError(f"{root} isn't on {remote}, so pull requests can't merge into it")
+        for root in roots:
+            if git.rev(f"refs/remotes/{remote}/{root}") is None:
+                raise StackError(f"{root} isn't on {remote}, so pull requests can't merge into it")
 
 
 class AutocreatePlanner:

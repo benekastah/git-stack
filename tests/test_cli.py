@@ -354,6 +354,35 @@ def test_info_notes_a_reverted_merged_parent(stack: Any, capsys: pytest.CaptureF
     assert capsys.readouterr().out == "main\n└── pr2 (pr1 was reverted)\n"
 
 
+def test_info_draws_a_header_above_the_stacks_in_a_group(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
+    stack.info.return_value = [
+        BranchInfo("main", None, None, current=False),
+        BranchInfo("b", "main", BranchStatus.UP_TO_DATE, current=False, group="a"),
+        BranchInfo("b2", "b", BranchStatus.UP_TO_DATE, current=False),
+        BranchInfo("c", "main", BranchStatus.UP_TO_DATE, current=True, group="a"),
+        BranchInfo("solo", "main", BranchStatus.UP_TO_DATE, current=False),
+    ]
+
+    main(["info"], stack=stack)
+
+    assert capsys.readouterr().out == ("main\n├── group a\n│   ├── b\n│   │   └── b2\n│   └── c *\n└── solo\n")
+
+
+def test_info_draws_a_group_header_on_each_root_it_has_stacks_on(
+    stack: Any, capsys: pytest.CaptureFixture[str]
+) -> None:
+    stack.info.return_value = [
+        BranchInfo("main", None, None, current=False),
+        BranchInfo("b", "main", BranchStatus.UP_TO_DATE, current=False, group="a"),
+        BranchInfo("release", None, None, current=False),
+        BranchInfo("c", "release", BranchStatus.UP_TO_DATE, current=False, group="a"),
+    ]
+
+    main(["info"], stack=stack)
+
+    assert capsys.readouterr().out == ("main\n└── group a\n    └── b\nrelease\n└── group a\n    └── c\n")
+
+
 def test_info_json_lists_every_branch(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
     stack.info.return_value = [
         BranchInfo("main", None, None, current=False),
@@ -364,19 +393,29 @@ def test_info_json_lists_every_branch(stack: Any, capsys: pytest.CaptureFixture[
             current=True,
             pull_request=PullRequestLink(12, "https://github.com/acme/widgets/pull/12", PullRequestState.OPEN),
             reverted_parent="pr0",
+            group="pr0",
         ),
     ]
 
     main(["info", "--json"], stack=stack)
 
     assert json.loads(capsys.readouterr().out) == [
-        {"name": "main", "parent": None, "status": None, "current": False, "reverted_parent": None, "pr": None},
+        {
+            "name": "main",
+            "parent": None,
+            "status": None,
+            "current": False,
+            "reverted_parent": None,
+            "group": None,
+            "pr": None,
+        },
         {
             "name": "pr1",
             "parent": "main",
             "status": "needs-restack",
             "current": True,
             "reverted_parent": "pr0",
+            "group": "pr0",
             "pr": {"number": 12, "url": "https://github.com/acme/widgets/pull/12", "state": "open"},
         },
     ]

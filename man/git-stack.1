@@ -151,7 +151,11 @@ with \f[CR]git stack branch\f[R], or added it with
 replaying only the branch\(aqs own commits.
 .IP \(bu 2
 \f[B]the current stack\f[R]: the whole stack the branch you\(aqre on is
-part of, including branches beside yours, not just the ones above it.
+part of, including branches beside yours, not just the ones above it,
+and the other stacks in its group.
+.IP \(bu 2
+\f[B]group\f[R]: stacks that were one stack until the branch at their
+bottom merged (see Groups).
 .SH THE PROBLEM
 PR 2 is built on PR 1\(aqs branch.
 PR 1 is squash\-merged into \f[CR]main\f[R].
@@ -199,6 +203,39 @@ main
     │   └── pr3
     └── pr2b *
 .EE
+.SS Groups
+When a branch on \f[CR]main\f[R] merges, the branches stacked on it each
+become the bottom of a stack of their own.
+So that commands still treat them as one, as before the merge,
+\f[CR]sync\f[R] and \f[CR]clean\f[R] put them in a group, named after
+the merged branch.
+Here, \f[CR]restack\f[R] from \f[CR]pr2b\f[R] still restacks
+\f[CR]pr2a\f[R], \f[CR]pr2b\f[R] and \f[CR]pr3\f[R] after \f[CR]pr1\f[R]
+merges:
+.IP
+.EX
+main
+└── group pr1
+    ├── pr2a
+    │   └── pr3
+    └── pr2b *
+.EE
+.IP \(bu 2
+A group\(aqs stacks stay in it however many of their branches merge
+later; their children join it too.
+.IP \(bu 2
+A group can span roots, e.g.
+if you \f[CR]restack \-\-onto release\f[R] one of its stacks.
+Commands on it then cover every root it\(aqs on: \f[CR]sync\f[R]
+fast\-forwards each, and \f[CR]prs\f[R] gives each root\(aqs pull
+requests their own stack section.
+.IP \(bu 2
+\f[CR]info\f[R] only shows a group once it has two or more stacks, with
+\f[CR]group <name>\f[R] above its stacks on each root they\(aqre on.
+A group of one is just a stack.
+.IP \(bu 2
+A branch leaves its group when it\(aqs untracked, so a group ends once
+its last branch is untracked.
 .PP
 Like git, every command accepts \f[CR]\-C <path>\f[R] before it to run
 as if started in \f[CR]<path>\f[R], e.g.
@@ -437,6 +474,9 @@ A merged branch was reverted).
 \f[CR](parent <name> missing)\f[R]: its parent branch was deleted by
 hand; fix it with \f[CR]git stack track <parent>\f[R].
 .IP \(bu 2
+\f[CR]group <name>\f[R]: the stacks below it are in the group
+\f[CR]<name>\f[R] (see Groups).
+.IP \(bu 2
 \f[CR](<name> was reverted)\f[R]: it was stacked on \f[CR]<name>\f[R]
 until that merged, and its parent has since reverted some of
 \f[CR]<name>\f[R]\(aqs changes, so its pull request is missing them.
@@ -471,6 +511,9 @@ and \f[CR]status\f[R] is one of \f[CR]up\-to\-date\f[R],
 \f[CR]parent\-missing\f[R].
 \f[CR]reverted_parent\f[R] is the \f[CR]<name>\f[R] of
 \f[CR](<name> was reverted)\f[R], or \f[CR]null\f[R].
+\f[CR]group\f[R] is the group of a branch on a stack\(aqs root, when
+\f[CR]info\f[R] shows it (once the group has two or more stacks), or
+\f[CR]null\f[R].
 \f[CR]pr\f[R] is the branch\(aqs pull request\(aqs \f[CR]number\f[R],
 \f[CR]url\f[R] and \f[CR]state\f[R] (\f[CR]open\f[R], \f[CR]draft\f[R]
 or \f[CR]merged\f[R]), or \f[CR]null\f[R] if it has none (or for a root,
@@ -1076,6 +1119,10 @@ leaving it alone means its CI doesn\(aqt rerun and its reviews aren\(aqt
 dismissed just because \f[CR]main\f[R] moved on.
 Branches stacked on other branches are restacked whenever their parent
 changes, since they need its new commits.
+.PP
+When a merged branch on a stack\(aqs root stops being tracked, each
+branch that was stacked on it gets its group (or its name) in
+\f[CR]branch.<name>.stackGroup\f[R].
 .PP
 When a merged branch stops being tracked, each branch that was stacked
 on it records what it was, in

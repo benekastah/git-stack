@@ -64,7 +64,10 @@ git stack sync                  # catch up: drop merged PRs, rebase what's left,
 - **restack**: rebase a branch onto its parent's latest commit, replaying only
   the branch's own commits.
 - **the current stack**: the whole stack the branch you're on is part of,
-  including branches beside yours, not just the ones above it.
+  including branches beside yours, not just the ones above it, and the other
+  stacks in its group.
+- **group**: stacks that were one stack until the branch at their bottom
+  merged (see [Groups](#groups)).
 
 ## The problem
 
@@ -114,6 +117,33 @@ main
     │   └── pr3
     └── pr2b *
 ```
+
+### Groups
+
+When a branch on `main` merges, the branches stacked on it each become the
+bottom of a stack of their own. So that commands still treat them as one, as
+before the merge, `sync` and `clean` put them in a group, named after the
+merged branch. Here, `restack` from `pr2b` still restacks `pr2a`, `pr2b` and
+`pr3` after `pr1` merges:
+
+```
+main
+└── group pr1
+    ├── pr2a
+    │   └── pr3
+    └── pr2b *
+```
+
+- A group's stacks stay in it however many of their branches merge later;
+  their children join it too.
+- A group can span roots, e.g. if you `restack --onto release` one of its
+  stacks. Commands on it then cover every root it's on: `sync` fast-forwards
+  each, and `prs` gives each root's pull requests their own stack section.
+- `info` only shows a group once it has two or more stacks, with
+  `group <name>` above its stacks on each root they're on. A group of one is
+  just a stack.
+- A branch leaves its group when it's untracked, so a group ends once its last
+  branch is untracked.
 
 Like git, every command accepts `-C <path>` before it to run as if started in
 `<path>`, e.g. `git stack -C ~/src/app info`, and `git -C <path> stack ...`
@@ -304,6 +334,8 @@ git stack info
   [A merged branch was reverted](#a-merged-branch-was-reverted)).
 - `(parent <name> missing)`: its parent branch was deleted by hand; fix it
   with `git stack track <parent>`.
+- `group <name>`: the stacks below it are in the group `<name>` (see
+  [Groups](#groups)).
 - `(<name> was reverted)`: it was stacked on `<name>` until that merged, and
   its parent has since reverted some of `<name>`'s changes, so its pull
   request is missing them. `sync` and `clean` say so too (see
@@ -325,6 +357,8 @@ git stack info
   `needs-restack`, `merged`, `merged-with-new-commits`, `reverted` or
   `parent-missing`.
   `reverted_parent` is the `<name>` of `(<name> was reverted)`, or `null`.
+  `group` is the group of a branch on a stack's root, when `info` shows it
+  (once the group has two or more stacks), or `null`.
   `pr` is the branch's pull request's `number`, `url` and `state` (`open`,
   `draft` or `merged`), or `null` if it has none (or for a root, or without
   the GitHub adapter).
@@ -821,6 +855,9 @@ changes either way, and leaving it alone means its CI doesn't rerun and its
 reviews aren't dismissed just because `main` moved on. Branches stacked on
 other branches are restacked whenever their parent changes, since they need
 its new commits.
+
+When a merged branch on a stack's root stops being tracked, each branch that
+was stacked on it gets its group (or its name) in `branch.<name>.stackGroup`.
 
 When a merged branch stops being tracked, each branch that was stacked on it
 records what it was, in `branch.<name>.stackMergedParent`: its name, the

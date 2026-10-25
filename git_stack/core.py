@@ -39,9 +39,17 @@ REVERTED_CHECK_KEY = "stackRevertedCheck"
 # reverted.
 MERGED_PARENT_KEY = "stackMergedParent"
 MERGED_PARENT_REVERTED_CHECK_KEY = "stackMergedParentRevertedCheck"
+# The group of stacks the branch's stack is in. When a branch stacked on a
+# stack's root (e.g. main) merges, the branches stacked on it become the
+# bottoms of stacks of their own, and get its group (or, if it had none, its
+# name), so commands on one of them still cover the others, as they did before
+# it merged.
+GROUP_KEY = "stackGroup"
 
 # {branch: the branch it is stacked on}
 Parents: TypeAlias = dict[str, str]
+# {branch: its group}, for branches that have one
+Groups: TypeAlias = dict[str, str]
 
 
 @dataclass(frozen=True)
@@ -109,12 +117,26 @@ def ensure_no_cycle(branch: str, new_parent: str, parents: Parents) -> None:
         raise StackError(f"{new_parent} is stacked on {branch}; that would create a cycle")
 
 
-def stack_of(branch: str, parents: Parents) -> list[str]:
+def stack_of(branch: str, parents: Parents, groups: Groups | None = None) -> list[str]:
     """Tracked branches in the stack containing tracked branch, parent-before-child:
     everything stacked on its bottom-most tracked ancestor, and that ancestor.
+    With groups, also the stacks of the other bottom branches in that
+    ancestor's group (see group_bottoms), which may be on other roots.
     """
-    bottom = ancestry(branch, parents)[-2]
-    return [bottom, *descendants(bottom, children_map(parents))]
+    chain = ancestry(branch, parents)
+    bottoms = group_bottoms(chain[-2], parents, groups or {})
+    children = children_map(parents)
+    return [b for bottom in bottoms for b in (bottom, *descendants(bottom, children))]
+
+
+def group_bottoms(bottom: str, parents: Parents, groups: Groups) -> list[str]:
+    """bottom, a branch on a stack's root, followed by the other branches on a
+    stack's root in its group, if it has one."""
+    group = groups.get(bottom)
+    if group is None:
+        return [bottom]
+    others = (b for b, g in groups.items() if g == group and b != bottom and b in parents and parents[b] not in parents)
+    return [bottom, *sorted(others)]
 
 
 def drop_from_stack(branch: str, parents: Parents) -> list[str]:
@@ -153,6 +175,14 @@ class StackCore:
             for (branch, key), parent in self.git.branch_config().items()
             if key == PARENT_KEY.lower() and branch in existing
         }
+
+    def groups(self, parents: Parents) -> Groups:
+        """The group of each branch in parents that has one (see GROUP_KEY)."""
+        return {b: group for b in parents if (group := self.git.config_get(b, GROUP_KEY))}
+
+    def stack(self, branch: str, parents: Parents) -> list[str]:
+        """stack_of, with the branches' groups."""
+        return stack_of(branch, parents, self.groups(parents))
 
     def current_stacked_branch(self, parents: Parents, command: str, hint: str | None = None) -> str:
         """Return the current branch, refusing unless it's in a stack.
@@ -515,6 +545,7 @@ class StackCore:
             REVERTED_CHECK_KEY,
             MERGED_PARENT_KEY,
             MERGED_PARENT_REVERTED_CHECK_KEY,
+            GROUP_KEY,
         ):
             self.git.config_unset(branch, key)
 
@@ -525,8 +556,9 @@ class StackCore:
 
     def remove_merged(self, branch: str, parents: Parents, delete: bool, merges: tuple[str, ...] = ()) -> None:
         """Move branch's children onto its parent, recording branch on each as
-        their MergedParent (with merges, see GitAdapter.landing_merges), then
-        stop tracking branch.
+        their MergedParent (with merges, see GitAdapter.landing_merges), and,
+        if that's a stack's root, putting them in branch's group (see
+        GROUP_KEY). Then stop tracking branch.
 
         If delete is set, the branch itself is deleted too, unless it's checked
         out in another worktree. If it was checked out here, its first child (or
@@ -537,11 +569,14 @@ class StackCore:
         new_parent = parents[branch]
         base = git.config_get(branch, BASE_KEY)
         merged = MergedParent(branch, new_parent, base, git.tip(branch), merges) if base else None
+        group = git.config_get(branch, GROUP_KEY) or branch
         children = tuple(drop_from_stack(branch, parents))
         for child in children:
             git.config_set(child, PARENT_KEY, new_parent)
             if merged is not None:
                 git.config_set(child, MERGED_PARENT_KEY, str(merged))
+            if new_parent not in parents:
+                git.config_set(child, GROUP_KEY, group)
         if delete and (worktree := git.other_worktree_of(branch)) is not None:
             self.emit(events.NotDeletedInOtherWorktree(branch, worktree))
             delete = False

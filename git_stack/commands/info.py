@@ -3,6 +3,7 @@ import json
 import os
 import sys
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import TypeAlias
 
 from git_stack.adapters.git import PullRequestState
@@ -88,7 +89,17 @@ def painter(color: bool) -> Paint:
     return lambda text, code: f"\033[{code}m{text}\033[m" if color and text else text
 
 
-def label(branch: BranchInfo, paint: Paint) -> str:
+@dataclass(frozen=True)
+class GroupHeader:
+    """The line info draws above the stacks in a group, on their root."""
+
+    group: str
+    root: str
+
+
+def label(branch: BranchInfo | GroupHeader, paint: Paint) -> str:
+    if isinstance(branch, GroupHeader):
+        return paint(f"group {branch.group}", ROOT)
     if branch.parent is None:
         parts = [paint(branch.name, ROOT)]
     elif branch.current:
@@ -126,6 +137,7 @@ def print_json(branches: list[BranchInfo]) -> None:
                     "status": b.status.value if b.status else None,
                     "current": b.current,
                     "reverted_parent": b.reverted_parent,
+                    "group": b.group,
                     "pr": {
                         "number": b.pull_request.number,
                         "url": b.pull_request.url,
@@ -141,21 +153,36 @@ def print_json(branches: list[BranchInfo]) -> None:
     )
 
 
+def tree_children(branches: list[BranchInfo]) -> dict[str | GroupHeader, list[BranchInfo | GroupHeader]]:
+    """What print_tree draws under each branch (by name) and group header."""
+    children: dict[str | GroupHeader, list[BranchInfo | GroupHeader]] = {}
+    for branch in branches:
+        if branch.parent is None:
+            continue
+        # The stacks in a group go under a header for it, where the first of
+        # them would be.
+        if branch.group is not None:
+            header = GroupHeader(branch.group, branch.parent)
+            if header not in children:
+                children.setdefault(branch.parent, []).append(header)
+            children.setdefault(header, []).append(branch)
+        else:
+            children.setdefault(branch.parent, []).append(branch)
+    return children
+
+
 def print_tree(stack: StackClient, branches: list[BranchInfo]) -> None:
     """Print branches, which isn't empty, as a tree for each stack, with each
     branch's pull request linked at the end of its line."""
     paint = painter(use_color(stack))
     flip = root_at_bottom(stack)
-    children: dict[str, list[BranchInfo]] = {}
-    for branch in branches:
-        if branch.parent is not None:
-            children.setdefault(branch.parent, []).append(branch)
+    children = tree_children(branches)
 
     # (the tree drawn before branch, branch), in the order they're printed.
-    rows: list[tuple[str, BranchInfo]] = []
+    rows: list[tuple[str, BranchInfo | GroupHeader]] = []
 
-    def add(branch: BranchInfo, prefix: str, drawn: list[tuple[str, BranchInfo]]) -> None:
-        kids = children.get(branch.name, [])
+    def add(branch: BranchInfo | GroupHeader, prefix: str, drawn: list[tuple[str, BranchInfo | GroupHeader]]) -> None:
+        kids = children.get(branch if isinstance(branch, GroupHeader) else branch.name, [])
         for i, kid in enumerate(kids):
             last = i == len(kids) - 1
             drawn.append((f"{prefix}{('┌── ' if flip else '└── ') if last else '├── '}", kid))
@@ -163,16 +190,17 @@ def print_tree(stack: StackClient, branches: list[BranchInfo]) -> None:
 
     for branch in branches:
         if branch.parent is None:
-            drawn = [("", branch)]
+            drawn: list[tuple[str, BranchInfo | GroupHeader]] = [("", branch)]
             add(branch, "", drawn)
             # Upside down, the tree reads the same, mirrored.
             rows.extend(reversed(drawn) if flip else drawn)
     # Pull request links go in a right-aligned column after the longest line.
-    widths = [len(tree) + len(label(branch, painter(False))) for tree, branch in rows]
-    link_width = max(len(branch.pull_request.url) if branch.pull_request else 0 for _, branch in rows)
-    for (tree, branch), width in zip(rows, widths, strict=True):
-        line = paint(tree, TREE) + label(branch, paint)
-        if branch.pull_request:
-            link = branch.pull_request.url.rjust(link_width)
-            line += " " * (max(widths) - width + 2) + paint(link, LINK_COLORS[branch.pull_request.state])
+    widths = [len(tree) + len(label(row, painter(False))) for tree, row in rows]
+    links = [row.pull_request if isinstance(row, BranchInfo) else None for _, row in rows]
+    link_width = max(len(link.url) if link else 0 for link in links)
+    for (tree, row), width, pull_request in zip(rows, widths, links, strict=True):
+        line = paint(tree, TREE) + label(row, paint)
+        if pull_request:
+            link = pull_request.url.rjust(link_width)
+            line += " " * (max(widths) - width + 2) + paint(link, LINK_COLORS[pull_request.state])
         print(line)
