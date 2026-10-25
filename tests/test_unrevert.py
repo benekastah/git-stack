@@ -2,6 +2,7 @@
 
 import pytest
 
+from git_stack import events
 from git_stack.errors import StackError
 from git_stack.stack import BranchStatus, PullRequestAction, StackClient
 from tests.helpers import FakeGitHub, Repo
@@ -129,3 +130,137 @@ def test_unrevert_stopped_on_conflict_can_be_undone(repo: Repo, client: StackCli
 
     assert repo.config("pr1", "stackBase") == old_base
     assert repo.branch_info("pr1").status is BranchStatus.REVERTED
+
+
+def merge_sync_revert(
+    repo: Repo, client: StackClient, *, delete: str | None = None, merge_commit: bool = False
+) -> None:
+    """Merge pr1, sync from pr2 (untracking pr1 and moving pr2 onto main), then
+    revert pr1's merge on main and sync again."""
+    repo.make_stack()
+    client.push()
+    if merge_commit:
+        repo.merge_on_forge("pr1")
+    else:
+        repo.squash_merge_on_forge("pr1")
+    repo.git("switch", "--quiet", "pr2")
+    client.sync(delete=delete)
+    repo.revert_on_forge(*(("-m", "1") if merge_commit else ()), "HEAD")
+    client.sync()
+
+
+def test_sync_records_merged_parent_on_its_children(repo: Repo, client: StackClient) -> None:
+    repo.make_stack()
+    client.push()
+    base, tip = repo.config("pr1", "stackBase"), repo.git("rev-parse", "pr1")
+    repo.squash_merge_on_forge("pr1")
+    repo.git("switch", "--quiet", "pr2")
+
+    client.sync()
+
+    assert repo.config("pr2", "stackMergedParent") == f"pr1 main {base} {tip}"
+    assert not repo.config_exists("pr3", "stackMergedParent")
+
+
+def test_sync_and_info_say_when_a_merged_parent_was_reverted(
+    repo: Repo, client: StackClient, emitted: list[events.Event]
+) -> None:
+    merge_sync_revert(repo, client)
+
+    assert events.MergedParentReverted("pr2", "pr1", "main") in emitted
+    assert repo.branch_info("pr2").reverted_parent == "pr1"
+    assert repo.branch_info("pr3").reverted_parent is None
+    # pr2 is still synced: only its pull request is missing pr1's changes.
+    assert repo.config("pr2", "stackParent") == "main"
+
+
+@pytest.mark.parametrize("delete", [None, "local"], ids=["kept", "deleted"])
+def test_unrevert_recreates_untracked_branch_and_moves_its_children_back(
+    repo: Repo, client: StackClient, delete: str | None
+) -> None:
+    merge_sync_revert(repo, client, delete=delete)
+    assert bool(repo.git("branch", "--list", "pr1")) == (delete is None)
+
+    unreverted = client.unrevert("pr1")
+
+    assert unreverted.children == ("pr2",)
+    assert repo.config("pr1", "stackParent") == "main"
+    assert repo.config("pr1", "stackBase") == repo.git("rev-parse", "main")
+    assert repo.git("show", "pr1:a") == "pr1 second"
+    assert repo.config("pr2", "stackParent") == "pr1"
+    assert not repo.config_exists("pr2", "stackMergedParent")
+    client.restack()
+    repo.assert_stacked("pr2", "pr1", ["pr2 c1"])
+    repo.assert_stacked("pr3", "pr2", ["pr3 c1"])
+
+
+def test_unrevert_recreates_untracked_branch_merged_with_a_merge_commit(repo: Repo, client: StackClient) -> None:
+    merge_sync_revert(repo, client, merge_commit=True)
+
+    client.unrevert("pr1")
+
+    assert repo.git("show", "pr1:a") == "pr1 second"
+    assert repo.config("pr2", "stackParent") == "pr1"
+
+
+def test_unrevert_recreates_deleted_branch_whose_pull_request_merge_was_tweaked(
+    repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event]
+) -> None:
+    repo.make_stack()
+    merge_pr1_on_forge_with_a_tweak(repo, gh)
+    repo.git("switch", "--quiet", "pr2")
+    client.sync(delete="local")
+    repo.revert_on_forge("HEAD")
+    client.sync()
+    assert events.MergedParentReverted("pr2", "pr1", "main") in emitted
+
+    client.unrevert("pr1")
+
+    assert repo.git("show", "pr1:a") == "tweaked by the maintainer"
+    assert repo.config("pr2", "stackParent") == "pr1"
+
+
+def test_unrevert_leaves_untracked_branch_alone_if_it_changed(repo: Repo, client: StackClient) -> None:
+    merge_sync_revert(repo, client)
+    repo.git("switch", "--quiet", "pr1")
+    repo.commit("c", "later\n", "pr1 later")
+    pr1 = repo.git("rev-parse", "pr1")
+
+    with pytest.raises(StackError, match="pr1 has changed since it merged"):
+        client.unrevert("pr1")
+
+    assert repo.git("rev-parse", "pr1") == pr1
+    assert not repo.config_exists("pr1", "stackParent")
+    assert repo.config("pr2", "stackParent") == "main"
+
+
+def test_unrevert_refuses_untracked_branch_whose_commits_are_gone(repo: Repo, client: StackClient) -> None:
+    merge_sync_revert(repo, client, delete="local")
+    recorded = repo.config("pr2", "stackMergedParent").split()
+    recorded[3] = "0123456789abcdef0123456789abcdef01234567"
+    repo.git("config", "branch.pr2.stackMergedParent", " ".join(recorded))
+
+    with pytest.raises(StackError, match="pr1's commits are no longer in the repository"):
+        client.unrevert("pr1")
+
+    assert not repo.git("branch", "--list", "pr1")
+
+
+def test_unrevert_refuses_untracked_branch_that_isnt_reverted(repo: Repo, client: StackClient) -> None:
+    repo.make_stack()
+    client.push()
+    repo.squash_merge_on_forge("pr1")
+    repo.git("switch", "--quiet", "pr2")
+    client.sync()
+
+    with pytest.raises(StackError, match="pr1 doesn't look reverted in main"):
+        client.unrevert("pr1")
+
+    assert not repo.config_exists("pr1", "stackParent")
+
+
+def test_unrevert_refuses_branch_nothing_was_stacked_on(repo: Repo, client: StackClient) -> None:
+    repo.git("branch", "loose")
+
+    with pytest.raises(StackError, match="loose isn't in a stack, and no branch in one was stacked on it"):
+        client.unrevert("loose")

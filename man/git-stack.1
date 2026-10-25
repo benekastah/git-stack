@@ -437,6 +437,12 @@ A merged branch was reverted).
 \f[CR](parent <name> missing)\f[R]: its parent branch was deleted by
 hand; fix it with \f[CR]git stack track <parent>\f[R].
 .IP \(bu 2
+\f[CR](<name> was reverted)\f[R]: it was stacked on \f[CR]<name>\f[R]
+until that merged, and its parent has since reverted some of
+\f[CR]<name>\f[R]\(aqs changes, so its pull request is missing them.
+\f[CR]sync\f[R] and \f[CR]clean\f[R] say so too (see A merged branch was
+reverted).
+.IP \(bu 2
 With the GitHub adapter, each branch\(aqs pull request (open or merged)
 is linked in a column at the end of its line: blue if it\(aqs open, grey
 if it\(aqs a draft, and magenta if it was merged.
@@ -463,6 +469,8 @@ and \f[CR]status\f[R] is one of \f[CR]up\-to\-date\f[R],
 \f[CR]needs\-restack\f[R], \f[CR]merged\f[R],
 \f[CR]merged\-with\-new\-commits\f[R], \f[CR]reverted\f[R] or
 \f[CR]parent\-missing\f[R].
+\f[CR]reverted_parent\f[R] is the \f[CR]<name>\f[R] of
+\f[CR](<name> was reverted)\f[R], or \f[CR]null\f[R].
 \f[CR]pr\f[R] is the branch\(aqs pull request\(aqs \f[CR]number\f[R],
 \f[CR]url\f[R] and \f[CR]state\f[R] (\f[CR]open\f[R], \f[CR]draft\f[R]
 or \f[CR]merged\f[R]), or \f[CR]null\f[R] if it has none (or for a root,
@@ -826,10 +834,12 @@ Needs the GitHub adapter.
 open, with their titles, without opening them.
 .SS \f[CR]git stack unrevert [<branch>] [\-\-remote origin]\f[R]
 Rebuild a branch (default: the current one) whose merge into its parent
-was reverted, as commits on its parent\(aqs tip that revert the reverts.
+was reverted, as commits on its parent\(aqs tip that revert the reverts,
+and move the branches that were stacked on it back onto it.
 .PP
 \f[B]When would I use it?\f[R] When \f[CR]info\f[R] shows a branch as
-\f[CR](merged, then reverted)\f[R] and you want to bring its changes
+\f[CR](merged, then reverted)\f[R], or a branch that was stacked on it
+as \f[CR](<branch> was reverted)\f[R], and you want to bring its changes
 back, e.g.
 to fix whatever got it reverted and merge it again.
 .IP
@@ -850,8 +860,21 @@ The branch\(aqs old commits are dropped, since its parent already has
 them (or a squash of them) in its history.
 Its new base is its parent\(aqs tip.
 .IP \(bu 2
-Branches stacked on it stay stacked on it; \f[CR]restack\f[R] or
-\f[CR]sync\f[R] moves them onto its new commits.
+It works whether or not \f[CR]sync\f[R] or \f[CR]clean\f[R] already
+stopped tracking it, and even if they deleted it, as long as a branch
+stacked on it is still tracked: that branch recorded what it was when it
+merged.
+If it still exists, it\(aqs tracked again, unless it changed since it
+merged, in which case it\(aqs left alone (rename it to have it recreated
+instead).
+If it was deleted, it\(aqs recreated.
+Once its commits are garbage\-collected (by default, two weeks after it
+was deleted, if nothing else has them), it can\(aqt be.
+.IP \(bu 2
+The branches that were stacked on it are moved back onto it, which
+changes their pull requests\(aq bases the next time you push.
+Like the ones still stacked on it, \f[CR]restack\f[R] or \f[CR]sync\f[R]
+moves them onto its new commits.
 .IP \(bu 2
 Its merged pull request can\(aqt be reopened, and no longer counts as
 the branch\(aqs.
@@ -1007,12 +1030,19 @@ it, or some of its commits), \f[CR]info\f[R] shows it as
 \f[CR](merged, then reverted)\f[R], and \f[CR]sync\f[R],
 \f[CR]clean\f[R], \f[CR]restack\f[R], \f[CR]push\f[R] and \f[CR]prs\f[R]
 leave it, and the branches stacked on it, alone.
-To bring its changes back, rebuild it on \f[CR]main\f[R] with
-\f[CR]unrevert\f[R], which reverts the reverts, then restack its
+.PP
+If \f[CR]sync\f[R] or \f[CR]clean\f[R] had already stopped tracking
+\f[CR]pr1\f[R] (and moved \f[CR]pr2\f[R] onto \f[CR]main\f[R]) by the
+time it was reverted, \f[CR]info\f[R] shows \f[CR]pr2\f[R] as
+\f[CR](pr1 was reverted)\f[R], and \f[CR]sync\f[R] and \f[CR]clean\f[R]
+warn about it.
+.PP
+Either way, to bring its changes back, rebuild it on \f[CR]main\f[R]
+with \f[CR]unrevert\f[R], which reverts the reverts, then restack its
 children onto it and open a new pull request:
 .IP
 .EX
-git stack unrevert pr1
+git stack unrevert pr1             \f[I]# moves pr2 back onto it, if it had moved\f[R]
 git stack restack                  \f[I]# move pr2 onto the new pr1\f[R]
 git stack push
 git stack prs                      \f[I]# open a new one for pr1\f[R]
@@ -1021,6 +1051,8 @@ git stack prs                      \f[I]# open a new one for pr1\f[R]
 To drop it instead, move \f[CR]pr2\f[R] onto \f[CR]main\f[R] (from
 \f[CR]pr2\f[R], \f[CR]git stack restack \-\-onto main\f[R]), then stop
 tracking it with \f[CR]git stack untrack pr1\f[R].
+If it was already untracked, stop the warning about it with
+\f[CR]git config \-\-unset branch.pr2.stackMergedParent\f[R].
 .SH HOW IT WORKS
 When a branch is created (or tracked), git\-stack records its parent
 branch and the exact parent commit it was built on:
@@ -1045,14 +1077,26 @@ dismissed just because \f[CR]main\f[R] moved on.
 Branches stacked on other branches are restacked whenever their parent
 changes, since they need its new commits.
 .PP
-Checking whether a branch conflicts with its parent, and whether its
-changes already landed there, can take a second or more for a branch far
-behind \f[CR]main\f[R] in a big repository.
+When a merged branch stops being tracked, each branch that was stacked
+on it records what it was, in
+\f[CR]branch.<name>.stackMergedParent\f[R]: its name, the parent it
+merged into, its base and tip, and (with the GitHub adapter) its pull
+request\(aqs merge commit.
+That\(aqs how a later revert of it is noticed, and how
+\f[CR]unrevert\f[R] can bring it back even once it\(aqs untracked or
+deleted.
+.PP
+Checking whether a branch conflicts with its parent, whether its changes
+already landed there, and whether they were reverted since, can take a
+second or more for a branch far behind \f[CR]main\f[R] in a big
+repository.
 Since the answers only depend on the commits involved, git\-stack
 remembers the last ones, with those commits, in
-\f[CR]branch.<name>.stackConflictCheck\f[R] and
-\f[CR]branch.<name>.stackLandedCheck\f[R], and only checks again once
-one of them changes.
+\f[CR]branch.<name>.stackConflictCheck\f[R],
+\f[CR]branch.<name>.stackLandedCheck\f[R],
+\f[CR]branch.<name>.stackRevertedCheck\f[R] and
+\f[CR]branch.<name>.stackMergedParentRevertedCheck\f[R], and only checks
+again once one of them changes.
 .SH GITHUB
 If your repository is on github.com and \c
 .UR https://cli.github.com

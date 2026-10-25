@@ -304,6 +304,10 @@ git stack info
   [A merged branch was reverted](#a-merged-branch-was-reverted)).
 - `(parent <name> missing)`: its parent branch was deleted by hand; fix it
   with `git stack track <parent>`.
+- `(<name> was reverted)`: it was stacked on `<name>` until that merged, and
+  its parent has since reverted some of `<name>`'s changes, so its pull
+  request is missing them. `sync` and `clean` say so too (see
+  [A merged branch was reverted](#a-merged-branch-was-reverted)).
 - With the [GitHub adapter](#github), each branch's pull request (open or
   merged) is linked in a column at the end of its line: blue if it's open,
   grey if it's a draft, and magenta if it was merged.
@@ -320,6 +324,7 @@ git stack info
   `status` are `null` for a root, and `status` is one of `up-to-date`,
   `needs-restack`, `merged`, `merged-with-new-commits`, `reverted` or
   `parent-missing`.
+  `reverted_parent` is the `<name>` of `(<name> was reverted)`, or `null`.
   `pr` is the branch's pull request's `number`, `url` and `state` (`open`,
   `draft` or `merged`), or `null` if it has none (or for a root, or without
   the GitHub adapter).
@@ -611,10 +616,12 @@ git stack prs
 ### `git stack unrevert [<branch>] [--remote origin]`
 
 Rebuild a branch (default: the current one) whose merge into its parent was
-reverted, as commits on its parent's tip that revert the reverts.
+reverted, as commits on its parent's tip that revert the reverts, and move the
+branches that were stacked on it back onto it.
 
 **When would I use it?** When `info` shows a branch as
-`(merged, then reverted)` and you want to bring its changes back, e.g. to fix
+`(merged, then reverted)`, or a branch that was stacked on it as
+`(<branch> was reverted)`, and you want to bring its changes back, e.g. to fix
 whatever got it reverted and merge it again.
 
 ```sh
@@ -630,8 +637,16 @@ git stack unrevert add-api
   messages for reverting a revert; amend them as you like.
 - The branch's old commits are dropped, since its parent already has them (or
   a squash of them) in its history. Its new base is its parent's tip.
-- Branches stacked on it stay stacked on it; `restack` or `sync` moves them
-  onto its new commits.
+- It works whether or not `sync` or `clean` already stopped tracking it, and
+  even if they deleted it, as long as a branch stacked on it is still tracked:
+  that branch recorded what it was when it merged. If it still exists, it's
+  tracked again, unless it changed since it merged, in which case it's left
+  alone (rename it to have it recreated instead). If it was deleted, it's
+  recreated. Once its commits are garbage-collected (by default, two weeks
+  after it was deleted, if nothing else has them), it can't be.
+- The branches that were stacked on it are moved back onto it, which changes
+  their pull requests' bases the next time you push. Like the ones still
+  stacked on it, `restack` or `sync` moves them onto its new commits.
 - Its merged pull request can't be reopened, and no longer counts as the
   branch's. If its remote branch was deleted when it was merged, its upstream
   is unset, so `git stack push` pushes it again; then `git stack prs` opens a
@@ -764,12 +779,17 @@ without committing anything, and git-stack's rebases pick it up automatically.
 If `pr1` is merged and then reverted on `main` (all of it, or some of its
 commits), `info` shows it as `(merged, then reverted)`, and `sync`, `clean`,
 `restack`, `push` and `prs` leave it, and the branches stacked on it, alone.
-To bring its changes back, rebuild it on `main` with
+
+If `sync` or `clean` had already stopped tracking `pr1` (and moved `pr2` onto
+`main`) by the time it was reverted, `info` shows `pr2` as
+`(pr1 was reverted)`, and `sync` and `clean` warn about it.
+
+Either way, to bring its changes back, rebuild it on `main` with
 [`unrevert`](#git-stack-unrevert-branch---remote-origin), which reverts the
 reverts, then restack its children onto it and open a new pull request:
 
 ```sh
-git stack unrevert pr1
+git stack unrevert pr1             # moves pr2 back onto it, if it had moved
 git stack restack                  # move pr2 onto the new pr1
 git stack push
 git stack prs                      # open a new one for pr1
@@ -777,7 +797,8 @@ git stack prs                      # open a new one for pr1
 
 To drop it instead, move `pr2` onto `main` (from `pr2`,
 `git stack restack --onto main`), then stop tracking it with
-`git stack untrack pr1`.
+`git stack untrack pr1`. If it was already untracked, stop the warning about
+it with `git config --unset branch.pr2.stackMergedParent`.
 
 ## How it works
 
@@ -801,12 +822,20 @@ reviews aren't dismissed just because `main` moved on. Branches stacked on
 other branches are restacked whenever their parent changes, since they need
 its new commits.
 
-Checking whether a branch conflicts with its parent, and whether its changes
-already landed there, can take a second or more for a branch far behind
-`main` in a big repository. Since the answers only depend on the commits
-involved, git-stack remembers the last ones, with those commits, in
-`branch.<name>.stackConflictCheck` and `branch.<name>.stackLandedCheck`, and
-only checks again once one of them changes.
+When a merged branch stops being tracked, each branch that was stacked on it
+records what it was, in `branch.<name>.stackMergedParent`: its name, the
+parent it merged into, its base and tip, and (with the GitHub adapter) its pull
+request's merge commit. That's how a later revert of it is noticed, and how
+`unrevert` can bring it back even once it's untracked or deleted.
+
+Checking whether a branch conflicts with its parent, whether its changes
+already landed there, and whether they were reverted since, can take a second
+or more for a branch far behind `main` in a big repository. Since the answers
+only depend on the commits involved, git-stack remembers the last ones, with
+those commits, in `branch.<name>.stackConflictCheck`,
+`branch.<name>.stackLandedCheck`, `branch.<name>.stackRevertedCheck` and
+`branch.<name>.stackMergedParentRevertedCheck`, and only checks again once one
+of them changes.
 
 ## GitHub
 

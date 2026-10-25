@@ -101,6 +101,8 @@ def label(branch: BranchInfo, paint: Paint) -> str:
         note = NOTES[branch.status]
         if note:
             parts.append(paint(note, STATUS_COLORS[branch.status]))
+    if branch.reverted_parent:
+        parts.append(paint(f"({branch.reverted_parent} was reverted)", STATUS_COLORS[BranchStatus.REVERTED]))
     return " ".join(parts)
 
 
@@ -123,6 +125,7 @@ def print_json(branches: list[BranchInfo]) -> None:
                     "parent": b.parent,
                     "status": b.status.value if b.status else None,
                     "current": b.current,
+                    "reverted_parent": b.reverted_parent,
                     "pr": {
                         "number": b.pull_request.number,
                         "url": b.pull_request.url,

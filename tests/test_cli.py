@@ -343,6 +343,17 @@ def test_untrack_prints_branches_left_on_it(stack: Any, capsys: pytest.CaptureFi
     )
 
 
+def test_info_notes_a_reverted_merged_parent(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
+    stack.info.return_value = [
+        BranchInfo("main", None, None, current=False),
+        BranchInfo("pr2", "main", BranchStatus.UP_TO_DATE, current=False, reverted_parent="pr1"),
+    ]
+
+    main(["info"], stack=stack)
+
+    assert capsys.readouterr().out == "main\n└── pr2 (pr1 was reverted)\n"
+
+
 def test_info_json_lists_every_branch(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
     stack.info.return_value = [
         BranchInfo("main", None, None, current=False),
@@ -352,18 +363,20 @@ def test_info_json_lists_every_branch(stack: Any, capsys: pytest.CaptureFixture[
             BranchStatus.NEEDS_RESTACK,
             current=True,
             pull_request=PullRequestLink(12, "https://github.com/acme/widgets/pull/12", PullRequestState.OPEN),
+            reverted_parent="pr0",
         ),
     ]
 
     main(["info", "--json"], stack=stack)
 
     assert json.loads(capsys.readouterr().out) == [
-        {"name": "main", "parent": None, "status": None, "current": False, "pr": None},
+        {"name": "main", "parent": None, "status": None, "current": False, "reverted_parent": None, "pr": None},
         {
             "name": "pr1",
             "parent": "main",
             "status": "needs-restack",
             "current": True,
+            "reverted_parent": "pr0",
             "pr": {"number": 12, "url": "https://github.com/acme/widgets/pull/12", "state": "open"},
         },
     ]

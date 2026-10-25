@@ -165,6 +165,16 @@ class Reverted:
 
 
 @dataclass(frozen=True)
+class MergedParentReverted:
+    """branch was stacked on merged until it merged into parent, and parent
+    has since reverted some of merged's changes."""
+
+    branch: str
+    merged: str
+    parent: str
+
+
+@dataclass(frozen=True)
 class UpstreamGone:
     """branch's remote branch was deleted, but it wasn't merged into parent."""
 
@@ -238,6 +248,7 @@ Event: TypeAlias = (
     | ParentSkipped
     | MergedWithNewCommits
     | Reverted
+    | MergedParentReverted
     | UpstreamGone
     | BrokenBranch
     | ParentMissing

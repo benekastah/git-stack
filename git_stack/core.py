@@ -1,6 +1,7 @@
 import os
 import tempfile
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from typing import TypeAlias
 
 from git_stack import events
@@ -31,9 +32,40 @@ PENDING_PULL_IDENTITIES_KEY = "stackPendingPullIdentities"
 CONFLICT_CHECK_KEY = "stackConflictCheck"
 LANDED_CHECK_KEY = "stackLandedCheck"
 REVERTED_CHECK_KEY = "stackRevertedCheck"
+# The branch this one was stacked on until it merged, as "<name> <the parent it
+# merged into> <its base> <its tip> <its merge commits...>" (see MergedParent),
+# so a later revert of it can be noticed, and undone with `git stack unrevert`,
+# even once it's untracked or deleted. And the last answer to whether it was
+# reverted.
+MERGED_PARENT_KEY = "stackMergedParent"
+MERGED_PARENT_REVERTED_CHECK_KEY = "stackMergedParentRevertedCheck"
 
 # {branch: the branch it is stacked on}
 Parents: TypeAlias = dict[str, str]
+
+
+@dataclass(frozen=True)
+class MergedParent:
+    """A merged branch, as a branch stacked on it recorded it when it merged:
+    the parent it merged into, the base it was built on, its tip, and the
+    commits known to have landed it (see GitAdapter.landing_merges)."""
+
+    name: str
+    parent: str
+    base: str
+    tip: str
+    merges: tuple[str, ...]
+
+    def __str__(self) -> str:
+        return " ".join([self.name, self.parent, self.base, self.tip, *self.merges])
+
+    @classmethod
+    def parse(cls, value: str) -> "MergedParent | None":
+        parts = value.split()
+        if len(parts) < 4:
+            return None
+        name, parent, base, tip, *merges = parts
+        return cls(name, parent, base, tip, tuple(merges))
 
 
 # The functions below work on a {branch: parent} map like the one
@@ -481,11 +513,20 @@ class StackCore:
             CONFLICT_CHECK_KEY,
             LANDED_CHECK_KEY,
             REVERTED_CHECK_KEY,
+            MERGED_PARENT_KEY,
+            MERGED_PARENT_REVERTED_CHECK_KEY,
         ):
             self.git.config_unset(branch, key)
 
-    def remove_merged(self, branch: str, parents: Parents, delete: bool) -> None:
-        """Move branch's children onto its parent, then stop tracking branch.
+    def merged_parent(self, branch: str) -> MergedParent | None:
+        """The branch that branch was stacked on until it merged, if recorded."""
+        value = self.git.config_get(branch, MERGED_PARENT_KEY)
+        return MergedParent.parse(value) if value else None
+
+    def remove_merged(self, branch: str, parents: Parents, delete: bool, merges: tuple[str, ...] = ()) -> None:
+        """Move branch's children onto its parent, recording branch on each as
+        their MergedParent (with merges, see GitAdapter.landing_merges), then
+        stop tracking branch.
 
         If delete is set, the branch itself is deleted too, unless it's checked
         out in another worktree. If it was checked out here, its first child (or
@@ -494,9 +535,13 @@ class StackCore:
         """
         git = self.git
         new_parent = parents[branch]
+        base = git.config_get(branch, BASE_KEY)
+        merged = MergedParent(branch, new_parent, base, git.tip(branch), merges) if base else None
         children = tuple(drop_from_stack(branch, parents))
         for child in children:
             git.config_set(child, PARENT_KEY, new_parent)
+            if merged is not None:
+                git.config_set(child, MERGED_PARENT_KEY, str(merged))
         if delete and (worktree := git.other_worktree_of(branch)) is not None:
             self.emit(events.NotDeletedInOtherWorktree(branch, worktree))
             delete = False
@@ -521,16 +566,17 @@ class StackCore:
         git.run("branch", "--quiet", "--delete", "--force", branch)
         self.emit(events.Untracked(branch, new_parent, children, deleted_tip=tip))
 
-    def untrack_merged(self, branch: str, parents: Parents, delete: str | None) -> bool:
+    def untrack_merged(self, branch: str, parents: Parents, delete: str | None, merges: tuple[str, ...] = ()) -> bool:
         """Stop tracking merged branch, deleting what delete ("local", "remote" or
-        "both") says. Returns False, leaving branch alone, if its remote branch
-        couldn't be deleted.
+        "both") says, and recording it on its children (see remove_merged).
+        Returns False, leaving branch alone, if its remote branch couldn't be
+        deleted.
         """
         git = self.git
         delete_local = delete in ("local", "both")
         remote = git.remote_branch(branch)
         if remote is None:
-            self.remove_merged(branch, parents, delete_local)
+            self.remove_merged(branch, parents, delete_local, merges)
             return True
         upstream = git.run("rev-parse", "--abbrev-ref", f"{branch}@{{upstream}}")
         remote_name, ref, tip = remote
@@ -539,9 +585,9 @@ class StackCore:
                 self.emit(events.RemoteBranchDeleteFailed(branch, upstream))
                 return False
             self.emit(events.RemoteBranchDeleted(upstream))
-            self.remove_merged(branch, parents, delete_local)
+            self.remove_merged(branch, parents, delete_local, merges)
         else:
-            self.remove_merged(branch, parents, delete_local)
+            self.remove_merged(branch, parents, delete_local, merges)
             self.emit(events.RemoteBranchKept(upstream, remote_name, ref.removeprefix("refs/heads/")))
         return True
 

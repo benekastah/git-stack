@@ -10,10 +10,13 @@ from git_stack.adapters.github import GitHubAdapter, OpenPullRequest
 from git_stack.adapters.merge_state import MergeState
 from git_stack.core import (
     BASE_KEY,
+    MERGED_PARENT_KEY,
+    MERGED_PARENT_REVERTED_CHECK_KEY,
     PARENT_KEY,
     PENDING_BASE_KEY,
     PENDING_PARENT_KEY,
     PULLED_KEY,
+    MergedParent,
     Parents,
     StackCore,
     children_map,
@@ -42,13 +45,16 @@ class BranchStatus(enum.Enum):
 class BranchInfo:
     """A branch in info()'s listing. parent and status are None for a stack's
     root (e.g. main), which isn't tracked. pull_request is None for a root and
-    for a branch without a pull request the adapter knows of."""
+    for a branch without a pull request the adapter knows of. reverted_parent
+    is the branch it was stacked on until it merged, if that has since been
+    reverted (see GitAdapter.reverted_merged_parent)."""
 
     name: str
     parent: str | None
     status: BranchStatus | None
     current: bool
     pull_request: PullRequestLink | None = None
+    reverted_parent: str | None = None
 
 
 @dataclass(frozen=True)
@@ -370,7 +376,13 @@ class StackClient(StackCore):
     def unrevert(self, branch: str | None = None, remote: str = DEFAULT_REMOTE) -> Unreverted:
         """Rebuild branch (default: the current branch), whose merge into its
         parent was reverted, as commits on the parent's tip that revert those
-        reverts. Returns an Unreverted.
+        reverts, and move the branches that were stacked on it until it merged
+        back onto it. Returns an Unreverted.
+
+        branch needn't be tracked any more, or even exist: once it merged, the
+        branches stacked on it recorded what it was (see
+        StackCore.merged_parent), and it's tracked again, or recreated, from
+        that. If it still exists but has changed since, it's left alone.
 
         Its old commits are dropped (the parent has them, or a squash of them,
         in its history). If its remote branch was deleted (e.g. when its pull
@@ -382,18 +394,67 @@ class StackClient(StackCore):
         self.ensure_clean_worktree()
         self.settle_all()
         parents = self.tracked_branches()
+        branch = branch or git.current_branch()
         if branch is None:
-            branch = self.current_stacked_branch(parents, "unrevert")
-        elif branch not in parents:
-            raise StackError(f"{branch} isn't in a stack")
-        parent = parents[branch]
+            raise StackError("not on a branch; name the branch to unrevert")
         adapter = make_adapter(self, remote, fetch=False)
+        # The branches stacked on it until it merged, and what they recorded of it.
+        orphans = [(c, m) for c in parents if (m := self.merged_parent(c)) is not None and m.name == branch]
+        if branch in parents:
+            parent, retrack = parents[branch], None
+            reverts = self.tracked_reverts(branch, parent, adapter)
+        elif orphans:
+            retrack = orphans[0][1]
+            parent = retrack.parent
+            reverts = self.untracked_reverts(branch, retrack, adapter)
+        else:
+            raise StackError(f"{branch} isn't in a stack, and no branch in one was stacked on it when it merged")
+        if (worktree := git.other_worktree_of(branch)) is not None:
+            raise StackError(f"{branch} is checked out in {worktree}; unrevert it there")
+        if retrack is not None:
+            if not git.local_branch_exists(branch):
+                git.run("branch", "--quiet", branch, retrack.tip)
+            git.config_set(branch, PARENT_KEY, parent)
+            git.config_set(branch, BASE_KEY, retrack.base)
+        # They keep their bases, which the rebuilt branch has in its history, so
+        # the next restack moves them onto it.
+        for child, _ in orphans:
+            git.config_set(child, PARENT_KEY, branch)
+            git.config_unset(child, MERGED_PARENT_KEY)
+            git.config_unset(child, MERGED_PARENT_REVERTED_CHECK_KEY)
+        self.rebuild_reverted(branch, parent, reverts)
+        children = tuple(child for child, p in self.tracked_branches().items() if p == branch)
+        return Unreverted(branch, parent, tuple(reverts), children)
+
+    def tracked_reverts(self, branch: str, parent: str, adapter: GitAdapter) -> list[str]:
+        """The reverts for unrevert to revert, for tracked branch."""
         state = adapter.merge_state(branch, parent)
         if state is not MergeState.REVERTED:
             raise StackError(f"{branch} doesn't look reverted in {parent} (it's {state.value})")
-        if (worktree := git.other_worktree_of(branch)) is not None:
-            raise StackError(f"{branch} is checked out in {worktree}; unrevert it there")
-        reverts = adapter.reverts(branch, parent)
+        return adapter.reverts(branch, parent)
+
+    def untracked_reverts(self, branch: str, merged: MergedParent, adapter: GitAdapter) -> list[str]:
+        """The reverts for unrevert to revert, for branch, which isn't tracked
+        and merged as merged records, or fails if it can't be tracked again."""
+        git = self.git
+        if git.rev(merged.tip) is None or git.rev(merged.base) is None:
+            raise StackError(
+                f"{branch}'s commits are no longer in the repository; recreate it with "
+                f"`git stack branch {branch}` from {merged.parent}"
+            )
+        if git.local_branch_exists(branch) and git.tip(branch) != merged.tip:
+            raise StackError(
+                f"{branch} has changed since it merged, so it was left alone; rename it with "
+                f"`git branch -m {branch} <new>` to let unrevert recreate it"
+            )
+        reverts = adapter.merged_parent_reverts(merged)
+        if not reverts:
+            raise StackError(f"{branch} doesn't look reverted in {merged.parent}")
+        return reverts
+
+    def rebuild_reverted(self, branch: str, parent: str, reverts: list[str]) -> None:
+        """Reset branch to parent's tip and revert reverts there (see unrevert)."""
+        git = self.git
         old_tip, parent_tip = git.tip(branch), git.tip(parent)
         # Recorded like a restack's, so a revert that stops partway is recorded
         # once it's finished, and resetting to old_tip instead keeps the old base.
@@ -410,8 +471,6 @@ class StackClient(StackCore):
                 f"then `git reset --hard {old_tip}`"
             )
         self.settle(branch)
-        children = tuple(child for child, p in parents.items() if p == branch)
-        return Unreverted(branch, parent, tuple(reverts), children)
 
     def settled_branches(self) -> Parents:
         """Like tracked_branches, but first picks up the result of a restack or
@@ -513,12 +572,20 @@ class StackClient(StackCore):
         with ThreadPoolExecutor() as pool:
             prefetched = pool.submit(adapter.prefetch)
             statuses = dict(zip(parents, pool.map(status, parents), strict=True))
+            reverted_parents = dict(zip(parents, pool.map(adapter.reverted_merged_parent, parents), strict=True))
             prefetched.result()
         result = []
         for root in sorted({stack_root(b, parents) for b in parents}):
             result.append(BranchInfo(root, None, None, root == current))
             result.extend(
-                BranchInfo(b, parents[b], statuses[b], b == current, adapter.pull_request_link(b))
+                BranchInfo(
+                    b,
+                    parents[b],
+                    statuses[b],
+                    b == current,
+                    adapter.pull_request_link(b),
+                    merged.name if (merged := reverted_parents[b]) else None,
+                )
                 for b in descendants(root, children)
             )
         return result
@@ -642,7 +709,7 @@ class StackClient(StackCore):
             return
         merge_state = adapter.merge_state(branch, parent)
         if merge_state is MergeState.MERGED:
-            if not self.untrack_merged(branch, state.parents, state.delete):
+            if not self.untrack_merged(branch, state.parents, state.delete, adapter.landing_merges(branch, parent)):
                 state.skipped.add(branch)
             elif branch == state.original:
                 state.original = self.current_checkout()
@@ -654,7 +721,12 @@ class StackClient(StackCore):
             self.emit(events.Reverted(branch, parent))
             state.skipped.add(branch)
         else:
+            self.warn_if_merged_parent_reverted(branch, adapter)
             self.sync_unmerged(branch, parent, state)
+
+    def warn_if_merged_parent_reverted(self, branch: str, adapter: GitAdapter) -> None:
+        if (merged := adapter.reverted_merged_parent(branch)) is not None:
+            self.emit(events.MergedParentReverted(branch, merged.name, merged.parent))
 
     def sync_unmerged(self, branch: str, parent: str, state: SyncState) -> None:
         """Restack branch, which isn't merged, onto parent and pull in commits
@@ -709,12 +781,15 @@ class StackClient(StackCore):
                 continue
             state = adapter.merge_state(branch, parent)
             if state is MergeState.MERGED:
-                if self.untrack_merged(branch, parents, delete) and branch == original:
+                merges = adapter.landing_merges(branch, parent)
+                if self.untrack_merged(branch, parents, delete, merges) and branch == original:
                     original = self.current_checkout()
             elif state is MergeState.MERGED_WITH_NEW_COMMITS:
                 self.emit(events.MergedWithNewCommits(branch, parent))
             elif state is MergeState.REVERTED:
                 self.emit(events.Reverted(branch, parent))
+            else:
+                self.warn_if_merged_parent_reverted(branch, adapter)
         self.restore_checkout(original)
 
     def push(self, branch: str | None = None, remote: str = DEFAULT_REMOTE, force: bool = False) -> list[str]:

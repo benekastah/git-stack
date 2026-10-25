@@ -2,7 +2,15 @@ import enum
 from dataclasses import dataclass
 
 from git_stack.adapters.merge_state import MergeState
-from git_stack.core import BASE_KEY, LANDED_CHECK_KEY, REVERTED_CHECK_KEY, Parents, StackCore
+from git_stack.core import (
+    BASE_KEY,
+    LANDED_CHECK_KEY,
+    MERGED_PARENT_REVERTED_CHECK_KEY,
+    REVERTED_CHECK_KEY,
+    MergedParent,
+    Parents,
+    StackCore,
+)
 
 
 class PullRequestState(enum.Enum):
@@ -137,6 +145,32 @@ class GitAdapter:
         if parent_tip is None or base is None or not git.is_ancestor(base, branch):
             return []
         return self.reverts_since(git.tip(branch), base, parent_tip, self.landing_merges(branch, parent))
+
+    def reverted_merged_parent(self, branch: str) -> MergedParent | None:
+        """The branch that branch was stacked on until it merged (see
+        StackCore.merged_parent), if the parent it merged into has since
+        reverted some of its changes."""
+        merged = self.core.merged_parent(branch)
+        if merged is None:
+            return None
+        parent_tip = self.git.rev(merged.parent)
+        # Its commits may be gone, e.g. garbage-collected after it was deleted.
+        if parent_tip is None or self.git.rev(merged.tip) is None or self.git.rev(merged.base) is None:
+            return None
+        reverted = self.core.remembered(
+            branch,
+            MERGED_PARENT_REVERTED_CHECK_KEY,
+            [merged.tip, parent_tip, merged.base, *merged.merges],
+            lambda: bool(self.merged_parent_reverts(merged)),
+        )
+        return merged if reverted else None
+
+    def merged_parent_reverts(self, merged: MergedParent) -> list[str]:
+        """reverts, for the merged branch merged."""
+        parent_tip = self.git.rev(merged.parent)
+        if parent_tip is None:
+            return []
+        return self.reverts_since(merged.tip, merged.base, parent_tip, merged.merges)
 
     def landing_merges(self, branch: str, parent: str) -> tuple[str, ...]:
         """Commits known to have landed branch in parent, whose reverts count as
