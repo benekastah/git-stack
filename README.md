@@ -47,7 +47,7 @@ git stack sync                  # catch up: drop merged PRs, rebase what's left,
 | set up stacks from my open PRs (e.g. in a new clone) | `git stack autocreate` |
 | open draft PRs for my stack | `git stack push`, then `git stack prs` |
 | rename a branch in a stack | `git stack rename <new>` |
-| sync several stacks at once | `git stack group add <name> <branch-or-glob>...`, then `git stack sync <name>` |
+| sync several stacks at once | `git stack group add <name> <branch-or-glob>...`, then `git stack sync -g <name>` |
 | clean up merged branches in every stack | `git stack clean` |
 | bring back a PR whose merge was reverted | `git stack unrevert <branch>` |
 | read all of this in the terminal | `git stack --help` |
@@ -148,20 +148,21 @@ main
   branch (e.g. with `restack --onto`), since it's then part of that branch's
   stack, and isn't put back in the group if it's at the bottom of a stack
   again later.
-- [`git stack group`](#git-stack-group-add-name-branchgroupglob)
+- [`git stack group`](#git-stack-group-add-name-branchglob--g-group)
   puts stacks in a group by hand, takes them out, or renames a group.
 
 `restack`, `sync`, `push` and `prs` act on other stacks instead of the current
 one when you name them, from any branch, and `info` shows only the stacks you
-name: each argument can be a branch (its stack), a group (its stacks), or a
-glob of branch names, matched like `git branch --list` does (the stacks of the
-branches it matches). `untrack` takes globs too, but untracks the branches
-themselves, not their stacks, and doesn't take groups. Quote a
-glob, so the shell doesn't expand it:
+name: each argument can be a branch (its stack) or a glob of branch names,
+matched like `git branch --list` does (the stacks of the branches it matches),
+and `-g`/`--group <group>`, which can be given more than once, names a group's
+stacks. `untrack` takes globs too, but untracks the branches themselves, not
+their stacks, and doesn't take `-g`. Quote a glob, so the shell doesn't
+expand it:
 
 ```sh
-git stack sync pr2b                 # pr2b's stack
-git stack restack search 'fix-*'    # the search group, and every fix-* branch's stack
+git stack sync pr2b                     # pr2b's stack
+git stack restack -g search 'fix-*'     # the search group, and every fix-* branch's stack
 ```
 
 Like git, every command accepts `-C <path>` before it to run as if started in
@@ -315,7 +316,7 @@ git stack rename add-api api-v2
   Delete the old remote branch yourself (`git push origin :add-api`) if you
   no longer want it.
 
-### `git stack info [<branch|group|glob>...] [--json] [--offline]`
+### `git stack info [<branch|glob>...] [-g <group>] [--json] [--offline]`
 
 Show every tracked stack (or the ones named, see [Groups](#groups)) as a tree,
 with its root (e.g. `main`) on top and the branches built on it below.
@@ -451,7 +452,7 @@ git stack prev                  # to main
 
 - From the bottom of a stack, it switches to the stack's root (e.g. `main`).
 
-### `git stack restack [<branch|group|glob>...] [--onto <parent>] [--squash] [--latest]`
+### `git stack restack [<branch|glob>...] [-g <group>] [--onto <parent>] [--squash] [--latest]`
 
 Rebase every branch in the current stack (or the ones named, see
 [Groups](#groups)) onto its parent, bottom-up, except
@@ -495,7 +496,7 @@ git stack restack --latest              # also move the stack onto main's latest
 - A branch checked out in another worktree is skipped, with a warning; see
   [Branches checked out in other worktrees](#branches-checked-out-in-other-worktrees).
 
-### `git stack sync [<branch|group|glob>...] [--remote origin] [-d local|remote|both] [--latest] [--no-push]`
+### `git stack sync [<branch|glob>...] [-g <group>] [--remote origin] [-d local|remote|both] [--latest] [--no-push]`
 
 Bring the current stack (or the ones named, see [Groups](#groups)) up to date
 with the remote:
@@ -578,7 +579,7 @@ git stack clean -d local
 - Runs from any branch, even one that isn't in a stack. Needs a clean
   worktree.
 
-### `git stack push [<branch|group|glob>...] [--remote origin] [--force]`
+### `git stack push [<branch|glob>...] [-g <group>] [--remote origin] [--force]`
 
 Force-push (with lease) every branch in the current stack (or the ones named,
 see [Groups](#groups)), and set each one's upstream.
@@ -618,13 +619,14 @@ git stack push --force          # drop commits on the remote you didn't pull
   stack parent (e.g. at `main` once the parent PR was merged), and lists the
   branches that have none, which `git stack prs` opens.
 
-### `git stack group add <name> [<branch|group|glob>...]`
+### `git stack group add <name> [<branch|glob>...] [-g <group>]`
 
 Put stacks (default: the current one) in group `<name>`, so `restack`, `sync`,
 `push` and `prs` on one of them cover them all, and so you can name them all
 at once (see [Groups](#groups)). `git stack group remove` takes stacks out of
-their groups, and `git stack group rename [<old>] <new>` renames a group
-(default: the current stack's).
+their groups (`git stack ungroup` for short), and
+`git stack group rename [<old>] <new>` renames a group (default: the current
+stack's).
 
 **When would I use it?** When you work on several stacks together, e.g. a
 feature split across stacks that don't depend on each other, or to rename a
@@ -632,21 +634,21 @@ group `sync` made after a merge.
 
 ```sh
 git stack group add search 'search-*'   # the stacks of every search-* branch
-git stack sync search                   # from anywhere
+git stack sync -g search                # from anywhere
 git stack group rename search find      # or, from one of its stacks, `group rename find`
-git stack group remove search-ui        # take search-ui's stack back out
+git stack ungroup search-ui             # take search-ui's stack back out
 ```
 
-- Each argument names stacks as for `sync` (a branch, a group or a glob), and
-  each stack goes in by its bottom branch, the one on its root. A stack
-  that's in another group leaves it.
-- A group name can't be a tracked branch's name, have spaces, or have `*`,
-  `?` or `[` in it, since an argument with those is a glob.
+- The arguments name stacks as for `sync` (branches, globs, and groups with
+  `-g`), and each stack goes in by its bottom branch, the one on its root. A
+  stack that's in another group leaves it.
+- A group name can't be empty or have spaces in it. It can be the same as a
+  branch's name, since groups are only ever named with `-g`.
 - `rename` refuses a name another group has, so two groups aren't merged by
-  mistake. To merge them, run `git stack group add <name> <other group>`.
+  mistake. To merge them, run `git stack group add <name> -g <other group>`.
 - `info` shows a group once it has two or more stacks.
 
-### `git stack prs [<branch|group|glob>...] [--remote origin] [-n]`
+### `git stack prs [<branch|glob>...] [-g <group>] [--remote origin] [-n]`
 
 Open a draft pull request on GitHub for each branch in the current stack (or
 the ones named, see [Groups](#groups)) that has none, into its stack parent,

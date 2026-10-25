@@ -1,19 +1,15 @@
 import argparse
 
-from git_stack.commands import Subparsers
+from git_stack.commands import Subparsers, add_stack_arguments
 from git_stack.stack import StackClient
-
-SELECTORS_HELP = (
-    "the stacks of these branches, of the branches in these groups, or of the branches "
-    "these globs match (quote them, so the shell doesn't expand them); default: the current stack"
-)
 
 
 class Args(argparse.Namespace):
     """The arguments register's parser produces."""
 
     name: str
-    selectors: list[str]
+    branches: list[str]
+    groups: list[str]
     old: str | None
     new: str
 
@@ -24,11 +20,11 @@ def register(subparsers: Subparsers) -> None:
 
     add = actions.add_parser("add", help="put stacks in group NAME, so commands on one cover them all")
     add.add_argument("name", help="the group")
-    add.add_argument("selectors", nargs="*", metavar="branch|group|glob", help=SELECTORS_HELP)
+    add_stack_arguments(add, "group")
     add.set_defaults(func=run_add)
 
-    remove = actions.add_parser("remove", help="take stacks out of their groups")
-    remove.add_argument("selectors", nargs="*", metavar="branch|group|glob", help=SELECTORS_HELP)
+    remove = actions.add_parser("remove", help="take stacks out of their groups (also `git stack ungroup`)")
+    add_stack_arguments(remove, "ungroup")
     remove.set_defaults(func=run_remove)
 
     rename = actions.add_parser("rename", help="rename a group (default: the current stack's)")
@@ -36,14 +32,18 @@ def register(subparsers: Subparsers) -> None:
     rename.add_argument("new", help="new name")
     rename.set_defaults(func=run_rename)
 
+    ungroup = subparsers.add_parser("ungroup", help="take stacks out of their groups (`git stack group remove`)")
+    add_stack_arguments(ungroup, "ungroup")
+    ungroup.set_defaults(func=run_remove)
+
 
 def run_add(stack: StackClient, args: Args) -> None:
-    bottoms = stack.group_add(args.name, args.selectors)
+    bottoms = stack.group_add(args.name, args.branches, args.groups)
     print(f"put the stacks of {', '.join(bottoms)} in group {args.name}")
 
 
 def run_remove(stack: StackClient, args: Args) -> None:
-    removed = stack.group_remove(args.selectors)
+    removed = stack.group_remove(args.branches, args.groups)
     if not removed:
         print("none of those stacks were in a group")
     for bottom, group in removed:

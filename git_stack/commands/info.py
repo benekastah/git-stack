@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import TypeAlias
 
 from git_stack.adapters.git import PullRequestState
-from git_stack.commands import Subparsers, add_selectors_argument
+from git_stack.commands import Subparsers, add_stack_arguments
 from git_stack.errors import StackError
 from git_stack.stack import BranchInfo, BranchStatus, StackClient
 
@@ -47,14 +47,15 @@ Paint: TypeAlias = Callable[[str, str], str]
 class Args(argparse.Namespace):
     """The arguments register's parser produces."""
 
-    selectors: list[str]
+    branches: list[str]
+    groups: list[str]
     json: bool
     offline: bool
 
 
 def register(subparsers: Subparsers) -> None:
     p = subparsers.add_parser("info", help="show all tracked stacks (or the named ones)")
-    add_selectors_argument(p, "show", default="every stack")
+    add_stack_arguments(p, "show", default="every stack")
     p.add_argument(
         "--json",
         action="store_true",
@@ -120,7 +121,7 @@ def label(branch: BranchInfo | GroupHeader, paint: Paint) -> str:
 
 
 def run(stack: StackClient, args: Args) -> None:
-    branches = stack.info(args.selectors, offline=args.offline)
+    branches = stack.info(args.branches, args.groups, offline=args.offline)
     if args.json:
         print_json(branches)
     elif not branches:

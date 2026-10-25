@@ -117,19 +117,6 @@ reason, counts as reverting it. The branch is then left alone as
 were stacked on it are warned about. Nothing is lost, but it stays tracked
 until untracked by hand.
 
-## A group with a tracked branch's name can't be named
-
-An argument that names a tracked branch means that branch's stack, even if a
-group has the same name. `group add`, `group rename` and `branch --group`
-refuse a tracked branch's name, but nothing stops a branch getting a group's
-name later, e.g. `git stack branch a` from `main` while the stacks `a` left
-behind when it merged are still in group `a`. `sync a` and the other
-commands then act on the new branch's stack, not the group's, until the
-group is renamed.
-
-Possible fix: have `branch`, `track` and `rename` refuse a group's name, as
-they do a name already on a remote.
-
 ## The branch config cache could miss a write
 
 `GitClient.branch_config` rereads `.git/config` only when its inode, mtime or

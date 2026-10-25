@@ -23,7 +23,6 @@ from git_stack.core import (
     drop_from_stack,
     ensure_no_cycle,
     group_bottoms,
-    is_glob,
     stack_root,
 )
 from git_stack.errors import BrokenStackError, StackError
@@ -195,9 +194,7 @@ class StackClient(StackCore):
         bottom = None
         if group is not None:
             parents = self.tracked_branches()
-            self.ensure_group_name(group, parents)
-            if group == name:
-                raise StackError(f"{name} can't be both the new branch's name and its group's")
+            self.ensure_group_name(group)
             if parent in parents:
                 bottom = ancestry(parent, parents)[-2]
                 current = git.config_get(bottom, GROUP_KEY)
@@ -346,28 +343,30 @@ class StackClient(StackCore):
                 f"branches (e.g. branch, not origin/branch)"
             )
 
-    def group_add(self, name: str, selectors: Sequence[str] = ()) -> list[str]:
-        """Put the stacks of the branches selectors name (see selected; default:
-        the current branch), each by its bottom branch, in the group name, out
-        of any group they were in. Returns those bottom branches."""
+    def group_add(self, name: str, branches: Sequence[str] = (), groups: Sequence[str] = ()) -> list[str]:
+        """Put the stacks of the branches that branches and groups name (see
+        named; default: the current branch), each by its bottom branch, in the
+        group name, out of any group they were in. Returns those bottom
+        branches."""
         self.ensure_no_operation_in_progress()
         self.settle_all()
         parents = self.tracked_branches()
-        self.ensure_group_name(name, parents)
-        bottoms = self.selected_bottoms(selectors, parents, "group")
+        self.ensure_group_name(name)
+        bottoms = self.selected_bottoms(branches, groups, parents, "group")
         for bottom in bottoms:
             self.git.config_set(bottom, GROUP_KEY, name)
         return bottoms
 
-    def group_remove(self, selectors: Sequence[str] = ()) -> list[tuple[str, str]]:
-        """Take the stacks of the branches selectors name (see selected;
-        default: the current branch), each by its bottom branch, out of their
-        groups. Returns (bottom branch, its old group) for those that were in one."""
+    def group_remove(self, branches: Sequence[str] = (), groups: Sequence[str] = ()) -> list[tuple[str, str]]:
+        """Take the stacks of the branches that branches and groups name (see
+        named; default: the current branch), each by its bottom branch, out of
+        their groups. Returns (bottom branch, its old group) for those that
+        were in one."""
         self.ensure_no_operation_in_progress()
         self.settle_all()
         parents = self.tracked_branches()
         removed = []
-        for bottom in self.selected_bottoms(selectors, parents, "ungroup"):
+        for bottom in self.selected_bottoms(branches, groups, parents, "ungroup"):
             if (group := self.git.config_get(bottom, GROUP_KEY)) is not None:
                 self.git.config_unset(bottom, GROUP_KEY)
                 removed.append((bottom, group))
@@ -386,11 +385,11 @@ class StackClient(StackCore):
             old = self.git.config_get(bottom, GROUP_KEY)
             if old is None:
                 raise StackError(f"{bottom}'s stack isn't in a group; name the group to rename")
-        self.ensure_group_name(new, parents)
+        self.ensure_group_name(new)
         groups = self.groups(parents)
         if new in groups.values():
             raise StackError(
-                f"group {new} already exists; to merge {old} into it, run `git stack group add {new} {old}`"
+                f"group {new} already exists; to merge {old} into it, run `git stack group add {new} -g {old}`"
             )
         members = [b for b, g in groups.items() if g == old]
         if not members:
@@ -399,13 +398,10 @@ class StackClient(StackCore):
             self.git.config_set(branch, GROUP_KEY, new)
         return old, members
 
-    def ensure_group_name(self, name: str, parents: Parents) -> None:
-        """Refuse a group name that a branch, group or glob argument (see
-        selected) couldn't name."""
-        if not name or is_glob(name) or any(c.isspace() for c in name):
-            raise StackError(f"{name!r} can't be a group name: it can't be empty, or have spaces or *, ? or [ in it")
-        if name in parents:
-            raise StackError(f"{name} is a tracked branch, so it can't be a group name too")
+    def ensure_group_name(self, name: str) -> None:
+        """Refuse a group name that's empty or has spaces in it."""
+        if not name or any(c.isspace() for c in name):
+            raise StackError(f"{name!r} can't be a group name: it can't be empty, or have spaces in it")
 
     def untrack(self, branches: Iterable[str] = ()) -> list[Untracked]:
         """Stop tracking branches (default: the current branch), each a branch
@@ -624,15 +620,15 @@ class StackClient(StackCore):
         if not self.git.passthrough("switch", "--quiet", branch):
             raise StackError(f"switching to {branch} failed; see git's output above")
 
-    def info(self, selectors: Sequence[str] = (), offline: bool = False) -> list[BranchInfo]:
-        """Every tracked stack (or the stacks of the branches selectors name,
-        see selected), as a list of BranchInfo: each stack's root, then its
+    def info(self, branches: Sequence[str] = (), groups: Sequence[str] = (), offline: bool = False) -> list[BranchInfo]:
+        """Every tracked stack (or the stacks of the branches that branches and
+        groups name, see named), as a list of BranchInfo: each stack's root, then its
         branches, parent-before-child. offline checks for merges like the git
         adapter does, without asking GitHub about pull requests."""
         git = self.git
         parents = self.settled_branches()
-        if selectors:
-            parents = {b: parents[b] for b in self.selected_stacks(selectors, parents, "show")}
+        if branches or groups:
+            parents = {b: parents[b] for b in self.selected_stacks(branches, groups, parents, "show")}
         current = git.current_branch()
         children = children_map(parents)
         adapter = GitAdapter(self) if offline else make_adapter(self, DEFAULT_REMOTE, fetch=False)
@@ -665,9 +661,11 @@ class StackClient(StackCore):
             statuses = dict(zip(parents, pool.map(status, parents), strict=True))
             reverted_parents = dict(zip(parents, pool.map(adapter.reverted_merged_parent, parents), strict=True))
             prefetched.result()
-        groups = self.groups(parents)
+        all_groups = self.groups(parents)
         shown_groups = {
-            b: g for b, g in groups.items() if parents[b] not in parents and len(group_bottoms(b, parents, groups)) > 1
+            b: g
+            for b, g in all_groups.items()
+            if parents[b] not in parents and len(group_bottoms(b, parents, all_groups)) > 1
         }
         result = []
         for root in sorted({stack_root(b, parents) for b in parents}):
@@ -726,18 +724,23 @@ class StackClient(StackCore):
         return remaining
 
     def restack(
-        self, selectors: Sequence[str] = (), onto: str | None = None, squash: bool = False, latest: bool = False
+        self,
+        branches: Sequence[str] = (),
+        groups: Sequence[str] = (),
+        onto: str | None = None,
+        squash: bool = False,
+        latest: bool = False,
     ) -> None:
         """Rebase every branch that needs it onto its parent, bottom-up (see
         needs_restack), in the current stack, or in the stacks of the branches
-        selectors name (see selected).
+        that branches and groups name (see named).
 
         onto first retargets the current branch, so it can't be combined with
-        selectors; squash first squashes each branch into one commit; latest
+        branches or groups; squash first squashes each branch into one commit; latest
         moves branches on a stack's root onto its tip even if they don't
         conflict with it.
         """
-        if onto and selectors:
+        if onto and (branches or groups):
             raise StackError("--onto moves the current branch, so it can't be combined with branches to restack")
         self.ensure_no_operation_in_progress()
         self.ensure_clean_worktree()
@@ -750,24 +753,25 @@ class StackClient(StackCore):
             ensure_no_cycle(branch, onto, parents)
             parents[branch] = onto
         adapter = make_adapter(self, DEFAULT_REMOTE, fetch=False)
-        branches = self.skip_merged(self.selected_stacks(selectors, parents, "restack"), parents, adapter)
+        to_restack = self.skip_merged(self.selected_stacks(branches, groups, parents, "restack"), parents, adapter)
         if squash:
-            for b in branches:
+            for b in to_restack:
                 self.squash_branch(b, parents[b])
             self.restore_checkout(original)
-        self.restack_all(branches, parents, latest)
+        self.restack_all(to_restack, parents, latest)
         self.restore_checkout(original)
 
     def sync(
         self,
-        selectors: Sequence[str] = (),
+        branches: Sequence[str] = (),
+        groups: Sequence[str] = (),
         remote: str = DEFAULT_REMOTE,
         delete: str | None = None,
         latest: bool = False,
         push: bool = True,
     ) -> list[str]:
         """Fetch, untrack the merged branches in the current stack, or in the
-        stacks of the branches selectors name (see selected), deleting what
+        stacks of the branches that branches and groups name (see named), deleting what
         delete, "local", "remote" or "both", says, restack them (see restack
         for latest), and pull in commits others pushed. Then, if push is set, push
         the branches that differ from the upstream they already have on remote.
@@ -784,7 +788,7 @@ class StackClient(StackCore):
         self.ensure_clean_worktree()
         self.settle_all()
         parents = self.tracked_branches()
-        stack = self.selected_stacks(selectors, parents, "sync")
+        stack = self.selected_stacks(branches, groups, parents, "sync")
         original = self.current_checkout()
         adapter = self.checked_adapter(remote)
         self.fetch(remote)
@@ -902,9 +906,15 @@ class StackClient(StackCore):
                 self.warn_if_merged_parent_reverted(branch, adapter)
         self.restore_checkout(original)
 
-    def push(self, selectors: Sequence[str] = (), remote: str = DEFAULT_REMOTE, force: bool = False) -> list[str]:
+    def push(
+        self,
+        branches: Sequence[str] = (),
+        groups: Sequence[str] = (),
+        remote: str = DEFAULT_REMOTE,
+        force: bool = False,
+    ) -> list[str]:
         """Force-push (with lease) every unmerged branch in the current stack, or
-        in the stacks of the branches selectors name (see selected), then let
+        in the stacks of the branches that branches and groups name (see named), then let
         the adapter update their pull requests. Returns the pushed branches,
         which is empty if every branch looks merged.
 
@@ -915,7 +925,7 @@ class StackClient(StackCore):
         self.ensure_no_operation_in_progress()
         self.settle_all()
         parents = self.tracked_branches()
-        stack = self.selected_stacks(selectors, parents, "push")
+        stack = self.selected_stacks(branches, groups, parents, "push")
         adapter = self.checked_adapter(remote)
         branches = self.skip_merged(stack, parents, adapter)
         return self.push_branches(branches, parents, adapter, remote, force)
@@ -993,11 +1003,15 @@ class StackClient(StackCore):
                 )
 
     def prs(
-        self, selectors: Sequence[str] = (), remote: str = DEFAULT_REMOTE, dry_run: bool = False
+        self,
+        branches: Sequence[str] = (),
+        groups: Sequence[str] = (),
+        remote: str = DEFAULT_REMOTE,
+        dry_run: bool = False,
     ) -> list[PullRequestStep]:
         """Open a draft pull request into its stack parent for each unmerged
-        branch in the current stack (or in the stacks of the branches selectors
-        name, see selected) that has none, bottom-up. Its title is the
+        branch in the current stack (or in the stacks of the branches that
+        branches and groups name, see named) that has none, bottom-up. Its title is the
         branch's oldest commit's subject, and its body the repository's pull
         request template. Points the other open ones at their stack parents, as
         push does, in case one was opened or retargeted elsewhere since. Then
@@ -1013,7 +1027,7 @@ class StackClient(StackCore):
         self.ensure_no_operation_in_progress()
         self.settle_all()
         parents = self.tracked_branches()
-        stack = self.selected_stacks(selectors, parents, "open pull requests for")
+        stack = self.selected_stacks(branches, groups, parents, "open pull requests for")
         adapter = make_adapter(self, remote, fetch=True)
         if not isinstance(adapter, GitHubAdapter):
             raise StackError(

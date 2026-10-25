@@ -1,6 +1,6 @@
 import argparse
 
-from git_stack.commands import Subparsers, add_selectors_argument
+from git_stack.commands import Subparsers, add_stack_arguments
 from git_stack.git import DEFAULT_REMOTE
 from git_stack.stack import StackClient
 
@@ -8,7 +8,8 @@ from git_stack.stack import StackClient
 class Args(argparse.Namespace):
     """The arguments register's parser produces."""
 
-    selectors: list[str]
+    branches: list[str]
+    groups: list[str]
     remote: str
     force: bool
 
@@ -19,7 +20,7 @@ def register(subparsers: Subparsers) -> None:
         help="force-push (with lease) every branch in the current stack (or the ones "
         "named), refusing if that would drop commits on the remote",
     )
-    add_selectors_argument(p, "push")
+    add_stack_arguments(p, "push")
     p.add_argument("--remote", default=DEFAULT_REMOTE)
     p.add_argument(
         "--force",
@@ -31,6 +32,6 @@ def register(subparsers: Subparsers) -> None:
 
 
 def run(stack: StackClient, args: Args) -> None:
-    if not stack.push(args.selectors, remote=args.remote, force=args.force):
-        where = "those stacks" if args.selectors else f"{stack.git.current_branch()}'s stack"
+    if not stack.push(args.branches, args.groups, remote=args.remote, force=args.force):
+        where = "those stacks" if args.branches or args.groups else f"{stack.git.current_branch()}'s stack"
         print(f"nothing to push: every branch in {where} looks merged")

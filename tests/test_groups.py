@@ -152,7 +152,7 @@ def two_stacks(repo: Repo, client: StackClient) -> None:
     repo.commit("a", "main again\n", "main c2")
 
 
-def test_restack_takes_branches_globs_and_groups(repo: Repo, client: StackClient) -> None:
+def test_restack_takes_globs(repo: Repo, client: StackClient) -> None:
     two_stacks(repo, client)
     main = repo.git("rev-parse", "main")
 
@@ -171,7 +171,7 @@ def test_group_add_puts_stacks_in_a_group_that_commands_then_cover(repo: Repo, c
 
     assert client.show_stack("feat-a") == ["feat-a", "feat-b"]
     assert repo.branch_info("feat-b").group == "feat"
-    client.restack(["feat"], latest=True)
+    client.restack(groups=["feat"], latest=True)
     assert repo.config("feat-b", "stackBase") == repo.git("rev-parse", "main")
     assert repo.config("other", "stackBase") != repo.git("rev-parse", "main")
 
@@ -187,12 +187,21 @@ def test_group_add_takes_a_stack_by_its_bottom_branch(repo: Repo, client: StackC
     assert not repo.config_exists("feat-a2", "stackGroup")
 
 
-@pytest.mark.parametrize("name", ["", "has space", "glob*", "other"])
-def test_group_add_refuses_names_arguments_couldnt_name(repo: Repo, client: StackClient, name: str) -> None:
+@pytest.mark.parametrize("name", ["", "has space"])
+def test_group_add_refuses_empty_name_or_one_with_spaces(repo: Repo, client: StackClient, name: str) -> None:
     two_stacks(repo, client)
 
     with pytest.raises(StackError, match="can't be a group name"):
         client.group_add(name, ["feat-a"])
+
+
+def test_group_can_share_a_branchs_name(repo: Repo, client: StackClient) -> None:
+    two_stacks(repo, client)
+    client.group_add("other", ["feat-*"])
+
+    assert client.show_stack("feat-a") == ["feat-a", "feat-b"]
+    assert [b.name for b in client.info(["other"])] == ["main", "other"]
+    assert [b.name for b in client.info(groups=["other"])] == ["main", "feat-a", "feat-b"]
 
 
 def test_group_remove_takes_stacks_out_of_their_group(repo: Repo, client: StackClient) -> None:
@@ -222,7 +231,7 @@ def test_group_rename_refuses_to_merge_into_an_existing_group(repo: Repo, client
     client.group_add("misc", ["other"])
 
     with pytest.raises(
-        StackError, match="group misc already exists; to merge feat into it, run `git stack group add misc feat`"
+        StackError, match="group misc already exists; to merge feat into it, run `git stack group add misc -g feat`"
     ):
         client.group_rename("misc", old="feat")
 
@@ -238,8 +247,10 @@ def test_group_rename_refuses_stack_without_a_group(repo: Repo, client: StackCli
 def test_unknown_argument_names_nothing(repo: Repo, client: StackClient) -> None:
     two_stacks(repo, client)
 
-    with pytest.raises(StackError, match="nope isn't a tracked branch or a group"):
+    with pytest.raises(StackError, match="nope isn't in a stack"):
         client.restack(["nope"])
+    with pytest.raises(StackError, match="there's no group nope"):
+        client.restack(groups=["nope"])
     with pytest.raises(StackError, match="nope-\\* matches no tracked branch"):
         client.restack(["nope-*"])
 
@@ -267,7 +278,7 @@ def test_info_shows_only_the_stacks_named(repo: Repo, client: StackClient) -> No
     two_stacks(repo, client)
     client.group_add("feat", ["feat-a", "feat-b"])
 
-    assert [b.name for b in client.info(["feat"])] == ["main", "feat-a", "feat-b"]
+    assert [b.name for b in client.info(groups=["feat"])] == ["main", "feat-a", "feat-b"]
     assert [b.name for b in client.info(["oth*"])] == ["main", "other"]
 
 
@@ -275,6 +286,7 @@ def test_untrack_takes_globs_but_not_groups(repo: Repo, client: StackClient) -> 
     two_stacks(repo, client)
     client.group_add("feat", ["feat-*"])
 
+    # A group's name is just a branch name to untrack.
     with pytest.raises(StackError, match="feat isn't in a stack"):
         client.untrack(["feat"])
     with pytest.raises(StackError, match="nope-\\* matches no tracked branch"):
@@ -324,12 +336,11 @@ def test_branch_refuses_stack_in_another_group_without_creating_it(repo: Repo, c
     assert repo.config("feat-a", "stackGroup") == "feat"
 
 
-@pytest.mark.parametrize("group", ["other", "feat-x", "bad name"])
-def test_branch_refuses_bad_group_without_creating_it(repo: Repo, client: StackClient, group: str) -> None:
+def test_branch_refuses_bad_group_without_creating_it(repo: Repo, client: StackClient) -> None:
     two_stacks(repo, client)
 
-    with pytest.raises(StackError, match="can't be"):
-        client.branch("feat-x", group=group)
+    with pytest.raises(StackError, match="can't be a group name"):
+        client.branch("feat-x", group="bad name")
 
     assert not repo.git("branch", "--list", "feat-x")
 

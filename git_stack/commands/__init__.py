@@ -22,14 +22,23 @@ def add_latest_argument(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def add_selectors_argument(parser: argparse.ArgumentParser, verb: str, default: str = "the current stack") -> None:
+def add_stack_arguments(parser: argparse.ArgumentParser, verb: str, default: str = "the current stack") -> None:
+    """Add the branches and --group arguments that name stacks, as
+    StackCore.named takes them."""
     parser.add_argument(
-        "selectors",
+        "branches",
         nargs="*",
-        metavar="branch|group|glob",
-        help=f"{verb} the stacks of these branches, of the branches in these groups, or of the "
-        f"branches these globs match (quote them, so the shell doesn't expand them), instead "
-        f"of {default}",
+        metavar="branch|glob",
+        help=f"{verb} the stacks of these branches, or of the branches these globs match (quote "
+        f"them, so the shell doesn't expand them), instead of {default}",
+    )
+    parser.add_argument(
+        "-g",
+        "--group",
+        dest="groups",
+        action="append",
+        default=[],
+        help=f"{verb} the stacks in GROUP too (can be given more than once)",
     )
 
 

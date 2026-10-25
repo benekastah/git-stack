@@ -1,6 +1,6 @@
 import argparse
 
-from git_stack.commands import Subparsers, add_delete_argument, add_latest_argument, add_selectors_argument
+from git_stack.commands import Subparsers, add_delete_argument, add_latest_argument, add_stack_arguments
 from git_stack.git import DEFAULT_REMOTE
 from git_stack.stack import StackClient
 
@@ -8,7 +8,8 @@ from git_stack.stack import StackClient
 class Args(argparse.Namespace):
     """The arguments register's parser produces."""
 
-    selectors: list[str]
+    branches: list[str]
+    groups: list[str]
     remote: str
     delete: str | None
     latest: bool
@@ -21,7 +22,7 @@ def register(subparsers: Subparsers) -> None:
         help="fetch, untrack the current stack's (or the named ones') merged branches, restack "
         "it, pull in commits others pushed, and push the branches that already have a remote branch",
     )
-    add_selectors_argument(p, "sync")
+    add_stack_arguments(p, "sync")
     p.add_argument("--remote", default=DEFAULT_REMOTE)
     add_delete_argument(p)
     add_latest_argument(p)
@@ -33,7 +34,7 @@ def register(subparsers: Subparsers) -> None:
 
 def run(stack: StackClient, args: Args) -> None:
     unpushed = stack.sync(
-        args.selectors, remote=args.remote, delete=args.delete, latest=args.latest, push=not args.no_push
+        args.branches, args.groups, remote=args.remote, delete=args.delete, latest=args.latest, push=not args.no_push
     )
     if unpushed:
         print("note: run `git stack push` to update the remote branches and pull requests of:")

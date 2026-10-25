@@ -1,6 +1,6 @@
 import argparse
 
-from git_stack.commands import Subparsers, add_selectors_argument
+from git_stack.commands import Subparsers, add_stack_arguments
 from git_stack.git import DEFAULT_REMOTE
 from git_stack.stack import PullRequestAction, PullRequestStep, StackClient
 
@@ -8,7 +8,8 @@ from git_stack.stack import PullRequestAction, PullRequestStep, StackClient
 class Args(argparse.Namespace):
     """The arguments register's parser produces."""
 
-    selectors: list[str]
+    branches: list[str]
+    groups: list[str]
     remote: str
     dry_run: bool
 
@@ -20,7 +21,7 @@ def register(subparsers: Subparsers) -> None:
         help="open a draft pull request on GitHub for each branch in the current "
         "stack (or the named ones) that has none, into its stack parent",
     )
-    add_selectors_argument(p, "open pull requests for")
+    add_stack_arguments(p, "open pull requests for")
     p.add_argument("--remote", default=DEFAULT_REMOTE)
     p.add_argument(
         "-n", "--dry-run", action="store_true", help="print the pull requests it would open, without opening them"
@@ -41,7 +42,7 @@ def describe(step: PullRequestStep, dry_run: bool) -> str:
 
 
 def run(stack: StackClient, args: Args) -> None:
-    steps = stack.prs(args.selectors, remote=args.remote, dry_run=args.dry_run)
+    steps = stack.prs(args.branches, args.groups, remote=args.remote, dry_run=args.dry_run)
     if not steps:
         print("nothing to open: every branch in the current stack looks merged")
     for step in steps:

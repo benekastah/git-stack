@@ -102,7 +102,7 @@ def test_push_refuses_outside_a_stack(repo: Repo, client: StackClient) -> None:
 def test_push_refuses_untracked_branch(repo: Repo, client: StackClient) -> None:
     repo.make_stack()
 
-    with pytest.raises(StackError, match="main isn't a tracked branch or a group"):
+    with pytest.raises(StackError, match="main isn't in a stack"):
         client.push(["main"])
 
 
