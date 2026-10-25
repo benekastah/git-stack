@@ -261,3 +261,74 @@ def test_sync_from_main_syncs_the_stacks_named(repo: Repo, client: StackClient) 
     repo.assert_stacked("b", "main", ["b c1"])
     repo.assert_stacked("c", "main", ["c c1"])
     assert repo.git("branch", "--show-current") == "main"
+
+
+def test_info_shows_only_the_stacks_named(repo: Repo, client: StackClient) -> None:
+    two_stacks(repo, client)
+    client.group_add("feat", ["feat-a", "feat-b"])
+
+    assert [b.name for b in client.info(["feat"])] == ["main", "feat-a", "feat-b"]
+    assert [b.name for b in client.info(["oth*"])] == ["main", "other"]
+
+
+def test_untrack_takes_globs_but_not_groups(repo: Repo, client: StackClient) -> None:
+    two_stacks(repo, client)
+    client.group_add("feat", ["feat-*"])
+
+    with pytest.raises(StackError, match="feat isn't in a stack"):
+        client.untrack(["feat"])
+    with pytest.raises(StackError, match="nope-\\* matches no tracked branch"):
+        client.untrack(["other", "nope-*"])
+    assert repo.config("other", "stackParent") == "main"
+
+    assert [u.branch for u in client.untrack(["feat-*"])] == ["feat-a", "feat-b"]
+    repo.assert_untracked("feat-a")
+    repo.assert_untracked("feat-b")
+    assert repo.config("other", "stackParent") == "main"
+
+
+def test_branch_from_main_starts_a_stack_in_the_group(repo: Repo, client: StackClient) -> None:
+    two_stacks(repo, client)
+    client.group_add("feat", ["feat-a"])
+    repo.git("switch", "--quiet", "main")
+
+    client.branch("feat-c", group="feat")
+
+    assert repo.config("feat-c", "stackGroup") == "feat"
+    assert client.show_stack("feat-c") == ["feat-c", "feat-a"]
+
+
+def test_branch_on_a_stack_puts_the_stack_in_the_group(repo: Repo, client: StackClient) -> None:
+    two_stacks(repo, client)
+    repo.git("switch", "--quiet", "feat-a")
+
+    client.branch("feat-a2", group="feat")
+
+    assert repo.config("feat-a", "stackGroup") == "feat"
+    assert not repo.config_exists("feat-a2", "stackGroup")
+    # Asking for the group it's already in is fine.
+    client.branch("feat-a3", group="feat")
+    assert repo.config("feat-a3", "stackParent") == "feat-a2"
+
+
+def test_branch_refuses_stack_in_another_group_without_creating_it(repo: Repo, client: StackClient) -> None:
+    two_stacks(repo, client)
+    client.group_add("feat", ["feat-a"])
+    repo.git("switch", "--quiet", "feat-a")
+
+    with pytest.raises(StackError, match="feat-a's stack is in group feat already"):
+        client.branch("feat-a2", group="misc")
+
+    assert not repo.git("branch", "--list", "feat-a2")
+    assert repo.git("branch", "--show-current") == "feat-a"
+    assert repo.config("feat-a", "stackGroup") == "feat"
+
+
+@pytest.mark.parametrize("group", ["other", "feat-x", "bad name"])
+def test_branch_refuses_bad_group_without_creating_it(repo: Repo, client: StackClient, group: str) -> None:
+    two_stacks(repo, client)
+
+    with pytest.raises(StackError, match="can't be"):
+        client.branch("feat-x", group=group)
+
+    assert not repo.git("branch", "--list", "feat-x")

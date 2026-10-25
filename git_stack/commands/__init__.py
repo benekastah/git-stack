@@ -22,14 +22,14 @@ def add_latest_argument(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def add_selectors_argument(parser: argparse.ArgumentParser, verb: str) -> None:
+def add_selectors_argument(parser: argparse.ArgumentParser, verb: str, default: str = "the current stack") -> None:
     parser.add_argument(
         "selectors",
         nargs="*",
         metavar="branch|group|glob",
         help=f"{verb} the stacks of these branches, of the branches in these groups, or of the "
-        "branches these globs match (quote them, so the shell doesn't expand them), instead "
-        "of the current stack",
+        f"branches these globs match (quote them, so the shell doesn't expand them), instead "
+        f"of {default}",
     )
 
 

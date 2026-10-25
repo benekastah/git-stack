@@ -14,7 +14,13 @@ def register(subparsers: Subparsers) -> None:
     p = subparsers.add_parser(
         "untrack", help="stop tracking branches (default: the current one), without deleting them"
     )
-    p.add_argument("branches", nargs="*", metavar="branch", help="branches to untrack (default: the current branch)")
+    p.add_argument(
+        "branches",
+        nargs="*",
+        metavar="branch|glob",
+        help="branches to untrack, or globs of them (quote them, so the shell doesn't expand them); "
+        "default: the current branch",
+    )
     p.set_defaults(func=run)
 
 

@@ -140,6 +140,12 @@ def group_bottoms(bottom: str, parents: Parents, groups: Groups) -> list[str]:
     return [bottom, *sorted(others)]
 
 
+def is_glob(name: str) -> bool:
+    """Whether name is a glob rather than a branch or group name, which can't
+    have these characters in them."""
+    return any(c in name for c in "*?[")
+
+
 def drop_from_stack(branch: str, parents: Parents) -> list[str]:
     """Move branch's children onto its parent in parents and remove branch.
 
@@ -189,17 +195,24 @@ class StackCore:
         """The tracked branches selector names: a branch, a group (its bottom
         branches), or a glob (the branches it matches, as `git branch --list`
         would). Fails if it names none."""
-        if selector in parents:
-            return [selector]
-        if any(c in selector for c in "*?["):
-            matches = [b for b in parents if fnmatch.fnmatchcase(b, selector)]
-            if not matches:
-                raise StackError(f"{selector} matches no tracked branch")
-            return matches
+        if selector in parents or is_glob(selector):
+            return self.matching(selector, parents)
         bottoms = [b for b, g in self.groups(parents).items() if g == selector and parents[b] not in parents]
         if not bottoms:
             raise StackError(f"{selector} isn't a tracked branch or a group")
         return bottoms
+
+    def matching(self, selector: str, parents: Parents) -> list[str]:
+        """The tracked branches selector names, as a branch or a glob (as
+        `git branch --list` would match it). Fails if it names none."""
+        if not is_glob(selector):
+            if selector not in parents:
+                raise StackError(f"{selector} isn't in a stack")
+            return [selector]
+        matches = [b for b in parents if fnmatch.fnmatchcase(b, selector)]
+        if not matches:
+            raise StackError(f"{selector} matches no tracked branch")
+        return matches
 
     def selected_stacks(self, selectors: Sequence[str], parents: Parents, command: str) -> list[str]:
         """The branches in the stacks (see stack) of the branches selectors

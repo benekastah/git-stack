@@ -148,10 +148,12 @@ main
 - [`git stack group`](#git-stack-group-add-name-branchgroupglob)
   puts stacks in a group by hand, takes them out, or renames a group.
 
-`restack`, `sync` and `push` act on other stacks instead of the current one
-when you name them, from any branch: each argument can be a branch (its
-stack), a group (its stacks), or a glob of branch names, matched like
-`git branch --list` does (the stacks of the branches it matches). Quote a
+`restack`, `sync`, `push` and `prs` act on other stacks instead of the current
+one when you name them, from any branch, and `info` shows only the stacks you
+name: each argument can be a branch (its stack), a group (its stacks), or a
+glob of branch names, matched like `git branch --list` does (the stacks of the
+branches it matches). `untrack` takes globs too, but untracks the branches
+themselves, not their stacks, and doesn't take groups. Quote a
 glob, so the shell doesn't expand it:
 
 ```sh
@@ -163,7 +165,7 @@ Like git, every command accepts `-C <path>` before it to run as if started in
 `<path>`, e.g. `git stack -C ~/src/app info`, and `git -C <path> stack ...`
 works too.
 
-### `git stack branch <name>`
+### `git stack branch <name> [--group <group>]`
 
 Create `<name>` on top of the current branch, switch to it, and track it.
 
@@ -176,6 +178,8 @@ for a change that depends on that PR before it's merged.
 git switch main
 git stack branch add-api        # stacked on main
 git stack branch use-api        # stacked on add-api
+git switch main
+git stack branch search-ui --group search   # a new stack, in group search
 ```
 
 - Uncommitted changes come along to the new branch, as with `git switch -c`.
@@ -188,6 +192,9 @@ git stack branch use-api        # stacked on add-api
 - Whatever untracked branch is at the bottom of a stack (usually `main`) is its
   root, and `sync` and `clean` fast-forward it to its upstream. If you branch
   off a branch that isn't tracked, that branch becomes the root.
+- `--group` puts the new branch's stack in `<group>` (see [Groups](#groups)),
+  as `git stack group add` would. If the stack is in another group already,
+  it refuses without creating the branch.
 
 ### `git stack track <parent> [<branch>...] [--base <sha>]`
 
@@ -261,7 +268,7 @@ git stack autocreate
 - `-n`/`--dry-run` prints what it would do without changing anything (besides
   fetching).
 
-### `git stack untrack [<branch>...]`
+### `git stack untrack [<branch|glob>...]`
 
 Stop tracking branches (default: the current one), without deleting them or
 changing their commits.
@@ -274,6 +281,7 @@ branches, since `sync` and `clean` untrack those for you.
 ```sh
 git stack untrack experiment
 git stack untrack old-poc old-poc-2
+git stack untrack 'spike-*'             # every tracked spike-* branch
 ```
 
 - Branches stacked on it stay on it, so it becomes the root of their stack,
@@ -304,10 +312,10 @@ git stack rename add-api api-v2
   Delete the old remote branch yourself (`git push origin :add-api`) if you
   no longer want it.
 
-### `git stack info [--json] [--offline]`
+### `git stack info [<branch|group|glob>...] [--json] [--offline]`
 
-Show every tracked stack as a tree, with its root (e.g. `main`) on top and
-the branches built on it below.
+Show every tracked stack (or the ones named, see [Groups](#groups)) as a tree,
+with its root (e.g. `main`) on top and the branches built on it below.
 
 **When would I use it?** When you want to see your stacks and what needs doing:
 which branches depend on which, which need a restack, and which were merged.
@@ -635,10 +643,11 @@ git stack group remove search-ui        # take search-ui's stack back out
   mistake. To merge them, run `git stack group add <name> <other group>`.
 - `info` shows a group once it has two or more stacks.
 
-### `git stack prs [--remote origin] [-n]`
+### `git stack prs [<branch|group|glob>...] [--remote origin] [-n]`
 
-Open a draft pull request on GitHub for each branch in the current stack that
-has none, into its stack parent, bottom-up.
+Open a draft pull request on GitHub for each branch in the current stack (or
+the ones named, see [Groups](#groups)) that has none, into its stack parent,
+bottom-up.
 
 **When would I use it?** After pushing a new stack, or new branches in one,
 to open their pull requests with the right bases.

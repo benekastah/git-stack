@@ -26,6 +26,7 @@ from git_stack.core import (
     drop_from_stack,
     ensure_no_cycle,
     group_bottoms,
+    is_glob,
     stack_root,
 )
 from git_stack.errors import BrokenStackError, StackError
@@ -181,18 +182,40 @@ class StackClient(StackCore):
     and warnings through on_event, and raise StackError when they fail.
     """
 
-    def branch(self, name: str) -> str:
-        """Create name on top of the current branch and track it. Returns the parent."""
+    def branch(self, name: str, group: str | None = None) -> str:
+        """Create name on top of the current branch and track it, putting its
+        stack in group, if given. Returns the parent.
+
+        Refuses, creating nothing, if the stack is in another group already.
+        """
         git = self.git
         parent = git.current_branch()
         if parent is None:
             raise StackError("not on a branch")
         self.ensure_name_free_on_remotes(name)
+        # The branch at the bottom of name's stack, which is what's in a group,
+        # or None if that's name itself.
+        bottom = None
+        if group is not None:
+            parents = self.tracked_branches()
+            self.ensure_group_name(group, parents)
+            if group == name:
+                raise StackError(f"{name} can't be both the new branch's name and its group's")
+            if parent in parents:
+                bottom = ancestry(parent, parents)[-2]
+                current = git.config_get(bottom, GROUP_KEY)
+                if current is not None and current != group:
+                    raise StackError(
+                        f"{parent}'s stack is in group {current} already; run `git stack group add {group}` "
+                        f"from it to move it, or `git stack group rename {group}` to rename the group"
+                    )
         # Without --no-track, branch.autoSetupMerge=inherit (or always) would give
         # name its parent's upstream, which sync and push take as its own.
         git.run("switch", "--quiet", "--no-track", "--create", name)
         git.config_set(name, PARENT_KEY, parent)
         git.config_set(name, BASE_KEY, git.tip(name))
+        if group is not None:
+            git.config_set(bottom or name, GROUP_KEY, group)
         return parent
 
     def track(self, parent: str, branches: Iterable[str] = (), base: str | None = None) -> list[Tracked]:
@@ -384,15 +407,16 @@ class StackClient(StackCore):
     def ensure_group_name(self, name: str, parents: Parents) -> None:
         """Refuse a group name that a branch, group or glob argument (see
         selected) couldn't name."""
-        if not name or any(c.isspace() or c in "*?[" for c in name):
+        if not name or is_glob(name) or any(c.isspace() for c in name):
             raise StackError(f"{name!r} can't be a group name: it can't be empty, or have spaces or *, ? or [ in it")
         if name in parents:
             raise StackError(f"{name} is a tracked branch, so it can't be a group name too")
 
     def untrack(self, branches: Iterable[str] = ()) -> list[Untracked]:
-        """Stop tracking branches (default: the current branch), leaving the
-        branches themselves alone. Branches stacked on them stay on them.
-        Returns an Untracked for each branch.
+        """Stop tracking branches (default: the current branch), each a branch
+        or a glob (see matching), leaving the branches themselves alone.
+        Branches stacked on them stay on them. Returns an Untracked for each
+        branch.
 
         Nothing is untracked unless every branch is tracked, so a bad argument
         doesn't leave some of them untracked.
@@ -400,12 +424,10 @@ class StackClient(StackCore):
         self.ensure_no_operation_in_progress()
         self.settle_all()
         parents = self.tracked_branches()
-        branches = list(branches) or [
+        selectors = list(branches) or [
             self.current_stacked_branch(parents, "untrack", hint="name the branches to untrack")
         ]
-        for branch in branches:
-            if branch not in parents:
-                raise StackError(f"{branch} isn't in a stack")
+        branches = [branch for selector in selectors for branch in self.matching(selector, parents)]
         for branch in branches:
             self.forget(branch)
         # Children untracked along with their parent aren't still stacked on it.
@@ -608,12 +630,15 @@ class StackClient(StackCore):
         if not self.git.passthrough("switch", "--quiet", branch):
             raise StackError(f"switching to {branch} failed; see git's output above")
 
-    def info(self, offline: bool = False) -> list[BranchInfo]:
-        """Every tracked stack, as a list of BranchInfo: each stack's root, then
-        its branches, parent-before-child. offline checks for merges like the
-        git adapter does, without asking GitHub about pull requests."""
+    def info(self, selectors: Sequence[str] = (), offline: bool = False) -> list[BranchInfo]:
+        """Every tracked stack (or the stacks of the branches selectors name,
+        see selected), as a list of BranchInfo: each stack's root, then its
+        branches, parent-before-child. offline checks for merges like the git
+        adapter does, without asking GitHub about pull requests."""
         git = self.git
         parents = self.settled_branches()
+        if selectors:
+            parents = {b: parents[b] for b in self.selected_stacks(selectors, parents, "show")}
         current = git.current_branch()
         children = children_map(parents)
         adapter = GitAdapter(self) if offline else make_adapter(self, DEFAULT_REMOTE, fetch=False)
@@ -973,9 +998,12 @@ class StackClient(StackCore):
                     f"and `git stack sync` first"
                 )
 
-    def prs(self, remote: str = DEFAULT_REMOTE, dry_run: bool = False) -> list[PullRequestStep]:
+    def prs(
+        self, selectors: Sequence[str] = (), remote: str = DEFAULT_REMOTE, dry_run: bool = False
+    ) -> list[PullRequestStep]:
         """Open a draft pull request into its stack parent for each unmerged
-        branch in the current stack that has none, bottom-up. Its title is the
+        branch in the current stack (or in the stacks of the branches selectors
+        name, see selected) that has none, bottom-up. Its title is the
         branch's oldest commit's subject, and its body the repository's pull
         request template. Points the other open ones at their stack parents, as
         push does, in case one was opened or retargeted elsewhere since. Then
@@ -991,7 +1019,7 @@ class StackClient(StackCore):
         self.ensure_no_operation_in_progress()
         self.settle_all()
         parents = self.tracked_branches()
-        branch = self.current_stacked_branch(parents, "open pull requests for")
+        stack = self.selected_stacks(selectors, parents, "open pull requests for")
         adapter = make_adapter(self, remote, fetch=True)
         if not isinstance(adapter, GitHubAdapter):
             raise StackError(
@@ -999,7 +1027,7 @@ class StackClient(StackCore):
                 f"isn't installed, or {ADAPTER_SETTING} is git"
             )
         adapter.ensure_available()
-        branches = self.skip_merged(self.stack(branch, parents), parents, adapter)
+        branches = self.skip_merged(stack, parents, adapter)
         self.ensure_on_remote(branches, sorted({stack_root(b, parents) for b in branches}), remote)
 
         prs = adapter.pull_requests()

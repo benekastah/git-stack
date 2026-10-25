@@ -264,3 +264,17 @@ def test_prs_needs_github(repo: Repo, client: StackClient) -> None:
 
     with pytest.raises(StackError, match="prs opens pull requests on GitHub"):
         client.prs()
+
+
+def test_prs_opens_pull_requests_for_the_stacks_named(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+    repo.make_stack()
+    client.push()
+    repo.git("switch", "--quiet", "main")
+    client.branch("solo")
+    repo.commit("c", "solo\n", "solo c1")
+    client.push()
+    repo.git("switch", "--quiet", "main")
+
+    client.prs(["pr2"])
+
+    assert [head for head, *_ in opened(gh)] == ["pr1", "pr2", "pr3"]
