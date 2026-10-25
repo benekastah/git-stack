@@ -189,6 +189,9 @@ def test_unrevert_recreates_untracked_branch_and_moves_its_children_back(
     assert repo.git("show", "pr1:a") == "pr1 second"
     assert repo.config("pr2", "stackParent") == "pr1"
     assert not repo.config_exists("pr2", "stackMergedParent")
+    # pr2 is no longer at the bottom of a stack, so pr1 holds its group.
+    assert repo.config("pr1", "stackGroup") == "pr1"
+    assert not repo.config_exists("pr2", "stackGroup")
     client.restack()
     repo.assert_stacked("pr2", "pr1", ["pr2 c1"])
     repo.assert_stacked("pr3", "pr2", ["pr3 c1"])
@@ -264,3 +267,35 @@ def test_unrevert_refuses_branch_nothing_was_stacked_on(repo: Repo, client: Stac
 
     with pytest.raises(StackError, match="loose isn't in a stack, and no branch in one was stacked on it"):
         client.unrevert("loose")
+
+
+def merged_tip_refs(repo: Repo) -> list[str]:
+    return repo.git("for-each-ref", "--format=%(refname)", "refs/stack/merged/").split()
+
+
+def test_recorded_tip_of_deleted_branch_survives_garbage_collection(repo: Repo, client: StackClient) -> None:
+    merge_sync_revert(repo, client, delete="local")
+    pr1 = repo.config("pr2", "stackMergedParent").split()[3]
+    assert merged_tip_refs(repo) == [f"refs/stack/merged/{pr1}"]
+
+    repo.git("reflog", "expire", "--expire=now", "--all")
+    repo.git("gc", "--quiet", "--prune=now")
+
+    assert repo.branch_info("pr2").reverted_parent == "pr1"
+    client.unrevert("pr1")
+    assert repo.git("show", "pr1:a") == "pr1 second"
+    # No branch records pr1's old tip any more.
+    assert merged_tip_refs(repo) == []
+
+
+def test_recorded_tip_ref_goes_once_no_branch_records_it(repo: Repo, client: StackClient) -> None:
+    repo.make_stack()
+    client.push()
+    repo.squash_merge_on_forge("pr1")
+    repo.git("switch", "--quiet", "pr2")
+    client.sync(delete="local")
+    assert len(merged_tip_refs(repo)) == 1
+
+    client.untrack(["pr2"])
+
+    assert merged_tip_refs(repo) == []

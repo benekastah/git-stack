@@ -144,7 +144,10 @@ main
   `group <name>` above its stacks on each root they're on. A group of one is
   just a stack.
 - A branch leaves its group when it's untracked, so a group ends once its last
-  branch is untracked.
+  branch is untracked. It also leaves when it's moved onto another tracked
+  branch (e.g. with `restack --onto`), since it's then part of that branch's
+  stack, and isn't put back in the group if it's at the bottom of a stack
+  again later.
 - [`git stack group`](#git-stack-group-add-name-branchgroupglob)
   puts stacks in a group by hand, takes them out, or renames a group.
 
@@ -730,8 +733,8 @@ git stack unrevert add-api
   that branch recorded what it was when it merged. If it still exists, it's
   tracked again, unless it changed since it merged, in which case it's left
   alone (rename it to have it recreated instead). If it was deleted, it's
-  recreated. Once its commits are garbage-collected (by default, two weeks
-  after it was deleted, if nothing else has them), it can't be.
+  recreated: git-stack keeps its commits from being garbage-collected for as
+  long as a branch records it.
 - The branches that were stacked on it are moved back onto it, which changes
   their pull requests' bases the next time you push. Like the ones still
   stacked on it, `restack` or `sync` moves them onto its new commits.
@@ -917,7 +920,9 @@ When a merged branch stops being tracked, each branch that was stacked on it
 records what it was, in `branch.<name>.stackMergedParent`: its name, the
 parent it merged into, its base and tip, and (with the GitHub adapter) its pull
 request's merge commit. That's how a later revert of it is noticed, and how
-`unrevert` can bring it back even once it's untracked or deleted.
+`unrevert` can bring it back even once it's untracked or deleted. So that its
+commits aren't garbage-collected once nothing else has them, its tip is kept
+as `refs/stack/merged/<commit>`, until no branch records it any more.
 
 Checking whether a branch conflicts with its parent, whether its changes
 already landed there, and whether they were reverted since, can take a second

@@ -11,9 +11,6 @@ from git_stack.adapters.merge_state import MergeState
 from git_stack.core import (
     BASE_KEY,
     GROUP_KEY,
-    MERGED_PARENT_KEY,
-    MERGED_PARENT_REVERTED_CHECK_KEY,
-    PARENT_KEY,
     PENDING_BASE_KEY,
     PENDING_PARENT_KEY,
     PULLED_KEY,
@@ -212,7 +209,7 @@ class StackClient(StackCore):
         # Without --no-track, branch.autoSetupMerge=inherit (or always) would give
         # name its parent's upstream, which sync and push take as its own.
         git.run("switch", "--quiet", "--no-track", "--create", name)
-        git.config_set(name, PARENT_KEY, parent)
+        self.set_parent(name, parent)
         git.config_set(name, BASE_KEY, git.tip(name))
         if group is not None:
             git.config_set(bottom or name, GROUP_KEY, group)
@@ -261,7 +258,7 @@ class StackClient(StackCore):
             parent, base_arg = branch, None
 
         for tracked in plan:
-            git.config_set(tracked.branch, PARENT_KEY, tracked.parent)
+            self.set_parent(tracked.branch, tracked.parent)
             git.config_set(tracked.branch, BASE_KEY, tracked.base)
         return plan
 
@@ -335,7 +332,7 @@ class StackClient(StackCore):
                 ):
                     git.run("branch", "--quiet", f"--set-upstream-to=refs/remotes/{remote}/{step.branch}", step.branch)
                 if step.base is not None:
-                    git.config_set(step.branch, PARENT_KEY, step.parent)
+                    self.set_parent(step.branch, step.parent)
                     git.config_set(step.branch, BASE_KEY, step.base)
         return plan
 
@@ -395,8 +392,6 @@ class StackClient(StackCore):
             raise StackError(
                 f"group {new} already exists; to merge {old} into it, run `git stack group add {new} {old}`"
             )
-        # Including branches no longer at the bottom of a stack, so the group
-        # they'd go back to if their parent merged is renamed too.
         members = [b for b, g in groups.items() if g == old]
         if not members:
             raise StackError(f"there's no group {old}")
@@ -456,7 +451,7 @@ class StackClient(StackCore):
         children = tuple(child for child, parent in self.tracked_branches().items() if parent == old)
         git.run("branch", "--move", old, new)
         for child in children:
-            git.config_set(child, PARENT_KEY, new)
+            self.set_parent(child, new)
         if upstream:
             # Leaving the old upstream would make sync pull from it, and report it
             # as gone once it's deleted.
@@ -504,7 +499,7 @@ class StackClient(StackCore):
         if retrack is not None:
             if not git.local_branch_exists(branch):
                 git.run("branch", "--quiet", branch, retrack.tip)
-            git.config_set(branch, PARENT_KEY, parent)
+            self.set_parent(branch, parent)
             git.config_set(branch, BASE_KEY, retrack.base)
         # So it stays in the group they were in, with the other stacks in it.
         group = next((g for child, _ in orphans if (g := git.config_get(child, GROUP_KEY))), None)
@@ -513,9 +508,8 @@ class StackClient(StackCore):
         # They keep their bases, which the rebuilt branch has in its history, so
         # the next restack moves them onto it.
         for child, _ in orphans:
-            git.config_set(child, PARENT_KEY, branch)
-            git.config_unset(child, MERGED_PARENT_KEY)
-            git.config_unset(child, MERGED_PARENT_REVERTED_CHECK_KEY)
+            self.set_parent(child, branch)
+            self.unrecord_merged_parent(child)
         self.rebuild_reverted(branch, parent, reverts)
         children = tuple(child for child, p in self.tracked_branches().items() if p == branch)
         return Unreverted(branch, parent, tuple(reverts), children)

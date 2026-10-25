@@ -332,3 +332,20 @@ def test_branch_refuses_bad_group_without_creating_it(repo: Repo, client: StackC
         client.branch("feat-x", group=group)
 
     assert not repo.git("branch", "--list", "feat-x")
+
+
+def test_branch_moved_onto_a_tracked_branch_leaves_its_group(repo: Repo, client: StackClient) -> None:
+    make_siblings(repo, client)
+    repo.git("switch", "--quiet", "b")
+    client.sync()
+    repo.git("switch", "--quiet", "main")
+    client.branch("d")
+    repo.commit("a", "d\n", "d c1")
+    repo.git("switch", "--quiet", "c")
+
+    client.restack(onto="d")
+
+    assert not repo.config_exists("c", "stackGroup")
+    # Even once d is untracked, leaving c at the bottom of a stack again.
+    client.untrack(["d"])
+    assert client.show_stack("b") == ["b"]

@@ -71,14 +71,17 @@ the parent, but its own commits and messages are dropped.
 
 ## `info` can make a concurrent command fail to lock git config
 
-`info` remembers whether each branch conflicts with its parent and whether its
-changes landed there (`StackCore.remembered`), by writing
-`branch.<name>.stackConflictCheck` and `branch.<name>.stackLandedCheck` with
-`git config`, which locks `.git/config` while it writes. `git config` doesn't
+`info` remembers whether each branch conflicts with its parent, whether its
+changes landed there, and whether they, or those of the branch it was stacked
+on until that merged, were reverted since (`StackCore.remembered`), by writing
+`branch.<name>.stackConflictCheck`, `branch.<name>.stackLandedCheck`,
+`branch.<name>.stackRevertedCheck` and
+`branch.<name>.stackMergedParentRevertedCheck` with `git config`, which locks
+`.git/config` while it writes. `git config` doesn't
 wait for a lock: any other `git config` write at that moment fails with "could
 not lock config file". `info` ignores that for its own writes, but every other
-command treats a failed write as an error, so `sync`, `restack`, `push` or
-`clean` running while `info` does (e.g. from an editor or a status bar that
+command treats a failed write as an error, so `sync`, `restack`, `push`,
+`clean`, `unrevert` or `group` running while `info` does (e.g. from an editor or a status bar that
 refreshes it, or in another terminal) can stop partway with that error.
 
 Reproduced by holding `.git/config.lock` while running `git stack restack`: it
@@ -96,12 +99,36 @@ fails on the lock.
 
 ## Two commands that restack at once can corrupt each other's records
 
-Each command that restacks or pulls (`restack`, `sync`, and the others that
-settle first: `track`, `untrack`, `rename`, `clean`, `push`, `autocreate`,
-`prs`) takes a pending restack or pull it finds unfinished as aborted, and
-discards it. If another such command is between writing its pending keys and
+Each command that restacks or pulls (`restack`, `sync`, `unrevert`, and the
+others that settle first: `track`, `untrack`, `rename`, `clean`, `push`,
+`autocreate`, `prs`, and `group add`, `remove` and `rename`) takes a pending
+restack or pull it finds unfinished as aborted, and discards it. If another such command is between writing its pending keys and
 starting its rebase or cherry-pick, that rebase is never recorded, so the
 branch keeps its old base. There's no lock to stop two from running at once.
+
+## A change undone some other way can look like a revert
+
+Revert detection compares patch-ids without context lines, so a revert still
+matches after later commits change the lines around it. The flip side is that
+any later commit on the parent that undoes exactly one of the branch's
+changes in the same file (say, setting a version number back), for whatever
+reason, counts as reverting it. The branch is then left alone as
+`(merged, then reverted)` instead of being untracked, and the branches that
+were stacked on it are warned about. Nothing is lost, but it stays tracked
+until untracked by hand.
+
+## A group with a tracked branch's name can't be named
+
+An argument that names a tracked branch means that branch's stack, even if a
+group has the same name. `group add`, `group rename` and `branch --group`
+refuse a tracked branch's name, but nothing stops a branch getting a group's
+name later, e.g. `git stack branch a` from `main` while the stacks `a` left
+behind when it merged are still in group `a`. `sync a` and the other
+commands then act on the new branch's stack, not the group's, until the
+group is renamed.
+
+Possible fix: have `branch`, `track` and `rename` refuse a group's name, as
+they do a name already on a remote.
 
 ## The branch config cache could miss a write
 

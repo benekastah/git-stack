@@ -40,6 +40,10 @@ REVERTED_CHECK_KEY = "stackRevertedCheck"
 # reverted.
 MERGED_PARENT_KEY = "stackMergedParent"
 MERGED_PARENT_REVERTED_CHECK_KEY = "stackMergedParentRevertedCheck"
+# A ref to each tip a MERGED_PARENT_KEY records, named after it, so its commits
+# aren't garbage-collected once nothing else has them (e.g. after its branch
+# was deleted following a squash merge), for as long as a record names it.
+MERGED_TIPS_REF_PREFIX = "refs/stack/merged/"
 # The group of stacks the branch's stack is in. When a branch stacked on a
 # stack's root (e.g. main) merges, the branches stacked on it become the
 # bottoms of stacks of their own, and get its group (or, if it had none, its
@@ -183,6 +187,14 @@ class StackCore:
             if key == PARENT_KEY.lower() and branch in existing
         }
 
+    def set_parent(self, branch: str, parent: str) -> None:
+        """Record parent as branch's parent. If parent is tracked, branch is no
+        longer at the bottom of a stack, so it leaves its group (see GROUP_KEY),
+        rather than rejoining it if it's ever at the bottom again."""
+        self.git.config_set(branch, PARENT_KEY, parent)
+        if self.git.config_get(parent, PARENT_KEY) is not None:
+            self.git.config_unset(branch, GROUP_KEY)
+
     def groups(self, parents: Parents) -> Groups:
         """The group of each branch in parents that has one (see GROUP_KEY)."""
         return {b: group for b in parents if (group := self.git.config_get(b, GROUP_KEY))}
@@ -301,7 +313,7 @@ class StackCore:
             return
         pending_base = git.config_get(branch, PENDING_BASE_KEY)
         if pending_base is not None and git.is_ancestor(pending_base, branch):
-            git.config_set(branch, PARENT_KEY, pending_parent)
+            self.set_parent(branch, pending_parent)
             git.config_set(branch, BASE_KEY, pending_base)
         elif not forget_unfinished or git.other_worktree_of(branch) is not None:
             # Another worktree may have stopped partway through it.
@@ -443,7 +455,7 @@ class StackCore:
         base = self.recorded_base(branch, parent)
         if not self.needs_restack(branch, parent, base, parent_tip, latest):
             # There's no rebase to wait for.
-            git.config_set(branch, PARENT_KEY, parent)
+            self.set_parent(branch, parent)
             return True
         if (worktree := git.other_worktree_of(branch)) is not None:
             self.emit(events.NotRestackedInOtherWorktree(branch, worktree))
@@ -606,6 +618,26 @@ class StackCore:
             GROUP_KEY,
         ):
             self.git.config_unset(branch, key)
+        self.prune_merged_tips()
+
+    def unrecord_merged_parent(self, branch: str) -> None:
+        """Forget the branch that branch was stacked on until it merged."""
+        self.git.config_unset(branch, MERGED_PARENT_KEY)
+        self.git.config_unset(branch, MERGED_PARENT_REVERTED_CHECK_KEY)
+        self.prune_merged_tips()
+
+    def prune_merged_tips(self) -> None:
+        """Delete the refs (see MERGED_TIPS_REF_PREFIX) to tips no branch's
+        MergedParent records any more."""
+        git = self.git
+        recorded = {
+            merged.tip
+            for (_, key), value in git.branch_config().items()
+            if key == MERGED_PARENT_KEY.lower() and (merged := MergedParent.parse(value)) is not None
+        }
+        for ref in git.run("for-each-ref", "--format=%(refname)", MERGED_TIPS_REF_PREFIX).split():
+            if ref.removeprefix(MERGED_TIPS_REF_PREFIX) not in recorded:
+                git.run("update-ref", "-d", ref)
 
     def merged_parent(self, branch: str) -> MergedParent | None:
         """The branch that branch was stacked on until it merged, if recorded."""
@@ -627,10 +659,12 @@ class StackCore:
         new_parent = parents[branch]
         base = git.config_get(branch, BASE_KEY)
         merged = MergedParent(branch, new_parent, base, git.tip(branch), merges) if base else None
+        if merged is not None:
+            git.run("update-ref", f"{MERGED_TIPS_REF_PREFIX}{merged.tip}", merged.tip)
         group = git.config_get(branch, GROUP_KEY) or branch
         children = tuple(drop_from_stack(branch, parents))
         for child in children:
-            git.config_set(child, PARENT_KEY, new_parent)
+            self.set_parent(child, new_parent)
             if merged is not None:
                 git.config_set(child, MERGED_PARENT_KEY, str(merged))
             if new_parent not in parents:

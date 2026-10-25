@@ -242,6 +242,10 @@ A group of one is just a stack.
 .IP \(bu 2
 A branch leaves its group when it\(aqs untracked, so a group ends once
 its last branch is untracked.
+It also leaves when it\(aqs moved onto another tracked branch (e.g.
+with \f[CR]restack \-\-onto\f[R]), since it\(aqs then part of that
+branch\(aqs stack, and isn\(aqt put back in the group if it\(aqs at the
+bottom of a stack again later.
 .IP \(bu 2
 \f[CR]git stack group\f[R] puts stacks in a group by hand, takes them
 out, or renames a group.
@@ -983,9 +987,8 @@ merged.
 If it still exists, it\(aqs tracked again, unless it changed since it
 merged, in which case it\(aqs left alone (rename it to have it recreated
 instead).
-If it was deleted, it\(aqs recreated.
-Once its commits are garbage\-collected (by default, two weeks after it
-was deleted, if nothing else has them), it can\(aqt be.
+If it was deleted, it\(aqs recreated: git\-stack keeps its commits from
+being garbage\-collected for as long as a branch records it.
 .IP \(bu 2
 The branches that were stacked on it are moved back onto it, which
 changes their pull requests\(aq bases the next time you push.
@@ -1205,6 +1208,9 @@ request\(aqs merge commit.
 That\(aqs how a later revert of it is noticed, and how
 \f[CR]unrevert\f[R] can bring it back even once it\(aqs untracked or
 deleted.
+So that its commits aren\(aqt garbage\-collected once nothing else has
+them, its tip is kept as \f[CR]refs/stack/merged/<commit>\f[R], until no
+branch records it any more.
 .PP
 Checking whether a branch conflicts with its parent, whether its changes
 already landed there, and whether they were reverted since, can take a
