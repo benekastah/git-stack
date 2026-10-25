@@ -114,8 +114,9 @@ any later commit on the parent that undoes exactly one of the branch's
 changes in the same file (say, setting a version number back), for whatever
 reason, counts as reverting it. The branch is then left alone as
 `(merged, then reverted)` instead of being untracked, and the branches that
-were stacked on it are warned about. Nothing is lost, but it stays tracked
-until untracked by hand.
+were stacked on it are warned about. Nothing is lost, and
+`clean --ignore-revert <branch>` (or `sync`'s) says it wasn't a revert, but
+until then every command skips it.
 
 ## The branch config cache could miss a write
 

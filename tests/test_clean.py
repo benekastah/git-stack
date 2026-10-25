@@ -1,6 +1,9 @@
 """git stack clean."""
 
+import pytest
+
 from git_stack import events
+from git_stack.errors import StackError
 from git_stack.stack import StackClient
 from tests.helpers import Repo
 
@@ -53,3 +56,22 @@ def test_clean_keeps_tracking_reverted_branch(repo: Repo, client: StackClient, e
     assert events.Reverted("pr1", "main") in emitted
     assert repo.config("pr1", "stackParent") == "main"
     assert repo.config("pr2", "stackParent") == "pr1"
+
+
+def test_clean_ignore_revert_untracks_reverted_branch_as_merged(repo: Repo, client: StackClient) -> None:
+    repo.make_stack()
+    client.push()
+    repo.squash_merge_on_forge("pr1")
+    repo.revert_on_forge("HEAD")
+
+    client.clean(ignore_reverts=["pr1"])
+
+    repo.assert_untracked("pr1")
+    assert repo.config("pr2", "stackParent") == "main"
+
+
+def test_clean_ignore_revert_refuses_branch_with_no_revert_to_ignore(repo: Repo, client: StackClient) -> None:
+    repo.make_stack()
+
+    with pytest.raises(StackError, match="there's no revert of nope to ignore in any stack"):
+        client.clean(ignore_reverts=["nope"])

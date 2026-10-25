@@ -156,7 +156,8 @@ class SyncState:
     are left alone too. blocked are those that couldn't be restacked or pulled
     into because of another worktree (or are stacked on one), which a push
     can't include. pushable are the branches to push, and unpushed those that
-    differ from their remote branch but won't be pushed.
+    differ from their remote branch but won't be pushed. ignore_reverts are
+    the branches whose reverts to ignore (see StackClient.sync).
     """
 
     original: str
@@ -165,6 +166,7 @@ class SyncState:
     delete: str | None
     latest: bool
     push: bool
+    ignore_reverts: frozenset[str] = frozenset()
     skipped: set[str] = field(default_factory=set)
     blocked: list[str] = field(default_factory=list)
     pushable: list[str] = field(default_factory=list)
@@ -769,6 +771,7 @@ class StackClient(StackCore):
         delete: str | None = None,
         latest: bool = False,
         push: bool = True,
+        ignore_reverts: Sequence[str] = (),
     ) -> list[str]:
         """Fetch, untrack the merged branches in the current stack, or in the
         stacks of the branches that branches and groups name (see named), deleting what
@@ -776,6 +779,10 @@ class StackClient(StackCore):
         for latest), and pull in commits others pushed. Then, if push is set, push
         the branches that differ from the upstream they already have on remote.
         Branches with no such upstream are never pushed.
+
+        A branch in ignore_reverts counts as merged even if its parent has since
+        reverted it, and a branch that was stacked on one until it merged
+        forgets it (see warn_if_merged_parent_reverted).
 
         Returns the branches that now differ from their remote branch, which
         with push are only those it didn't push.
@@ -789,13 +796,14 @@ class StackClient(StackCore):
         self.settle_all()
         parents = self.tracked_branches()
         stack = self.selected_stacks(branches, groups, parents, "sync")
+        self.ensure_ignorable_reverts(ignore_reverts, stack, "the stacks being synced")
         original = self.current_checkout()
         adapter = self.checked_adapter(remote)
         self.fetch(remote)
         # A group's stacks can be on different roots.
         self.fast_forward_trunks(sorted({stack_root(b, parents) for b in stack}))
 
-        state = SyncState(original, parents, remote, delete, latest, push)
+        state = SyncState(original, parents, remote, delete, latest, push, frozenset(ignore_reverts))
         # Parent-before-child, so by the time we reach a branch its parent is
         # final: merged branches have been removed (and their children reparented
         # in `parents`), and the rest have been restacked and pulled.
@@ -821,7 +829,7 @@ class StackClient(StackCore):
             if parent in state.blocked:
                 state.blocked.append(branch)
             return
-        merge_state = adapter.merge_state(branch, parent)
+        merge_state = adapter.merge_state(branch, parent, ignore_revert=branch in state.ignore_reverts)
         if merge_state is MergeState.MERGED:
             if not self.untrack_merged(branch, state.parents, state.delete, adapter.landing_merges(branch, parent)):
                 state.skipped.add(branch)
@@ -835,12 +843,33 @@ class StackClient(StackCore):
             self.emit(events.Reverted(branch, parent))
             state.skipped.add(branch)
         else:
-            self.warn_if_merged_parent_reverted(branch, adapter)
+            self.warn_if_merged_parent_reverted(branch, adapter, state.ignore_reverts)
             self.sync_unmerged(branch, parent, state)
 
-    def warn_if_merged_parent_reverted(self, branch: str, adapter: GitAdapter) -> None:
-        if (merged := adapter.reverted_merged_parent(branch)) is not None:
+    def warn_if_merged_parent_reverted(self, branch: str, adapter: GitAdapter, ignore_reverts: Iterable[str]) -> None:
+        """Warn if the branch that branch was stacked on until it merged was
+        reverted since, unless it's in ignore_reverts: then branch forgets it,
+        so as not to warn again."""
+        if (merged := adapter.reverted_merged_parent(branch)) is None:
+            return
+        if merged.name in ignore_reverts:
+            self.unrecord_merged_parent(branch)
+        else:
             self.emit(events.MergedParentReverted(branch, merged.name, merged.parent))
+
+    def ensure_ignorable_reverts(self, ignore_reverts: Iterable[str], scope: Sequence[str], where: str) -> None:
+        """Refuse a branch to ignore the reverts of (see sync) that isn't in
+        scope, the branches the command will look at, and isn't recorded as
+        the branch one of them was stacked on until it merged, since the
+        command would never come across a revert of it. where says what scope
+        is, for the error."""
+        recorded = {merged.name for b in scope if (merged := self.merged_parent(b)) is not None}
+        for branch in ignore_reverts:
+            if branch not in scope and branch not in recorded:
+                raise StackError(
+                    f"there's no revert of {branch} to ignore in {where}: it isn't one of their branches, "
+                    f"and none of them was stacked on it when it merged"
+                )
 
     def sync_unmerged(self, branch: str, parent: str, state: SyncState) -> None:
         """Restack branch, which isn't merged, onto parent and pull in commits
@@ -869,13 +898,16 @@ class StackClient(StackCore):
             else:
                 state.unpushed.append(branch)
 
-    def clean(self, remote: str = DEFAULT_REMOTE, delete: str | None = None) -> None:
+    def clean(
+        self, remote: str = DEFAULT_REMOTE, delete: str | None = None, ignore_reverts: Sequence[str] = ()
+    ) -> None:
         """Fetch and untrack merged branches in every stack, deleting what delete
-        says, without restacking anything."""
+        says, without restacking anything. ignore_reverts is as for sync."""
         git = self.git
         self.ensure_no_operation_in_progress()
         self.ensure_clean_worktree()
         self.settle_all()
+        self.ensure_ignorable_reverts(ignore_reverts, list(self.tracked_branches()), "any stack")
         # Where to leave the user afterwards: their branch (or the commit they had
         # detached at), or wherever deleting their branch left them.
         original = self.current_checkout()
@@ -893,7 +925,7 @@ class StackClient(StackCore):
             if git.rev(parent) is None:
                 self.emit(events.ParentMissing(branch, parent))
                 continue
-            state = adapter.merge_state(branch, parent)
+            state = adapter.merge_state(branch, parent, ignore_revert=branch in ignore_reverts)
             if state is MergeState.MERGED:
                 merges = adapter.landing_merges(branch, parent)
                 if self.untrack_merged(branch, parents, delete, merges) and branch == original:
@@ -903,7 +935,7 @@ class StackClient(StackCore):
             elif state is MergeState.REVERTED:
                 self.emit(events.Reverted(branch, parent))
             else:
-                self.warn_if_merged_parent_reverted(branch, adapter)
+                self.warn_if_merged_parent_reverted(branch, adapter, ignore_reverts)
         self.restore_checkout(original)
 
     def push(

@@ -42,5 +42,18 @@ def add_stack_arguments(parser: argparse.ArgumentParser, verb: str, default: str
     )
 
 
+def add_ignore_revert_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--ignore-revert",
+        dest="ignore_reverts",
+        action="append",
+        default=[],
+        metavar="BRANCH",
+        help="treat BRANCH as merged even if its parent has since reverted some of it, and stop "
+        "warning that the branch a stacked branch was on until it merged was reverted (can be "
+        "given more than once)",
+    )
+
+
 def add_delete_argument(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("-d", "--delete", choices=("local", "remote", "both"), help=DELETE_HELP)

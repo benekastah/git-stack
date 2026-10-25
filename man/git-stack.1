@@ -683,7 +683,7 @@ If a rebase stops on a conflict, see Conflicts.
 .IP \(bu 2
 A branch checked out in another worktree is skipped, with a warning; see
 Branches checked out in other worktrees.
-.SS \f[CR]git stack sync [<branch|glob>...] [\-g <group>] [\-\-remote origin] [\-d local|remote|both] [\-\-latest] [\-\-no\-push]\f[R]
+.SS \f[CR]git stack sync [<branch|glob>...] [\-g <group>] [\-\-remote origin] [\-d local|remote|both] [\-\-latest] [\-\-no\-push] [\-\-ignore\-revert <branch>]\f[R]
 Bring the current stack (or the ones named, see Groups) up to date with
 the remote:
 .IP "1." 3
@@ -758,6 +758,18 @@ A merged branch whose remote branch got new commits after the merge is
 skipped with a warning, along with the branches stacked on it, since
 restacking it would replay its merged commits.
 .IP \(bu 2
+A merged branch its parent has since reverted is skipped with a warning
+too, along with the branches stacked on it (see A merged branch was
+reverted).
+\f[CR]\-\-ignore\-revert <branch>\f[R] (which can be given more than
+once) says that wasn\(aqt really a revert: the branch counts as merged,
+and is untracked as usual.
+It also stops the warning that the branch a stacked branch was on until
+it merged was reverted.
+The branch has to be in the stacks being synced (or recorded by one of
+their branches); \f[CR]clean \-\-ignore\-revert\f[R] works from
+anywhere, and doesn\(aqt restack or push.
+.IP \(bu 2
 A branch with broken metadata (e.g.
 its parent was deleted by hand) is skipped with a warning, along with
 everything stacked on it; the rest of the stack is still synced.
@@ -772,7 +784,7 @@ couldn\(aqt push for that reason (unless it was run with
 \f[CR]\-\-no\-push\f[R]).
 .IP \(bu 2
 Needs a clean worktree, and refuses to run outside a stack.
-.SS \f[CR]git stack clean [\-\-remote origin] [\-d local|remote|both]\f[R]
+.SS \f[CR]git stack clean [\-\-remote origin] [\-d local|remote|both] [\-\-ignore\-revert <branch>]\f[R]
 Fetch with \f[CR]\-\-prune\f[R], fast\-forward every stack\(aqs root,
 and stop tracking merged branches in every stack, moving their children
 onto their parent.
@@ -792,7 +804,8 @@ Nothing is restacked, so there are no conflicts.
 The children are rebased the next time you \f[CR]sync\f[R] or
 \f[CR]restack\f[R] their stack.
 .IP \(bu 2
-\f[CR]\-d\f[R] works as for \f[CR]sync\f[R].
+\f[CR]\-d\f[R] and \f[CR]\-\-ignore\-revert\f[R] work as for
+\f[CR]sync\f[R].
 .IP \(bu 2
 Runs from any branch, even one that isn\(aqt in a stack.
 Needs a clean worktree.
@@ -1170,11 +1183,17 @@ git stack push
 git stack prs                      \f[I]# open a new one for pr1\f[R]
 .EE
 .PP
-To drop it instead, move \f[CR]pr2\f[R] onto \f[CR]main\f[R] (from
-\f[CR]pr2\f[R], \f[CR]git stack restack \-\-onto main\f[R]), then stop
-tracking it with \f[CR]git stack untrack pr1\f[R].
-If it was already untracked, stop the warning about it with
-\f[CR]git config \-\-unset branch.pr2.stackMergedParent\f[R].
+If it wasn\(aqt really reverted (git\-stack only compares changes, so a
+later commit that happens to undo one of them, say setting a version
+number back, looks like a revert too), run
+\f[CR]git stack clean \-\-ignore\-revert pr1\f[R]: \f[CR]pr1\f[R] counts
+as merged, and \f[CR]clean\f[R] stops tracking it as usual, moving
+\f[CR]pr2\f[R] onto \f[CR]main\f[R], without restacking or pushing
+anything.
+If \f[CR]pr1\f[R] was already untracked, that stops the warning about
+\f[CR]pr2\f[R] instead.
+\f[CR]sync\f[R] takes \f[CR]\-\-ignore\-revert\f[R] too, if you\(aqre
+syncing that stack anyway.
 .SH HOW IT WORKS
 When a branch is created (or tracked), git\-stack records its parent
 branch and the exact parent commit it was built on:

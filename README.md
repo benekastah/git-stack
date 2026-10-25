@@ -496,7 +496,7 @@ git stack restack --latest              # also move the stack onto main's latest
 - A branch checked out in another worktree is skipped, with a warning; see
   [Branches checked out in other worktrees](#branches-checked-out-in-other-worktrees).
 
-### `git stack sync [<branch|glob>...] [-g <group>] [--remote origin] [-d local|remote|both] [--latest] [--no-push]`
+### `git stack sync [<branch|glob>...] [-g <group>] [--remote origin] [-d local|remote|both] [--latest] [--no-push] [--ignore-revert <branch>]`
 
 Bring the current stack (or the ones named, see [Groups](#groups)) up to date
 with the remote:
@@ -547,6 +547,15 @@ git stack sync -d both          # ...and their remote branches
 - A merged branch whose remote branch got new commits after the merge is
   skipped with a warning, along with the branches stacked on it, since
   restacking it would replay its merged commits.
+- A merged branch its parent has since reverted is skipped with a warning too,
+  along with the branches stacked on it (see
+  [A merged branch was reverted](#a-merged-branch-was-reverted)).
+  `--ignore-revert <branch>` (which can be given more than once) says that
+  wasn't really a revert: the branch counts as merged, and is untracked as
+  usual. It also stops the warning that the branch a stacked branch was on
+  until it merged was reverted. The branch has to be in the stacks being
+  synced (or recorded by one of their branches); `clean --ignore-revert`
+  works from anywhere, and doesn't restack or push.
 - A branch with broken metadata (e.g. its parent was deleted by hand) is
   skipped with a warning, along with everything stacked on it; the rest of the
   stack is still synced.
@@ -558,7 +567,7 @@ git stack sync -d both          # ...and their remote branches
   for that reason (unless it was run with `--no-push`).
 - Needs a clean worktree, and refuses to run outside a stack.
 
-### `git stack clean [--remote origin] [-d local|remote|both]`
+### `git stack clean [--remote origin] [-d local|remote|both] [--ignore-revert <branch>]`
 
 Fetch with `--prune`, fast-forward every stack's root, and stop tracking merged
 branches in every stack, moving their children onto their parent.
@@ -575,7 +584,7 @@ git stack clean -d local
 
 - Nothing is restacked, so there are no conflicts. The children are rebased
   the next time you `sync` or `restack` their stack.
-- `-d` works as for `sync`.
+- `-d` and `--ignore-revert` work as for `sync`.
 - Runs from any branch, even one that isn't in a stack. Needs a clean
   worktree.
 
@@ -888,10 +897,13 @@ git stack push
 git stack prs                      # open a new one for pr1
 ```
 
-To drop it instead, move `pr2` onto `main` (from `pr2`,
-`git stack restack --onto main`), then stop tracking it with
-`git stack untrack pr1`. If it was already untracked, stop the warning about
-it with `git config --unset branch.pr2.stackMergedParent`.
+If it wasn't really reverted (git-stack only compares changes, so a later
+commit that happens to undo one of them, say setting a version number back,
+looks like a revert too), run `git stack clean --ignore-revert pr1`: `pr1`
+counts as merged, and `clean` stops tracking it as usual, moving `pr2` onto
+`main`, without restacking or pushing anything. If `pr1` was already
+untracked, that stops the warning about `pr2` instead. `sync` takes
+`--ignore-revert` too, if you're syncing that stack anyway.
 
 ## How it works
 

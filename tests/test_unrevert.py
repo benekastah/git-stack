@@ -299,3 +299,17 @@ def test_recorded_tip_ref_goes_once_no_branch_records_it(repo: Repo, client: Sta
     client.untrack(["pr2"])
 
     assert merged_tip_refs(repo) == []
+
+
+def test_sync_ignore_revert_forgets_a_reverted_merged_parent(
+    repo: Repo, client: StackClient, emitted: list[events.Event]
+) -> None:
+    merge_sync_revert(repo, client, delete="local")
+    emitted.clear()
+
+    client.sync(ignore_reverts=["pr1"])
+
+    assert not any(isinstance(e, events.MergedParentReverted) for e in emitted)
+    assert not repo.config_exists("pr2", "stackMergedParent")
+    assert merged_tip_refs(repo) == []
+    assert repo.branch_info("pr2").reverted_parent is None

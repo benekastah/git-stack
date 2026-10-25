@@ -621,3 +621,32 @@ def test_sync_untracks_branch_whose_revert_was_reverted(repo: Repo, client: Stac
 
     repo.assert_untracked("pr1")
     repo.assert_stacked("pr2", "main", ["pr2 c1"])
+
+
+def test_sync_ignore_revert_untracks_reverted_branch_as_merged(
+    repo: Repo, client: StackClient, emitted: list[events.Event]
+) -> None:
+    repo.make_stack()
+    client.push()
+    repo.squash_merge_on_forge("pr1")
+    repo.revert_on_forge("HEAD")
+    repo.git("switch", "--quiet", "pr2")
+
+    client.sync(ignore_reverts=["pr1"])
+
+    assert not any(isinstance(e, (events.Reverted, events.MergedParentReverted)) for e in emitted)
+    repo.assert_untracked("pr1")
+    assert repo.config("pr2", "stackParent") == "main"
+    # So the next sync doesn't warn that pr2's merged parent was reverted.
+    assert not repo.config_exists("pr2", "stackMergedParent")
+
+
+def test_sync_ignore_revert_refuses_branch_outside_the_stacks_it_syncs(repo: Repo, client: StackClient) -> None:
+    repo.make_stack()
+    repo.git("switch", "--quiet", "main")
+    client.branch("solo")
+    repo.commit("c", "solo\n", "solo c1")
+
+    # pr1 is tracked, but in another stack, so this sync would never see it.
+    with pytest.raises(StackError, match="there's no revert of pr1 to ignore in the stacks being synced"):
+        client.sync(ignore_reverts=["pr1"])

@@ -37,7 +37,7 @@ class GitAdapter:
         self.core = core
         self.git = core.git
 
-    def merge_state(self, branch: str, parent: str) -> MergeState:
+    def merge_state(self, branch: str, parent: str, ignore_revert: bool = False) -> MergeState:
         """Whether branch has landed in parent, so dropping it loses nothing.
 
         Its changes must be in parent. Unless its remote branch was deleted
@@ -45,12 +45,13 @@ class GitAdapter:
         change something, so a new branch with no commits isn't mistaken for a
         merged one, and if it has a remote branch, commits pushed there after
         the merge make it MERGED_WITH_NEW_COMMITS, so they aren't dropped. If
-        parent has since reverted any of its changes, it's REVERTED.
+        parent has since reverted any of its changes, it's REVERTED, unless
+        ignore_revert is set.
         """
         git = self.git
         if not self.landed(branch, parent):
             return MergeState.NOT_MERGED
-        if self.reverted(branch, parent):
+        if not ignore_revert and self.reverted(branch, parent):
             return MergeState.REVERTED
         if git.upstream_gone(branch):
             return MergeState.MERGED

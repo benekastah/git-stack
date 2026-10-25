@@ -283,15 +283,15 @@ class GitHubAdapter(GitAdapter):
         )
         return PullRequestLink(pr.number, f"https://{self.host}/{self.owner}/{self.name}/pull/{pr.number}", state)
 
-    def merge_state(self, branch: str, parent: str) -> MergeState:
+    def merge_state(self, branch: str, parent: str, ignore_revert: bool = False) -> MergeState:
         git = self.git
         pr = self.pull_requests().get(branch)
         if pr is not None and pr.state == "OPEN" and parent == self._default_branch:
             return MergeState.NOT_MERGED
         merged = self.trusted_merge(branch, parent)
         if merged is None:
-            return super().merge_state(branch, parent)
-        if self.reverted(branch, parent):
+            return super().merge_state(branch, parent, ignore_revert)
+        if not ignore_revert and self.reverted(branch, parent):
             return MergeState.REVERTED
         head = merged.head_oid
         upstream_tip = git.rev(f"{branch}@{{upstream}}")
