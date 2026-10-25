@@ -24,11 +24,13 @@ PENDING_BASE_KEY = "stackPendingBase"
 PENDING_PULL_FROM_KEY = "stackPendingPullFrom"
 PENDING_PULLED_KEY = "stackPendingPulled"
 PENDING_PULL_IDENTITIES_KEY = "stackPendingPullIdentities"
-# The last answers to whether the branch conflicts with its parent, and whether
-# its changes landed in its parent (see StackCore.remembered). Each can take a
-# second or more for a branch far behind main.
+# The last answers to whether the branch conflicts with its parent, whether its
+# changes landed in its parent, and whether its parent then reverted them (see
+# StackCore.remembered). Each can take a second or more for a branch far behind
+# main.
 CONFLICT_CHECK_KEY = "stackConflictCheck"
 LANDED_CHECK_KEY = "stackLandedCheck"
+REVERTED_CHECK_KEY = "stackRevertedCheck"
 
 # {branch: the branch it is stacked on}
 Parents: TypeAlias = dict[str, str]
@@ -478,6 +480,7 @@ class StackCore:
             PENDING_PULL_IDENTITIES_KEY,
             CONFLICT_CHECK_KEY,
             LANDED_CHECK_KEY,
+            REVERTED_CHECK_KEY,
         ):
             self.git.config_unset(branch, key)
 

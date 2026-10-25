@@ -156,6 +156,15 @@ class MergedWithNewCommits:
 
 
 @dataclass(frozen=True)
+class Reverted:
+    """branch was merged into parent, then parent reverted some of its
+    changes, so it was left alone."""
+
+    branch: str
+    parent: str
+
+
+@dataclass(frozen=True)
 class UpstreamGone:
     """branch's remote branch was deleted, but it wasn't merged into parent."""
 
@@ -228,6 +237,7 @@ Event: TypeAlias = (
     | RemoteBranchKept
     | ParentSkipped
     | MergedWithNewCommits
+    | Reverted
     | UpstreamGone
     | BrokenBranch
     | ParentMissing

@@ -154,3 +154,21 @@ def test_push_named_branch_pushes_its_stack(repo: Repo, client: StackClient) -> 
     for branch in ("pr1", "pr2", "pr3"):
         assert repo.git("rev-parse", f"origin/{branch}") == repo.git("rev-parse", branch)
     assert repo.git("branch", "--show-current") == "main"
+
+
+def test_push_skips_reverted_branch_and_its_children(
+    repo: Repo, client: StackClient, emitted: list[events.Event]
+) -> None:
+    repo.make_stack()
+    client.push()
+    repo.squash_merge_on_forge("pr1")
+    repo.revert_on_forge("HEAD")
+    repo.git("switch", "--quiet", "main")
+    repo.git("pull", "--quiet")
+    repo.git("switch", "--quiet", "pr2")
+    repo.commit("b", "pr2 again\n", "pr2 c2")
+
+    assert client.push() == []
+    assert events.Reverted("pr1", "main") in emitted
+    assert events.ParentSkipped("pr2", "pr1") in emitted
+    assert repo.remote_subject("pr2") == "pr2 c1"

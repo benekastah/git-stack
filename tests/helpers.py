@@ -79,6 +79,18 @@ class Repo:
         self.git("commit", "--quiet", "-m", f"{branch} (squashed)", cwd=self.forge)
         self.git("push", "--quiet", "origin", "main", *([f":{branch}"] if delete_branch else []), cwd=self.forge)
 
+    def merge_on_forge(self, branch: str) -> None:
+        """Merge origin/<branch> into origin/main with a merge commit, and delete the branch."""
+        self.git("pull", "--quiet", cwd=self.forge)
+        self.git("merge", "--quiet", "--no-ff", "--no-edit", f"origin/{branch}", cwd=self.forge)
+        self.git("push", "--quiet", "origin", "main", f":{branch}", cwd=self.forge)
+
+    def revert_on_forge(self, *args: str) -> None:
+        """Run `git revert <args>` on origin/main, as a maintainer would."""
+        self.git("pull", "--quiet", cwd=self.forge)
+        self.git("revert", "--no-edit", *args, cwd=self.forge)
+        self.git("push", "--quiet", "origin", "main", cwd=self.forge)
+
     def commit_on_forge(
         self,
         branch: str,

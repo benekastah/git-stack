@@ -561,3 +561,63 @@ def test_sync_stopped_on_a_conflict_pushes_nothing_until_rerun(repo: Repo, clien
 
     assert repo.git("rev-parse", "origin/pr1") == repo.git("rev-parse", "pr1")
     assert repo.git("rev-parse", "origin/pr2") == repo.git("rev-parse", "pr2")
+
+
+def test_sync_leaves_reverted_squash_merge_and_its_children_alone(
+    repo: Repo, client: StackClient, emitted: list[events.Event]
+) -> None:
+    repo.make_stack()
+    client.push()
+    repo.squash_merge_on_forge("pr1")
+    repo.revert_on_forge("HEAD")
+    pr2 = repo.git("rev-parse", "pr2")
+
+    client.sync()
+
+    assert events.Reverted("pr1", "main") in emitted
+    assert events.ParentSkipped("pr2", "pr1") in emitted
+    assert repo.config("pr1", "stackParent") == "main"
+    assert repo.config("pr2", "stackParent") == "pr1"
+    assert repo.git("rev-parse", "pr2") == pr2
+
+
+def test_sync_leaves_reverted_merge_commit_alone(repo: Repo, client: StackClient, emitted: list[events.Event]) -> None:
+    repo.make_stack()
+    client.push()
+    repo.merge_on_forge("pr1")
+    repo.revert_on_forge("-m", "1", "HEAD")
+
+    client.sync()
+
+    assert events.Reverted("pr1", "main") in emitted
+    assert repo.config("pr1", "stackParent") == "main"
+
+
+def test_sync_leaves_branch_alone_when_one_of_its_commits_was_reverted(
+    repo: Repo, client: StackClient, emitted: list[events.Event]
+) -> None:
+    client.branch("pr1")
+    repo.commit("a", "pr1\n", "pr1 c1")
+    repo.commit("b", "pr1\n", "pr1 c2")
+    client.push()
+    repo.merge_on_forge("pr1")
+    # The other commit changes neither the lines it changed nor the lines around them.
+    repo.revert_on_forge(repo.git("rev-parse", "pr1~1"))
+
+    client.sync()
+
+    assert events.Reverted("pr1", "main") in emitted
+    assert repo.config("pr1", "stackParent") == "main"
+
+
+def test_sync_untracks_branch_whose_revert_was_reverted(repo: Repo, client: StackClient) -> None:
+    repo.make_stack()
+    client.push()
+    repo.squash_merge_on_forge("pr1")
+    repo.revert_on_forge("HEAD")
+    repo.revert_on_forge("HEAD")
+
+    client.sync()
+
+    repo.assert_untracked("pr1")
+    repo.assert_stacked("pr2", "main", ["pr2 c1"])

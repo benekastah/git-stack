@@ -77,6 +77,25 @@ def test_restack_skips_branch_merged_locally(repo: Repo, client: StackClient, em
     repo.assert_stacked("pr3", "pr2", ["pr3 c1"])
 
 
+def test_restack_leaves_reverted_branch_and_its_children_alone(
+    repo: Repo, client: StackClient, emitted: list[events.Event]
+) -> None:
+    repo.make_stack()
+    repo.git("switch", "--quiet", "pr1")
+    repo.git("merge", "--quiet", "--no-ff", "--no-edit", "pr2")
+    repo.git("revert", "--no-edit", "-m", "1", "HEAD")
+    pr2 = repo.git("rev-parse", "pr2")
+    repo.git("switch", "--quiet", "pr3")
+
+    client.restack()
+
+    assert events.Reverted("pr2", "pr1") in emitted
+    assert events.ParentSkipped("pr3", "pr2") in emitted
+    # Rebasing pr2 onto pr1 would drop its commit, which pr1 already has.
+    assert repo.git("rev-parse", "pr2") == pr2
+    repo.assert_stacked("pr3", "pr2", ["pr3 c1"])
+
+
 def test_conflict_resolved_with_rebase_continue_records_new_base(repo: Repo, client: StackClient) -> None:
     repo.make_stack()
     repo.git("switch", "--quiet", "pr1")

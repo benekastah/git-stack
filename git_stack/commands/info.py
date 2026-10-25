@@ -15,6 +15,7 @@ NOTES: dict[BranchStatus, str | None] = {
     BranchStatus.NEEDS_RESTACK: "(needs restack)",
     BranchStatus.MERGED: "(merged)",
     BranchStatus.MERGED_WITH_NEW_COMMITS: "(merged, with new commits)",
+    BranchStatus.REVERTED: "(merged, then reverted)",
 }
 # Which way up info draws each stack. A root on top reads like a file tree;
 # a root at the bottom like a stack of commits, as in `git log --graph`.
@@ -35,6 +36,7 @@ STATUS_COLORS = {
     BranchStatus.NEEDS_RESTACK: "33",  # yellow
     BranchStatus.MERGED: "36",  # cyan
     BranchStatus.MERGED_WITH_NEW_COMMITS: "33",
+    BranchStatus.REVERTED: "33",
     BranchStatus.PARENT_MISSING: "31",  # red
 }
 

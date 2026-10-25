@@ -217,6 +217,7 @@ def test_info_draws_each_stack_as_a_tree(stack: Any, capsys: pytest.CaptureFixtu
         ),
         BranchInfo("pr2b", "pr1", BranchStatus.MERGED, current=False),
         BranchInfo("solo", "main", BranchStatus.MERGED_WITH_NEW_COMMITS, current=True),
+        BranchInfo("undone", "main", BranchStatus.REVERTED, current=False),
         BranchInfo("release", None, None, current=False),
         BranchInfo("hotfix", "release", BranchStatus.PARENT_MISSING, current=False),
     ]
@@ -228,7 +229,8 @@ def test_info_draws_each_stack_as_a_tree(stack: Any, capsys: pytest.CaptureFixtu
         "├── pr1                                 https://github.com/acme/widgets/pull/9\n"
         "│   ├── pr2 (needs restack)            https://github.com/acme/widgets/pull/13\n"
         "│   └── pr2b (merged)\n"
-        "└── solo * (merged, with new commits)\n"
+        "├── solo * (merged, with new commits)\n"
+        "└── undone (merged, then reverted)\n"
         "release\n"
         "└── hotfix (parent release missing)\n"
     )

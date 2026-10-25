@@ -16,6 +16,7 @@ WARNINGS = (
     events.RemoteBranchDeleteFailed,
     events.ParentSkipped,
     events.MergedWithNewCommits,
+    events.Reverted,
     events.UpstreamGone,
     events.BrokenBranch,
     events.ParentMissing,
@@ -88,6 +89,11 @@ def message(event: events.Event) -> str:  # noqa: C901
             return (
                 f"skipping {event.branch}: it was merged into {event.parent}, but it or its "
                 f"remote branch has commits that {event.parent} doesn't"
+            )
+        case events.Reverted():
+            return (
+                f"skipping {event.branch}: it was merged into {event.parent}, then {event.parent} reverted "
+                f'some of its changes; see "A merged branch was reverted" in `git stack --help`'
             )
         case events.UpstreamGone():
             return f"{event.branch}'s remote branch is gone but its changes aren't in {event.parent}; leaving it alone"

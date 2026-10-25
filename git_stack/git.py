@@ -216,9 +216,14 @@ class GitClient:
 
     def patch_ids(self, *args: str) -> set[str]:
         """The patch-ids of the commits or diff that `git <args>` prints."""
+        return set(self.patch_id_list(*args))
+
+    def patch_id_list(self, *args: str) -> list[str]:
+        """The patch-id of each commit (or the diff) that `git <args>` prints, in
+        the order it prints them."""
         command, *rest = args
         patches = self.run("--literal-pathspecs", command, "--no-color", "--no-ext-diff", *rest)
-        return {line.split()[0] for line in self.run("patch-id", "--stable", input=patches + "\n").splitlines()}
+        return [line.split()[0] for line in self.run("patch-id", "--stable", input=patches + "\n").splitlines()]
 
     def identities(self, *args: str) -> set[str]:
         """The author, author date and subject of each commit `git log <args>`

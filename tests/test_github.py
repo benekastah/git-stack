@@ -528,3 +528,17 @@ def test_github_repo_leaves_https_host_alone(repo: Repo, fake_ssh: None) -> None
     repo.git("config", "remote.origin.url", "https://github-work/acme/widgets.git")
 
     assert github_repo(GitClient(repo.path), "origin") == ("github-work", "acme", "widgets")
+
+
+def test_sync_leaves_reverted_pr_alone_when_its_merge_was_tweaked(
+    repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event]
+) -> None:
+    repo.make_stack()
+    merge_pr1_on_forge_with_a_tweak(repo, gh)
+    # The revert undoes the merge commit, tweak included, so it only matches that.
+    repo.revert_on_forge("HEAD")
+
+    client.sync()
+
+    assert events.Reverted("pr1", "main") in emitted
+    assert repo.config("pr1", "stackParent") == "main"

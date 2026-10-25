@@ -423,6 +423,12 @@ branch got commits after the merge.
 \f[CR]sync\f[R] skips it, and the branches stacked on it, until you sort
 it out.
 .IP \(bu 2
+\f[CR](merged, then reverted)\f[R]: it was merged, then its parent
+reverted some or all of its changes.
+\f[CR]sync\f[R], \f[CR]clean\f[R], \f[CR]restack\f[R], \f[CR]push\f[R]
+and \f[CR]prs\f[R] leave it, and the branches stacked on it, alone (see
+A merged branch was reverted).
+.IP \(bu 2
 \f[CR](parent <name> missing)\f[R]: its parent branch was deleted by
 hand; fix it with \f[CR]git stack track <parent>\f[R].
 .IP \(bu 2
@@ -450,7 +456,8 @@ child.
 \f[CR]parent\f[R] and \f[CR]status\f[R] are \f[CR]null\f[R] for a root,
 and \f[CR]status\f[R] is one of \f[CR]up\-to\-date\f[R],
 \f[CR]needs\-restack\f[R], \f[CR]merged\f[R],
-\f[CR]merged\-with\-new\-commits\f[R] or \f[CR]parent\-missing\f[R].
+\f[CR]merged\-with\-new\-commits\f[R], \f[CR]reverted\f[R] or
+\f[CR]parent\-missing\f[R].
 \f[CR]pr\f[R] is the branch\(aqs pull request\(aqs \f[CR]number\f[R],
 \f[CR]url\f[R] and \f[CR]state\f[R] (\f[CR]open\f[R], \f[CR]draft\f[R]
 or \f[CR]merged\f[R]), or \f[CR]null\f[R] if it has none (or for a root,
@@ -944,17 +951,15 @@ It can be enabled just for yourself (globally or for one repository)
 without committing anything, and git\-stack\(aqs rebases pick it up
 automatically.
 .SS A merged branch was reverted
-If \f[CR]pr1\f[R] is merged and then reverted on \f[CR]main\f[R],
-git\-stack still considers it merged: its pull request was merged, and
-\f[CR]main\f[R] has a commit with its changes.
-\f[CR]sync\f[R] stops tracking \f[CR]pr1\f[R] (and deletes it with
-\f[CR]\-d local\f[R]) and restacks \f[CR]pr2\f[R] onto \f[CR]main\f[R],
-which no longer has \f[CR]pr1\f[R]\(aqs changes.
-Tracking the old \f[CR]pr1\f[R] again doesn\(aqt help, since it still
-looks merged.
+If \f[CR]pr1\f[R] is merged and then reverted on \f[CR]main\f[R] (all of
+it, or some of its commits), \f[CR]info\f[R] shows it as
+\f[CR](merged, then reverted)\f[R], and \f[CR]sync\f[R],
+\f[CR]clean\f[R], \f[CR]restack\f[R], \f[CR]push\f[R] and \f[CR]prs\f[R]
+leave it, and the branches stacked on it, alone.
+Its pull request was merged, so it can\(aqt be reopened.
 .PP
-Instead, recreate \f[CR]pr1\f[R] with new commits on top of
-\f[CR]main\f[R], then move \f[CR]pr2\f[R] back onto it:
+To bring its changes back, recreate \f[CR]pr1\f[R] with new commits on
+top of \f[CR]main\f[R], then move \f[CR]pr2\f[R] back onto it:
 .IP
 .EX
 git switch main
@@ -964,6 +969,7 @@ git switch pr2
 git stack restack \-\-onto pr1\-again
 git stack push                     \f[I]# point pr2\(aqs pull request at pr1\-again\f[R]
 git stack prs                      \f[I]# open one for pr1\-again\f[R]
+git stack untrack pr1              \f[I]# stop tracking the reverted one\f[R]
 .EE
 .PP
 \f[CR]restack \-\-onto\f[R] moves only the current branch, so if
@@ -1114,6 +1120,14 @@ new branch with no commits isn\(aqt mistaken for a merged one).
 .PP
 A branch whose remote branch was deleted without merging (a closed PR)
 fails the first check, so it\(aqs not considered merged.
+.PP
+A merged branch counts as reverted instead if, since it was merged, its
+parent got a commit that undoes the whole branch, one of its commits, or
+(with the GitHub adapter) its pull request\(aqs merge commit, the way
+\f[CR]git revert\f[R] does, and no later commit redid it.
+Changes undone by hand, or a revert that was edited (e.g.
+to resolve a conflict), aren\(aqt recognized, so the branch still counts
+as merged.
 .SH PULLING COMMITS OTHERS PUSHED
 After restacking a branch, \f[CR]sync\f[R] cherry\-picks onto it any
 commits on its upstream that it doesn\(aqt already have

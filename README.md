@@ -297,6 +297,10 @@ git stack info
 - `(merged, with new commits)`: it was merged, but its remote branch got
   commits after the merge. `sync` skips it, and the branches stacked on it,
   until you sort it out.
+- `(merged, then reverted)`: it was merged, then its parent reverted some or
+  all of its changes. `sync`, `clean`, `restack`, `push` and `prs` leave it,
+  and the branches stacked on it, alone (see
+  [A merged branch was reverted](#a-merged-branch-was-reverted)).
 - `(parent <name> missing)`: its parent branch was deleted by hand; fix it
   with `git stack track <parent>`.
 - With the [GitHub adapter](#github), each branch's pull request (open or
@@ -313,7 +317,8 @@ git stack info
 - `--json` prints the same information for scripts: a list with an object for
   each branch, each stack's root first, parent before child. `parent` and
   `status` are `null` for a root, and `status` is one of `up-to-date`,
-  `needs-restack`, `merged`, `merged-with-new-commits` or `parent-missing`.
+  `needs-restack`, `merged`, `merged-with-new-commits`, `reverted` or
+  `parent-missing`.
   `pr` is the branch's pull request's `number`, `url` and `state` (`open`,
   `draft` or `merged`), or `null` if it has none (or for a root, or without
   the GitHub adapter).
@@ -719,14 +724,13 @@ without committing anything, and git-stack's rebases pick it up automatically.
 
 ### A merged branch was reverted
 
-If `pr1` is merged and then reverted on `main`, git-stack still considers it
-merged: its pull request was merged, and `main` has a commit with its changes.
-`sync` stops tracking `pr1` (and deletes it with `-d local`) and restacks
-`pr2` onto `main`, which no longer has `pr1`'s changes. Tracking the old `pr1`
-again doesn't help, since it still looks merged.
+If `pr1` is merged and then reverted on `main` (all of it, or some of its
+commits), `info` shows it as `(merged, then reverted)`, and `sync`, `clean`,
+`restack`, `push` and `prs` leave it, and the branches stacked on it, alone.
+Its pull request was merged, so it can't be reopened.
 
-Instead, recreate `pr1` with new commits on top of `main`, then move `pr2` back
-onto it:
+To bring its changes back, recreate `pr1` with new commits on top of `main`,
+then move `pr2` back onto it:
 
 ```sh
 git switch main
@@ -736,6 +740,7 @@ git switch pr2
 git stack restack --onto pr1-again
 git stack push                     # point pr2's pull request at pr1-again
 git stack prs                      # open one for pr1-again
+git stack untrack pr1              # stop tracking the reverted one
 ```
 
 `restack --onto` moves only the current branch, so if `pr1` had several
@@ -857,6 +862,13 @@ locally. In addition, either:
 
 A branch whose remote branch was deleted without merging (a closed PR) fails
 the first check, so it's not considered merged.
+
+A merged branch counts as reverted instead if, since it was merged, its parent
+got a commit that undoes the whole branch, one of its commits, or (with the
+GitHub adapter) its pull request's merge commit, the way `git revert` does, and
+no later commit redid it. Changes undone by hand, or a revert that was edited
+(e.g. to resolve a conflict), aren't recognized, so the branch still counts as
+merged.
 
 ## Pulling commits others pushed
 

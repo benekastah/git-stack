@@ -40,3 +40,16 @@ def test_clean_delete_both_deletes_merged_branch(repo: Repo, client: StackClient
     assert repo.git("branch", "--list", "pr1") == ""
     assert repo.git("branch", "--list", "pr1", cwd=repo.origin) == ""
     assert repo.git("branch", "--show-current") == "pr2"
+
+
+def test_clean_keeps_tracking_reverted_branch(repo: Repo, client: StackClient, emitted: list[events.Event]) -> None:
+    repo.make_stack()
+    client.push()
+    repo.squash_merge_on_forge("pr1")
+    repo.revert_on_forge("HEAD")
+
+    client.clean()
+
+    assert events.Reverted("pr1", "main") in emitted
+    assert repo.config("pr1", "stackParent") == "main"
+    assert repo.config("pr2", "stackParent") == "pr1"

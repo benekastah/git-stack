@@ -296,6 +296,8 @@ class GitHubAdapter(GitAdapter):
         # merged commits, so we can tell whether anything came after them.
         if not (merge and git.rev(merge) and git.is_ancestor(merge, parent) and git.rev(head)):
             return super().merge_state(branch, parent)
+        if self.reverted(branch, parent, (merge,)):
+            return MergeState.REVERTED
         upstream_tip = git.rev(f"{branch}@{{upstream}}")
         if self.unmerged_commits(f"refs/heads/{branch}", head, parent) or (
             upstream_tip and self.unmerged_commits(upstream_tip, head, parent)

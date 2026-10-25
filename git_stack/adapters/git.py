@@ -2,7 +2,7 @@ import enum
 from dataclasses import dataclass
 
 from git_stack.adapters.merge_state import MergeState
-from git_stack.core import BASE_KEY, LANDED_CHECK_KEY, Parents, StackCore
+from git_stack.core import BASE_KEY, LANDED_CHECK_KEY, REVERTED_CHECK_KEY, Parents, StackCore
 
 
 class PullRequestState(enum.Enum):
@@ -36,11 +36,14 @@ class GitAdapter:
         (which is all the evidence of a merge we need), the branch must also
         change something, so a new branch with no commits isn't mistaken for a
         merged one, and if it has a remote branch, commits pushed there after
-        the merge make it MERGED_WITH_NEW_COMMITS, so they aren't dropped.
+        the merge make it MERGED_WITH_NEW_COMMITS, so they aren't dropped. If
+        parent has since reverted any of its changes, it's REVERTED.
         """
         git = self.git
         if not self.landed(branch, parent):
             return MergeState.NOT_MERGED
+        if self.reverted(branch, parent):
+            return MergeState.REVERTED
         if git.upstream_gone(branch):
             return MergeState.MERGED
         if not self.changes_something(branch):
@@ -90,8 +93,7 @@ class GitAdapter:
         base = git.config_get(branch, BASE_KEY)
         if base is None or not git.is_ancestor(base, branch) or git.rev(parent) is None:
             return False
-        files = git.run("diff", "--name-only", "-z", base, f"refs/heads/{branch}").split("\0")
-        files = [f for f in files if f]
+        files = self.changed_files(base, f"refs/heads/{branch}")
         if not files:
             return False
         # Only parent's commits that touch the same files can match.
@@ -102,6 +104,62 @@ class GitAdapter:
             return True
         own = git.patch_ids("log", "-p", "--no-merges", f"{base}..refs/heads/{branch}")
         return bool(own) and own <= landed
+
+    def reverted(self, branch: str, parent: str, merges: tuple[str, ...] = ()) -> bool:
+        """Whether parent, which has branch's changes, has since reverted some of
+        them, and not reapplied them since.
+
+        A revert counts if it undoes the whole branch, one of its commits, or
+        one of merges, the commits that landed it in parent (e.g. its pull
+        request's merge commit), as `git revert` does. Changes undone by hand,
+        or a revert edited (e.g. to resolve a conflict), aren't recognized.
+        """
+        git = self.git
+        parent_tip = git.rev(parent)
+        base = git.config_get(branch, BASE_KEY)
+        if parent_tip is None or base is None or not git.is_ancestor(base, branch):
+            return False
+        tip = git.tip(branch)
+        return self.core.remembered(
+            branch,
+            REVERTED_CHECK_KEY,
+            [tip, parent_tip, base, *merges],
+            lambda: self.reverted_since(tip, base, parent_tip, merges),
+        )
+
+    def reverted_since(self, tip: str, base: str, parent_tip: str, merges: tuple[str, ...]) -> bool:
+        """reverted, for a branch at tip built on base, and parent at parent_tip."""
+        git = self.git
+        files = self.changed_files(base, tip)
+        if not files:
+            return False
+        # Without context lines, a revert of one of the branch's commits matches
+        # even when it was reverted after later commits changed the lines
+        # around it. Without prefixes, so -R doesn't swap "a/" and "b/".
+        diff = ("-U0", "--no-prefix")
+        ranges = [(base, tip), *((f"{m}^", m) for m in merges)]
+        applied = git.patch_ids("log", "-p", "--no-merges", *diff, f"{base}..{tip}")
+        reverted = git.patch_ids("log", "-p", "--no-merges", "-R", *diff, f"{base}..{tip}")
+        for old, new in ranges:
+            applied |= git.patch_ids("diff", *diff, old, new)
+            reverted |= git.patch_ids("diff", "-R", *diff, old, new)
+        # A patch that does one of the branch's changes and undoes another (e.g.
+        # its own commits revert each other) doesn't say which happened.
+        reverted -= applied
+        # The newest commit that does or undoes one of them says which is current.
+        for patch in git.patch_id_list(
+            "log", "-p", "--no-merges", "--full-diff", *diff, parent_tip, "--not", tip, "--", *files
+        ):
+            if patch in reverted:
+                return True
+            if patch in applied:
+                return False
+        return False
+
+    def changed_files(self, base: str, rev: str) -> list[str]:
+        """The files rev changes since base."""
+        files = self.git.run("diff", "--name-only", "-z", base, rev).split("\0")
+        return [f for f in files if f]
 
     def prefetch(self) -> None:
         """Look up whatever merge_state asks a remote service about, so it's

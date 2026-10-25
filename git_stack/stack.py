@@ -33,6 +33,7 @@ class BranchStatus(enum.Enum):
     PARENT_MISSING = "parent-missing"
     MERGED = "merged"
     MERGED_WITH_NEW_COMMITS = "merged-with-new-commits"
+    REVERTED = "reverted"
 
 
 @dataclass(frozen=True)
@@ -441,6 +442,8 @@ class StackClient(StackCore):
                 return BranchStatus.MERGED
             if state is MergeState.MERGED_WITH_NEW_COMMITS:
                 return BranchStatus.MERGED_WITH_NEW_COMMITS
+            if state is MergeState.REVERTED:
+                return BranchStatus.REVERTED
             return BranchStatus.NEEDS_RESTACK if needs_restack else BranchStatus.UP_TO_DATE
 
         # Each status can take a few git calls, and checking whether a branch on
@@ -476,13 +479,25 @@ class StackClient(StackCore):
         return adapter
 
     def skip_merged(self, branches: Iterable[str], parents: Parents, adapter: GitAdapter) -> list[str]:
-        """Leave merged branches out of branches, moving their children down in parents."""
+        """Leave merged branches out of branches (parent-before-child), moving
+        their children down in parents. Leave reverted ones out too, with the
+        branches stacked on them, as sync does."""
         remaining = []
+        skipped = set()
         for branch in branches:
             parent = parents[branch]
-            if adapter.merge_state(branch, parent) is MergeState.MERGED:
+            if parent in skipped:
+                self.emit(events.ParentSkipped(branch, parent))
+                skipped.add(branch)
+                continue
+            state = adapter.merge_state(branch, parent)
+            if state is MergeState.MERGED:
                 self.emit(events.SkippedMerged(branch, parent))
                 drop_from_stack(branch, parents)
+            elif state is MergeState.REVERTED:
+                # Restacking it could drop its commits, as already in parent.
+                self.emit(events.Reverted(branch, parent))
+                skipped.add(branch)
             else:
                 remaining.append(branch)
         return remaining
@@ -575,6 +590,9 @@ class StackClient(StackCore):
             # Restacking would replay the merged commits onto parent.
             self.emit(events.MergedWithNewCommits(branch, parent))
             state.skipped.add(branch)
+        elif merge_state is MergeState.REVERTED:
+            self.emit(events.Reverted(branch, parent))
+            state.skipped.add(branch)
         else:
             self.sync_unmerged(branch, parent, state)
 
@@ -635,6 +653,8 @@ class StackClient(StackCore):
                     original = self.current_checkout()
             elif state is MergeState.MERGED_WITH_NEW_COMMITS:
                 self.emit(events.MergedWithNewCommits(branch, parent))
+            elif state is MergeState.REVERTED:
+                self.emit(events.Reverted(branch, parent))
         self.restore_checkout(original)
 
     def push(self, branch: str | None = None, remote: str = DEFAULT_REMOTE, force: bool = False) -> list[str]:

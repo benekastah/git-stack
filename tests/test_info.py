@@ -59,3 +59,14 @@ def test_info_remembers_whether_a_branch_landed_in_its_parent(repo: Repo, client
 
     repo.git("config", "branch.pr1.stackLandedCheck", cached.replace("false", "true"))
     assert repo.branch_info("pr1").status is BranchStatus.MERGED
+
+
+def test_info_shows_reverted_branch(repo: Repo, client: StackClient) -> None:
+    client.branch("pr1")
+    repo.commit("a", "pr1\n", "pr1 c1")
+    repo.git("switch", "--quiet", "main")
+    repo.git("merge", "--quiet", "--squash", "pr1")
+    repo.git("commit", "--quiet", "-m", "pr1 (squashed)")
+    repo.git("revert", "--no-edit", "HEAD")
+
+    assert repo.branch_info("pr1").status is BranchStatus.REVERTED
