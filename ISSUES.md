@@ -109,11 +109,11 @@ fails on the lock.
 ## Two commands that restack at once can corrupt each other's records
 
 Each command that restacks or pulls (`restack`, `sync`, and the others that
-settle first: `track`, `untrack`, `rename`, `clean`, `push`) takes a pending
-restack or pull it finds unfinished as aborted, and discards it. If another
-such command is between writing its pending keys and starting its rebase or
-cherry-pick, that rebase is never recorded, so the branch keeps its old base.
-There's no lock to stop two from running at once.
+settle first: `track`, `untrack`, `rename`, `clean`, `push`, `autocreate`,
+`prs`) takes a pending restack or pull it finds unfinished as aborted, and
+discards it. If another such command is between writing its pending keys and
+starting its rebase or cherry-pick, that rebase is never recorded, so the
+branch keeps its old base. There's no lock to stop two from running at once.
 
 ## The branch config cache could miss a write
 
