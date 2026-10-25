@@ -118,6 +118,11 @@ T}@T{
 \f[CR]git stack clean\f[R]
 T}
 T{
+bring back a PR whose merge was reverted
+T}@T{
+\f[CR]git stack unrevert <branch>\f[R]
+T}
+T{
 read all of this in the terminal
 T}@T{
 \f[CR]git stack \-\-help\f[R]
@@ -819,6 +824,52 @@ Needs the GitHub adapter.
 .IP \(bu 2
 \f[CR]\-n\f[R]/\f[CR]\-\-dry\-run\f[R] prints the pull requests it would
 open, with their titles, without opening them.
+.SS \f[CR]git stack unrevert [<branch>] [\-\-remote origin]\f[R]
+Rebuild a branch (default: the current one) whose merge into its parent
+was reverted, as commits on its parent\(aqs tip that revert the reverts.
+.PP
+\f[B]When would I use it?\f[R] When \f[CR]info\f[R] shows a branch as
+\f[CR](merged, then reverted)\f[R] and you want to bring its changes
+back, e.g.
+to fix whatever got it reverted and merge it again.
+.IP
+.EX
+git stack unrevert add\-api
+\f[I]# rebuilt add\-api on main, reverting 1 revert\f[R]
+\f[I]# note: run \(gagit stack restack\(ga to move use\-api onto it\f[R]
+\f[I]# note: run \(gagit stack push\(ga and \(gagit stack prs\(ga to open a new pull request for it\f[R]
+.EE
+.IP \(bu 2
+Only the reverts still in effect are reverted, newest first: if only
+some of the branch\(aqs commits were reverted, only those come back, and
+a revert that was itself reverted is left alone.
+The commits get git\(aqs usual messages for reverting a revert; amend
+them as you like.
+.IP \(bu 2
+The branch\(aqs old commits are dropped, since its parent already has
+them (or a squash of them) in its history.
+Its new base is its parent\(aqs tip.
+.IP \(bu 2
+Branches stacked on it stay stacked on it; \f[CR]restack\f[R] or
+\f[CR]sync\f[R] moves them onto its new commits.
+.IP \(bu 2
+Its merged pull request can\(aqt be reopened, and no longer counts as
+the branch\(aqs.
+If its remote branch was deleted when it was merged, its upstream is
+unset, so \f[CR]git stack push\f[R] pushes it again; then
+\f[CR]git stack prs\f[R] opens a new pull request.
+.IP \(bu 2
+If a revert stops on a conflict, resolve it and run
+\f[CR]git revert \-\-continue\f[R]; the next git\-stack command records
+the new base.
+To put the branch back as it was instead, run
+\f[CR]git revert \-\-abort\f[R], then \f[CR]git reset \-\-hard\f[R] to
+the commit the error message names.
+.IP \(bu 2
+Works on the local parent, without fetching, so run
+\f[CR]git stack sync\f[R] first if the revert only happened on the
+remote.
+Needs a clean worktree.
 .SH SCRIPTING
 These commands print one thing per line, for use in scripts, aliases,
 shell prompts and editors.
@@ -884,11 +935,11 @@ isn\(aqt.
 As with the other commands, the stack includes branches beside the
 current one, not just those above and below it.
 .SH CONFLICTS
-If a rebase or cherry\-pick stops on a conflict, resolve it and run
-\f[CR]git rebase \-\-continue\f[R] /
-\f[CR]git cherry\-pick \-\-continue\f[R] (or \f[CR]\-\-abort\f[R]) as
-usual, then rerun the git\-stack command to finish the rest of the
-stack.
+If a rebase, cherry\-pick or revert stops on a conflict, resolve it and
+run \f[CR]git rebase \-\-continue\f[R] /
+\f[CR]git cherry\-pick \-\-continue\f[R] /
+\f[CR]git revert \-\-continue\f[R] (or \f[CR]\-\-abort\f[R]) as usual,
+then rerun the git\-stack command to finish the rest of the stack.
 The new parent and base (and the pulled upstream commits) are recorded
 only if the operation actually completed.
 .PP
@@ -956,24 +1007,20 @@ it, or some of its commits), \f[CR]info\f[R] shows it as
 \f[CR](merged, then reverted)\f[R], and \f[CR]sync\f[R],
 \f[CR]clean\f[R], \f[CR]restack\f[R], \f[CR]push\f[R] and \f[CR]prs\f[R]
 leave it, and the branches stacked on it, alone.
-Its pull request was merged, so it can\(aqt be reopened.
-.PP
-To bring its changes back, recreate \f[CR]pr1\f[R] with new commits on
-top of \f[CR]main\f[R], then move \f[CR]pr2\f[R] back onto it:
+To bring its changes back, rebuild it on \f[CR]main\f[R] with
+\f[CR]unrevert\f[R], which reverts the reverts, then restack its
+children onto it and open a new pull request:
 .IP
 .EX
-git switch main
-git stack branch pr1\-again
-git revert <the revert commit>     \f[I]# or cherry\-pick pr1\(aqs commits\f[R]
-git switch pr2
-git stack restack \-\-onto pr1\-again
-git stack push                     \f[I]# point pr2\(aqs pull request at pr1\-again\f[R]
-git stack prs                      \f[I]# open one for pr1\-again\f[R]
-git stack untrack pr1              \f[I]# stop tracking the reverted one\f[R]
+git stack unrevert pr1
+git stack restack                  \f[I]# move pr2 onto the new pr1\f[R]
+git stack push
+git stack prs                      \f[I]# open a new one for pr1\f[R]
 .EE
 .PP
-\f[CR]restack \-\-onto\f[R] moves only the current branch, so if
-\f[CR]pr1\f[R] had several children, run it from each one.
+To drop it instead, move \f[CR]pr2\f[R] onto \f[CR]main\f[R] (from
+\f[CR]pr2\f[R], \f[CR]git stack restack \-\-onto main\f[R]), then stop
+tracking it with \f[CR]git stack untrack pr1\f[R].
 .SH HOW IT WORKS
 When a branch is created (or tracked), git\-stack records its parent
 branch and the exact parent commit it was built on:

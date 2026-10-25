@@ -48,6 +48,7 @@ git stack sync                  # catch up: drop merged PRs, rebase what's left,
 | open draft PRs for my stack | `git stack push`, then `git stack prs` |
 | rename a branch in a stack | `git stack rename <new>` |
 | clean up merged branches in every stack | `git stack clean` |
+| bring back a PR whose merge was reverted | `git stack unrevert <branch>` |
 | read all of this in the terminal | `git stack --help` |
 
 ## Words used here
@@ -607,6 +608,41 @@ git stack prs
 - `-n`/`--dry-run` prints the pull requests it would open, with their titles,
   without opening them.
 
+### `git stack unrevert [<branch>] [--remote origin]`
+
+Rebuild a branch (default: the current one) whose merge into its parent was
+reverted, as commits on its parent's tip that revert the reverts.
+
+**When would I use it?** When `info` shows a branch as
+`(merged, then reverted)` and you want to bring its changes back, e.g. to fix
+whatever got it reverted and merge it again.
+
+```sh
+git stack unrevert add-api
+# rebuilt add-api on main, reverting 1 revert
+# note: run `git stack restack` to move use-api onto it
+# note: run `git stack push` and `git stack prs` to open a new pull request for it
+```
+
+- Only the reverts still in effect are reverted, newest first: if only some
+  of the branch's commits were reverted, only those come back, and a revert
+  that was itself reverted is left alone. The commits get git's usual
+  messages for reverting a revert; amend them as you like.
+- The branch's old commits are dropped, since its parent already has them (or
+  a squash of them) in its history. Its new base is its parent's tip.
+- Branches stacked on it stay stacked on it; `restack` or `sync` moves them
+  onto its new commits.
+- Its merged pull request can't be reopened, and no longer counts as the
+  branch's. If its remote branch was deleted when it was merged, its upstream
+  is unset, so `git stack push` pushes it again; then `git stack prs` opens a
+  new pull request.
+- If a revert stops on a conflict, resolve it and run `git revert --continue`;
+  the next git-stack command records the new base. To put the branch back as
+  it was instead, run `git revert --abort`, then `git reset --hard` to the
+  commit the error message names.
+- Works on the local parent, without fetching, so run `git stack sync` first
+  if the revert only happened on the remote. Needs a clean worktree.
+
 ## Scripting
 
 These commands print one thing per line, for use in scripts, aliases, shell
@@ -671,8 +707,9 @@ fi
 
 ## Conflicts
 
-If a rebase or cherry-pick stops on a conflict, resolve it and run
-`git rebase --continue` / `git cherry-pick --continue` (or `--abort`) as usual,
+If a rebase, cherry-pick or revert stops on a conflict, resolve it and run
+`git rebase --continue` / `git cherry-pick --continue` /
+`git revert --continue` (or `--abort`) as usual,
 then rerun the git-stack command to finish the rest of the stack. The new
 parent and base (and the pulled upstream commits) are recorded only if the
 operation actually completed.
@@ -727,24 +764,20 @@ without committing anything, and git-stack's rebases pick it up automatically.
 If `pr1` is merged and then reverted on `main` (all of it, or some of its
 commits), `info` shows it as `(merged, then reverted)`, and `sync`, `clean`,
 `restack`, `push` and `prs` leave it, and the branches stacked on it, alone.
-Its pull request was merged, so it can't be reopened.
-
-To bring its changes back, recreate `pr1` with new commits on top of `main`,
-then move `pr2` back onto it:
+To bring its changes back, rebuild it on `main` with
+[`unrevert`](#git-stack-unrevert-branch---remote-origin), which reverts the
+reverts, then restack its children onto it and open a new pull request:
 
 ```sh
-git switch main
-git stack branch pr1-again
-git revert <the revert commit>     # or cherry-pick pr1's commits
-git switch pr2
-git stack restack --onto pr1-again
-git stack push                     # point pr2's pull request at pr1-again
-git stack prs                      # open one for pr1-again
-git stack untrack pr1              # stop tracking the reverted one
+git stack unrevert pr1
+git stack restack                  # move pr2 onto the new pr1
+git stack push
+git stack prs                      # open a new one for pr1
 ```
 
-`restack --onto` moves only the current branch, so if `pr1` had several
-children, run it from each one.
+To drop it instead, move `pr2` onto `main` (from `pr2`,
+`git stack restack --onto main`), then stop tracking it with
+`git stack untrack pr1`.
 
 ## How it works
 

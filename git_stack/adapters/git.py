@@ -105,56 +105,87 @@ class GitAdapter:
         own = git.patch_ids("log", "-p", "--no-merges", f"{base}..refs/heads/{branch}")
         return bool(own) and own <= landed
 
-    def reverted(self, branch: str, parent: str, merges: tuple[str, ...] = ()) -> bool:
+    def reverted(self, branch: str, parent: str) -> bool:
         """Whether parent, which has branch's changes, has since reverted some of
-        them, and not reapplied them since.
-
-        A revert counts if it undoes the whole branch, one of its commits, or
-        one of merges, the commits that landed it in parent (e.g. its pull
-        request's merge commit), as `git revert` does. Changes undone by hand,
-        or a revert edited (e.g. to resolve a conflict), aren't recognized.
-        """
+        them (see reverts)."""
         git = self.git
         parent_tip = git.rev(parent)
         base = git.config_get(branch, BASE_KEY)
         if parent_tip is None or base is None or not git.is_ancestor(base, branch):
             return False
         tip = git.tip(branch)
+        merges = self.landing_merges(branch, parent)
         return self.core.remembered(
             branch,
             REVERTED_CHECK_KEY,
             [tip, parent_tip, base, *merges],
-            lambda: self.reverted_since(tip, base, parent_tip, merges),
+            lambda: bool(self.reverts_since(tip, base, parent_tip, merges)),
         )
 
-    def reverted_since(self, tip: str, base: str, parent_tip: str, merges: tuple[str, ...]) -> bool:
-        """reverted, for a branch at tip built on base, and parent at parent_tip."""
+    def reverts(self, branch: str, parent: str) -> list[str]:
+        """The commits on parent, newest first, that revert some of branch's
+        changes, and that nothing on parent has since reapplied.
+
+        A revert counts if it undoes the whole branch, one of its commits, or
+        one of the commits that landed it in parent (see landing_merges), as
+        `git revert` does. Changes undone by hand, or a revert edited (e.g. to
+        resolve a conflict), aren't recognized.
+        """
+        git = self.git
+        parent_tip = git.rev(parent)
+        base = git.config_get(branch, BASE_KEY)
+        if parent_tip is None or base is None or not git.is_ancestor(base, branch):
+            return []
+        return self.reverts_since(git.tip(branch), base, parent_tip, self.landing_merges(branch, parent))
+
+    def landing_merges(self, branch: str, parent: str) -> tuple[str, ...]:
+        """Commits known to have landed branch in parent, whose reverts count as
+        reverting branch."""
+        return ()
+
+    def reverts_since(self, tip: str, base: str, parent_tip: str, merges: tuple[str, ...]) -> list[str]:
+        """reverts, for a branch at tip built on base, and parent at parent_tip."""
         git = self.git
         files = self.changed_files(base, tip)
         if not files:
-            return False
+            return []
         # Without context lines, a revert of one of the branch's commits matches
         # even when it was reverted after later commits changed the lines
         # around it. Without prefixes, so -R doesn't swap "a/" and "b/".
         diff = ("-U0", "--no-prefix")
-        ranges = [(base, tip), *((f"{m}^", m) for m in merges)]
-        applied = git.patch_ids("log", "-p", "--no-merges", *diff, f"{base}..{tip}")
-        reverted = git.patch_ids("log", "-p", "--no-merges", "-R", *diff, f"{base}..{tip}")
-        for old, new in ranges:
-            applied |= git.patch_ids("diff", *diff, old, new)
-            reverted |= git.patch_ids("diff", "-R", *diff, old, new)
+        # Each change the branch made, as (the patch-id of doing it, of undoing it).
+        own = f"{base}..{tip}"
+        changes = [
+            (done, undone)
+            for (done, _), (undone, _) in zip(
+                git.commit_patch_ids("log", "-p", "--no-merges", *diff, own),
+                git.commit_patch_ids("log", "-p", "--no-merges", "-R", *diff, own),
+                strict=True,
+            )
+        ]
+        for old, new in [(base, tip), *((f"{m}^", m) for m in merges)]:
+            forward, backward = git.patch_ids("diff", *diff, old, new), git.patch_ids("diff", "-R", *diff, old, new)
+            # Empty for a merge that changed nothing.
+            if forward and backward:
+                changes.append((forward.pop(), backward.pop()))
+        doing: dict[str, set[int]] = {}
+        undoing: dict[str, set[int]] = {}
+        for i, (done, undone) in enumerate(changes):
+            doing.setdefault(done, set()).add(i)
+            undoing.setdefault(undone, set()).add(i)
         # A patch that does one of the branch's changes and undoes another (e.g.
         # its own commits revert each other) doesn't say which happened.
-        reverted -= applied
-        # The newest commit that does or undoes one of them says which is current.
-        for patch in git.patch_id_list(
-            "log", "-p", "--no-merges", "--full-diff", *diff, parent_tip, "--not", tip, "--", *files
-        ):
-            if patch in reverted:
-                return True
-            if patch in applied:
-                return False
-        return False
+        for patch in doing:
+            undoing.pop(patch, None)
+        # The newest commit that does or undoes a change says whether it's undone.
+        decided: set[int] = set()
+        reverts = []
+        log = ("log", "-p", "--no-merges", "--full-diff", *diff, parent_tip, "--not", tip, "--", *files)
+        for patch, commit in git.commit_patch_ids(*log):
+            if undecided := undoing.get(patch, set()) - decided:
+                reverts.append(commit)
+            decided |= undecided | doing.get(patch, set())
+        return reverts
 
     def changed_files(self, base: str, rev: str) -> list[str]:
         """The files rev changes since base."""

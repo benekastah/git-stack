@@ -142,7 +142,7 @@ class StackCore:
     def ensure_no_operation_in_progress(self) -> None:
         if self.git.operation_in_progress():
             raise StackError(
-                "a rebase, cherry-pick or merge is in progress; finish it with "
+                "a rebase, cherry-pick, revert or merge is in progress; finish it with "
                 "`--continue` (or `--abort`), then rerun this command"
             )
 

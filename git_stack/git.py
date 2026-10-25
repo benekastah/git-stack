@@ -101,13 +101,14 @@ class GitClient:
         self.run("switch", "--quiet", branch)
 
     def operation_in_progress(self) -> bool:
-        """Whether a rebase, cherry-pick or merge has stopped and is waiting for the user.
+        """Whether a rebase, cherry-pick, revert or merge has stopped and is
+        waiting for the user.
 
-        A cherry-pick of several commits that stopped before changing anything
-        (e.g. because of an untracked file in the way) leaves only its
-        sequencer state behind, not CHERRY_PICK_HEAD.
+        A cherry-pick (or revert) of several commits that stopped before
+        changing anything (e.g. because of an untracked file in the way) leaves
+        only its sequencer state behind, not CHERRY_PICK_HEAD.
         """
-        names = ("rebase-merge", "rebase-apply", "CHERRY_PICK_HEAD", "sequencer", "MERGE_HEAD")
+        names = ("rebase-merge", "rebase-apply", "CHERRY_PICK_HEAD", "REVERT_HEAD", "sequencer", "MERGE_HEAD")
         paths = self.run(
             "rev-parse", "--path-format=absolute", *(arg for name in names for arg in ("--git-path", name))
         ).splitlines()
@@ -216,14 +217,15 @@ class GitClient:
 
     def patch_ids(self, *args: str) -> set[str]:
         """The patch-ids of the commits or diff that `git <args>` prints."""
-        return set(self.patch_id_list(*args))
+        return {patch_id for patch_id, _ in self.commit_patch_ids(*args)}
 
-    def patch_id_list(self, *args: str) -> list[str]:
-        """The patch-id of each commit (or the diff) that `git <args>` prints, in
-        the order it prints them."""
+    def commit_patch_ids(self, *args: str) -> list[tuple[str, str]]:
+        """(patch-id, commit) for each commit that `git <args>` prints, in the
+        order it prints them. For a diff, the commit is all zeros."""
         command, *rest = args
         patches = self.run("--literal-pathspecs", command, "--no-color", "--no-ext-diff", *rest)
-        return [line.split()[0] for line in self.run("patch-id", "--stable", input=patches + "\n").splitlines()]
+        lines = self.run("patch-id", "--stable", input=patches + "\n").splitlines()
+        return [(patch_id, commit) for patch_id, commit in (line.split() for line in lines)]
 
     def identities(self, *args: str) -> set[str]:
         """The author, author date and subject of each commit `git log <args>`

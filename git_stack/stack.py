@@ -11,6 +11,8 @@ from git_stack.adapters.merge_state import MergeState
 from git_stack.core import (
     BASE_KEY,
     PARENT_KEY,
+    PENDING_BASE_KEY,
+    PENDING_PARENT_KEY,
     PULLED_KEY,
     Parents,
     StackCore,
@@ -74,6 +76,18 @@ class Renamed:
     new: str
     children: tuple[str, ...]
     upstream: str | None
+
+
+@dataclass(frozen=True)
+class Unreverted:
+    """reverts are the commits on parent that branch's new commits revert,
+    newest first. children are the branches stacked on branch, which still
+    need restacking onto it."""
+
+    branch: str
+    parent: str
+    reverts: tuple[str, ...]
+    children: tuple[str, ...]
 
 
 class AutocreateAction(enum.Enum):
@@ -352,6 +366,52 @@ class StackClient(StackCore):
             # as gone once it's deleted.
             git.run("branch", "--unset-upstream", new)
         return Renamed(old, new, children, upstream)
+
+    def unrevert(self, branch: str | None = None, remote: str = DEFAULT_REMOTE) -> Unreverted:
+        """Rebuild branch (default: the current branch), whose merge into its
+        parent was reverted, as commits on the parent's tip that revert those
+        reverts. Returns an Unreverted.
+
+        Its old commits are dropped (the parent has them, or a squash of them,
+        in its history). If its remote branch was deleted (e.g. when its pull
+        request was merged), its upstream is unset, so `git stack push` can
+        push it again.
+        """
+        git = self.git
+        self.ensure_no_operation_in_progress()
+        self.ensure_clean_worktree()
+        self.settle_all()
+        parents = self.tracked_branches()
+        if branch is None:
+            branch = self.current_stacked_branch(parents, "unrevert")
+        elif branch not in parents:
+            raise StackError(f"{branch} isn't in a stack")
+        parent = parents[branch]
+        adapter = make_adapter(self, remote, fetch=False)
+        state = adapter.merge_state(branch, parent)
+        if state is not MergeState.REVERTED:
+            raise StackError(f"{branch} doesn't look reverted in {parent} (it's {state.value})")
+        if (worktree := git.other_worktree_of(branch)) is not None:
+            raise StackError(f"{branch} is checked out in {worktree}; unrevert it there")
+        reverts = adapter.reverts(branch, parent)
+        old_tip, parent_tip = git.tip(branch), git.tip(parent)
+        # Recorded like a restack's, so a revert that stops partway is recorded
+        # once it's finished, and resetting to old_tip instead keeps the old base.
+        git.config_set(branch, PENDING_PARENT_KEY, parent)
+        git.config_set(branch, PENDING_BASE_KEY, parent_tip)
+        git.switch(branch)
+        git.run("reset", "--quiet", "--hard", parent_tip)
+        if git.upstream_gone(branch):
+            git.run("branch", "--unset-upstream", branch)
+        if not git.passthrough("revert", "--no-edit", *reverts):
+            raise StackError(
+                f"unreverting {branch} stopped; see git's output above. Resolve any conflicts and run "
+                f"`git revert --continue`. Or to put {branch} back as it was, run `git revert --abort`, "
+                f"then `git reset --hard {old_tip}`"
+            )
+        self.settle(branch)
+        children = tuple(child for child, p in parents.items() if p == branch)
+        return Unreverted(branch, parent, tuple(reverts), children)
 
     def settled_branches(self) -> Parents:
         """Like tracked_branches, but first picks up the result of a restack or

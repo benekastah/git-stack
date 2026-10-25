@@ -286,24 +286,40 @@ class GitHubAdapter(GitAdapter):
     def merge_state(self, branch: str, parent: str) -> MergeState:
         git = self.git
         pr = self.pull_requests().get(branch)
-        if pr is None or pr.state != "MERGED":
-            if pr is not None and parent == self._default_branch:
-                return MergeState.NOT_MERGED
+        if pr is not None and pr.state == "OPEN" and parent == self._default_branch:
+            return MergeState.NOT_MERGED
+        merged = self.trusted_merge(branch, parent)
+        if merged is None:
             return super().merge_state(branch, parent)
-        merge, head = pr.merge_oid, pr.head_oid
-        # Trust GitHub only once the merge is in the local parent, so children
-        # aren't restacked onto a parent that lacks it, and only if we have the
-        # merged commits, so we can tell whether anything came after them.
-        if not (merge and git.rev(merge) and git.is_ancestor(merge, parent) and git.rev(head)):
-            return super().merge_state(branch, parent)
-        if self.reverted(branch, parent, (merge,)):
+        if self.reverted(branch, parent):
             return MergeState.REVERTED
+        head = merged.head_oid
         upstream_tip = git.rev(f"{branch}@{{upstream}}")
         if self.unmerged_commits(f"refs/heads/{branch}", head, parent) or (
             upstream_tip and self.unmerged_commits(upstream_tip, head, parent)
         ):
             return MergeState.MERGED_WITH_NEW_COMMITS
         return MergeState.MERGED
+
+    def trusted_merge(self, branch: str, parent: str) -> PullRequest | None:
+        """branch's merged pull request, if it's merged into the local parent.
+
+        Trust GitHub only once the merge is in the local parent, so children
+        aren't restacked onto a parent that lacks it, and only if we have the
+        merged commits, so we can tell whether anything came after them.
+        """
+        git = self.git
+        pr = self.pull_requests().get(branch)
+        if pr is None or pr.state != "MERGED":
+            return None
+        merge = pr.merge_oid
+        if not (merge and git.rev(merge) and git.is_ancestor(merge, parent) and git.rev(pr.head_oid)):
+            return None
+        return pr
+
+    def landing_merges(self, branch: str, parent: str) -> tuple[str, ...]:
+        pr = self.trusted_merge(branch, parent)
+        return (pr.merge_oid,) if pr is not None and pr.merge_oid else ()
 
     def unmerged_commits(self, ref: str, merged_head: str, parent: str) -> set[str]:
         """Non-merge commits on ref that aren't in parent and don't match a commit on merged_head."""
