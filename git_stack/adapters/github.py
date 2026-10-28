@@ -465,12 +465,11 @@ class GitHubAdapter(GitAdapter):
         if sum(isinstance(n, int) for n in current) + len(merged) < 2:
             return
         tree = stack_section.lay_out(root, current, old, merged)
-        for branch, number in to_update.items():
+        for number in to_update.values():
             body = bodies[number]
             new_body = stack_section.replace(body, stack_section.render(root, tree, merged, number))
             if new_body != body:
                 self.gh("pr", "edit", str(number), "--repo", self.repo, "--body-file", "-", input=new_body)
-                self.core.emit(events.StackSectionUpdated(branch, number))
 
 
 def github_repo(git: GitClient, remote: str) -> tuple[str, str, str] | None:

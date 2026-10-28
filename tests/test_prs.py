@@ -4,7 +4,7 @@ import pytest
 
 from git_stack import events, stack_section
 from git_stack.errors import StackError
-from git_stack.stack import PullRequestAction, PullRequestStep, StackClient
+from git_stack.stack import BranchStatus, PullRequestAction, PullRequestStep, StackClient
 from tests.helpers import FakeGitHub, Repo
 
 # Without a trailing newline, which git-stack strips like the rest of git's output.
@@ -46,12 +46,19 @@ def test_prs_opens_drafts_for_the_whole_stack_into_stack_parents(
     client.push()
     repo.git("switch", "--quiet", "pr2")
 
-    steps = client.prs()
+    result = client.prs()
 
-    assert steps == [
+    assert result.steps == [
         PullRequestStep("pr1", "main", PullRequestAction.OPEN, "pr1 c1", 1, "https://github.com/acme/widgets/pull/1"),
         PullRequestStep("pr2", "pr1", PullRequestAction.OPEN, "pr2 c1", 2, "https://github.com/acme/widgets/pull/2"),
         PullRequestStep("pr3", "pr2", PullRequestAction.OPEN, "pr3 c1", 3, "https://github.com/acme/widgets/pull/3"),
+    ]
+    # The pull requests it just opened, without looking them up again.
+    assert [(b.name, b.pull_request and b.pull_request.number) for b in result.branches] == [
+        ("main", None),
+        ("pr1", 1),
+        ("pr2", 2),
+        ("pr3", 3),
     ]
     assert [pr[:3] + pr[4:] for pr in opened(gh)] == [
         ("pr1", "main", "pr1 c1", True),
@@ -75,7 +82,7 @@ def test_prs_skips_branches_with_a_pull_request(repo: Repo, gh: FakeGitHub, clie
         mergeCommit=None,
     )
 
-    steps = client.prs()
+    steps = client.prs().steps
 
     assert [(s.branch, s.action, s.number) for s in steps] == [
         ("pr1", PullRequestAction.OPEN, 8),
@@ -110,7 +117,7 @@ def test_prs_skips_branches_without_commits(repo: Repo, gh: FakeGitHub, client: 
     client.branch("empty")
     client.push()
 
-    assert client.prs() == [PullRequestStep("empty", "main", PullRequestAction.NO_COMMITS)]
+    assert client.prs().steps == [PullRequestStep("empty", "main", PullRequestAction.NO_COMMITS)]
     assert opened(gh) == []
 
 
@@ -167,7 +174,7 @@ def test_prs_dry_run_opens_nothing(repo: Repo, gh: FakeGitHub, client: StackClie
     repo.make_stack()
     client.push()
 
-    steps = client.prs(dry_run=True)
+    steps = client.prs(dry_run=True).steps
 
     assert [(s.branch, s.action, s.title, s.number) for s in steps] == [
         ("pr1", PullRequestAction.OPEN, "pr1 c1", None),
@@ -242,6 +249,31 @@ def test_prs_keeps_merged_pull_requests_in_the_stack(repo: Repo, gh: FakeGitHub,
 
     assert body(gh, 2) == stack("- `main`", "  - #1 (merged)", "  - #2 👈", "    - #3", "      - #4")
     assert "#4" not in body(gh, 1)  # merged pull requests are left alone
+
+
+def test_prs_shows_a_merged_branch_it_skipped(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+    repo.make_stack()
+    client.push()
+    client.prs()
+    repo.squash_merge_on_forge("pr1")
+    state = gh.load()
+    state["prs"][0] |= {
+        "state": "MERGED",
+        "headRefOid": repo.git("rev-parse", "pr1"),
+        "mergeCommit": {"oid": repo.git("rev-parse", "HEAD", cwd=repo.forge)},
+    }
+    gh.save(state)
+    repo.git("fetch", "--quiet")
+    repo.git("branch", "--quiet", "--force", "main", "origin/main")
+
+    branches = client.prs().branches
+
+    assert [(b.name, b.status) for b in branches] == [
+        ("main", None),
+        ("pr1", BranchStatus.MERGED),
+        ("pr2", BranchStatus.UP_TO_DATE),
+        ("pr3", BranchStatus.UP_TO_DATE),
+    ]
 
 
 def test_prs_moves_the_stack_to_the_end_keeping_the_rest(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:

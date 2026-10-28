@@ -674,9 +674,13 @@ to open their pull requests with the right bases.
 git stack push
 git stack prs -n                # see what it would open
 git stack prs
-# opened draft pull request #12 for add-api into main: https://github.com/...
-# opened draft pull request #13 for use-api into add-api: https://github.com/...
+# main
+# └── add-api *       https://github.com/acme/widgets/pull/12
+#     └── use-api     https://github.com/acme/widgets/pull/13
 ```
+
+- It ends by showing the stacks, as `info` does, with the links of the pull
+  requests it just opened in green.
 
 - Each pull request's title is its branch's oldest commit's subject, and its
   body the repository's pull request template, `pull_request_template.md`
@@ -718,8 +722,8 @@ git stack prs
   problem is fixed to open the rest.
 - Needs the [GitHub adapter](#github).
 - `git stack pr` is an alias.
-- `-n`/`--dry-run` prints the pull requests it would open, with their titles,
-  without opening them.
+- `-n`/`--dry-run` shows the stacks with the pull requests it would open, with
+  their titles, in place of their links, without opening them.
 
 ### `git stack unrevert [<branch>] [--remote origin]`
 

@@ -2,7 +2,7 @@ import argparse
 import json
 import os
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import TypeAlias
 
@@ -33,6 +33,8 @@ LINK_COLORS = {
     PullRequestState.DRAFT: "90",  # grey
     PullRequestState.MERGED: "35",  # magenta
 }
+# For a pull request prs just opened, or would open.
+NEW_LINK = "32"  # green
 STATUS_COLORS = {
     BranchStatus.NEEDS_RESTACK: "33",  # yellow
     BranchStatus.MERGED: "36",  # cyan
@@ -174,9 +176,11 @@ def tree_children(branches: list[BranchInfo]) -> dict[str | GroupHeader, list[Br
     return children
 
 
-def print_tree(stack: StackClient, branches: list[BranchInfo]) -> None:
+def print_tree(stack: StackClient, branches: list[BranchInfo], new_links: Mapping[str, str] = {}) -> None:
     """Print branches, which isn't empty, as a tree for each stack, with each
-    branch's pull request linked at the end of its line."""
+    branch's pull request linked at the end of its line. new_links is
+    {branch: text}, shown in NEW_LINK's color in place of its link, for pull
+    requests that were just opened, or would be."""
     paint = painter(use_color(stack))
     flip = root_at_bottom(stack)
     children = tree_children(branches)
@@ -199,11 +203,22 @@ def print_tree(stack: StackClient, branches: list[BranchInfo]) -> None:
             rows.extend(reversed(drawn) if flip else drawn)
     # Pull request links go in a right-aligned column after the longest line.
     widths = [len(tree) + len(label(row, painter(False))) for tree, row in rows]
-    links = [row.pull_request if isinstance(row, BranchInfo) else None for _, row in rows]
-    link_width = max(len(link.url) if link else 0 for link in links)
-    for (tree, row), width, pull_request in zip(rows, widths, links, strict=True):
+    links = [link_of(row, new_links) for _, row in rows]
+    link_width = max(len(link[0]) if link else 0 for link in links)
+    for (tree, row), width, link in zip(rows, widths, links, strict=True):
         line = paint(tree, TREE) + label(row, paint)
-        if pull_request:
-            link = pull_request.url.rjust(link_width)
-            line += " " * (max(widths) - width + 2) + paint(link, LINK_COLORS[pull_request.state])
+        if link:
+            text, color = link
+            line += " " * (max(widths) - width + 2) + paint(text.rjust(link_width), color)
         print(line)
+
+
+def link_of(row: BranchInfo | GroupHeader, new_links: Mapping[str, str]) -> tuple[str, str] | None:
+    """(text, color) at the end of row's line in print_tree, if anything."""
+    if isinstance(row, GroupHeader):
+        return None
+    if row.name in new_links:
+        return new_links[row.name], NEW_LINK
+    if row.pull_request:
+        return row.pull_request.url, LINK_COLORS[row.pull_request.state]
+    return None

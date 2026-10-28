@@ -17,6 +17,7 @@ from git_stack.stack import (
     Autocreated,
     BranchInfo,
     BranchStatus,
+    PrsResult,
     PullRequestAction,
     PullRequestStep,
     Renamed,
@@ -40,7 +41,7 @@ def stack() -> Any:
     stack.info.return_value = []
     stack.sync.return_value = []
     stack.push.return_value = ["pr1"]
-    stack.prs.return_value = []
+    stack.prs.return_value = PrsResult([], [])
     stack.next.return_value = "pr2"
     stack.prev.return_value = "main"
     stack.parent.return_value = "main"
@@ -166,22 +167,44 @@ def test_autocreate_without_pull_requests_says_so(stack: Any, capsys: pytest.Cap
 
 
 @pytest.mark.parametrize("dry_run", [False, True])
-def test_prs_says_what_it_did_for_each_branch(stack: Any, capsys: pytest.CaptureFixture[str], dry_run: bool) -> None:
+def test_prs_shows_the_stack_with_new_pull_requests_in_green(
+    stack: Any, capsys: pytest.CaptureFixture[str], dry_run: bool
+) -> None:
+    stack.git.run.side_effect = lambda *args, check=True: "true" if "--get-colorbool" in args else ""
     url = "https://github.com/acme/widgets/pull/1"
-    stack.prs.return_value = [
-        PullRequestStep("pr1", "main", PullRequestAction.OPEN, "Add the API", *((None, None) if dry_run else (1, url))),
-        PullRequestStep("pr2", "pr1", PullRequestAction.EXISTS, number=7),
-        PullRequestStep("pr3", "pr2", PullRequestAction.NO_COMMITS),
-    ]
+    existing = PullRequestLink(7, "https://github.com/acme/widgets/pull/7", PullRequestState.OPEN)
+    stack.prs.return_value = PrsResult(
+        [
+            PullRequestStep(
+                "pr1", "main", PullRequestAction.OPEN, "Add the API", *((None, None) if dry_run else (1, url))
+            ),
+            PullRequestStep("pr2", "pr1", PullRequestAction.EXISTS, number=7),
+            PullRequestStep("pr3", "pr2", PullRequestAction.NO_COMMITS),
+        ],
+        [
+            BranchInfo("main", None, None, current=False),
+            BranchInfo(
+                "pr1",
+                "main",
+                BranchStatus.UP_TO_DATE,
+                current=False,
+                pull_request=None if dry_run else PullRequestLink(1, url, PullRequestState.DRAFT),
+            ),
+            BranchInfo("pr2", "pr1", BranchStatus.UP_TO_DATE, current=False, pull_request=existing),
+            BranchInfo("pr3", "pr2", BranchStatus.UP_TO_DATE, current=False),
+        ],
+    )
 
     main(["prs", *(["--dry-run"] if dry_run else [])], stack=stack)
 
+    new = "would open: Add the API" if dry_run else url
+    width = max(len(new), len(existing.url))
     assert capsys.readouterr().out.splitlines() == [
-        "would open a draft pull request for pr1 into main: Add the API"
-        if dry_run
-        else f"opened draft pull request #1 for pr1 into main: {url}",
-        "pr2 already has pull request #7",
         "skipping pr3: it has no commits of its own",
+        "\033[1mmain\033[m",
+        f"\033[2m└── \033[mpr1          \033[32m{new.rjust(width)}\033[m",
+        f"\033[2m    └── \033[mpr2      \033[34m{existing.url.rjust(width)}\033[m",
+        "\033[2m        └── \033[mpr3",
     ]
 
 

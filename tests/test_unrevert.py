@@ -75,7 +75,7 @@ def test_unrevert_reverts_reverted_pull_request_merge(repo: Repo, gh: FakeGitHub
     assert repo.branch_info("pr1").status is BranchStatus.UP_TO_DATE
     client.restack()
     client.push()
-    first = client.prs()[0]
+    first = client.prs().steps[0]
     assert (first.branch, first.action) == ("pr1", PullRequestAction.OPEN)
 
 

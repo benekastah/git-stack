@@ -919,9 +919,13 @@ branches in one, to open their pull requests with the right bases.
 git stack push
 git stack prs \-n                \f[I]# see what it would open\f[R]
 git stack prs
-\f[I]# opened draft pull request #12 for add\-api into main: https://github.com/...\f[R]
-\f[I]# opened draft pull request #13 for use\-api into add\-api: https://github.com/...\f[R]
+\f[I]# main\f[R]
+\f[I]# └── add\-api *       https://github.com/acme/widgets/pull/12\f[R]
+\f[I]#     └── use\-api     https://github.com/acme/widgets/pull/13\f[R]
 .EE
+.IP \(bu 2
+It ends by showing the stacks, as \f[CR]info\f[R] does, with the links
+of the pull requests it just opened in green.
 .IP \(bu 2
 Each pull request\(aqs title is its branch\(aqs oldest commit\(aqs
 subject, and its body the repository\(aqs pull request template,
@@ -976,8 +980,9 @@ Needs the GitHub adapter.
 .IP \(bu 2
 \f[CR]git stack pr\f[R] is an alias.
 .IP \(bu 2
-\f[CR]\-n\f[R]/\f[CR]\-\-dry\-run\f[R] prints the pull requests it would
-open, with their titles, without opening them.
+\f[CR]\-n\f[R]/\f[CR]\-\-dry\-run\f[R] shows the stacks with the pull
+requests it would open, with their titles, in place of their links,
+without opening them.
 .SS \f[CR]git stack unrevert [<branch>] [\-\-remote origin]\f[R]
 Rebuild a branch (default: the current one) whose merge into its parent
 was reverted, as commits on its parent\(aqs tip that revert the reverts,

@@ -25,6 +25,7 @@ from git_stack.core import (
     drop_from_stack,
     ensure_no_cycle,
     group_bottoms,
+    stack_of,
     stack_root,
 )
 from git_stack.errors import BrokenStackError, StackError
@@ -164,6 +165,16 @@ class PullRequestStep:
     title: str | None = None
     number: int | None = None
     url: str | None = None
+
+
+@dataclass(frozen=True)
+class PrsResult:
+    """What prs did: a PullRequestStep for each branch it looked at, and the
+    stacks it looked at, as info() lists them, with the pull requests it
+    opened."""
+
+    steps: list[PullRequestStep]
+    branches: list[BranchInfo]
 
 
 @dataclass
@@ -673,13 +684,19 @@ class StackClient(StackCore):
         groups name, see named), as a list of BranchInfo: each stack's root, then its
         branches, parent-before-child. offline checks for merges like the git
         adapter does, without asking GitHub about pull requests."""
-        git = self.git
         parents = self.settled_branches()
         if branches or groups:
             parents = {b: parents[b] for b in self.selected_stacks(branches, groups, parents, "show")}
+        adapter = GitAdapter(self) if offline else make_adapter(self, DEFAULT_REMOTE, fetch=False)
+        return self.branch_infos(parents, adapter)
+
+    def branch_infos(self, parents: Parents, adapter: GitAdapter) -> list[BranchInfo]:
+        """The branches in parents, as info() lists them, checked with adapter,
+        so a command that already has one (and its pull requests) can show
+        them without looking them up again."""
+        git = self.git
         current = git.current_branch()
         children = children_map(parents)
-        adapter = GitAdapter(self) if offline else make_adapter(self, DEFAULT_REMOTE, fetch=False)
 
         def status(branch: str) -> BranchStatus:
             parent = parents[branch]
@@ -731,6 +748,15 @@ class StackClient(StackCore):
                 for b in descendants(root, children)
             )
         return result
+
+    def stack_infos(self, branches: Iterable[str], adapter: GitAdapter) -> list[BranchInfo]:
+        """The stacks of those of branches that are still tracked, and of the
+        other stacks in their groups, as info() lists them (see branch_infos),
+        for a command to show what it left them as."""
+        parents = self.tracked_branches()
+        groups = self.groups(parents)
+        shown = {s: parents[s] for b in branches if b in parents for s in stack_of(b, parents, groups)}
+        return self.branch_infos(shown, adapter)
 
     def checked_adapter(self, remote: str) -> GitAdapter:
         """The adapter for sync, clean and push, which fetch and change
@@ -1091,7 +1117,7 @@ class StackClient(StackCore):
         groups: Sequence[str] = (),
         remote: str = DEFAULT_REMOTE,
         dry_run: bool = False,
-    ) -> list[PullRequestStep]:
+    ) -> PrsResult:
         """Open a draft pull request into its stack parent for each unmerged
         branch in the current stack (or in the stacks of the branches that
         branches and groups name, see named) that has none, bottom-up. Its title is the
@@ -1103,8 +1129,9 @@ class StackClient(StackCore):
 
         Refuses unless every unmerged branch in the stack was pushed with `git
         stack push` and matches its remote branch, so each pull request shows
-        what's local. Returns a PullRequestStep for each branch. With dry_run, nothing
-        is opened, retargeted or rewritten.
+        what's local. Returns a PullRequestStep for each branch, and the stacks
+        as info() lists them. With dry_run, nothing is opened, retargeted or
+        rewritten.
         """
         git = self.git
         self.ensure_no_operation_in_progress()
@@ -1151,7 +1178,7 @@ class StackClient(StackCore):
             steps.append(PullRequestStep(b, parent, PullRequestAction.OPEN, title=title, number=number, url=url))
         if branches and not dry_run:
             self.update_stack_sections(branches, parents, adapter)
-        return steps
+        return PrsResult(steps, self.stack_infos(stack, adapter))
 
     def update_stack_sections(self, branches: list[str], parents: Parents, adapter: GitHubAdapter) -> None:
         """Update the stack sections of branches' pull requests (see

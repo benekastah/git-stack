@@ -224,14 +224,6 @@ class PullRequestRetargeted:
     base: str
 
 
-@dataclass(frozen=True)
-class StackSectionUpdated:
-    """The stack section in branch's pull request's description was rewritten."""
-
-    branch: str
-    number: int
-
-
 # Every event, so code that handles them can check it handles each one.
 Event: TypeAlias = (
     WaitingForLock
@@ -262,5 +254,4 @@ Event: TypeAlias = (
     | PullRequestLookupFailed
     | NoPullRequests
     | PullRequestRetargeted
-    | StackSectionUpdated
 )
