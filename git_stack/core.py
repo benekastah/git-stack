@@ -237,10 +237,18 @@ class StackCore:
     def set_parent(self, branch: str, parent: str) -> None:
         """Record parent as branch's parent. If parent is tracked, branch is no
         longer at the bottom of a stack, so it leaves its group (see GROUP_KEY),
-        rather than rejoining it if it's ever at the bottom again."""
-        self.git.config_set(branch, PARENT_KEY, parent)
-        if self.git.config_get(parent, PARENT_KEY) is not None:
-            self.git.config_unset(branch, GROUP_KEY)
+        rather than rejoining it if it's ever at the bottom again. If parent is
+        a stack's root and branch was higher up a stack (e.g. restack --onto
+        main), branch joins that stack's group, so the two stay together."""
+        git = self.git
+        old_parent = git.config_get(branch, PARENT_KEY)
+        if git.config_get(parent, PARENT_KEY) is not None:
+            git.config_unset(branch, GROUP_KEY)
+        elif old_parent is not None and git.config_get(old_parent, PARENT_KEY) is not None:
+            bottom = ancestry(old_parent, self.tracked_branches())[-2]
+            if (group := git.config_get(bottom, GROUP_KEY)) is not None:
+                git.config_set(branch, GROUP_KEY, group)
+        git.config_set(branch, PARENT_KEY, parent)
 
     def groups(self, parents: Parents) -> Groups:
         """The group of each branch in parents that has one (see GROUP_KEY)."""

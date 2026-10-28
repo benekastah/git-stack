@@ -147,7 +147,9 @@ main
   branch is untracked. It also leaves when it's moved onto another tracked
   branch (e.g. with `restack --onto`), since it's then part of that branch's
   stack, and isn't put back in the group if it's at the bottom of a stack
-  again later.
+  again later. A branch moved from higher up a stack onto a root (e.g. with
+  `restack --onto main`) joins its old stack's group, if it was in one, so
+  the two stay together.
 - [`git stack group`](#git-stack-group-add-name-branchglob--g-group---move)
   puts stacks in a group by hand, takes them out, or renames a group.
 

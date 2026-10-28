@@ -393,3 +393,16 @@ def test_branch_moved_onto_a_tracked_branch_leaves_its_group(repo: Repo, client:
     # Even once d is untracked, leaving c at the bottom of a stack again.
     client.untrack(["d"])
     assert client.show_stack("b") == ["b"]
+
+
+def test_branch_moved_onto_the_root_from_up_a_stack_stays_in_its_group(repo: Repo, client: StackClient) -> None:
+    two_stacks(repo, client)
+    client.group_add("feat", ["feat-a"])
+    repo.git("switch", "--quiet", "feat-a")
+    client.branch("feat-a2")
+    repo.commit("b", "feat-a2\n", "feat-a2 c1")
+
+    client.restack(onto="main")
+
+    assert repo.config("feat-a2", "stackGroup") == "feat"
+    assert client.show_stack("feat-a") == ["feat-a", "feat-a2"]

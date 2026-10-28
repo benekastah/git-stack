@@ -246,6 +246,9 @@ It also leaves when it\(aqs moved onto another tracked branch (e.g.
 with \f[CR]restack \-\-onto\f[R]), since it\(aqs then part of that
 branch\(aqs stack, and isn\(aqt put back in the group if it\(aqs at the
 bottom of a stack again later.
+A branch moved from higher up a stack onto a root (e.g.
+with \f[CR]restack \-\-onto main\f[R]) joins its old stack\(aqs group,
+if it was in one, so the two stay together.
 .IP \(bu 2
 \f[CR]git stack group\f[R] puts stacks in a group by hand, takes them
 out, or renames a group.
