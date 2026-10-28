@@ -246,9 +246,14 @@ pull requests you opened before you started using git-stack.
 ```sh
 git stack autocreate -n         # see what it would do
 git stack autocreate
-# created add-api from origin/add-api, tracking it on main (#12)
-# created use-api from origin/use-api, tracking it on add-api (#13)
+# main
+# └── add-api     https://github.com/acme/widgets/pull/12
+#     └── use-api https://github.com/acme/widgets/pull/13
 ```
+
+- It ends by showing the stacks it tracked, as `info` does, with the links of
+  the pull requests whose branches it just tracked in green. `-n` lists what
+  it would do for each pull request instead.
 
 - It only looks at your own open pull requests from branches in the
   repository: GitHub finds them with a search for pull requests by you, so
@@ -528,6 +533,7 @@ git stack sync -d both          # ...and their remote branches
 
 - Only the current stack is synced; to untrack merged branches in every stack,
   use `clean`.
+- It ends by showing the stacks it synced, as `info` does.
 - Merged branches are kept unless `-d`/`--delete` says to delete their local
   branches, their remote branches, or both. A branch is untracked by the first
   `sync` or `clean` that sees it merged, so pass `-d` on that run if you want
@@ -587,6 +593,7 @@ git stack clean -d local
 - Nothing is restacked, so there are no conflicts. The children are rebased
   the next time you `sync` or `restack` their stack.
 - `-d` and `--ignore-revert` work as for `sync`.
+- It ends by showing every stack, as `info` does.
 - Runs from any branch, even one that isn't in a stack. Needs a clean
   worktree.
 
@@ -610,6 +617,7 @@ git stack push --force          # drop commits on the remote you didn't pull
 ```
 
 - Each branch is pushed to a remote branch of the same name.
+- It ends by showing the stacks it pushed, as `info` does.
 - Refuses, even with `--force`, if that remote branch exists but isn't the
   branch's upstream, since it's probably someone else's branch that happens to
   have the same name. Rename yours with `git stack rename`, or, if the remote

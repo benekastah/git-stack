@@ -177,6 +177,34 @@ class PrsResult:
     branches: list[BranchInfo]
 
 
+@dataclass(frozen=True)
+class AutocreateResult:
+    """What autocreate did: an Autocreated for each pull request, and the
+    stacks of the branches it tracked or found tracked, as info() lists them
+    (none in a dry run, which tracks nothing)."""
+
+    steps: list[Autocreated]
+    branches: list[BranchInfo]
+
+
+@dataclass(frozen=True)
+class SyncResult:
+    """What sync did: the branches that now differ from their remote branch,
+    and the stacks it synced, as info() lists them."""
+
+    unpushed: list[str]
+    branches: list[BranchInfo]
+
+
+@dataclass(frozen=True)
+class PushResult:
+    """What push did: the branches it pushed, and the stacks it pushed, as
+    info() lists them."""
+
+    pushed: list[str]
+    branches: list[BranchInfo]
+
+
 @dataclass
 class SyncState:
     """A sync's options, and how far it got, as it goes through the stack.
@@ -320,15 +348,16 @@ class StackClient(StackCore):
                 )
 
     @exclusive
-    def autocreate(self, remote: str = DEFAULT_REMOTE, dry_run: bool = False) -> list[Autocreated]:
+    def autocreate(self, remote: str = DEFAULT_REMOTE, dry_run: bool = False) -> AutocreateResult:
         """Track the gh user's open pull requests on GitHub, drafts included, as
         stacks: each one's branch on the branch it merges into, creating local
         branches from remote for those that don't have one. Branches that are
         already tracked are left alone. The untracked branches they merge into
         (e.g. main) are fast-forwarded to their upstreams first.
 
-        Returns an Autocreated for each pull request, parents before children.
-        With dry_run, nothing is changed (besides fetching remote).
+        Returns an Autocreated for each pull request, parents before children,
+        and the stacks of the branches it tracked or found tracked. With
+        dry_run, nothing is changed (besides fetching remote).
         """
         git = self.git
         self.ensure_no_operation_in_progress()
@@ -367,7 +396,9 @@ class StackClient(StackCore):
                 if step.base is not None:
                     self.set_parent(step.branch, step.parent)
                     git.config_set(step.branch, BASE_KEY, step.base)
-        return plan
+        if dry_run:
+            return AutocreateResult(plan, [])
+        return AutocreateResult(plan, self.stack_infos((s.branch for s in plan), adapter))
 
     def ensure_local_branch_parent(self, parent: str) -> None:
         """Refuse a parent that isn't a local branch: sync fast-forwards a stack's
@@ -846,7 +877,7 @@ class StackClient(StackCore):
         latest: bool = False,
         push: bool = True,
         ignore_reverts: Sequence[str] = (),
-    ) -> list[str]:
+    ) -> SyncResult:
         """Fetch, untrack the merged branches in the current stack, or in the
         stacks of the branches that branches and groups name (see named), deleting what
         delete, "local", "remote" or "both", says, restack them (see restack
@@ -859,7 +890,7 @@ class StackClient(StackCore):
         forgets it (see warn_if_merged_parent_reverted).
 
         Returns the branches that now differ from their remote branch, which
-        with push are only those it didn't push.
+        with push are only those it didn't push, and the stacks it synced.
 
         Raises StackError, after pushing the rest, if push is set and a branch
         couldn't be restacked or pulled into because it's checked out in
@@ -891,7 +922,7 @@ class StackClient(StackCore):
                 f"didn't push {', '.join(state.blocked)}: checked out in another worktree, or stacked on a branch "
                 f"that is"
             )
-        return state.unpushed
+        return SyncResult(state.unpushed, self.stack_infos(stack, adapter))
 
     def sync_branch(self, branch: str, adapter: GitAdapter, state: SyncState) -> None:
         """Untrack branch if it was merged, and otherwise bring it up to date (see
@@ -975,9 +1006,10 @@ class StackClient(StackCore):
     @exclusive
     def clean(
         self, remote: str = DEFAULT_REMOTE, delete: str | None = None, ignore_reverts: Sequence[str] = ()
-    ) -> None:
+    ) -> list[BranchInfo]:
         """Fetch and untrack merged branches in every stack, deleting what delete
-        says, without restacking anything. ignore_reverts is as for sync."""
+        says, without restacking anything. ignore_reverts is as for sync.
+        Returns every stack, as info() lists them."""
         git = self.git
         self.ensure_no_operation_in_progress()
         self.ensure_clean_worktree()
@@ -1012,6 +1044,7 @@ class StackClient(StackCore):
             else:
                 self.warn_if_merged_parent_reverted(branch, adapter, ignore_reverts)
         self.restore_checkout(original)
+        return self.stack_infos(order, adapter)
 
     @exclusive
     def push(
@@ -1020,11 +1053,11 @@ class StackClient(StackCore):
         groups: Sequence[str] = (),
         remote: str = DEFAULT_REMOTE,
         force: bool = False,
-    ) -> list[str]:
+    ) -> PushResult:
         """Force-push (with lease) every unmerged branch in the current stack, or
         in the stacks of the branches that branches and groups name (see named), then let
         the adapter update their pull requests. Returns the pushed branches,
-        which is empty if every branch looks merged.
+        which is empty if every branch looks merged, and the stacks.
 
         Refuses if a remote branch has commits the local one doesn't, unless
         force is set. Either way, the push fails if a remote branch changed
@@ -1036,7 +1069,8 @@ class StackClient(StackCore):
         stack = self.selected_stacks(branches, groups, parents, "push")
         adapter = self.checked_adapter(remote)
         branches = self.skip_merged(stack, parents, adapter)
-        return self.push_branches(branches, parents, adapter, remote, force)
+        pushed = self.push_branches(branches, parents, adapter, remote, force)
+        return PushResult(pushed, self.stack_infos(stack, adapter))
 
     def push_branches(
         self, branches: list[str], parents: Parents, adapter: GitAdapter, remote: str, force: bool = False

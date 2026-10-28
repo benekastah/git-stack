@@ -7,6 +7,7 @@ from git_stack.commands import (
     add_latest_argument,
     add_stack_arguments,
 )
+from git_stack.commands.info import print_tree
 from git_stack.git import DEFAULT_REMOTE
 from git_stack.stack import StackClient
 
@@ -41,7 +42,7 @@ def register(subparsers: Subparsers) -> None:
 
 
 def run(stack: StackClient, args: Args) -> None:
-    unpushed = stack.sync(
+    result = stack.sync(
         args.branches,
         args.groups,
         remote=args.remote,
@@ -50,7 +51,9 @@ def run(stack: StackClient, args: Args) -> None:
         push=not args.no_push,
         ignore_reverts=args.ignore_reverts,
     )
-    if unpushed:
+    if result.branches:
+        print_tree(stack, result.branches)
+    if result.unpushed:
         print("note: run `git stack push` to update the remote branches and pull requests of:")
-        for branch in unpushed:
+        for branch in result.unpushed:
             print(f"  {branch}")

@@ -1,6 +1,7 @@
 import argparse
 
 from git_stack.commands import Subparsers
+from git_stack.commands.info import print_tree
 from git_stack.git import DEFAULT_REMOTE
 from git_stack.stack import AutocreateAction, Autocreated, StackClient
 
@@ -48,8 +49,15 @@ def describe(step: Autocreated, remote: str, dry_run: bool) -> str:
 
 
 def run(stack: StackClient, args: Args) -> None:
-    steps = stack.autocreate(remote=args.remote, dry_run=args.dry_run)
-    if not steps:
+    result = stack.autocreate(remote=args.remote, dry_run=args.dry_run)
+    if not result.steps:
         print("you have no open pull requests from branches in this repository")
-    for step in steps:
-        print(describe(step, args.remote, args.dry_run))
+    # Without a dry run, the stacks show what was tracked, with the pull
+    # requests of the branches it just tracked in green.
+    for step in result.steps:
+        if args.dry_run or step.action in (AutocreateAction.PARENT_DIFFERS, AutocreateAction.SKIP):
+            print(describe(step, args.remote, args.dry_run))
+    if result.branches:
+        tracked = {s.branch for s in result.steps if s.action in (AutocreateAction.CREATE, AutocreateAction.TRACK)}
+        new_links = {b.name: b.pull_request.url for b in result.branches if b.name in tracked and b.pull_request}
+        print_tree(stack, result.branches, new_links)

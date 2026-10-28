@@ -15,16 +15,26 @@ from git_stack.git import GitClient
 from git_stack.stack import (
     AutocreateAction,
     Autocreated,
+    AutocreateResult,
     BranchInfo,
     BranchStatus,
     PrsResult,
     PullRequestAction,
     PullRequestStep,
+    PushResult,
     Renamed,
     StackClient,
+    SyncResult,
     Tracked,
     Untracked,
 )
+
+# A stack, and how print_tree draws it without color.
+STACK = [
+    BranchInfo("main", None, None, current=False),
+    BranchInfo("pr1", "main", BranchStatus.UP_TO_DATE, current=True),
+]
+STACK_TREE = "main\n└── pr1 *\n"
 
 
 @pytest.fixture
@@ -35,12 +45,13 @@ def stack() -> Any:
     stack.git.run.return_value = ""  # e.g. git config --get of an unset setting
     stack.branch.return_value = "main"
     stack.track.return_value = []
-    stack.autocreate.return_value = []
+    stack.autocreate.return_value = AutocreateResult([], [])
     stack.untrack.return_value = [Untracked("pr1", children=())]
     stack.rename.return_value = Renamed("old", "new", children=(), upstream=None)
     stack.info.return_value = []
-    stack.sync.return_value = []
-    stack.push.return_value = ["pr1"]
+    stack.sync.return_value = SyncResult([], [])
+    stack.push.return_value = PushResult(["pr1"], [])
+    stack.clean.return_value = []
     stack.prs.return_value = PrsResult([], [])
     stack.next.return_value = "pr2"
     stack.prev.return_value = "main"
@@ -133,30 +144,57 @@ def test_command_calls_its_client_method(
     getattr(stack, method).assert_called_once_with(*args, **kwargs)
 
 
-@pytest.mark.parametrize("dry_run", [False, True])
-def test_autocreate_says_what_it_did_for_each_pull_request(
-    stack: Any, capsys: pytest.CaptureFixture[str], dry_run: bool
+AUTOCREATED = [
+    Autocreated("pr1", "main", 1, AutocreateAction.CREATE, base="a" * 40),
+    Autocreated("pr2", "pr1", 2, AutocreateAction.TRACK, base="b" * 40),
+    Autocreated("pr3", "pr2", 3, AutocreateAction.ALREADY_TRACKED),
+    Autocreated("pr4", "pr2", 4, AutocreateAction.PARENT_DIFFERS, tracked_parent="main"),
+    Autocreated("pr5", "theirs", 5, AutocreateAction.SKIP, reason="theirs isn't a local branch"),
+]
+PARENT_DIFFERS = (
+    "pr4 is tracked on main, but #4 merges it into pr2; leaving it (to follow GitHub, run `git stack track pr2 pr4`)"
+)
+
+
+def test_autocreate_dry_run_says_what_it_would_do_for_each_pull_request(
+    stack: Any, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    stack.autocreate.return_value = [
-        Autocreated("pr1", "main", 1, AutocreateAction.CREATE, base="a" * 40),
-        Autocreated("pr2", "pr1", 2, AutocreateAction.TRACK, base="b" * 40),
-        Autocreated("pr3", "pr2", 3, AutocreateAction.ALREADY_TRACKED),
-        Autocreated("pr4", "pr2", 4, AutocreateAction.PARENT_DIFFERS, tracked_parent="main"),
-        Autocreated("pr5", "theirs", 5, AutocreateAction.SKIP, reason="theirs isn't a local branch"),
+    stack.autocreate.return_value = AutocreateResult(AUTOCREATED, [])
+
+    main(["autocreate", "--dry-run"], stack=stack)
+
+    assert capsys.readouterr().out.splitlines() == [
+        "would create pr1 from origin/pr1, tracking it on main (#1)",
+        "would track pr2 on pr1 (#2)",
+        "pr3 is already tracked on pr2 (#3)",
+        PARENT_DIFFERS,
+        "skipping pr5 (#5): theirs isn't a local branch",
     ]
 
-    main(["autocreate", *(["--dry-run"] if dry_run else [])], stack=stack)
 
-    created, tracking = ("would create", "would track") if dry_run else ("created", "tracking")
+def test_autocreate_shows_the_stacks_with_what_it_tracked_in_green(
+    stack: Any, capsys: pytest.CaptureFixture[str]
+) -> None:
+    stack.git.run.side_effect = lambda *args, check=True: "true" if "--get-colorbool" in args else ""
+
+    def info(name: str, parent: str, number: int) -> BranchInfo:
+        url = f"https://github.com/acme/widgets/pull/{number}"
+        link = PullRequestLink(number, url, PullRequestState.OPEN)
+        return BranchInfo(name, parent, BranchStatus.UP_TO_DATE, current=False, pull_request=link)
+
+    stack.autocreate.return_value = AutocreateResult(
+        AUTOCREATED,
+        [BranchInfo("main", None, None, current=False), info("pr1", "main", 1), info("pr2", "pr1", 2)],
+    )
+
+    main(["autocreate"], stack=stack)
+
     assert capsys.readouterr().out.splitlines() == [
-        f"{created} pr1 from origin/pr1, tracking it on main (#1)",
-        f"{tracking} pr2 on pr1 (#2)",
-        "pr3 is already tracked on pr2 (#3)",
-        (
-            "pr4 is tracked on main, but #4 merges it into pr2; leaving it (to follow GitHub, run "
-            "`git stack track pr2 pr4`)"
-        ),
+        PARENT_DIFFERS,
         "skipping pr5 (#5): theirs isn't a local branch",
+        "\033[1mmain\033[m",
+        "\033[2m└── \033[mpr1      \033[32mhttps://github.com/acme/widgets/pull/1\033[m",
+        "\033[2m    └── \033[mpr2  \033[32mhttps://github.com/acme/widgets/pull/2\033[m",
     ]
 
 
@@ -356,12 +394,12 @@ def test_info_without_stacks(stack: Any, capsys: pytest.CaptureFixture[str]) -> 
     assert capsys.readouterr().out == "no tracked branches\n"
 
 
-def test_sync_lists_branches_left_to_push(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
-    stack.sync.return_value = ["pr2", "pr3"]
+def test_sync_shows_the_stacks_then_lists_branches_left_to_push(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
+    stack.sync.return_value = SyncResult(["pr2", "pr3"], STACK)
 
     main(["sync"], stack=stack)
 
-    assert capsys.readouterr().out == (
+    assert capsys.readouterr().out == STACK_TREE + (
         "note: run `git stack push` to update the remote branches and pull requests of:\n  pr2\n  pr3\n"
     )
 
@@ -372,8 +410,24 @@ def test_sync_with_nothing_to_push_prints_nothing(stack: Any, capsys: pytest.Cap
     assert capsys.readouterr().out == ""
 
 
+def test_push_shows_the_stacks(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
+    stack.push.return_value = PushResult(["pr1"], STACK)
+
+    main(["push"], stack=stack)
+
+    assert capsys.readouterr().out == STACK_TREE
+
+
+def test_clean_shows_the_stacks(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
+    stack.clean.return_value = STACK
+
+    main(["clean"], stack=stack)
+
+    assert capsys.readouterr().out == STACK_TREE
+
+
 def test_push_says_when_everything_looks_merged(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
-    stack.push.return_value = []
+    stack.push.return_value = PushResult([], [])
     stack.git.current_branch.return_value = "pr1"
 
     main(["push"], stack=stack)

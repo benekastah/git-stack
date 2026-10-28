@@ -1,6 +1,7 @@
 import argparse
 
 from git_stack.commands import Subparsers, add_stack_arguments
+from git_stack.commands.info import print_tree
 from git_stack.git import DEFAULT_REMOTE
 from git_stack.stack import StackClient
 
@@ -32,6 +33,9 @@ def register(subparsers: Subparsers) -> None:
 
 
 def run(stack: StackClient, args: Args) -> None:
-    if not stack.push(args.branches, args.groups, remote=args.remote, force=args.force):
+    result = stack.push(args.branches, args.groups, remote=args.remote, force=args.force)
+    if result.branches:
+        print_tree(stack, result.branches)
+    if not result.pushed:
         where = "those stacks" if args.branches or args.groups else f"{stack.git.current_branch()}'s stack"
         print(f"nothing to push: every branch in {where} looks merged")

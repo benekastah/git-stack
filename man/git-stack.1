@@ -368,9 +368,14 @@ using git\-stack.
 .EX
 git stack autocreate \-n         \f[I]# see what it would do\f[R]
 git stack autocreate
-\f[I]# created add\-api from origin/add\-api, tracking it on main (#12)\f[R]
-\f[I]# created use\-api from origin/use\-api, tracking it on add\-api (#13)\f[R]
+\f[I]# main\f[R]
+\f[I]# └── add\-api     https://github.com/acme/widgets/pull/12\f[R]
+\f[I]#     └── use\-api https://github.com/acme/widgets/pull/13\f[R]
 .EE
+.IP \(bu 2
+It ends by showing the stacks it tracked, as \f[CR]info\f[R] does, with
+the links of the pull requests whose branches it just tracked in green.
+\f[CR]\-n\f[R] lists what it would do for each pull request instead.
 .IP \(bu 2
 It only looks at your own open pull requests from branches in the
 repository: GitHub finds them with a search for pull requests by you, so
@@ -729,6 +734,8 @@ git stack sync \-d both          \f[I]# ...and their remote branches\f[R]
 Only the current stack is synced; to untrack merged branches in every
 stack, use \f[CR]clean\f[R].
 .IP \(bu 2
+It ends by showing the stacks it synced, as \f[CR]info\f[R] does.
+.IP \(bu 2
 Merged branches are kept unless \f[CR]\-d\f[R]/\f[CR]\-\-delete\f[R]
 says to delete their local branches, their remote branches, or both.
 A branch is untracked by the first \f[CR]sync\f[R] or \f[CR]clean\f[R]
@@ -810,6 +817,8 @@ The children are rebased the next time you \f[CR]sync\f[R] or
 \f[CR]\-d\f[R] and \f[CR]\-\-ignore\-revert\f[R] work as for
 \f[CR]sync\f[R].
 .IP \(bu 2
+It ends by showing every stack, as \f[CR]info\f[R] does.
+.IP \(bu 2
 Runs from any branch, even one that isn\(aqt in a stack.
 Needs a clean worktree.
 .SS \f[CR]git stack push [<branch|glob>...] [\-g <group>] [\-\-remote origin] [\-\-force]\f[R]
@@ -833,6 +842,8 @@ git stack push \-\-force          \f[I]# drop commits on the remote you didn\(aq
 .EE
 .IP \(bu 2
 Each branch is pushed to a remote branch of the same name.
+.IP \(bu 2
+It ends by showing the stacks it pushed, as \f[CR]info\f[R] does.
 .IP \(bu 2
 Refuses, even with \f[CR]\-\-force\f[R], if that remote branch exists
 but isn\(aqt the branch\(aqs upstream, since it\(aqs probably someone

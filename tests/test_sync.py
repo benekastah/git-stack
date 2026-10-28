@@ -29,14 +29,27 @@ def test_sync_returns_restacked_branches_to_push(repo: Repo, client: StackClient
     client.push()
     repo.squash_merge_on_forge("pr1")
 
-    assert client.sync(push=False) == ["pr2", "pr3"]
+    assert client.sync(push=False).unpushed == ["pr2", "pr3"]
+
+
+def test_sync_returns_the_stacks_it_synced(repo: Repo, client: StackClient) -> None:
+    repo.make_stack()
+    client.push()
+    repo.git("switch", "--quiet", "main")
+    client.branch("solo")
+    repo.git("switch", "--quiet", "pr3")
+    repo.squash_merge_on_forge("pr1")
+
+    branches = client.sync().branches
+
+    assert [(b.name, b.parent) for b in branches] == [("main", None), ("pr2", "main"), ("pr3", "pr2")]
 
 
 def test_sync_returns_nothing_to_push_when_up_to_date(repo: Repo, client: StackClient) -> None:
     repo.make_stack()
     client.push()
 
-    assert client.sync() == []
+    assert client.sync().unpushed == []
 
 
 def test_sync_delete_local_deletes_merged_branch(repo: Repo, client: StackClient) -> None:
@@ -486,7 +499,7 @@ def test_sync_leaves_branch_on_main_alone_when_main_moves_without_conflict(repo:
     tips = {branch: repo.git("rev-parse", branch) for branch in ("pr1", "pr2", "pr3")}
     repo.commit_on_forge("main", "d", "upstream\n", "main moved")
 
-    unpushed = client.sync()
+    unpushed = client.sync().unpushed
 
     assert repo.git("rev-parse", "main") == repo.git("rev-parse", "origin/main")
     assert {branch: repo.git("rev-parse", branch) for branch in tips} == tips
@@ -523,7 +536,7 @@ def test_sync_pushes_the_branches_it_restacked(repo: Repo, client: StackClient) 
     client.push()
     repo.squash_merge_on_forge("pr1")
 
-    assert client.sync() == []
+    assert client.sync().unpushed == []
 
     assert repo.git("rev-parse", "origin/pr2") == repo.git("rev-parse", "pr2")
     assert repo.git("rev-parse", "origin/pr3") == repo.git("rev-parse", "pr3")

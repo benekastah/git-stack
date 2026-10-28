@@ -36,11 +36,16 @@ def test_autocreate_creates_and_tracks_branches_of_open_prs(repo: Repo, gh: Fake
     open_pr(repo, gh, 1, "pr1", "main")
     open_pr(repo, gh, 2, "pr2", "pr1")
 
-    steps = client.autocreate()
+    result = client.autocreate()
 
-    assert [(s.branch, s.parent, s.number, s.action) for s in steps] == [
+    assert [(s.branch, s.parent, s.number, s.action) for s in result.steps] == [
         ("pr1", "main", 1, AutocreateAction.CREATE),
         ("pr2", "pr1", 2, AutocreateAction.CREATE),
+    ]
+    assert [(b.name, b.pull_request and b.pull_request.number) for b in result.branches] == [
+        ("main", None),
+        ("pr1", 1),
+        ("pr2", 2),
     ]
     repo.assert_stacked("pr1", "main", ["pr1 c1"])
     repo.assert_stacked("pr2", "pr1", ["pr2 c1"])
@@ -62,7 +67,7 @@ def test_autocreate_dry_run_changes_nothing(repo: Repo, gh: FakeGitHub, client: 
     open_pr(repo, gh, 1, "pr1", "main")
     open_pr(repo, gh, 2, "pr2", "pr1")
 
-    steps = client.autocreate(dry_run=True)
+    steps = client.autocreate(dry_run=True).steps
 
     assert [s.action for s in steps] == [AutocreateAction.CREATE, AutocreateAction.CREATE]
     assert repo.git("branch", "--list", "pr1", "pr2") == ""
@@ -76,7 +81,7 @@ def test_autocreate_tracks_existing_local_branch_and_sets_its_upstream(
     repo.git("fetch", "--quiet")
     repo.git("branch", "--quiet", "--no-track", "pr1", "origin/pr1")
 
-    steps = client.autocreate()
+    steps = client.autocreate().steps
 
     assert actions(steps) == [("pr1", AutocreateAction.TRACK)]
     repo.assert_stacked("pr1", "main", ["pr1 c1"])
@@ -101,7 +106,7 @@ def test_autocreate_leaves_tracked_branches_alone(repo: Repo, gh: FakeGitHub, cl
     client.track("main", ["pr1"])
     client.track("main", ["pr2"])
 
-    steps = client.autocreate()
+    steps = client.autocreate().steps
 
     assert actions(steps) == [("pr1", AutocreateAction.ALREADY_TRACKED), ("pr2", AutocreateAction.PARENT_DIFFERS)]
     assert steps[1].tracked_parent == "main"
@@ -111,7 +116,7 @@ def test_autocreate_leaves_tracked_branches_alone(repo: Repo, gh: FakeGitHub, cl
 def test_autocreate_ignores_other_peoples_prs(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
     open_pr(repo, gh, 1, "theirs", "main", author="someone")
 
-    assert client.autocreate() == []
+    assert client.autocreate().steps == []
     assert repo.git("branch", "--list", "theirs") == ""
 
 
@@ -120,7 +125,7 @@ def test_autocreate_skips_pr_into_branch_that_isnt_local(repo: Repo, gh: FakeGit
     open_pr(repo, gh, 2, "pr2", "theirs")
     open_pr(repo, gh, 3, "pr3", "pr2")
 
-    steps = client.autocreate()
+    steps = client.autocreate().steps
 
     assert actions(steps) == [("pr2", AutocreateAction.SKIP), ("pr3", AutocreateAction.SKIP)]
     assert "theirs, which it merges into, isn't a local branch" in (steps[0].reason or "")

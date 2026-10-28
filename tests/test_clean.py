@@ -22,7 +22,9 @@ def test_clean_untracks_merged_branches_in_every_stack_without_restacking(
     repo.git("switch", "--quiet", "main")
     pr2 = repo.git("rev-parse", "pr2")
 
-    client.clean()
+    branches = client.clean()
+
+    assert [(b.name, b.parent) for b in branches] == [("main", None), ("pr2", "main"), ("pr3", "pr2")]
 
     assert events.Untracked("pr1", "main", ("pr2",), deleted_tip=None) in emitted
     repo.assert_untracked("pr1")
