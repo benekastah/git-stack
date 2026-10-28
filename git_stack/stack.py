@@ -223,7 +223,7 @@ class StackClient(StackCore):
                 current = git.config_get(bottom, GROUP_KEY)
                 if current is not None and current != group:
                     raise StackError(
-                        f"{parent}'s stack is in group {current} already; run `git stack group add {group}` "
+                        f"{parent}'s stack is in group {current} already; run `git stack group add --move {group}` "
                         f"from it to move it, or `git stack group rename {group}` to rename the group"
                     )
         # Without --no-track, branch.autoSetupMerge=inherit (or always) would give
@@ -369,16 +369,33 @@ class StackClient(StackCore):
             )
 
     @exclusive
-    def group_add(self, name: str, branches: Sequence[str] = (), groups: Sequence[str] = ()) -> list[str]:
+    def group_add(
+        self, name: str, branches: Sequence[str] = (), groups: Sequence[str] = (), move: bool = False
+    ) -> list[str]:
         """Put the stacks of the branches that branches and groups name (see
         named; default: the current branch), each by its bottom branch, in the
-        group name, out of any group they were in. Returns those bottom
-        branches."""
+        group name. Returns those bottom branches.
+
+        Refuses, changing nothing, if any of them is in another group, unless
+        move is set, in which case they leave it. A glob can easily match a
+        stack in another group, and moving it silently splits that group.
+        """
         self.ensure_no_operation_in_progress()
         self.settle_all()
         parents = self.tracked_branches()
         self.ensure_group_name(name)
         bottoms = self.selected_bottoms(branches, groups, parents, "group")
+        if not move:
+            moves = [
+                f"{bottom}'s stack, from group {group}"
+                for bottom in bottoms
+                if (group := self.git.config_get(bottom, GROUP_KEY)) not in (None, name)
+            ]
+            if moves:
+                raise StackError(
+                    "some of those stacks are in another group already; pass --move to move them into "
+                    f"{name}:\n" + "\n".join(f"  {m}" for m in moves)
+                )
         for bottom in bottoms:
             self.git.config_set(bottom, GROUP_KEY, name)
         return bottoms
@@ -417,7 +434,7 @@ class StackClient(StackCore):
         groups = self.groups(parents)
         if new in groups.values():
             raise StackError(
-                f"group {new} already exists; to merge {old} into it, run `git stack group add {new} -g {old}`"
+                f"group {new} already exists; to merge {old} into it, run `git stack group add --move {new} -g {old}`"
             )
         members = [b for b, g in groups.items() if g == old]
         if not members:

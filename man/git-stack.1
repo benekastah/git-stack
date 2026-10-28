@@ -862,7 +862,7 @@ With the GitHub adapter, points each open pull request at its stack
 parent (e.g.
 at \f[CR]main\f[R] once the parent PR was merged), and lists the
 branches that have none, which \f[CR]git stack prs\f[R] opens.
-.SS \f[CR]git stack group add <name> [<branch|glob>...] [\-g <group>]\f[R]
+.SS \f[CR]git stack group add <name> [<branch|glob>...] [\-g <group>] [\-\-move]\f[R]
 Put stacks (default: the current one) in group \f[CR]<name>\f[R], so
 \f[CR]restack\f[R], \f[CR]sync\f[R], \f[CR]push\f[R] and \f[CR]prs\f[R]
 on one of them cover them all, and so you can name them all at once (see
@@ -887,7 +887,12 @@ git stack ungroup search\-ui             \f[I]# take search\-ui\(aqs stack back 
 The arguments name stacks as for \f[CR]sync\f[R] (branches, globs, and
 groups with \f[CR]\-g\f[R]), and each stack goes in by its bottom
 branch, the one on its root.
-A stack that\(aqs in another group leaves it.
+.IP \(bu 2
+A stack can only be in one group.
+If any of them is in another group already, \f[CR]add\f[R] refuses,
+listing them, since a glob can easily match a stack you didn\(aqt mean
+to take out of its group.
+\f[CR]\-\-move\f[R] moves them out of it.
 .IP \(bu 2
 A group name can\(aqt be empty or have spaces in it.
 It can be the same as a branch\(aqs name, since groups are only ever
@@ -896,7 +901,7 @@ named with \f[CR]\-g\f[R].
 \f[CR]rename\f[R] refuses a name another group has, so two groups
 aren\(aqt merged by mistake.
 To merge them, run
-\f[CR]git stack group add <name> \-g <other group>\f[R].
+\f[CR]git stack group add \-\-move <name> \-g <other group>\f[R].
 .IP \(bu 2
 \f[CR]info\f[R] shows a group once it has two or more stacks.
 .SS \f[CR]git stack prs [<branch|glob>...] [\-g <group>] [\-\-remote origin] [\-n]\f[R]

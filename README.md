@@ -148,7 +148,7 @@ main
   branch (e.g. with `restack --onto`), since it's then part of that branch's
   stack, and isn't put back in the group if it's at the bottom of a stack
   again later.
-- [`git stack group`](#git-stack-group-add-name-branchglob--g-group)
+- [`git stack group`](#git-stack-group-add-name-branchglob--g-group---move)
   puts stacks in a group by hand, takes them out, or renames a group.
 
 `restack`, `sync`, `push` and `prs` act on other stacks instead of the current
@@ -628,7 +628,7 @@ git stack push --force          # drop commits on the remote you didn't pull
   stack parent (e.g. at `main` once the parent PR was merged), and lists the
   branches that have none, which `git stack prs` opens.
 
-### `git stack group add <name> [<branch|glob>...] [-g <group>]`
+### `git stack group add <name> [<branch|glob>...] [-g <group>] [--move]`
 
 Put stacks (default: the current one) in group `<name>`, so `restack`, `sync`,
 `push` and `prs` on one of them cover them all, and so you can name them all
@@ -649,12 +649,14 @@ git stack ungroup search-ui             # take search-ui's stack back out
 ```
 
 - The arguments name stacks as for `sync` (branches, globs, and groups with
-  `-g`), and each stack goes in by its bottom branch, the one on its root. A
-  stack that's in another group leaves it.
+  `-g`), and each stack goes in by its bottom branch, the one on its root.
+- A stack can only be in one group. If any of them is in another group
+  already, `add` refuses, listing them, since a glob can easily match a stack
+  you didn't mean to take out of its group. `--move` moves them out of it.
 - A group name can't be empty or have spaces in it. It can be the same as a
   branch's name, since groups are only ever named with `-g`.
 - `rename` refuses a name another group has, so two groups aren't merged by
-  mistake. To merge them, run `git stack group add <name> -g <other group>`.
+  mistake. To merge them, run `git stack group add --move <name> -g <other group>`.
 - `info` shows a group once it has two or more stacks.
 
 ### `git stack prs [<branch|glob>...] [-g <group>] [--remote origin] [-n]`

@@ -195,6 +195,38 @@ def test_group_add_refuses_empty_name_or_one_with_spaces(repo: Repo, client: Sta
         client.group_add(name, ["feat-a"])
 
 
+def test_group_add_refuses_stacks_in_another_group_listing_them(repo: Repo, client: StackClient) -> None:
+    two_stacks(repo, client)
+    client.group_add("feat", ["feat-a"])
+    client.group_add("misc", ["other"])
+
+    with pytest.raises(
+        StackError,
+        match=r"pass --move to move them into new:\n  feat-a's stack, from group feat\n  other's stack, from group misc$",
+    ):
+        client.group_add("new", ["feat-*", "other"])
+
+    assert repo.config("feat-a", "stackGroup") == "feat"
+    assert not repo.config_exists("feat-b", "stackGroup")
+
+
+def test_group_add_move_takes_stacks_out_of_their_group(repo: Repo, client: StackClient) -> None:
+    two_stacks(repo, client)
+    client.group_add("feat", ["feat-*"])
+
+    client.group_add("misc", ["feat-a", "other"], move=True)
+
+    assert client.show_stack("feat-b") == ["feat-b"]
+    assert client.show_stack("other") == ["other", "feat-a"]
+
+
+def test_group_add_takes_stacks_already_in_the_group(repo: Repo, client: StackClient) -> None:
+    two_stacks(repo, client)
+    client.group_add("feat", ["feat-a"])
+
+    assert client.group_add("feat", ["feat-*"]) == ["feat-a", "feat-b"]
+
+
 def test_group_can_share_a_branchs_name(repo: Repo, client: StackClient) -> None:
     two_stacks(repo, client)
     client.group_add("other", ["feat-*"])
@@ -231,7 +263,8 @@ def test_group_rename_refuses_to_merge_into_an_existing_group(repo: Repo, client
     client.group_add("misc", ["other"])
 
     with pytest.raises(
-        StackError, match="group misc already exists; to merge feat into it, run `git stack group add misc -g feat`"
+        StackError,
+        match="group misc already exists; to merge feat into it, run `git stack group add --move misc -g feat`",
     ):
         client.group_rename("misc", old="feat")
 

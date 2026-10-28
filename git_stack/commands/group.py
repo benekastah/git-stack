@@ -10,6 +10,7 @@ class Args(argparse.Namespace):
     name: str
     branches: list[str]
     groups: list[str]
+    move: bool
     old: str | None
     new: str
 
@@ -21,6 +22,7 @@ def register(subparsers: Subparsers) -> None:
     add = actions.add_parser("add", help="put stacks in group NAME, so commands on one cover them all")
     add.add_argument("name", help="the group")
     add_stack_arguments(add, "group")
+    add.add_argument("--move", action="store_true", help="move stacks that are in another group out of it")
     add.set_defaults(func=run_add)
 
     remove = actions.add_parser("remove", help="take stacks out of their groups (also `git stack ungroup`)")
@@ -38,7 +40,7 @@ def register(subparsers: Subparsers) -> None:
 
 
 def run_add(stack: StackClient, args: Args) -> None:
-    bottoms = stack.group_add(args.name, args.branches, args.groups)
+    bottoms = stack.group_add(args.name, args.branches, args.groups, move=args.move)
     print(f"put the stacks of {', '.join(bottoms)} in group {args.name}")
 
 
