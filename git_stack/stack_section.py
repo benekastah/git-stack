@@ -3,8 +3,9 @@ request's description: the stack as a tree from its root, with the pull
 request's own branch marked.
 
 A node is a pull request's number, or the name of a branch without one (or of
-the root). Merged pull requests stay in the tree, since sync stops tracking
-their branches, so they're carried over from the section being replaced.
+the root). Merged pull requests stay in the tree, as a history, since sync
+stops tracking their branches, so they're carried over from the section being
+replaced.
 """
 
 import re
@@ -44,27 +45,15 @@ def find(body: str) -> Tree:
 
 def lay_out(root: str, current: Tree, old: Tree, merged: set[int]) -> Tree:
     """The tree to show: current (the stack's branches, without merged ones),
-    with the merged pull requests put back where old had them.
+    with the merged pull requests put back on the parents old had them on.
 
-    A branch goes back under a merged pull request it was stacked on in old,
-    unless it has since moved elsewhere. A merged pull request whose parent
-    isn't in the tree goes on root.
+    Branches stay on their current parents, not under a merged pull request
+    they were stacked on, so the tree shows what each pull request is built on
+    now. A merged pull request whose parent isn't in the tree goes on root.
     """
-
-    def unmerged_ancestor(node: Node) -> Node:
-        seen = set()
-        while node in merged and node not in seen:
-            seen.add(node)
-            node = old.get(node, root)
-        return node if node in current else root
-
     tree = dict(current)
     for number in merged:
         tree[number] = old.get(number, root)
-    for node, parent in current.items():
-        old_parent = old.get(node)
-        if old_parent in merged and unmerged_ancestor(old_parent) == parent:
-            tree[node] = old_parent
     return {node: parent if parent in tree else root for node, parent in tree.items()}
 
 

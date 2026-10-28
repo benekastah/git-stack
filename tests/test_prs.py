@@ -240,7 +240,7 @@ def test_prs_keeps_merged_pull_requests_in_the_stack(repo: Repo, gh: FakeGitHub,
 
     client.prs()
 
-    assert body(gh, 2) == stack("- `main`", "  - #1 (merged)", "    - #2 👈", "      - #3", "        - #4")
+    assert body(gh, 2) == stack("- `main`", "  - #1 (merged)", "  - #2 👈", "    - #3", "      - #4")
     assert "#4" not in body(gh, 1)  # merged pull requests are left alone
 
 

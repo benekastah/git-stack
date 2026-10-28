@@ -689,7 +689,9 @@ git stack prs
 - Then it adds the stack to the end of each open pull request's description,
   as a tree from the stack's root, with that pull request marked, and keeps
   it up to date each time it runs. Pull requests merged since stay in it, as
-  a history, though `sync` stops tracking their branches. A stack with only
+  a history, though `sync` stops tracking their branches, on what they were
+  stacked on, while each open one is shown on what it's stacked on now (e.g.
+  `main` once its parent merged). A stack with only
   one pull request gets none. Text you add outside the stack is kept, but
   edits to the stack itself are overwritten.
 
@@ -700,8 +702,8 @@ git stack prs
   **Stack**
   - `main`
     - #12 (merged)
-      - #13 👈
-        - #14
+    - #13 👈
+      - #14
   <!-- /git-stack -->
   ```
 
