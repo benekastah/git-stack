@@ -1,9 +1,13 @@
 import os
 import subprocess
+import time
 
 from git_stack.errors import StackError
 
 DEFAULT_REMOTE = "origin"
+# How long to keep retrying a git config write that finds the config file locked
+# by another process, which usually only holds it for a moment.
+CONFIG_LOCK_TIMEOUT = 5.0
 
 
 class GitClient:
@@ -11,8 +15,8 @@ class GitClient:
 
     def __init__(self, directory: str | os.PathLike[str] = ".") -> None:
         self.directory = os.fspath(directory)
+        self._common_dir: str | None = None
         # See branch_config.
-        self._config_path: str | None = None
         self._config_stat: tuple[int, int, int] | None = None
         self._branch_config: dict[tuple[str, str], str] = {}
 
@@ -34,6 +38,12 @@ class GitClient:
         """Run git with output going straight to the terminal."""
         return subprocess.run(self._command(*args), check=False).returncode == 0
 
+    def common_dir(self) -> str:
+        """The absolute path of the git directory every worktree shares."""
+        if self._common_dir is None:
+            self._common_dir = self.run("rev-parse", "--path-format=absolute", "--git-common-dir")
+        return self._common_dir
+
     def branch_config(self) -> dict[tuple[str, str], str]:
         """Every branch.<name>.<key> setting, as {(name, key in lower case): value}.
 
@@ -43,11 +53,8 @@ class GitClient:
         every tracked branch over and over, and each git call is slow enough to
         add up.
         """
-        if self._config_path is None:
-            common_dir = self.run("rev-parse", "--path-format=absolute", "--git-common-dir")
-            self._config_path = os.path.join(common_dir, "config")
         # Before reading, so a write that lands in between is read again next time.
-        st = os.stat(self._config_path)
+        st = os.stat(os.path.join(self.common_dir(), "config"))
         stat = (st.st_ino, st.st_mtime_ns, st.st_size)
         if stat != self._config_stat:
             config = {}
@@ -65,18 +72,36 @@ class GitClient:
         return self.branch_config().get((branch, key.lower())) or None
 
     def config_set(self, branch: str, key: str, value: str) -> None:
-        self.run("config", f"branch.{branch}.{key}", value)
+        self.write_config(f"branch.{branch}.{key}", value)
 
     def config_unset(self, branch: str, key: str, value: str | None = None) -> None:
         """Unset branch's key, or, if value is given, only if it's still value."""
-        self.run(
-            "config",
+        self.write_config(
             "--unset",
             *(("--fixed-value",) if value is not None else ()),
             f"branch.{branch}.{key}",
             *((value,) if value is not None else ()),
             check=False,
         )
+
+    def write_config(self, *args: str, check: bool = True) -> None:
+        """Run `git config <args>`, retrying for up to CONFIG_LOCK_TIMEOUT
+        seconds while another process has the config file locked.
+
+        git config doesn't wait for the lock itself, and fails at once instead.
+        A write either happens or doesn't, so retrying it is safe.
+        """
+        deadline = time.monotonic() + CONFIG_LOCK_TIMEOUT
+        delay = 0.01
+        while True:
+            result = subprocess.run(self._command("config", *args), capture_output=True, text=True, check=False)
+            locked = result.returncode != 0 and "could not lock config file" in result.stderr
+            if not locked or time.monotonic() >= deadline:
+                break
+            time.sleep(delay)
+            delay = min(delay * 2, 0.5)
+        if check and result.returncode != 0:
+            raise StackError(f"git config {' '.join(args)} failed:\n{result.stderr.strip()}")
 
     def rev(self, ref: str) -> str | None:
         return self.run("rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}", check=False) or None

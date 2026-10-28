@@ -123,6 +123,14 @@ class Repo:
         """Subject of the commit at <branch> on the remote itself."""
         return self.git("log", "-1", "--format=%s", branch, cwd=self.origin)
 
+    def cached_check(self, branch: str, key: str) -> str | None:
+        """branch's key in the check cache (see git_stack.check_cache), as on disk."""
+        try:
+            entries: dict[str, dict[str, str]] = json.loads((self.path / ".git" / "git-stack-cache.json").read_text())
+        except FileNotFoundError:
+            return None
+        return entries.get(branch, {}).get(key)
+
     def config(self, branch: str, key: str) -> str:
         return self.git("config", f"branch.{branch}.{key}")
 

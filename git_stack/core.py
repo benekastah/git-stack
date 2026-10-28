@@ -1,11 +1,14 @@
+import fcntl
 import fnmatch
 import os
 import tempfile
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TypeAlias
 
 from git_stack import events
+from git_stack.check_cache import CheckCache
 from git_stack.errors import BrokenStackError, StackError
 from git_stack.git import GitClient
 
@@ -28,8 +31,12 @@ PENDING_PULLED_KEY = "stackPendingPulled"
 PENDING_PULL_IDENTITIES_KEY = "stackPendingPullIdentities"
 # The last answers to whether the branch conflicts with its parent, whether its
 # changes landed in its parent, and whether its parent then reverted them (see
-# StackCore.remembered). Each can take a second or more for a branch far behind
-# main.
+# StackCore.remembered), kept in CHECK_CACHE_FILE. Each can take a second or
+# more for a branch far behind main.
+CHECK_CACHE_FILE = "git-stack-cache.json"
+# Held (see StackCore.exclusive) by each command that changes stack metadata, so
+# two never interleave their writes.
+LOCK_FILE = "git-stack.lock"
 CONFLICT_CHECK_KEY = "stackConflictCheck"
 LANDED_CHECK_KEY = "stackLandedCheck"
 REVERTED_CHECK_KEY = "stackRevertedCheck"
@@ -173,6 +180,46 @@ class StackCore:
     def __init__(self, git: GitClient, on_event: Callable[[events.Event], None] | None = None) -> None:
         self.git = git
         self.on_event = on_event
+        self._checks: CheckCache | None = None
+        # How many exclusive blocks this client is in, so they can nest.
+        self._exclusive_depth = 0
+
+    @contextmanager
+    def exclusive(self) -> Iterator[None]:
+        """Hold the repository's git-stack lock (see LOCK_FILE), waiting for
+        another git-stack command to finish if it has it.
+
+        Without it, a command could take a restack another one has just recorded
+        as pending, but not started yet, for one that was aborted, and discard
+        it (see settle). The lock is in the git directory every worktree
+        shares, as the metadata is. The system releases it when the process
+        ends, however it ends.
+        """
+        if self._exclusive_depth:
+            self._exclusive_depth += 1
+            try:
+                yield
+            finally:
+                self._exclusive_depth -= 1
+            return
+        with open(os.path.join(self.git.common_dir(), LOCK_FILE), "a") as lock:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                self.emit(events.WaitingForLock())
+                fcntl.flock(lock, fcntl.LOCK_EX)
+            self._exclusive_depth = 1
+            try:
+                yield
+            finally:
+                self._exclusive_depth = 0
+
+    @property
+    def checks(self) -> CheckCache:
+        """Where remembered keeps its answers."""
+        if self._checks is None:
+            self._checks = CheckCache(os.path.join(self.git.common_dir(), CHECK_CACHE_FILE))
+        return self._checks
 
     def emit(self, event: events.Event) -> None:
         if self.on_event is not None:
@@ -421,18 +468,17 @@ class StackCore:
         )
 
     def remembered(self, branch: str, key: str, inputs: list[str], check: Callable[[], bool]) -> bool:
-        """check(), which depends only on the commits inputs, remembered in
-        branch's key as "<inputs...> true|false", so it isn't run again until
-        one of them changes.
-
-        Failing to remember it (e.g. because another process holds the config
-        file's lock) only means checking again next time.
+        """check(), which depends only on the commits inputs, remembered as
+        branch's key in the check cache (see CheckCache) as
+        "<inputs...> true|false", so it isn't run again until one of them
+        changes. Failing to remember it only means checking again next time.
         """
-        cached = (self.git.config_get(branch, key) or "").split()
+        cached = (self.checks.get(branch, key) or "").split()
         if cached[:-1] == inputs and cached[-1:] in (["true"], ["false"]):
             return cached[-1] == "true"
         result = check()
-        self.git.run("config", f"branch.{branch}.{key}", " ".join([*inputs, str(result).lower()]), check=False)
+        tracked = {b for (b, k) in self.git.branch_config() if k == PARENT_KEY.lower()}
+        self.checks.set(branch, key, " ".join([*inputs, str(result).lower()]), tracked)
         return result
 
     def restack_branch(self, branch: str, parent: str, latest: bool = False) -> bool:
@@ -609,20 +655,22 @@ class StackCore:
             PENDING_PULL_FROM_KEY,
             PENDING_PULLED_KEY,
             PENDING_PULL_IDENTITIES_KEY,
+            MERGED_PARENT_KEY,
+            GROUP_KEY,
+            # Versions before the check cache kept these in git config too.
             CONFLICT_CHECK_KEY,
             LANDED_CHECK_KEY,
             REVERTED_CHECK_KEY,
-            MERGED_PARENT_KEY,
             MERGED_PARENT_REVERTED_CHECK_KEY,
-            GROUP_KEY,
         ):
             self.git.config_unset(branch, key)
+        self.checks.forget(branch)
         self.prune_merged_tips()
 
     def unrecord_merged_parent(self, branch: str) -> None:
         """Forget the branch that branch was stacked on until it merged."""
         self.git.config_unset(branch, MERGED_PARENT_KEY)
-        self.git.config_unset(branch, MERGED_PARENT_REVERTED_CHECK_KEY)
+        self.checks.forget(branch, [MERGED_PARENT_REVERTED_CHECK_KEY])
         self.prune_merged_tips()
 
     def prune_merged_tips(self) -> None:

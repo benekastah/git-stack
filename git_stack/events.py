@@ -9,6 +9,12 @@ from typing import TypeAlias
 
 
 @dataclass(frozen=True)
+class WaitingForLock:
+    """Another git-stack command in the repository is running, so this one is
+    waiting for it to finish."""
+
+
+@dataclass(frozen=True)
 class Fetching:
     """remote is being fetched, with --prune."""
 
@@ -228,7 +234,8 @@ class StackSectionUpdated:
 
 # Every event, so code that handles them can check it handles each one.
 Event: TypeAlias = (
-    Fetching
+    WaitingForLock
+    | Fetching
     | LookingUpPullRequests
     | Squashing
     | Restacking

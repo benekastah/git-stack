@@ -1240,11 +1240,23 @@ second or more for a branch far behind \f[CR]main\f[R] in a big
 repository.
 Since the answers only depend on the commits involved, git\-stack
 remembers the last ones, with those commits, in
-\f[CR]branch.<name>.stackConflictCheck\f[R],
-\f[CR]branch.<name>.stackLandedCheck\f[R],
-\f[CR]branch.<name>.stackRevertedCheck\f[R] and
-\f[CR]branch.<name>.stackMergedParentRevertedCheck\f[R], and only checks
-again once one of them changes.
+\f[CR].git/git\-stack\-cache.json\f[R], and only checks again once one
+of them changes.
+They\(aqre kept out of git config, so that \f[CR]info\f[R], which an
+editor or status bar may run every few seconds, never writes to it: git
+doesn\(aqt wait for another process\(aqs lock on it (before git\(aqs
+recent \f[CR]core.configLockTimeout\f[R]), so any other write at that
+moment would fail.
+git\-stack itself retries a config write that finds the file locked, for
+up to 5 seconds.
+.PP
+Commands that change stack metadata hold \f[CR].git/git\-stack.lock\f[R]
+while they run, so two of them never interleave their writes: one
+started while another is running (in any worktree of the repository)
+says it\(aqs waiting, and waits for it to finish.
+Read\-only commands like \f[CR]info\f[R] don\(aqt take it.
+The lock is released when a command exits, including when a rebase stops
+on a conflict, so resolving it never waits on anything.
 .SH GITHUB
 If your repository is on github.com and \c
 .UR https://cli.github.com

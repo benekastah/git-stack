@@ -1,7 +1,9 @@
 import enum
-from collections.abc import Iterable, Sequence
+import functools
+from collections.abc import Callable, Iterable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
+from typing import Concatenate, ParamSpec, TypeVar
 
 from git_stack import events
 from git_stack.adapters import ADAPTER_SETTING, make_adapter
@@ -27,6 +29,24 @@ from git_stack.core import (
 )
 from git_stack.errors import BrokenStackError, StackError
 from git_stack.git import DEFAULT_REMOTE
+
+Client = TypeVar("Client", bound=StackCore)
+Params = ParamSpec("Params")
+Result = TypeVar("Result")
+
+
+def exclusive(
+    method: Callable[Concatenate[Client, Params], Result],
+) -> Callable[Concatenate[Client, Params], Result]:
+    """Run method holding the repository's git-stack lock (see
+    StackCore.exclusive), as every command that changes stack metadata does."""
+
+    @functools.wraps(method)
+    def locked(client: Client, /, *args: Params.args, **kwargs: Params.kwargs) -> Result:
+        with client.exclusive():
+            return method(client, *args, **kwargs)
+
+    return locked
 
 
 class BranchStatus(enum.Enum):
@@ -180,6 +200,7 @@ class StackClient(StackCore):
     and warnings through on_event, and raise StackError when they fail.
     """
 
+    @exclusive
     def branch(self, name: str, group: str | None = None) -> str:
         """Create name on top of the current branch and track it, putting its
         stack in group, if given. Returns the parent.
@@ -214,6 +235,7 @@ class StackClient(StackCore):
             git.config_set(bottom or name, GROUP_KEY, group)
         return parent
 
+    @exclusive
     def track(self, parent: str, branches: Iterable[str] = (), base: str | None = None) -> list[Tracked]:
         """Track branches (default: the current branch) as a stack on parent, each
         on the one before it. base is where the first branch starts (default:
@@ -286,6 +308,7 @@ class StackClient(StackCore):
                     f"`git switch {name}` and track it with `git stack track <parent>`"
                 )
 
+    @exclusive
     def autocreate(self, remote: str = DEFAULT_REMOTE, dry_run: bool = False) -> list[Autocreated]:
         """Track the gh user's open pull requests on GitHub, drafts included, as
         stacks: each one's branch on the branch it merges into, creating local
@@ -345,6 +368,7 @@ class StackClient(StackCore):
                 f"branches (e.g. branch, not origin/branch)"
             )
 
+    @exclusive
     def group_add(self, name: str, branches: Sequence[str] = (), groups: Sequence[str] = ()) -> list[str]:
         """Put the stacks of the branches that branches and groups name (see
         named; default: the current branch), each by its bottom branch, in the
@@ -359,6 +383,7 @@ class StackClient(StackCore):
             self.git.config_set(bottom, GROUP_KEY, name)
         return bottoms
 
+    @exclusive
     def group_remove(self, branches: Sequence[str] = (), groups: Sequence[str] = ()) -> list[tuple[str, str]]:
         """Take the stacks of the branches that branches and groups name (see
         named; default: the current branch), each by its bottom branch, out of
@@ -374,6 +399,7 @@ class StackClient(StackCore):
                 removed.append((bottom, group))
         return removed
 
+    @exclusive
     def group_rename(self, new: str, old: str | None = None) -> tuple[str, list[str]]:
         """Rename the group old (default: the current branch's stack's) to new.
         Returns old and the branches that were in it. Refuses if a branch is in
@@ -405,6 +431,7 @@ class StackClient(StackCore):
         if not name or any(c.isspace() for c in name):
             raise StackError(f"{name!r} can't be a group name: it can't be empty, or have spaces in it")
 
+    @exclusive
     def untrack(self, branches: Iterable[str] = ()) -> list[Untracked]:
         """Stop tracking branches (default: the current branch), each a branch
         or a glob (see matching), leaving the branches themselves alone.
@@ -432,6 +459,7 @@ class StackClient(StackCore):
             for branch in dict.fromkeys(branches)
         ]
 
+    @exclusive
     def rename(self, new: str, old: str | None = None) -> Renamed:
         """Rename old (default: the current branch) to new, keeping the branches
         stacked on it. Returns a Renamed.
@@ -456,6 +484,7 @@ class StackClient(StackCore):
             git.run("branch", "--unset-upstream", new)
         return Renamed(old, new, children, upstream)
 
+    @exclusive
     def unrevert(self, branch: str | None = None, remote: str = DEFAULT_REMOTE) -> Unreverted:
         """Rebuild branch (default: the current branch), whose merge into its
         parent was reverted, as commits on the parent's tip that revert those
@@ -725,6 +754,7 @@ class StackClient(StackCore):
                 remaining.append(branch)
         return remaining
 
+    @exclusive
     def restack(
         self,
         branches: Sequence[str] = (),
@@ -763,6 +793,7 @@ class StackClient(StackCore):
         self.restack_all(to_restack, parents, latest)
         self.restore_checkout(original)
 
+    @exclusive
     def sync(
         self,
         branches: Sequence[str] = (),
@@ -898,6 +929,7 @@ class StackClient(StackCore):
             else:
                 state.unpushed.append(branch)
 
+    @exclusive
     def clean(
         self, remote: str = DEFAULT_REMOTE, delete: str | None = None, ignore_reverts: Sequence[str] = ()
     ) -> None:
@@ -938,6 +970,7 @@ class StackClient(StackCore):
                 self.warn_if_merged_parent_reverted(branch, adapter, ignore_reverts)
         self.restore_checkout(original)
 
+    @exclusive
     def push(
         self,
         branches: Sequence[str] = (),
@@ -1034,6 +1067,7 @@ class StackClient(StackCore):
                     f"and `git stack sync` first"
                 )
 
+    @exclusive
     def prs(
         self,
         branches: Sequence[str] = (),

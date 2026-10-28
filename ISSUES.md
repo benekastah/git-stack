@@ -69,43 +69,6 @@ regenerated file. `sync` and `clean` then untrack the branch, and delete it
 with `-d local`, though its pull request was never merged. Its changes are in
 the parent, but its own commits and messages are dropped.
 
-## `info` can make a concurrent command fail to lock git config
-
-`info` remembers whether each branch conflicts with its parent, whether its
-changes landed there, and whether they, or those of the branch it was stacked
-on until that merged, were reverted since (`StackCore.remembered`), by writing
-`branch.<name>.stackConflictCheck`, `branch.<name>.stackLandedCheck`,
-`branch.<name>.stackRevertedCheck` and
-`branch.<name>.stackMergedParentRevertedCheck` with `git config`, which locks
-`.git/config` while it writes. `git config` doesn't
-wait for a lock: any other `git config` write at that moment fails with "could
-not lock config file". `info` ignores that for its own writes, but every other
-command treats a failed write as an error, so `sync`, `restack`, `push`,
-`clean`, `unrevert` or `group` running while `info` does (e.g. from an editor or a status bar that
-refreshes it, or in another terminal) can stop partway with that error.
-
-Reproduced by holding `.git/config.lock` while running `git stack restack`: it
-stopped before rebasing with `git config branch.pr1.stackPendingParent main
-failed: could not lock config file`. Where the write fails decides what's
-left: before a rebase, nothing has changed; after one, the pending keys are
-still there and the next command records it; partway through `sync` moving a
-merged branch's children, some children are moved and the rest are moved by
-the next `sync`. Rerunning the command recovers in each case, but the error
-doesn't say so.
-
-Possible fixes: keep the remembered answers somewhere other than git config
-(a file under `.git/`, written with an atomic rename), or retry a write that
-fails on the lock.
-
-## Two commands that restack at once can corrupt each other's records
-
-Each command that restacks or pulls (`restack`, `sync`, `unrevert`, and the
-others that settle first: `track`, `untrack`, `rename`, `clean`, `push`,
-`autocreate`, `prs`, and `group add`, `remove` and `rename`) takes a pending
-restack or pull it finds unfinished as aborted, and discards it. If another such command is between writing its pending keys and
-starting its rebase or cherry-pick, that rebase is never recorded, so the
-branch keeps its old base. There's no lock to stop two from running at once.
-
 ## A change undone some other way can look like a revert
 
 Revert detection compares patch-ids without context lines, so a revert still
@@ -137,3 +100,11 @@ would rule it out at little cost, since the file is small.
 Most git calls pass bare names (`git rev-parse <parent>`,
 `git merge-tree <parent> <branch>`), so a tag with the same name as a branch
 wins over the branch.
+
+## No Windows support
+
+git-stack is written for Unix-like systems. The git-stack lock
+(`StackCore.exclusive`) uses `fcntl.flock`, which Windows doesn't have, so it
+won't even start there, and the tests rely on symlinks. Low priority until
+someone needs it: `msvcrt.locking`, or a lock file created with `O_EXCL`,
+would replace `flock`.

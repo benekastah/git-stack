@@ -942,10 +942,20 @@ Checking whether a branch conflicts with its parent, whether its changes
 already landed there, and whether they were reverted since, can take a second
 or more for a branch far behind `main` in a big repository. Since the answers
 only depend on the commits involved, git-stack remembers the last ones, with
-those commits, in `branch.<name>.stackConflictCheck`,
-`branch.<name>.stackLandedCheck`, `branch.<name>.stackRevertedCheck` and
-`branch.<name>.stackMergedParentRevertedCheck`, and only checks again once one
-of them changes.
+those commits, in `.git/git-stack-cache.json`, and only checks again once one
+of them changes. They're kept out of git config, so that `info`, which an
+editor or status bar may run every few seconds, never writes to it: git
+doesn't wait for another process's lock on it (before git's recent
+`core.configLockTimeout`), so any other write at that moment would fail.
+git-stack itself retries a config write that finds the file locked, for up
+to 5 seconds.
+
+Commands that change stack metadata hold `.git/git-stack.lock` while they
+run, so two of them never interleave their writes: one started while another
+is running (in any worktree of the repository) says it's waiting, and waits
+for it to finish. Read-only commands like `info` don't take it. The lock is
+released when a command exits, including when a rebase stops on a conflict,
+so resolving it never waits on anything.
 
 ## GitHub
 
