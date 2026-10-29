@@ -984,6 +984,11 @@ on GitHub, so they keep theirs.
 Pull requests can\(aqt be taken out of a stack on GitHub, so if some are
 in one that doesn\(aqt match (e.g.
 in another order), it warns and leaves them.
+GitHub doesn\(aqt change the base of a pull request in a stack either,
+so when a stack is reshaped (e.g.
+a branch is put in its middle), \f[CR]push\f[R] and \f[CR]prs\f[R] take
+its open pull requests out of their stack on GitHub to change their
+bases, and \f[CR]prs\f[R] then links them again.
 To stop it linking them, run
 \f[CR]git config stack.githubStacks false\f[R].
 .RS 2

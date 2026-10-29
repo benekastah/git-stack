@@ -50,11 +50,11 @@ def respond(args: list[str], state: dict[str, Any]) -> str | None:
         return pull_requests_by_head(args, query, prs)
     path = next((a for a in args if "/stacks" in a), None)
     if args[0] == "api" and path is not None:
-        return link_stack(path, json.loads(sys.stdin.read())["pull_requests"], state)
+        return stacks_api(path, state)
     if args[:2] == ["pr", "create"]:
         return create_pull_request(args, prs)
     if args[:2] == ["pr", "edit"]:
-        edit_pull_request(args, prs)
+        edit_pull_request(args, state)
         return None
     sys.exit(f"fake gh: unexpected {args}")
 
@@ -95,11 +95,38 @@ def stack_of(number: int, state: dict[str, Any]) -> object:
     return None
 
 
+def stacks_api(path: str, state: dict[str, Any]) -> str | None:
+    """Handle a call to the stacks REST API's path."""
+    if "stacks" not in state:
+        raise GhError("gh: Not Found (HTTP 404)")
+    if "?pull_request=" in path:
+        return stacks_of(int(path.rpartition("=")[2]), state)
+    if path.endswith("/unstack"):
+        unstack(int(path.split("/")[-2]), state)
+        return None
+    return link_stack(path, json.loads(sys.stdin.read())["pull_requests"], state)
+
+
+def stacks_of(number: int, state: dict[str, Any]) -> str:
+    """The stacks pull request number is in, as the REST API lists them."""
+    stacks = [stack for stack in state["stacks"] if number in stack["prs"]]
+    return json.dumps(
+        [{"number": stack["number"], "pull_requests": [{"number": n} for n in stack["prs"]]} for stack in stacks]
+    )
+
+
+def unstack(number: int, state: dict[str, Any]) -> None:
+    """Take the open pull requests out of stack number, dropping it if that
+    leaves none."""
+    stack = next(stack for stack in state["stacks"] if stack["number"] == number)
+    merged = {p["number"] for p in state["prs"] if p["state"] == "MERGED"}
+    stack["prs"] = [n for n in stack["prs"] if n in merged]
+    state["stacks"] = [stack for stack in state["stacks"] if stack["prs"]]
+
+
 def link_stack(path: str, numbers: list[int], state: dict[str, Any]) -> str:
     """Make a stack of numbers (POST .../stacks), or add them to the top of
     one (POST .../stacks/<number>/add), checking what GitHub would."""
-    if "stacks" not in state:
-        raise GhError("gh: Not Found (HTTP 404)")
     if any(n in stack["prs"] for stack in state["stacks"] for n in numbers):
         raise GhError("gh: Validation Failed (HTTP 422): a pull request is already in a stack")
     match = re.search(r"/stacks/(\d+)/add$", path)
@@ -143,9 +170,14 @@ def create_pull_request(args: list[str], prs: list[dict[str, Any]]) -> str:
     return f"https://github.com/acme/widgets/pull/{number}"
 
 
-def edit_pull_request(args: list[str], prs: list[dict[str, Any]]) -> None:
-    pr = next(p for p in prs if p["number"] == int(args[2]))
+def edit_pull_request(args: list[str], state: dict[str, Any]) -> None:
+    pr = next(p for p in state["prs"] if p["number"] == int(args[2]))
     if "--base" in args:
+        if any(pr["number"] in stack["prs"] for stack in state.get("stacks", [])):
+            raise GhError(
+                "GraphQL: Cannot change the base branch because the pull request is part of a stack. "
+                "(updatePullRequest)"
+            )
         pr["baseRefName"] = opt(args, "--base")
     if "--body-file" in args:
         pr["body"] = sys.stdin.read()

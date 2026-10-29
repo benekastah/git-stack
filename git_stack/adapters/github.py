@@ -30,6 +30,8 @@ GITHUB_STACKS_SETTING = "stack.githubStacks"
 # A pull request's stack on GitHub, as GraphQL gives it. GitHub only allows a
 # handful of pull requests in one.
 STACK_FIELDS = "stack { number entries(first: 100) { nodes { position pullRequest { number state } } } }"
+# What GitHub says when asked to change the base of a pull request in a stack.
+STACKED_BASE_ERROR = "Cannot change the base branch because the pull request is part of a stack"
 
 
 T = TypeVar("T")
@@ -378,9 +380,32 @@ class GitHubAdapter(GitAdapter):
         pr = prs.get(branch)
         if pr is None or pr.state != "OPEN" or pr.base == base:
             return
-        self.gh("pr", "edit", str(pr.number), "--repo", self.repo, "--base", base)
+        edit = ("pr", "edit", str(pr.number), "--repo", self.repo, "--base", base)
+        try:
+            self.gh(*edit)
+        except StackError as e:
+            # GitHub only changes a stack's bases itself, when one of its pull
+            # requests merges, so a stack that's been reshaped (e.g. a branch
+            # was put in the middle of it) has to be unstacked first.
+            if STACKED_BASE_ERROR not in str(e):
+                raise
+            self.unstack(pr.number)
+            self.gh(*edit)
         prs[branch] = replace(pr, base=base)
         self.core.emit(events.PullRequestRetargeted(branch, pr.number, base))
+
+    def unstack(self, number: int) -> None:
+        """Take the open pull requests of pull request number's stack on GitHub
+        out of it. Merged ones stay in it."""
+        found = parse_json(self.gh("api", "--hostname", self.host, f"{self.stacks_path()}?pull_request={number}"))
+        if not isinstance(found, list) or not found:
+            raise StackError(f"GitHub says #{number} is in a stack, but doesn't say which: {found!r}")
+        stack = field(found[0], "number", int)
+        self.gh("api", "--hostname", self.host, "-X", "POST", f"{self.stacks_path()}/{stack}/unstack")
+        self.core.emit(events.GitHubStackUnstacked(stack, number))
+
+    def stacks_path(self) -> str:
+        return f"repos/{self.owner}/{self.name}/stacks"
 
     def pull_request_template(self) -> str | None:
         """The repository's pull request template, as GitHub fills it in: from
@@ -536,15 +561,15 @@ class GitHubAdapter(GitAdapter):
             self.core.emit(events.GitHubStackMismatch(tuple(chain), tuple(sorted(found))))
             return False
         if stack is None:
-            return self.stacks_api("stacks", chain)
-        return self.stacks_api(f"stacks/{stack.number}/add", chain[len(bottom) :])
+            return self.stacks_api("", chain)
+        return self.stacks_api(f"/{stack.number}/add", chain[len(bottom) :])
 
     def github_stacks_enabled(self) -> bool:
         setting = self.git.run("config", "--type=bool", "--get", GITHUB_STACKS_SETTING, check=False)
         return setting != "false"
 
     def stacks_api(self, path: str, numbers: list[int]) -> bool:
-        """POST numbers to the stacks API's path, in the repository. Returns
+        """POST numbers to path in the repository's stacks API. Returns
         False if the repository doesn't have stacked pull requests."""
         result = subprocess.run(
             [
@@ -554,7 +579,7 @@ class GitHubAdapter(GitAdapter):
                 self.host,
                 "-X",
                 "POST",
-                f"repos/{self.owner}/{self.name}/{path}",
+                f"{self.stacks_path()}{path}",
                 "--input",
                 "-",
             ],

@@ -355,6 +355,7 @@ def test_prs_adds_to_a_stack_on_github_whose_bottom_merged(repo: Repo, gh: FakeG
         "headRefOid": repo.git("rev-parse", "pr1"),
         "mergeCommit": {"oid": repo.git("rev-parse", "HEAD", cwd=repo.forge)},
     }
+    state["prs"][1]["baseRefName"] = "main"  # as GitHub does for the next pull request in a stack
     gh.save(state)
     client.sync()
     client.branch("pr4")
@@ -447,3 +448,30 @@ def test_prs_works_where_github_has_no_stacked_pull_requests(repo: Repo, gh: Fak
     client.prs()
 
     assert stack_section.START in body(gh, 1)
+
+
+def test_push_unstacks_on_github_to_put_a_branch_in_the_middle_then_prs_links_it_again(
+    repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event]
+) -> None:
+    gh.enable_stacks()
+    repo.make_stack()
+    client.push()
+    client.prs()
+    repo.git("switch", "--quiet", "pr1")
+    client.branch("pr1b")
+    repo.write("d", "pr1b\n")
+    repo.git("add", "d")
+    repo.git("commit", "--quiet", "-m", "pr1b c1")
+    repo.git("switch", "--quiet", "pr2")
+    client.restack(onto="pr1b")
+
+    client.push()
+
+    # GitHub doesn't change the base of a pull request in a stack.
+    assert events.GitHubStackUnstacked(1000, 2) in emitted
+    assert gh.stacks() == []
+    assert next(pr for pr in gh.load()["prs"] if pr["number"] == 2)["baseRefName"] == "pr1b"
+
+    client.prs()
+
+    assert gh.stacks() == [[1, 4, 2, 3]]

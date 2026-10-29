@@ -121,6 +121,11 @@ def message(event: events.Event) -> str:  # noqa: C901
             return f"{', '.join(event.branches)} {have} no pull request; open drafts with `git stack prs`"
         case events.GitHubStackLinked():
             return f"linked {pull_requests(event.numbers)} into a stack on GitHub"
+        case events.GitHubStackUnstacked():
+            return (
+                f"unstacked stack {event.number} on GitHub, which doesn't change the base of a pull request "
+                f"in a stack, to change #{event.pull_request}'s; `git stack prs` links them again"
+            )
         case events.GitHubStackMismatch():
             stacks = ", ".join(map(str, event.stacks))
             return (

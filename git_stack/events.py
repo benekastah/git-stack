@@ -234,6 +234,15 @@ class GitHubStackLinked:
 
 
 @dataclass(frozen=True)
+class GitHubStackUnstacked:
+    """The open pull requests of stack number on GitHub were taken out of it,
+    so pull request pull_request's base could be changed."""
+
+    number: int
+    pull_request: int
+
+
+@dataclass(frozen=True)
 class GitHubStackMismatch:
     """The pull requests numbers, a chain bottom first, weren't linked into a
     stack on GitHub, since some are in stacks (their numbers) there that
@@ -283,4 +292,5 @@ Event: TypeAlias = (
     | PullRequestRetargeted
     | GitHubStackLinked
     | GitHubStackMismatch
+    | GitHubStackUnstacked
 )
