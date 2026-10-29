@@ -310,6 +310,26 @@ def test_sync_pulls_commits_pushed_by_others_into_diverged_branch(repo: Repo, cl
     assert repo.remote_subject("pr1") == "collab"
 
 
+def test_sync_takes_a_rebase_of_the_stack_from_the_remote(repo: Repo, client: StackClient) -> None:
+    repo.make_stack()
+    client.push()
+    repo.commit_on_forge("main", "d", "main\n", "main c1")
+    repo.rebase_stack_on_forge("pr1", "pr2", "pr3")
+    rebased = {b: repo.git("rev-parse", b, cwd=repo.origin) for b in ("pr1", "pr2", "pr3")}
+
+    client.sync()
+
+    assert [e for e in repo.emitted if isinstance(e, events.TookUpstreamRebase)] == [
+        events.TookUpstreamRebase(b, f"origin/{b}") for b in ("pr1", "pr2", "pr3")
+    ]
+    # Nothing pushed over it.
+    assert {b: repo.git("rev-parse", b, cwd=repo.origin) for b in rebased} == rebased
+    assert {b: repo.git("rev-parse", b) for b in rebased} == rebased
+    repo.assert_stacked("pr1", "main", ["pr1 c2", "pr1 c1"])
+    repo.assert_stacked("pr2", "pr1", ["pr2 c1"])
+    repo.assert_stacked("pr3", "pr2", ["pr3 c1"])
+
+
 def test_sync_doesnt_pull_from_upstream_of_another_name(repo: Repo, client: StackClient) -> None:
     # As `git switch -c pr2 origin/main` would set it.
     repo.make_stack()

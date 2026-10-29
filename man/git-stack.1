@@ -862,6 +862,12 @@ Either way, each lease is pinned to the remote\-tracking ref that was
 checked, so if someone pushes after your last fetch, the push fails
 instead of overwriting their work.
 .IP \(bu 2
+A remote branch whose commits were rebased there, e.g.
+by GitHub\(aqs \(dqRebase stack\(dq button, isn\(aqt pushed over: the
+local branch is moved to it instead, as \f[CR]sync\f[R] does (see
+Rebased on the remote).
+\f[CR]\-\-force\f[R] pushes over it.
+.IP \(bu 2
 The branches are pushed in one atomic push: if any of them can\(aqt be
 pushed (e.g.
 because its remote branch changed since your last fetch), none are.
@@ -1426,3 +1432,17 @@ commits), the commits you didn\(aqt take aren\(aqt counted as pulled:
 the next \f[CR]sync\f[R] offers them again, and \f[CR]push\f[R] refuses
 to drop them.
 To drop them anyway, run \f[CR]git stack push \-\-force\f[R].
+.SS Rebased on the remote
+GitHub\(aqs \(dqRebase stack\(dq button (or \f[CR]gh stack rebase\f[R]
+on another machine) rebases a stack\(aqs remote branches and
+force\-pushes them, so they have your commits as new commits, which
+\f[CR]sync\f[R] would otherwise try to pull in again.
+Instead, before restacking a branch, \f[CR]sync\f[R] moves it to its
+remote branch if that has the same commits, by author, date and subject,
+rebased onto its parent (or onto its parent\(aqs upstream, e.g.
+\f[CR]origin/main\f[R]), and nothing else.
+\f[CR]push\f[R] does the same, rather than refusing.
+This only happens if the branch hasn\(aqt changed since you last pushed
+it, so no local commit is dropped; if it has, pull the remote
+branch\(aqs commits in by hand, or push over them with
+\f[CR]git stack push \-\-force\f[R].

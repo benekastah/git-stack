@@ -977,11 +977,13 @@ class StackClient(StackCore):
                 )
 
     def sync_unmerged(self, branch: str, parent: str, state: SyncState) -> None:
-        """Restack branch, which isn't merged, onto parent and pull in commits
+        """Take a rebase of branch from its upstream (see take_upstream_rebase),
+        restack branch, which isn't merged, onto parent and pull in commits
         others pushed to it, then note whether it needs pushing."""
         git = self.git
         if git.upstream_gone(branch):
             self.emit(events.UpstreamGone(branch, parent))
+        self.take_upstream_rebase(branch, parent, state.remote)
         try:
             restacked = self.restack_branch(branch, parent, state.latest)
         except BrokenStackError as e:
@@ -1059,7 +1061,9 @@ class StackClient(StackCore):
         the adapter update their pull requests. Returns the pushed branches,
         which is empty if every branch looks merged, and the stacks.
 
-        Refuses if a remote branch has commits the local one doesn't, unless
+        Unless force is set, a branch whose remote branch has its commits rebased
+        (see take_upstream_rebase) is moved there first, so there's nothing
+        to push for it. Refuses if a remote branch has commits the local one doesn't, unless
         force is set. Either way, the push fails if a remote branch changed
         since it was last fetched.
         """
@@ -1069,6 +1073,9 @@ class StackClient(StackCore):
         stack = self.selected_stacks(branches, groups, parents, "push")
         adapter = self.checked_adapter(remote)
         branches = self.skip_merged(stack, parents, adapter)
+        if not force:
+            for b in branches:
+                self.take_upstream_rebase(b, parents[b], remote)
         pushed = self.push_branches(branches, parents, adapter, remote, force)
         return PushResult(pushed, self.stack_infos(stack, adapter))
 

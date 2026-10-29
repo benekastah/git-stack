@@ -108,6 +108,21 @@ class Repo:
         self.git("commit", "--quiet", f"--author={author}", "-m", message, cwd=self.forge)
         self.git("push", "--quiet", "origin", branch, cwd=self.forge)
 
+    def rebase_stack_on_forge(self, *branches: str) -> None:
+        """Rebase origin/<branch> for each of branches, a stack bottom first,
+        onto origin/main's tip or the rebased branch before it, and force-push
+        them, as GitHub's "Rebase stack" button would. Then fetch."""
+        self.git("fetch", "--quiet", cwd=self.forge)
+        old_parent = self.git("merge-base", "origin/main", f"origin/{branches[0]}", cwd=self.forge)
+        new_parent = "origin/main"
+        for branch in branches:
+            old_tip = self.git("rev-parse", f"origin/{branch}", cwd=self.forge)
+            self.git("switch", "--quiet", "-C", branch, old_tip, cwd=self.forge)
+            self.git("rebase", "--quiet", "--onto", new_parent, old_parent, cwd=self.forge)
+            old_parent, new_parent = old_tip, branch
+        self.git("push", "--quiet", "--force", "origin", *branches, cwd=self.forge)
+        self.git("fetch", "--quiet")
+
     def push_someone_elses_branch(self, branch: str) -> None:
         """Push a branch called branch, with a commit "theirs" on main, as a
         coworker would, and fetch it."""

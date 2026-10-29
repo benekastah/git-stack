@@ -606,6 +606,45 @@ class StackCore:
         git.config_unset(branch, PENDING_PULL_IDENTITIES_KEY)
         raise StackError(f"pulling upstream commits into {branch} failed; see git's output above")
 
+    def take_upstream_rebase(self, branch: str, parent: str, remote: str) -> bool:
+        """Move branch to its upstream if that's branch's own commits rebased
+        onto parent somewhere else (e.g. by GitHub's "Rebase stack" button),
+        so they're neither pulled in again nor pushed over. Its base becomes
+        where the upstream forks from parent. Returns whether it moved.
+
+        Only if branch hasn't changed since it was last pushed or pulled, so
+        no local work is lost, and the upstream has the same commits, by
+        author, date and subject, with nobody else's added. Not if branch is
+        checked out in another worktree.
+        """
+        git = self.git
+        if not git.tracks_same_name(branch, remote):
+            return False
+        tip = git.tip(branch)
+        upstream_tip = git.rev(f"{branch}@{{upstream}}")
+        base = git.config_get(branch, BASE_KEY)
+        if upstream_tip in (None, tip) or base is None or git.config_get(branch, PULLED_KEY) != tip:
+            return False
+        own = git.identities(f"{base}..{tip}")
+        # The upstream may be on commits the local parent doesn't have yet,
+        # e.g. main's latest, when it hasn't been fetched and fast-forwarded.
+        forks = (git.run("merge-base", ref, upstream_tip, check=False) for ref in (parent, f"{parent}@{{upstream}}"))
+        new_base = next((f for f in forks if f and git.identities(f"{f}..{upstream_tip}") == own), None)
+        if not own or new_base is None:
+            return False
+        if branch == git.current_branch():
+            # Like a fast-forward, it keeps uncommitted changes, or fails
+            # without touching them.
+            git.run("reset", "--quiet", "--keep", upstream_tip)
+        elif git.other_worktree_of(branch) is not None:
+            return False
+        else:
+            git.run("update-ref", f"refs/heads/{branch}", upstream_tip, tip)
+        git.config_set(branch, BASE_KEY, new_base)
+        git.config_set(branch, PULLED_KEY, upstream_tip)
+        self.emit(events.TookUpstreamRebase(branch, f"{remote}/{branch}"))
+        return True
+
     def stopped(self, what: str, command: str, then: str) -> StackError:
         """The error for a rebase or cherry-pick (command) that stopped partway
         through what, saying how to carry on."""

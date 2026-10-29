@@ -75,6 +75,54 @@ def test_push_force_refuses_when_remote_moved_since_last_fetch(repo: Repo, clien
     assert repo.remote_subject("pr1") == "collab"
 
 
+def edit_near_on_main_then_rebase_on_forge(repo: Repo, client: StackClient) -> str:
+    """Stack pr1 on main, editing a line of a file near one main then edits on
+    the remote, so the commit rebased there differs from pr1's in more than
+    its line numbers. Push pr1, then rebase it on the remote. Returns the
+    rebased tip."""
+    repo.write("d", "".join(f"line {n}\n" for n in range(1, 8)))
+    repo.git("add", "d")
+    repo.git("commit", "--quiet", "-m", "add d")
+    repo.git("push", "--quiet")
+    client.branch("pr1")
+    repo.commit("d", (repo.path / "d").read_text().replace("line 5", "pr1"), "pr1 c1")
+    client.push()
+    repo.git("fetch", "--quiet", cwd=repo.forge)
+    repo.git("switch", "--quiet", "main", cwd=repo.forge)
+    repo.git("pull", "--quiet", cwd=repo.forge)
+    repo.commit_on_forge("main", "d", (repo.forge / "d").read_text().replace("line 2", "main"), "main c1")
+    repo.rebase_stack_on_forge("pr1")
+    return repo.git("rev-parse", "pr1", cwd=repo.origin)
+
+
+def test_push_takes_a_rebase_from_the_remote(repo: Repo, client: StackClient) -> None:
+    rebased = edit_near_on_main_then_rebase_on_forge(repo, client)
+
+    client.push()
+
+    assert repo.git("rev-parse", "pr1") == rebased == repo.git("rev-parse", "pr1", cwd=repo.origin)
+    assert repo.config("pr1", "stackBase") == repo.git("rev-parse", "origin/main")
+
+
+def test_push_doesnt_take_a_rebase_over_local_commits(repo: Repo, client: StackClient) -> None:
+    rebased = edit_near_on_main_then_rebase_on_forge(repo, client)
+    repo.commit("a", "pr1 again\n", "pr1 c2")
+
+    with pytest.raises(StackError, match="origin/pr1 has commits that pr1 doesn't"):
+        client.push()
+
+    assert repo.git("rev-parse", "pr1", cwd=repo.origin) == rebased
+
+
+def test_push_force_pushes_over_a_rebase_on_the_remote(repo: Repo, client: StackClient) -> None:
+    edit_near_on_main_then_rebase_on_forge(repo, client)
+    local = repo.git("rev-parse", "pr1")
+
+    client.push(force=True)
+
+    assert repo.git("rev-parse", "pr1", cwd=repo.origin) == local
+
+
 @pytest.mark.parametrize("force", [False, True])
 def test_push_refuses_to_overwrite_someone_elses_branch_of_the_same_name(
     repo: Repo, client: StackClient, force: bool

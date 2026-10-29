@@ -629,6 +629,10 @@ git stack push --force          # drop commits on the remote you didn't pull
   or pass `--force` to drop them. Either way, each lease is pinned to the
   remote-tracking ref that was checked, so if someone pushes after your last
   fetch, the push fails instead of overwriting their work.
+- A remote branch whose commits were rebased there, e.g. by GitHub's
+  "Rebase stack" button, isn't pushed over: the local branch is moved to it
+  instead, as `sync` does (see
+  [Rebased on the remote](#rebased-on-the-remote)). `--force` pushes over it.
 - The branches are pushed in one atomic push: if any of them can't be pushed
   (e.g. because its remote branch changed since your last fetch), none are.
 - Refuses to push a branch whose remote branch was deleted, since that's
@@ -1085,6 +1089,19 @@ take, so nothing is pulled into it until `git stack push` gives it its own.
 If a pull stops on a conflict and you abort it (or skip some of the commits),
 the commits you didn't take aren't counted as pulled: the next `sync` offers
 them again, and `push` refuses to drop them. To drop them anyway, run
+`git stack push --force`.
+
+### Rebased on the remote
+
+GitHub's "Rebase stack" button (or `gh stack rebase` on another machine)
+rebases a stack's remote branches and force-pushes them, so they have your
+commits as new commits, which `sync` would otherwise try to pull in again.
+Instead, before restacking a branch, `sync` moves it to its remote branch
+if that has the same commits, by author, date and subject, rebased onto its
+parent (or onto its parent's upstream, e.g. `origin/main`), and nothing else.
+`push` does the same, rather than refusing. This only happens if the branch
+hasn't changed since you last pushed it, so no local commit is dropped; if
+it has, pull the remote branch's commits in by hand, or push over them with
 `git stack push --force`.
 
 ## Install

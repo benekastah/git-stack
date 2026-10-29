@@ -40,6 +40,8 @@ def message(event: events.Event) -> str:  # noqa: C901
             return f"restacking {event.branch} onto {event.parent}"
         case events.PullingUpstream():
             return f"pulling {event.count} new commit(s) from {event.branch}'s upstream"
+        case events.TookUpstreamRebase():
+            return f"moved {event.branch} to {event.upstream}, which has its commits rebased"
         case events.FastForwarded():
             return f"fast-forwarded {event.branch} to {event.upstream}"
         case events.TrunkDiverged():

@@ -45,6 +45,15 @@ class PullingUpstream:
 
 
 @dataclass(frozen=True)
+class TookUpstreamRebase:
+    """branch was moved to upstream, its own commits rebased elsewhere (e.g. by
+    GitHub's "Rebase stack" button)."""
+
+    branch: str
+    upstream: str
+
+
+@dataclass(frozen=True)
 class FastForwarded:
     branch: str
     upstream: str
@@ -232,6 +241,7 @@ Event: TypeAlias = (
     | Squashing
     | Restacking
     | PullingUpstream
+    | TookUpstreamRebase
     | FastForwarded
     | TrunkDiverged
     | TrunkInOtherWorktree
