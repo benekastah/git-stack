@@ -79,5 +79,10 @@ def render(root: str, tree: Tree, merged: set[int], active: Node) -> str:
 
 def replace(body: str, section: str) -> str:
     """body with section at its end, in place of any stack section it had."""
-    rest = SECTION.sub("\n\n", body).strip()
+    rest = remove(body)
     return f"{rest}\n\n{section}" if rest else section
+
+
+def remove(body: str) -> str:
+    """body without its stack section, if it had one."""
+    return SECTION.sub("\n\n", body).strip() if SECTION.search(body) else body

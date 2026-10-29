@@ -22,6 +22,7 @@ WARNINGS = (
     events.BrokenBranch,
     events.ParentMissing,
     events.PullRequestLookupFailed,
+    events.GitHubStackMismatch,
 )
 
 
@@ -118,10 +119,23 @@ def message(event: events.Event) -> str:  # noqa: C901
         case events.NoPullRequests():
             have = "has" if len(event.branches) == 1 else "have"
             return f"{', '.join(event.branches)} {have} no pull request; open drafts with `git stack prs`"
+        case events.GitHubStackLinked():
+            return f"linked {pull_requests(event.numbers)} into a stack on GitHub"
+        case events.GitHubStackMismatch():
+            stacks = ", ".join(map(str, event.stacks))
+            return (
+                f"didn't link {pull_requests(event.numbers)} into a stack on GitHub: some are in "
+                f"{'stacks' if len(event.stacks) > 1 else 'stack'} {stacks} there, which don't match "
+                f"them, and pull requests can't be taken out of a stack"
+            )
         case events.PullRequestRetargeted():
             return f"changed the base of {event.branch}'s pull request #{event.number} to {event.base}"
         case _:
             assert_never(event)
+
+
+def pull_requests(numbers: tuple[int, ...]) -> str:
+    return ", ".join(f"#{n}" for n in numbers)
 
 
 def print_event(event: events.Event) -> None:

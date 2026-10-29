@@ -712,6 +712,17 @@ git stack prs
   `main` once its parent merged). A stack with only
   one pull request gets none. Text you add outside the stack is kept, but
   edits to the stack itself are overwritten.
+- If the repository has GitHub's
+  [stacked pull requests](https://docs.github.com/en/pull-requests/reference/stacked-pull-requests),
+  and a stack's open pull requests are a chain, each on the one before, it
+  first links them into a stack on GitHub, or adds the new ones to the top
+  of the one they're in. Once they're all in one, GitHub shows the stack on
+  each pull request, so they get no stack in their descriptions, and the
+  ones they had are removed. A stack that branches out, or a group's stacks,
+  can't be one stack on GitHub, so they keep theirs. Pull requests can't be
+  taken out of a stack on GitHub, so if some are in one that doesn't match
+  (e.g. in another order), it warns and leaves them. To stop it linking
+  them, run `git config stack.githubStacks false`.
 
   ```
   <!-- git-stack -->
@@ -1030,7 +1041,9 @@ With the GitHub adapter:
   points the existing open ones at their stack parents too, and keeps the
   stack in each open one's description. (The link GitHub prints when a branch
   is first pushed targets the default branch instead; the next `prs` or
-  `push` retargets a pull request opened from it.)
+  `push` retargets a pull request opened from it.) Where the repository has
+  stacked pull requests, `prs` also links each stack that's a chain into a
+  stack on GitHub.
 - A pull request that GitHub says was merged counts as merged once its merge
   commit is in the local parent branch (`sync` fetches it), even if the parent
   changed the merged lines since, or the merge changed them.

@@ -24,6 +24,12 @@ PRS_PER_BRANCH = 10
 # case-insensitively. GitHub doesn't say which wins if there are several.
 TEMPLATE_DIRECTORIES = (".github", "", "docs")
 TEMPLATE_NAMES = ("pull_request_template.md", "pull_request_template.txt")
+# Whether prs links each linear stack's pull requests into a stack on GitHub
+# (default: true), where the repository has GitHub's stacked pull requests.
+GITHUB_STACKS_SETTING = "stack.githubStacks"
+# A pull request's stack on GitHub, as GraphQL gives it. GitHub only allows a
+# handful of pull requests in one.
+STACK_FIELDS = "stack { number entries(first: 100) { nodes { position pullRequest { number state } } } }"
 
 
 T = TypeVar("T")
@@ -76,6 +82,21 @@ class PullRequest:
             base=field(data, "baseRefName", str),
             merge_oid=field(merge_commit, "oid", str) if merge_commit is not None else None,
         )
+
+
+@dataclass(frozen=True)
+class GitHubStack:
+    """A stack of pull requests on GitHub, as STACK_FIELDS gives it."""
+
+    number: int
+    # (number, state) of each of its pull requests, bottom first.
+    entries: tuple[tuple[int, str], ...]
+
+    @classmethod
+    def from_json(cls, data: object) -> Self:
+        nodes = sorted(field(field(data, "entries", dict), "nodes", list), key=lambda n: field(n, "position", int))
+        prs = [field(node, "pullRequest", dict) for node in nodes]
+        return cls(field(data, "number", int), tuple((field(pr, "number", int), field(pr, "state", str)) for pr in prs))
 
 
 @dataclass(frozen=True)
@@ -443,6 +464,11 @@ class GitHubAdapter(GitAdapter):
         Merged pull requests the sections showed are kept, since branches no
         longer has them. A stack with fewer than two pull requests gets no
         section, but one it has isn't removed.
+
+        If branches are a chain of open pull requests, each on the one before,
+        they're linked into a stack on GitHub first (see link_github_stack).
+        Once they're all in one, which GitHub shows on each pull request
+        itself, they get no section, and the ones they have are removed.
         """
         prs = self.pull_requests()
         root = parents[branches[0]]
@@ -452,7 +478,13 @@ class GitHubAdapter(GitAdapter):
 
         current = {node(b): node(parents[b]) if parents[b] in branches else root for b in branches}
         to_update = {b: prs[b].number for b in branches if b in prs and prs[b].state == "OPEN"}
-        bodies = {n: field(pr, "body", str) for n, pr in self.pull_request_fields(to_update.values(), "body").items()}
+        try:
+            fields = self.pull_request_fields(to_update.values(), f"body {STACK_FIELDS}")
+        except StackError:
+            # E.g. GitHub Enterprise without stacked pull requests, which
+            # doesn't know the field.
+            fields = self.pull_request_fields(to_update.values(), "body")
+        bodies = {n: field(pr, "body", str) for n, pr in fields.items()}
         old: stack_section.Tree = {}
         for body in bodies.values():
             old = stack_section.find(body) | old
@@ -464,12 +496,88 @@ class GitHubAdapter(GitAdapter):
         }
         if sum(isinstance(n, int) for n in current) + len(merged) < 2:
             return
+        chain = [to_update[b] for b in branches] if is_chain(branches, parents, root, to_update) else []
+        stacks = {
+            n: GitHubStack.from_json(stack) if (stack := optional_field(pr, "stack", dict)) is not None else None
+            for n, pr in fields.items()
+        }
+        linked = len(chain) > 1 and self.link_github_stack(chain, stacks)
         tree = stack_section.lay_out(root, current, old, merged)
         for number in to_update.values():
             body = bodies[number]
-            new_body = stack_section.replace(body, stack_section.render(root, tree, merged, number))
+            if linked:
+                new_body = stack_section.remove(body)
+            else:
+                new_body = stack_section.replace(body, stack_section.render(root, tree, merged, number))
             if new_body != body:
                 self.gh("pr", "edit", str(number), "--repo", self.repo, "--body-file", "-", input=new_body)
+
+    def link_github_stack(self, chain: list[int], stacks: dict[int, GitHubStack | None]) -> bool:
+        """Put chain, open pull requests each on the one before, bottom first,
+        in one stack on GitHub, unless GITHUB_STACKS_SETTING turns that off.
+        stacks is each one's stack on GitHub, if it's in one. Returns whether
+        they're all in one.
+
+        They're all in one if its open pull requests are chain, in order.
+        Otherwise their stack is made, if none is in one, or the rest are
+        added to the top of the one whose open pull requests are chain's
+        bottom ones. Pull requests can't be taken out of a stack, so if
+        they're in several, or in one that doesn't fit, they're left alone,
+        with a warning. So is a repository without stacked pull requests.
+        """
+        found = {stack.number: stack for stack in stacks.values() if stack is not None}
+        (stack,) = found.values() if len(found) == 1 else (None,)
+        bottom = [n for n, state in stack.entries if state == "OPEN"] if stack is not None else []
+        if bottom == chain:
+            return True
+        if not self.github_stacks_enabled():
+            return False
+        if len(found) > 1 or bottom != chain[: len(bottom)]:
+            self.core.emit(events.GitHubStackMismatch(tuple(chain), tuple(sorted(found))))
+            return False
+        if stack is None:
+            return self.stacks_api("stacks", chain)
+        return self.stacks_api(f"stacks/{stack.number}/add", chain[len(bottom) :])
+
+    def github_stacks_enabled(self) -> bool:
+        setting = self.git.run("config", "--type=bool", "--get", GITHUB_STACKS_SETTING, check=False)
+        return setting != "false"
+
+    def stacks_api(self, path: str, numbers: list[int]) -> bool:
+        """POST numbers to the stacks API's path, in the repository. Returns
+        False if the repository doesn't have stacked pull requests."""
+        result = subprocess.run(
+            [
+                "gh",
+                "api",
+                "--hostname",
+                self.host,
+                "-X",
+                "POST",
+                f"repos/{self.owner}/{self.name}/{path}",
+                "--input",
+                "-",
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            input=json.dumps({"pull_requests": numbers}),
+            check=False,
+        )
+        if result.returncode == 0:
+            self.core.emit(events.GitHubStackLinked(tuple(numbers)))
+            return True
+        if "(HTTP 404)" in result.stderr:
+            return False
+        raise StackError(
+            f"linking {', '.join(f'#{n}' for n in numbers)} into a stack on GitHub failed:\n{result.stderr.strip()}"
+        )
+
+
+def is_chain(branches: list[str], parents: Parents, root: str, open_prs: dict[str, int]) -> bool:
+    """Whether branches, parent-before-child, each have an open pull request
+    (in open_prs) and are each stacked on the one before, the first on root."""
+    return all(b in open_prs and parents[b] == (branches[i - 1] if i else root) for i, b in enumerate(branches))
 
 
 def github_repo(git: GitClient, remote: str) -> tuple[str, str, str] | None:

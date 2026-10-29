@@ -968,6 +968,24 @@ on, while each open one is shown on what it\(aqs stacked on now (e.g.
 A stack with only one pull request gets none.
 Text you add outside the stack is kept, but edits to the stack itself
 are overwritten.
+.IP \(bu 2
+If the repository has GitHub\(aqs \c
+.UR https://docs.github.com/en/pull-requests/reference/stacked-pull-requests
+stacked pull requests
+.UE \c
+, and a stack\(aqs open pull requests are a chain, each on the one
+before, it first links them into a stack on GitHub, or adds the new ones
+to the top of the one they\(aqre in.
+Once they\(aqre all in one, GitHub shows the stack on each pull request,
+so they get no stack in their descriptions, and the ones they had are
+removed.
+A stack that branches out, or a group\(aqs stacks, can\(aqt be one stack
+on GitHub, so they keep theirs.
+Pull requests can\(aqt be taken out of a stack on GitHub, so if some are
+in one that doesn\(aqt match (e.g.
+in another order), it warns and leaves them.
+To stop it linking them, run
+\f[CR]git config stack.githubStacks false\f[R].
 .RS 2
 .IP
 .EX
@@ -1359,6 +1377,8 @@ parents too, and keeps the stack in each open one\(aqs description.
 (The link GitHub prints when a branch is first pushed targets the
 default branch instead; the next \f[CR]prs\f[R] or \f[CR]push\f[R]
 retargets a pull request opened from it.)
+Where the repository has stacked pull requests, \f[CR]prs\f[R] also
+links each stack that\(aqs a chain into a stack on GitHub.
 .IP \(bu 2
 A pull request that GitHub says was merged counts as merged once its
 merge commit is in the local parent branch (\f[CR]sync\f[R] fetches it),

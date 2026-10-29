@@ -5,6 +5,12 @@ Keeps pull requests and the calls it got in the JSON file at $FAKE_GH_STATE,
 and fails for commands whose first argument is listed in its "fail" key, and
 for opening pull requests of the branches in its "fail_heads" key. A pull
 request's "author" is "me", the gh user, unless it says otherwise.
+
+GitHub's stacks of pull requests are in its "stacks" key, each a "number" and
+the "prs" in it, bottom first. Without a "stacks" key, the repository doesn't
+have them, so the stacks API is Not Found, and with a true "no_stack_field"
+key, GraphQL doesn't even know pull requests' stack field, like GitHub
+Enterprise without them.
 """
 
 import json
@@ -26,15 +32,25 @@ def opt_value(args: list[str], key: str) -> str:
     return next(a for a in args if a.startswith(f"{key}=")).removeprefix(f"{key}=")
 
 
-def respond(args: list[str], prs: list[dict[str, Any]]) -> str | None:
-    """Handle the gh command args, updating prs. Return what gh would print, or None."""
+class GhError(Exception):
+    """gh fails, printing the message."""
+
+
+def respond(args: list[str], state: dict[str, Any]) -> str | None:
+    """Handle the gh command args, updating state. Return what gh would print, or None."""
+    prs: list[dict[str, Any]] = state["prs"]
     if args[:2] == ["api", "graphql"]:
         query = opt_value(args, "query")
         if "search(" in query:
             return my_open_pull_requests(prs)
         if "pullRequest(number:" in query:
-            return pull_requests_by_number(query, prs)
+            if " stack {" in query and "stacks" not in state and state.get("no_stack_field"):
+                raise GhError("gh: Field 'stack' doesn't exist on type 'PullRequest'")
+            return pull_requests_by_number(query, state)
         return pull_requests_by_head(args, query, prs)
+    path = next((a for a in args if "/stacks" in a), None)
+    if args[0] == "api" and path is not None:
+        return link_stack(path, json.loads(sys.stdin.read())["pull_requests"], state)
     if args[:2] == ["pr", "create"]:
         return create_pull_request(args, prs)
     if args[:2] == ["pr", "edit"]:
@@ -50,13 +66,50 @@ def my_open_pull_requests(prs: list[dict[str, Any]]) -> str:
     return json.dumps({"data": {"search": {"pageInfo": {"hasNextPage": False, "endCursor": None}, "nodes": nodes}}})
 
 
-def pull_requests_by_number(query: str, prs: list[dict[str, Any]]) -> str:
-    """The fields query asks for of the pull requests it names by number."""
+def pull_requests_by_number(query: str, state: dict[str, Any]) -> str:
+    """The fields query asks for of the pull requests it names by number. Of
+    a stack, all of them, whichever query asks for."""
+    prs: list[dict[str, Any]] = state["prs"]
     by_alias: dict[str, Any] = {}
-    for alias, number, fields in re.findall(r"(\w+): pullRequest\(number: (\d+)\) \{ ([^}]*) \}", query):
+    for alias, number, fields in re.findall(
+        r"(\w+): pullRequest\(number: (\d+)\) \{ (.*?) \}(?= \w+: pullRequest| \} \}$)", query
+    ):
         pr = next((p for p in prs if p["number"] == int(number)), None)
-        by_alias[alias] = None if pr is None else {f: pr.get(f, "") for f in fields.split()}
+        names = re.sub(r"\{.*\}", "", fields).split()
+        by_alias[alias] = (
+            None if pr is None else {f: stack_of(pr["number"], state) if f == "stack" else pr.get(f, "") for f in names}
+        )
     return json.dumps({"data": {"repository": by_alias}})
+
+
+def stack_of(number: int, state: dict[str, Any]) -> object:
+    """The stack that pull request number is in, as GraphQL gives it, or None."""
+    for stack in state.get("stacks", []):
+        if number in stack["prs"]:
+            states = {p["number"]: p["state"] for p in state["prs"]}
+            nodes = [
+                {"position": i + 1, "pullRequest": {"number": n, "state": states[n]}}
+                for i, n in enumerate(stack["prs"])
+            ]
+            return {"number": stack["number"], "entries": {"nodes": nodes}}
+    return None
+
+
+def link_stack(path: str, numbers: list[int], state: dict[str, Any]) -> str:
+    """Make a stack of numbers (POST .../stacks), or add them to the top of
+    one (POST .../stacks/<number>/add), checking what GitHub would."""
+    if "stacks" not in state:
+        raise GhError("gh: Not Found (HTTP 404)")
+    if any(n in stack["prs"] for stack in state["stacks"] for n in numbers):
+        raise GhError("gh: Validation Failed (HTTP 422): a pull request is already in a stack")
+    match = re.search(r"/stacks/(\d+)/add$", path)
+    if match is None:
+        if len(numbers) < 2:
+            raise GhError("gh: Validation Failed (HTTP 422): a stack needs two pull requests")
+        state["stacks"].append({"number": 1000 + len(state["stacks"]), "prs": numbers})
+    else:
+        next(stack for stack in state["stacks"] if stack["number"] == int(match.group(1)))["prs"].extend(numbers)
+    return json.dumps({"pull_requests": [{"number": n} for n in numbers]})
 
 
 def pull_requests_by_head(args: list[str], query: str, prs: list[dict[str, Any]]) -> str:
@@ -107,11 +160,17 @@ def main() -> None:
     failing = args[0] in state["fail"] or (
         args[:2] == ["pr", "create"] and args[args.index("--head") + 1] in state.get("fail_heads", [])
     )
-    out = None if failing else respond(args, state["prs"])
+    error = "fake gh: failing as asked" if failing else None
+    out = None
+    if not failing:
+        try:
+            out = respond(args, state)
+        except GhError as e:
+            error = str(e)
     with open(path, "w") as f:
         json.dump(state, f)
-    if failing:
-        sys.exit("fake gh: failing as asked")
+    if error is not None:
+        sys.exit(error)
     if out is not None:
         print(out)
 

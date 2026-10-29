@@ -210,6 +210,17 @@ class FakeGitHub:
         state["fail"] = list(commands)
         self.save(state)
 
+    def enable_stacks(self, *stacks: list[int]) -> None:
+        """Give the repository GitHub's stacked pull requests, with stacks, each
+        its pull requests' numbers, bottom first."""
+        state = self.load()
+        state["stacks"] = [{"number": 1000 + i, "prs": list(prs)} for i, prs in enumerate(stacks)]
+        self.save(state)
+
+    def stacks(self) -> list[list[int]]:
+        """The pull requests of each stack on GitHub, bottom first."""
+        return [stack["prs"] for stack in self.load().get("stacks", [])]
+
     def fail_opening(self, *heads: str) -> None:
         """Make gh fail to open pull requests of the branches heads."""
         state = self.load()

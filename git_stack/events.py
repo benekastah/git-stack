@@ -227,6 +227,23 @@ class NoPullRequests:
 
 
 @dataclass(frozen=True)
+class GitHubStackLinked:
+    """The pull requests numbers were put in a stack on GitHub, at its top."""
+
+    numbers: tuple[int, ...]
+
+
+@dataclass(frozen=True)
+class GitHubStackMismatch:
+    """The pull requests numbers, a chain bottom first, weren't linked into a
+    stack on GitHub, since some are in stacks (their numbers) there that
+    don't fit them."""
+
+    numbers: tuple[int, ...]
+    stacks: tuple[int, ...]
+
+
+@dataclass(frozen=True)
 class PullRequestRetargeted:
     branch: str
     number: int
@@ -264,4 +281,6 @@ Event: TypeAlias = (
     | PullRequestLookupFailed
     | NoPullRequests
     | PullRequestRetargeted
+    | GitHubStackLinked
+    | GitHubStackMismatch
 )

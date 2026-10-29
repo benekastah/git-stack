@@ -310,3 +310,140 @@ def test_prs_opens_pull_requests_for_the_stacks_named(repo: Repo, gh: FakeGitHub
     client.prs(["pr2"])
 
     assert [head for head, *_ in opened(gh)] == ["pr1", "pr2", "pr3"]
+
+
+def test_prs_links_a_linear_stack_on_github(
+    repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event]
+) -> None:
+    gh.enable_stacks()
+    repo.make_stack()
+    client.push()
+
+    client.prs()
+
+    assert gh.stacks() == [[1, 2, 3]]
+    assert events.GitHubStackLinked((1, 2, 3)) in emitted
+    # GitHub shows the stack on each pull request itself.
+    assert [body(gh, n) for n in (1, 2, 3)] == ["", "", ""]
+
+
+def test_prs_adds_new_pull_requests_to_the_top_of_the_stack_on_github(
+    repo: Repo, gh: FakeGitHub, client: StackClient
+) -> None:
+    gh.enable_stacks()
+    repo.make_stack()
+    client.push()
+    client.prs()
+    client.branch("pr4")
+    repo.commit("c", "pr4\n", "pr4 c1")
+    client.push()
+
+    client.prs()
+
+    assert gh.stacks() == [[1, 2, 3, 4]]
+
+
+def test_prs_adds_to_a_stack_on_github_whose_bottom_merged(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+    gh.enable_stacks()
+    repo.make_stack()
+    client.push()
+    client.prs()
+    repo.squash_merge_on_forge("pr1")
+    state = gh.load()
+    state["prs"][0] |= {
+        "state": "MERGED",
+        "headRefOid": repo.git("rev-parse", "pr1"),
+        "mergeCommit": {"oid": repo.git("rev-parse", "HEAD", cwd=repo.forge)},
+    }
+    gh.save(state)
+    client.sync()
+    client.branch("pr4")
+    repo.commit("c", "pr4\n", "pr4 c1")
+    client.push()
+
+    client.prs()
+
+    assert gh.stacks() == [[1, 2, 3, 4]]
+
+
+def test_prs_removes_the_stack_section_once_the_stack_is_on_github(
+    repo: Repo, gh: FakeGitHub, client: StackClient
+) -> None:
+    repo.make_stack()
+    client.push()
+    client.prs()  # without stacks on GitHub, so with sections
+    assert stack_section.START in body(gh, 1)
+    gh.enable_stacks()
+
+    client.prs()
+
+    assert [body(gh, n) for n in (1, 2, 3)] == ["", "", ""]
+
+
+def test_prs_doesnt_link_a_branching_stack_on_github(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+    gh.enable_stacks()
+    client.branch("pr1")
+    repo.commit("a", "pr1\n", "pr1 c1")
+    client.branch("pr2a")
+    repo.commit("b", "pr2a\n", "pr2a c1")
+    repo.git("switch", "--quiet", "pr1")
+    client.branch("pr2b")
+    repo.commit("c", "pr2b\n", "pr2b c1")
+    client.push()
+
+    client.prs()
+
+    assert gh.stacks() == []
+    assert body(gh, 1) == stack("- `main`", "  - #1 👈", "    - #2", "    - #3")
+
+
+def test_prs_doesnt_link_on_github_when_turned_off(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+    gh.enable_stacks()
+    repo.git("config", "stack.githubStacks", "false")
+    repo.make_stack()
+    client.push()
+
+    client.prs()
+
+    assert gh.stacks() == []
+    assert stack_section.START in body(gh, 1)
+
+
+def test_prs_warns_when_a_stack_on_github_doesnt_match(
+    repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event]
+) -> None:
+    repo.make_stack()
+    client.push()
+    client.prs()
+    gh.enable_stacks([2, 1])  # linked by hand, in the wrong order
+
+    client.prs()
+
+    assert gh.stacks() == [[2, 1]]
+    assert events.GitHubStackMismatch((1, 2, 3), (1000,)) in emitted
+    assert stack_section.START in body(gh, 3)
+
+
+def test_prs_warns_when_a_stack_on_github_is_in_another_order(
+    repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event]
+) -> None:
+    repo.make_stack()
+    client.push()
+    gh.enable_stacks([1, 3, 2])
+
+    client.prs()
+
+    assert events.GitHubStackMismatch((1, 2, 3), (1000,)) in emitted
+    assert stack_section.START in body(gh, 1)
+
+
+def test_prs_works_where_github_has_no_stacked_pull_requests(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+    state = gh.load()
+    state["no_stack_field"] = True
+    gh.save(state)
+    repo.make_stack()
+    client.push()
+
+    client.prs()
+
+    assert stack_section.START in body(gh, 1)
