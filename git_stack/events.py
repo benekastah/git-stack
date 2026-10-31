@@ -221,12 +221,15 @@ class MergedWithNewCommits:
 @dataclass(frozen=True)
 class Reverted:
     """branch was merged into parent, then parent reverted some of its
-    changes, so it was left alone."""
+    changes with reverts (newest first), so it was left alone, along with
+    children, the branches stacked on it."""
 
     event_type: ClassVar[str] = "reverted"
 
     branch: str
     parent: str
+    reverts: tuple[str, ...]
+    children: tuple[str, ...]
 
 
 @dataclass(frozen=True)

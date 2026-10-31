@@ -607,7 +607,7 @@ def test_sync_leaves_reverted_squash_merge_and_its_children_alone(
 
     client.sync()
 
-    assert events.Reverted("pr1", "main") in emitted
+    assert events.Reverted("pr1", "main", (repo.git("rev-parse", "main"),), ("pr2",)) in emitted
     assert events.ParentSkipped("pr2", "pr1") in emitted
     assert repo.config("pr1", "stackParent") == "main"
     assert repo.config("pr2", "stackParent") == "pr1"
@@ -622,7 +622,7 @@ def test_sync_leaves_reverted_merge_commit_alone(repo: Repo, client: StackClient
 
     client.sync()
 
-    assert events.Reverted("pr1", "main") in emitted
+    assert events.Reverted("pr1", "main", (repo.git("rev-parse", "main"),), ("pr2",)) in emitted
     assert repo.config("pr1", "stackParent") == "main"
 
 
@@ -639,7 +639,7 @@ def test_sync_leaves_branch_alone_when_one_of_its_commits_was_reverted(
 
     client.sync()
 
-    assert events.Reverted("pr1", "main") in emitted
+    assert events.Reverted("pr1", "main", (repo.git("rev-parse", "main"),), ()) in emitted
     assert repo.config("pr1", "stackParent") == "main"
 
 

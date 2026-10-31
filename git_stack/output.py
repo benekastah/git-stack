@@ -101,10 +101,13 @@ def message(event: events.Event) -> str:  # noqa: C901
                 f"remote branch has commits that {event.parent} doesn't"
             )
         case events.Reverted():
+            stack = "".join(f" --stack {child}" for child in event.children)
+            onto = f" with {', '.join(event.children)} on them" if event.children else ""
             return (
                 f"skipping {event.branch}: it was merged into {event.parent}, then {event.parent} reverted "
-                f'some of its changes; see "A merged branch was reverted" in `git stack --help`, or if '
-                f"that wasn't a revert, run `git stack clean --ignore-revert {event.branch}`"
+                f"some of its changes. To bring them back{onto}, run `git stack unrevert {event.branch}-unrevert "
+                f"{' '.join(r[:12] for r in event.reverts)} --from {event.parent}{stack}`, or if that wasn't "
+                f"a revert, `git stack clean --ignore-revert {event.branch}`"
             )
         case events.UpstreamGone():
             return f"{event.branch}'s remote branch is gone but its changes aren't in {event.parent}; leaving it alone"

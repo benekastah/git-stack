@@ -130,6 +130,11 @@ T}@T{
 \f[CR]git stack clean\f[R]
 T}
 T{
+bring back a PR whose merge was reverted
+T}@T{
+\f[CR]git stack unrevert <new branch> <revert> \-\-stack <branch>\f[R]
+T}
+T{
 read all of this in the terminal
 T}@T{
 \f[CR]git stack \-\-help\f[R]
@@ -796,7 +801,8 @@ skipped with a warning, along with the branches stacked on it, since
 restacking it would replay its merged commits.
 .IP \(bu 2
 A merged branch its parent has since reverted is skipped with a warning
-too, along with the branches stacked on it (see A merged branch was
+too, along with the branches stacked on it, which gives the
+\f[CR]unrevert\f[R] command that brings it back (see A merged branch was
 reverted).
 \f[CR]\-\-ignore\-revert <branch>\f[R] (which can be given more than
 once) says that wasn\(aqt really a revert: the branch counts as merged,
@@ -1056,6 +1062,59 @@ Needs the GitHub adapter.
 \f[CR]\-n\f[R]/\f[CR]\-\-dry\-run\f[R] shows the stacks with the pull
 requests it would open, with their titles, in place of their links,
 without opening them.
+.SS \f[CR]git stack unrevert <name> <revert>... [\-\-from <branch>] [\-\-stack <branch>...] [\-\-remote origin]\f[R]
+Create \f[CR]<name>\f[R] on \f[CR]\-\-from\f[R], with commits that
+revert the given reverts, to bring back the changes of a merged branch
+they reverted, and move the branches given with \f[CR]\-\-stack\f[R]
+onto it.
+.PP
+\f[B]When would I use it?\f[R] When a pull request was merged and then
+reverted, and you want to bring its changes back, e.g.
+to fix whatever got it reverted and merge it again, with the pull
+requests built on it on top.
+While the reverted branch is still tracked, \f[CR]sync\f[R],
+\f[CR]clean\f[R], \f[CR]restack\f[R], \f[CR]push\f[R] and \f[CR]prs\f[R]
+warn about it with the command to run; see A merged branch was reverted
+for when it isn\(aqt.
+.IP
+.EX
+git stack unrevert add\-api\-unrevert 1a2b3c4d5e6f \-\-stack use\-api
+\f[I]# created add\-api\-unrevert on main, reverting 1 revert\f[R]
+\f[I]# moved use\-api onto it\f[R]
+\f[I]# note: run \(gagit stack push\(ga and \(gagit stack prs\(ga to open a pull request for add\-api\-unrevert\f[R]
+.EE
+.IP \(bu 2
+\f[CR]<name>\f[R] must be a new branch, and like \f[CR]branch\f[R], it
+refuses a name a remote already has a branch of.
+It\(aqs tracked on \f[CR]\-\-from\f[R], which defaults to the root of
+the first \f[CR]\-\-stack\f[R] branch\(aqs stack (e.g.
+\f[CR]main\f[R]), or without \f[CR]\-\-stack\f[R], to the remote\(aqs
+default branch.
+.IP \(bu 2
+The reverts are reverted newest first, whatever order you give them in,
+so one that undid what a later one redid doesn\(aqt conflict.
+Each must be in \f[CR]\-\-from\f[R]\(aqs history.
+The new commits get git\(aqs usual messages for reverting a revert;
+amend them as you like.
+.IP \(bu 2
+Each \f[CR]\-\-stack\f[R] branch moves onto \f[CR]<name>\f[R] with the
+branches stacked on it, keeping its own commits, and is restacked onto
+it.
+That changes its pull request\(aqs base the next time you push.
+A merged, reverted branch they leave with nothing else stacked on it is
+untracked, but not deleted.
+.IP \(bu 2
+If a revert stops on a conflict, resolve it, run
+\f[CR]git revert \-\-continue\f[R], then \f[CR]git stack restack\f[R] to
+move the \f[CR]\-\-stack\f[R] branches onto \f[CR]<name>\f[R].
+They were moved before the reverts, so \f[CR]git revert \-\-abort\f[R]
+instead leaves them on \f[CR]<name>\f[R] with none of the reverted
+changes.
+.IP \(bu 2
+Works on the local \f[CR]\-\-from\f[R], without fetching, so run
+\f[CR]git stack sync\f[R] first if the revert only happened on the
+remote.
+Needs a clean worktree.
 .SH SCRIPTING
 The commands below print one thing per line, for use in scripts,
 aliases, shell prompts and editors.
@@ -1277,6 +1336,13 @@ existing one has no \f[CR]url\f[R], and a dry run opens none); each is
 \f[CR]null\f[R] otherwise
 T}
 T{
+\f[CR]unrevert\f[R]
+T}@T{
+the \f[CR]branch\f[R] it created, the \f[CR]parent\f[R] it created it
+on, the \f[CR]reverts\f[R] it reverted, newest first, and the
+\f[CR]children\f[R] it moved onto it
+T}
+T{
 \f[CR]parent\f[R], \f[CR]base\f[R]
 T}@T{
 the \f[CR]parent\f[R] or \f[CR]base\f[R]
@@ -1364,20 +1430,13 @@ it, or some of its commits), \f[CR]info\f[R] shows it as
 \f[CR](merged, then reverted)\f[R], and \f[CR]sync\f[R],
 \f[CR]clean\f[R], \f[CR]restack\f[R], \f[CR]push\f[R] and \f[CR]prs\f[R]
 leave it, and the branches stacked on it, alone.
-.PP
-To bring its changes back, make a branch on \f[CR]main\f[R] that reverts
-the revert, move \f[CR]pr2\f[R] onto it, and open a new pull request for
-it:
+Their warning gives the \f[CR]unrevert\f[R] command that brings it back
+as a new branch, with \f[CR]pr2\f[R] moved onto it:
 .IP
 .EX
-git switch main
-git stack branch pr1\-unrevert
-git revert <the revert>
-git stack track pr1\-unrevert pr2 \-\-base pr1   \f[I]# move pr2 onto it, keeping its own commits\f[R]
-git stack untrack pr1
-git stack restack
+git stack unrevert pr1\-unrevert 1a2b3c4d5e6f \-\-from main \-\-stack pr2
 git stack push
-git stack prs
+git stack prs                      \f[I]# open a pull request for pr1\-unrevert\f[R]
 .EE
 .PP
 A revert is only noticed while \f[CR]pr1\f[R] is still tracked.
@@ -1385,7 +1444,16 @@ Once \f[CR]sync\f[R] or \f[CR]clean\f[R] has stopped tracking it (and
 moved \f[CR]pr2\f[R] onto \f[CR]main\f[R]), a later revert of it
 isn\(aqt, so \f[CR]pr2\f[R]\(aqs pull request is missing
 \f[CR]pr1\f[R]\(aqs changes without a warning.
-Bring them back the same way.
+You may notice when \f[CR]pr2\f[R] stops building, or a restack of it
+conflicts with \f[CR]main\f[R].
+To bring them back, find the revert (GitHub\(aqs \(dqRevert\(dq button
+titles it \f[CR]Revert \(dq<pr1\(aqs title>\(dq\f[R]), and run
+\f[CR]unrevert\f[R] the same way:
+.IP
+.EX
+git log \-\-oneline \-\-grep=\(aqRevert \(dqAdd the API\(dq\(aq main
+git stack unrevert pr1\-unrevert 1a2b3c4d5e6f \-\-stack pr2
+.EE
 .PP
 If it wasn\(aqt really reverted (git\-stack only compares changes, so a
 later commit that happens to undo one of them, say setting a version

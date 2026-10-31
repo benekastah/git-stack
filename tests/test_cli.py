@@ -30,6 +30,7 @@ from git_stack.stack import (
     StackClient,
     SyncResult,
     Tracked,
+    Unreverted,
     Untracked,
 )
 
@@ -158,6 +159,13 @@ def stack() -> Any:
         (["prs"], "prs", ([], []), {"remote": "origin", "dry_run": False}),
         (["prs", "pr1", "-n", "--remote", "upstream"], "prs", (["pr1"], []), {"remote": "upstream", "dry_run": True}),
         (["pr"], "prs", ([], []), {"remote": "origin", "dry_run": False}),
+        (["unrevert", "pr1-unrevert", "abc"], "unrevert", ("pr1-unrevert", ["abc"], None, []), {"remote": "origin"}),
+        (
+            ["unrevert", "new", "abc", "def", "--from", "release", "--stack", "pr2", "--stack", "pr2b"],
+            "unrevert",
+            ("new", ["abc", "def"], "release", ["pr2", "pr2b"]),
+            {"remote": "origin"},
+        ),
         (["parent"], "parent", (None,), {}),
         (["parent", "pr1"], "parent", ("pr1",), {}),
         (["base"], "base", (None,), {}),
@@ -541,6 +549,12 @@ def test_clean_json_ends_with_the_error_when_it_fails(stack: Any, capsys: pytest
             },
         ),
         (["restack"], "restack", None, {}),
+        (
+            ["unrevert", "pr1-unrevert", "abc", "--stack", "pr2"],
+            "unrevert",
+            Unreverted("pr1-unrevert", "main", ("abc",), ("pr2",)),
+            {"branch": "pr1-unrevert", "parent": "main", "reverts": ["abc"], "children": ["pr2"]},
+        ),
         (
             ["track", "main"],
             "track",

@@ -540,5 +540,5 @@ def test_sync_leaves_reverted_pr_alone_when_its_merge_was_tweaked(
 
     client.sync()
 
-    assert events.Reverted("pr1", "main") in emitted
+    assert events.Reverted("pr1", "main", (repo.git("rev-parse", "main"),), ("pr2",)) in emitted
     assert repo.config("pr1", "stackParent") == "main"

@@ -217,6 +217,6 @@ def test_push_skips_reverted_branch_and_its_children(
     repo.commit("b", "pr2 again\n", "pr2 c2")
 
     assert client.push().pushed == []
-    assert events.Reverted("pr1", "main") in emitted
+    assert events.Reverted("pr1", "main", (repo.git("rev-parse", "main"),), ("pr2",)) in emitted
     assert events.ParentSkipped("pr2", "pr1") in emitted
     assert repo.remote_subject("pr2") == "pr2 c1"

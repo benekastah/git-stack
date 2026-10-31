@@ -55,7 +55,7 @@ def test_clean_keeps_tracking_reverted_branch(repo: Repo, client: StackClient, e
 
     client.clean()
 
-    assert events.Reverted("pr1", "main") in emitted
+    assert events.Reverted("pr1", "main", (repo.git("rev-parse", "main"),), ("pr2",)) in emitted
     assert repo.config("pr1", "stackParent") == "main"
     assert repo.config("pr2", "stackParent") == "pr1"
 

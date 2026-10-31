@@ -89,7 +89,7 @@ def test_restack_leaves_reverted_branch_and_its_children_alone(
 
     client.restack()
 
-    assert events.Reverted("pr2", "pr1") in emitted
+    assert events.Reverted("pr2", "pr1", (repo.git("rev-parse", "pr1"),), ("pr3",)) in emitted
     assert events.ParentSkipped("pr3", "pr2") in emitted
     # Rebasing pr2 onto pr1 would drop its commit, which pr1 already has.
     assert repo.git("rev-parse", "pr2") == pr2

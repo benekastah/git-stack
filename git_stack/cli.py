@@ -20,6 +20,7 @@ from git_stack.commands import (
     show_stack,
     sync,
     track,
+    unrevert,
     untrack,
 )
 from git_stack.errors import StackError
@@ -43,6 +44,7 @@ COMMANDS = (
     clean,
     push,
     prs,
+    unrevert,
     parent,
     base,
     show_stack,

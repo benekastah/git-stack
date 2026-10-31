@@ -65,3 +65,30 @@ def test_event_json_has_type_message_warning_and_fields() -> None:
         "deleted_tip": "0123456789abcdef",
     }
     assert event_json(events.TrunkDiverged("main", "origin/main"))["warning"] is True
+
+
+@pytest.mark.parametrize(
+    ("children", "expected"),
+    [
+        (
+            ("pr2", "pr2b"),
+            (
+                "skipping pr1: it was merged into main, then main reverted some of its changes. To bring them back "
+                "with pr2, pr2b on them, run `git stack unrevert pr1-unrevert 0123456789ab fedcba987654 --from main "
+                "--stack pr2 --stack pr2b`, or if that wasn't a revert, `git stack clean --ignore-revert pr1`"
+            ),
+        ),
+        (
+            (),
+            (
+                "skipping pr1: it was merged into main, then main reverted some of its changes. To bring them back, "
+                "run `git stack unrevert pr1-unrevert 0123456789ab fedcba987654 --from main`, or if that wasn't a "
+                "revert, `git stack clean --ignore-revert pr1`"
+            ),
+        ),
+    ],
+)
+def test_reverted_gives_the_unrevert_command(children: tuple[str, ...], expected: str) -> None:
+    event = events.Reverted("pr1", "main", ("0123456789abcdef", "fedcba9876543210"), children)
+
+    assert message(event) == expected

@@ -103,6 +103,18 @@ class Renamed:
     upstream: str | None
 
 
+@dataclass(frozen=True)
+class Unreverted:
+    """What unrevert did: created branch on parent, with commits reverting
+    reverts (newest first), and moved children, the branches it was given to
+    stack on it, onto it."""
+
+    branch: str
+    parent: str
+    reverts: tuple[str, ...]
+    children: tuple[str, ...]
+
+
 # What GitHub allows in a username, so one can't add to a search query.
 GITHUB_LOGIN = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})")
 
@@ -624,6 +636,108 @@ class StackClient(StackCore):
             git.run("branch", "--unset-upstream", new)
         return Renamed(old, new, children, upstream)
 
+    @exclusive
+    def unrevert(
+        self,
+        name: str,
+        reverts: Sequence[str],
+        from_branch: str | None = None,
+        stack: Sequence[str] = (),
+        remote: str = DEFAULT_REMOTE,
+    ) -> Unreverted:
+        """Create name on from_branch (default: the root of stack's first
+        branch, or else remote's default branch), track it, and revert reverts
+        there, newest first, bringing back a merged branch they reverted. Move
+        the branches in stack onto it, keeping their bases, and restack them
+        onto it. A merged, reverted branch they leave with nothing stacked on
+        it is untracked. Returns an Unreverted.
+
+        The branches are moved before the reverts are, so if one stops on a
+        conflict, resolving it with `git revert --continue` and running
+        `git stack restack` finishes the job.
+        """
+        git = self.git
+        self.ensure_no_operation_in_progress()
+        self.ensure_clean_worktree()
+        self.settle_all()
+        parents = self.tracked_branches()
+        if git.local_branch_exists(name):
+            raise StackError(f"{name} already exists; pick another name")
+        self.ensure_name_free_on_remotes(name)
+        if len(set(stack)) != len(stack):
+            raise StackError("each branch can only appear once")
+        for branch in stack:
+            if branch not in parents:
+                raise StackError(f"{branch} isn't in a stack")
+        parent = from_branch or (stack_root(stack[0], parents) if stack else self.default_branch(remote))
+        self.ensure_local_branch_parent(parent)
+        for branch in stack:
+            ensure_no_cycle(branch, name, {**parents, name: parent})
+        commits = self.reverts_to_revert(reverts, parent)
+        # The merged branches the stack is leaving, to untrack once nothing is
+        # stacked on them, which they'd otherwise be left as forever.
+        adapter = make_adapter(self, remote, fetch=False)
+        left = [
+            old
+            for old in dict.fromkeys(parents[b] for b in stack)
+            if old in parents
+            and all(b in stack for b, p in parents.items() if p == old)
+            and adapter.merge_state(old, parents[old]) is MergeState.REVERTED
+        ]
+        # So name, if it's at the bottom of a stack, stays in the group the
+        # stack was in, with the other stacks in it.
+        bottoms = [] if parent in parents else [ancestry(b, parents)[-2] for b in stack]
+        group = next((g for b in bottoms if (g := git.config_get(b, GROUP_KEY))), None)
+
+        git.run("branch", "--quiet", "--no-track", name, parent)
+        self.set_parent(name, parent)
+        git.config_set(name, BASE_KEY, git.tip(name))
+        if group is not None:
+            git.config_set(name, GROUP_KEY, group)
+        parents[name] = parent
+        for branch in stack:
+            self.set_parent(branch, name)
+            parents[branch] = name
+        for old in left:
+            self.remove_merged(old, parents, delete=False)
+        git.switch(name)
+        if not git.passthrough("revert", "--no-edit", *commits):
+            moved = f" to move {', '.join(stack)} onto {name}" if stack else ""
+            raise StackError(
+                f"unreverting stopped; see git's output above. Resolve any conflicts and run "
+                f"`git revert --continue`, then `git stack restack`{moved}"
+            )
+        self.restack_all(descendants(name, children_map(parents)), parents)
+        return Unreverted(name, parent, tuple(commits), tuple(stack))
+
+    def default_branch(self, remote: str) -> str:
+        """remote's default branch, as its HEAD names it (e.g. main)."""
+        head = self.git.run("symbolic-ref", "--quiet", "--short", f"refs/remotes/{remote}/HEAD", check=False)
+        if not head:
+            raise StackError(
+                f"{remote}'s default branch isn't known; pass --from, or run `git remote set-head {remote} --auto`"
+            )
+        return head.removeprefix(f"{remote}/")
+
+    def reverts_to_revert(self, reverts: Sequence[str], parent: str) -> list[str]:
+        """The commits reverts names, newest first, so undoing them one after
+        another doesn't conflict where a later one changed what an earlier one
+        did. Fails unless each is in parent's history."""
+        git = self.git
+        commits = []
+        for revert in reverts:
+            commit = git.rev(f"{revert}^{{commit}}")
+            if commit is None:
+                raise StackError(f"{revert} isn't a commit")
+            if not git.is_ancestor(commit, parent):
+                raise StackError(f"{revert} isn't in {parent}'s history")
+            commits.append(commit)
+
+        def newest_first(a: str, b: str) -> int:
+            return -1 if git.is_ancestor(b, a) else 1 if git.is_ancestor(a, b) else 0
+
+        return sorted(dict.fromkeys(commits), key=functools.cmp_to_key(newest_first))
+
     def settled_branches(self) -> Parents:
         """Like tracked_branches, but first picks up the result of a restack or
         pull the user finished by hand. One that hasn't finished is left alone,
@@ -798,7 +912,7 @@ class StackClient(StackCore):
                 drop_from_stack(branch, parents)
             elif state is MergeState.REVERTED:
                 # Restacking it could drop its commits, as already in parent.
-                self.emit(events.Reverted(branch, parent))
+                self.emit(self.reverted(branch, parents, adapter))
                 skipped.add(branch)
             else:
                 remaining.append(branch)
@@ -920,10 +1034,17 @@ class StackClient(StackCore):
             self.emit(events.MergedWithNewCommits(branch, parent))
             state.skipped.add(branch)
         elif merge_state is MergeState.REVERTED:
-            self.emit(events.Reverted(branch, parent))
+            self.emit(self.reverted(branch, state.parents, adapter))
             state.skipped.add(branch)
         else:
             self.sync_unmerged(branch, parent, state)
+
+    def reverted(self, branch: str, parents: Parents, adapter: GitAdapter) -> events.Reverted:
+        """The warning that branch, which parents says is stacked on its parent,
+        was merged and then reverted, with what unrevert needs to bring it back."""
+        parent = parents[branch]
+        children = tuple(children_map(parents).get(branch, ()))
+        return events.Reverted(branch, parent, tuple(adapter.reverts(branch, parent)), children)
 
     def ensure_ignorable_reverts(self, ignore_reverts: Iterable[str], scope: Sequence[str], where: str) -> None:
         """Refuse a branch to ignore the reverts of (see sync) that isn't in
@@ -1004,7 +1125,7 @@ class StackClient(StackCore):
             elif state is MergeState.MERGED_WITH_NEW_COMMITS:
                 self.emit(events.MergedWithNewCommits(branch, parent))
             elif state is MergeState.REVERTED:
-                self.emit(events.Reverted(branch, parent))
+                self.emit(self.reverted(branch, parents, adapter))
         self.restore_checkout(original)
         return self.stack_infos(order, adapter)
 

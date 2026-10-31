@@ -50,6 +50,7 @@ git stack sync                  # catch up: drop merged PRs, rebase what's left,
 | rename a branch in a stack | `git stack rename <new>` |
 | sync several stacks at once | `git stack group add <name> <branch-or-glob>...`, then `git stack sync -g <name>` |
 | clean up merged branches in every stack | `git stack clean` |
+| bring back a PR whose merge was reverted | `git stack unrevert <new branch> <revert> --stack <branch>` |
 | read all of this in the terminal | `git stack --help` |
 
 ## Words used here
@@ -572,7 +573,8 @@ git stack sync -d both          # ...and their remote branches
   skipped with a warning, along with the branches stacked on it, since
   restacking it would replay its merged commits.
 - A merged branch its parent has since reverted is skipped with a warning too,
-  along with the branches stacked on it (see
+  along with the branches stacked on it, which gives the `unrevert` command
+  that brings it back (see
   [A merged branch was reverted](#a-merged-branch-was-reverted)).
   `--ignore-revert <branch>` (which can be given more than once) says that
   wasn't really a revert: the branch counts as merged, and is untracked as
@@ -770,6 +772,46 @@ git stack prs
 - `-n`/`--dry-run` shows the stacks with the pull requests it would open, with
   their titles, in place of their links, without opening them.
 
+### `git stack unrevert <name> <revert>... [--from <branch>] [--stack <branch>...] [--remote origin]`
+
+Create `<name>` on `--from`, with commits that revert the given reverts, to
+bring back the changes of a merged branch they reverted, and move the
+branches given with `--stack` onto it.
+
+**When would I use it?** When a pull request was merged and then reverted, and
+you want to bring its changes back, e.g. to fix whatever got it reverted and
+merge it again, with the pull requests built on it on top. While the reverted
+branch is still tracked, `sync`, `clean`, `restack`, `push` and `prs` warn
+about it with the command to run; see
+[A merged branch was reverted](#a-merged-branch-was-reverted) for when it
+isn't.
+
+```sh
+git stack unrevert add-api-unrevert 1a2b3c4d5e6f --stack use-api
+# created add-api-unrevert on main, reverting 1 revert
+# moved use-api onto it
+# note: run `git stack push` and `git stack prs` to open a pull request for add-api-unrevert
+```
+
+- `<name>` must be a new branch, and like `branch`, it refuses a name a remote
+  already has a branch of. It's tracked on `--from`, which defaults to the
+  root of the first `--stack` branch's stack (e.g. `main`), or without
+  `--stack`, to the remote's default branch.
+- The reverts are reverted newest first, whatever order you give them in, so
+  one that undid what a later one redid doesn't conflict. Each must be in
+  `--from`'s history. The new commits get git's usual messages for reverting
+  a revert; amend them as you like.
+- Each `--stack` branch moves onto `<name>` with the branches stacked on it,
+  keeping its own commits, and is restacked onto it. That changes its pull
+  request's base the next time you push. A merged, reverted branch they
+  leave with nothing else stacked on it is untracked, but not deleted.
+- If a revert stops on a conflict, resolve it, run `git revert --continue`,
+  then `git stack restack` to move the `--stack` branches onto `<name>`. They
+  were moved before the reverts, so `git revert --abort` instead leaves them
+  on `<name>` with none of the reverted changes.
+- Works on the local `--from`, without fetching, so run `git stack sync`
+  first if the revert only happened on the remote. Needs a clean worktree.
+
 ## Scripting
 
 The commands below print one thing per line, for use in scripts, aliases,
@@ -884,6 +926,7 @@ What each command's result has, besides `type` and `events`:
 | `clean` | `stacks`: every stack |
 | `push` | `stacks`, and `pushed`, the branches it pushed |
 | `prs` | `stacks`, and `steps`, one for each branch: the `branch`, its `parent`, and the `action`: `open`, `exists` (it already has a pull request) or `no-commits` (skipped, since it has no commits of its own). `title` is an opened pull request's title, and `number` and `url` an opened or existing one's (an existing one has no `url`, and a dry run opens none); each is `null` otherwise |
+| `unrevert` | the `branch` it created, the `parent` it created it on, the `reverts` it reverted, newest first, and the `children` it moved onto it |
 | `parent`, `base` | the `parent` or `base` |
 | `show-stack` | `branches`, bottom first (`--quiet` can't be combined with `--json`) |
 
@@ -948,25 +991,26 @@ without committing anything, and git-stack's rebases pick it up automatically.
 If `pr1` is merged and then reverted on `main` (all of it, or some of its
 commits), `info` shows it as `(merged, then reverted)`, and `sync`, `clean`,
 `restack`, `push` and `prs` leave it, and the branches stacked on it, alone.
-
-To bring its changes back, make a branch on `main` that reverts the revert,
-move `pr2` onto it, and open a new pull request for it:
+Their warning gives the [`unrevert`](#git-stack-unrevert-name-revert---from-branch---stack-branch---remote-origin)
+command that brings it back as a new branch, with `pr2` moved onto it:
 
 ```sh
-git switch main
-git stack branch pr1-unrevert
-git revert <the revert>
-git stack track pr1-unrevert pr2 --base pr1   # move pr2 onto it, keeping its own commits
-git stack untrack pr1
-git stack restack
+git stack unrevert pr1-unrevert 1a2b3c4d5e6f --from main --stack pr2
 git stack push
-git stack prs
+git stack prs                      # open a pull request for pr1-unrevert
 ```
 
 A revert is only noticed while `pr1` is still tracked. Once `sync` or `clean`
 has stopped tracking it (and moved `pr2` onto `main`), a later revert of it
 isn't, so `pr2`'s pull request is missing `pr1`'s changes without a warning.
-Bring them back the same way.
+You may notice when `pr2` stops building, or a restack of it conflicts with
+`main`. To bring them back, find the revert (GitHub's "Revert" button titles
+it `Revert "<pr1's title>"`), and run `unrevert` the same way:
+
+```sh
+git log --oneline --grep='Revert "Add the API"' main
+git stack unrevert pr1-unrevert 1a2b3c4d5e6f --stack pr2
+```
 
 If it wasn't really reverted (git-stack only compares changes, so a later
 commit that happens to undo one of them, say setting a version number back,
