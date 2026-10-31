@@ -130,11 +130,6 @@ T}@T{
 \f[CR]git stack clean\f[R]
 T}
 T{
-bring back a PR whose merge was reverted
-T}@T{
-\f[CR]git stack unrevert <branch>\f[R]
-T}
-T{
 read all of this in the terminal
 T}@T{
 \f[CR]git stack \-\-help\f[R]
@@ -564,12 +559,6 @@ hand; fix it with \f[CR]git stack track <parent>\f[R].
 \f[CR]group <name>\f[R]: the stacks below it are in the group
 \f[CR]<name>\f[R] (see Groups).
 .IP \(bu 2
-\f[CR](<name> was reverted)\f[R]: it was stacked on \f[CR]<name>\f[R]
-until that merged, and its parent has since reverted some of
-\f[CR]<name>\f[R]\(aqs changes, so its pull request is missing them.
-\f[CR]sync\f[R] and \f[CR]clean\f[R] say so too (see A merged branch was
-reverted).
-.IP \(bu 2
 With the GitHub adapter, each branch\(aqs pull request (open or merged)
 is linked in a column at the end of its line: blue if it\(aqs open, grey
 if it\(aqs a draft, and magenta if it was merged.
@@ -596,8 +585,6 @@ and \f[CR]status\f[R] is one of \f[CR]up\-to\-date\f[R],
 \f[CR]needs\-restack\f[R], \f[CR]merged\f[R],
 \f[CR]merged\-with\-new\-commits\f[R], \f[CR]reverted\f[R] or
 \f[CR]parent\-missing\f[R].
-\f[CR]reverted_parent\f[R] is the \f[CR]<name>\f[R] of
-\f[CR](<name> was reverted)\f[R], or \f[CR]null\f[R].
 \f[CR]group\f[R] is the group of a branch on a stack\(aqs root, when
 \f[CR]info\f[R] shows it (once the group has two or more stacks), or
 \f[CR]null\f[R].
@@ -814,11 +801,9 @@ reverted).
 \f[CR]\-\-ignore\-revert <branch>\f[R] (which can be given more than
 once) says that wasn\(aqt really a revert: the branch counts as merged,
 and is untracked as usual.
-It also stops the warning that the branch a stacked branch was on until
-it merged was reverted.
-The branch has to be in the stacks being synced (or recorded by one of
-their branches); \f[CR]clean \-\-ignore\-revert\f[R] works from
-anywhere, and doesn\(aqt restack or push.
+The branch has to be in the stacks being synced;
+\f[CR]clean \-\-ignore\-revert\f[R] works from anywhere, and doesn\(aqt
+restack or push.
 .IP \(bu 2
 A branch with broken metadata (e.g.
 its parent was deleted by hand) is skipped with a warning, along with
@@ -1071,66 +1056,6 @@ Needs the GitHub adapter.
 \f[CR]\-n\f[R]/\f[CR]\-\-dry\-run\f[R] shows the stacks with the pull
 requests it would open, with their titles, in place of their links,
 without opening them.
-.SS \f[CR]git stack unrevert [<branch>] [\-\-remote origin]\f[R]
-Rebuild a branch (default: the current one) whose merge into its parent
-was reverted, as commits on its parent\(aqs tip that revert the reverts,
-and move the branches that were stacked on it back onto it.
-.PP
-\f[B]When would I use it?\f[R] When \f[CR]info\f[R] shows a branch as
-\f[CR](merged, then reverted)\f[R], or a branch that was stacked on it
-as \f[CR](<branch> was reverted)\f[R], and you want to bring its changes
-back, e.g.
-to fix whatever got it reverted and merge it again.
-.IP
-.EX
-git stack unrevert add\-api
-\f[I]# rebuilt add\-api on main, reverting 1 revert\f[R]
-\f[I]# note: run \(gagit stack restack\(ga to move use\-api onto it\f[R]
-\f[I]# note: run \(gagit stack push\(ga and \(gagit stack prs\(ga to open a new pull request for it\f[R]
-.EE
-.IP \(bu 2
-Only the reverts still in effect are reverted, newest first: if only
-some of the branch\(aqs commits were reverted, only those come back, and
-a revert that was itself reverted is left alone.
-The commits get git\(aqs usual messages for reverting a revert; amend
-them as you like.
-.IP \(bu 2
-The branch\(aqs old commits are dropped, since its parent already has
-them (or a squash of them) in its history.
-Its new base is its parent\(aqs tip.
-.IP \(bu 2
-It works whether or not \f[CR]sync\f[R] or \f[CR]clean\f[R] already
-stopped tracking it, and even if they deleted it, as long as a branch
-stacked on it is still tracked: that branch recorded what it was when it
-merged.
-If it still exists, it\(aqs tracked again, unless it changed since it
-merged, in which case it\(aqs left alone (rename it to have it recreated
-instead).
-If it was deleted, it\(aqs recreated: git\-stack keeps its commits from
-being garbage\-collected for as long as a branch records it.
-.IP \(bu 2
-The branches that were stacked on it are moved back onto it, which
-changes their pull requests\(aq bases the next time you push.
-Like the ones still stacked on it, \f[CR]restack\f[R] or \f[CR]sync\f[R]
-moves them onto its new commits.
-.IP \(bu 2
-Its merged pull request can\(aqt be reopened, and no longer counts as
-the branch\(aqs.
-If its remote branch was deleted when it was merged, its upstream is
-unset, so \f[CR]git stack push\f[R] pushes it again; then
-\f[CR]git stack prs\f[R] opens a new pull request.
-.IP \(bu 2
-If a revert stops on a conflict, resolve it and run
-\f[CR]git revert \-\-continue\f[R]; the next git\-stack command records
-the new base.
-To put the branch back as it was instead, run
-\f[CR]git revert \-\-abort\f[R], then \f[CR]git reset \-\-hard\f[R] to
-the commit the error message names.
-.IP \(bu 2
-Works on the local parent, without fetching, so run
-\f[CR]git stack sync\f[R] first if the revert only happened on the
-remote.
-Needs a clean worktree.
 .SH SCRIPTING
 The commands below print one thing per line, for use in scripts,
 aliases, shell prompts and editors.
@@ -1352,13 +1277,6 @@ existing one has no \f[CR]url\f[R], and a dry run opens none); each is
 \f[CR]null\f[R] otherwise
 T}
 T{
-\f[CR]unrevert\f[R]
-T}@T{
-the \f[CR]branch\f[R], the \f[CR]parent\f[R] it was rebuilt on, the
-\f[CR]reverts\f[R] it reverted, and the \f[CR]children\f[R] that still
-need restacking
-T}
-T{
 \f[CR]parent\f[R], \f[CR]base\f[R]
 T}@T{
 the \f[CR]parent\f[R] or \f[CR]base\f[R]
@@ -1447,22 +1365,27 @@ it, or some of its commits), \f[CR]info\f[R] shows it as
 \f[CR]clean\f[R], \f[CR]restack\f[R], \f[CR]push\f[R] and \f[CR]prs\f[R]
 leave it, and the branches stacked on it, alone.
 .PP
-If \f[CR]sync\f[R] or \f[CR]clean\f[R] had already stopped tracking
-\f[CR]pr1\f[R] (and moved \f[CR]pr2\f[R] onto \f[CR]main\f[R]) by the
-time it was reverted, \f[CR]info\f[R] shows \f[CR]pr2\f[R] as
-\f[CR](pr1 was reverted)\f[R], and \f[CR]sync\f[R] and \f[CR]clean\f[R]
-warn about it.
-.PP
-Either way, to bring its changes back, rebuild it on \f[CR]main\f[R]
-with \f[CR]unrevert\f[R], which reverts the reverts, then restack its
-children onto it and open a new pull request:
+To bring its changes back, make a branch on \f[CR]main\f[R] that reverts
+the revert, move \f[CR]pr2\f[R] onto it, and open a new pull request for
+it:
 .IP
 .EX
-git stack unrevert pr1             \f[I]# moves pr2 back onto it, if it had moved\f[R]
-git stack restack                  \f[I]# move pr2 onto the new pr1\f[R]
+git switch main
+git stack branch pr1\-unrevert
+git revert <the revert>
+git stack track pr1\-unrevert pr2 \-\-base pr1   \f[I]# move pr2 onto it, keeping its own commits\f[R]
+git stack untrack pr1
+git stack restack
 git stack push
-git stack prs                      \f[I]# open a new one for pr1\f[R]
+git stack prs
 .EE
+.PP
+A revert is only noticed while \f[CR]pr1\f[R] is still tracked.
+Once \f[CR]sync\f[R] or \f[CR]clean\f[R] has stopped tracking it (and
+moved \f[CR]pr2\f[R] onto \f[CR]main\f[R]), a later revert of it
+isn\(aqt, so \f[CR]pr2\f[R]\(aqs pull request is missing
+\f[CR]pr1\f[R]\(aqs changes without a warning.
+Bring them back the same way.
 .PP
 If it wasn\(aqt really reverted (git\-stack only compares changes, so a
 later commit that happens to undo one of them, say setting a version
@@ -1471,8 +1394,6 @@ number back, looks like a revert too), run
 as merged, and \f[CR]clean\f[R] stops tracking it as usual, moving
 \f[CR]pr2\f[R] onto \f[CR]main\f[R], without restacking or pushing
 anything.
-If \f[CR]pr1\f[R] was already untracked, that stops the warning about
-\f[CR]pr2\f[R] instead.
 \f[CR]sync\f[R] takes \f[CR]\-\-ignore\-revert\f[R] too, if you\(aqre
 syncing that stack anyway.
 .SH HOW IT WORKS
@@ -1502,18 +1423,6 @@ changes, since they need its new commits.
 When a merged branch on a stack\(aqs root stops being tracked, each
 branch that was stacked on it gets its group (or its name) in
 \f[CR]branch.<name>.stackGroup\f[R].
-.PP
-When a merged branch stops being tracked, each branch that was stacked
-on it records what it was, in
-\f[CR]branch.<name>.stackMergedParent\f[R]: its name, the parent it
-merged into, its base and tip, and (with the GitHub adapter) its pull
-request\(aqs merge commit.
-That\(aqs how a later revert of it is noticed, and how
-\f[CR]unrevert\f[R] can bring it back even once it\(aqs untracked or
-deleted.
-So that its commits aren\(aqt garbage\-collected once nothing else has
-them, its tip is kept as \f[CR]refs/stack/merged/<commit>\f[R], until no
-branch records it any more.
 .PP
 Checking whether a branch conflicts with its parent, whether its changes
 already landed there, and whether they were reverted since, can take a

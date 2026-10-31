@@ -53,9 +53,7 @@ def add_ignore_revert_argument(parser: argparse.ArgumentParser) -> None:
         action="append",
         default=[],
         metavar="BRANCH",
-        help="treat BRANCH as merged even if its parent has since reverted some of it, and stop "
-        "warning that the branch a stacked branch was on until it merged was reverted (can be "
-        "given more than once)",
+        help="treat BRANCH as merged even if its parent has since reverted some of it (can be given more than once)",
     )
 
 

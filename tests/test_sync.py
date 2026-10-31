@@ -667,11 +667,9 @@ def test_sync_ignore_revert_untracks_reverted_branch_as_merged(
 
     client.sync(ignore_reverts=["pr1"])
 
-    assert not any(isinstance(e, (events.Reverted, events.MergedParentReverted)) for e in emitted)
+    assert not any(isinstance(e, events.Reverted) for e in emitted)
     repo.assert_untracked("pr1")
     assert repo.config("pr2", "stackParent") == "main"
-    # So the next sync doesn't warn that pr2's merged parent was reverted.
-    assert not repo.config_exists("pr2", "stackMergedParent")
 
 
 def test_sync_ignore_revert_refuses_branch_outside_the_stacks_it_syncs(repo: Repo, client: StackClient) -> None:

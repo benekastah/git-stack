@@ -30,7 +30,6 @@ from git_stack.stack import (
     StackClient,
     SyncResult,
     Tracked,
-    Unreverted,
     Untracked,
 )
 
@@ -543,12 +542,6 @@ def test_clean_json_ends_with_the_error_when_it_fails(stack: Any, capsys: pytest
         ),
         (["restack"], "restack", None, {}),
         (
-            ["unrevert"],
-            "unrevert",
-            Unreverted("pr1", "main", ("abc",), ("pr2",)),
-            {"branch": "pr1", "parent": "main", "reverts": ["abc"], "children": ["pr2"]},
-        ),
-        (
             ["track", "main"],
             "track",
             [Tracked("pr1", "main", "abc")],
@@ -643,17 +636,6 @@ def test_untrack_prints_branches_left_on_it(stack: Any, capsys: pytest.CaptureFi
     )
 
 
-def test_info_notes_a_reverted_merged_parent(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
-    stack.info.return_value = [
-        BranchInfo("main", None, None, current=False),
-        BranchInfo("pr2", "main", BranchStatus.UP_TO_DATE, current=False, reverted_parent="pr1"),
-    ]
-
-    main(["info"], stack=stack)
-
-    assert capsys.readouterr().out == "main\n└── pr2 (pr1 was reverted)\n"
-
-
 def test_info_draws_a_header_above_the_stacks_in_a_group(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
     stack.info.return_value = [
         BranchInfo("main", None, None, current=False),
@@ -692,7 +674,6 @@ def test_info_json_lists_every_branch(stack: Any, capsys: pytest.CaptureFixture[
             BranchStatus.NEEDS_RESTACK,
             current=True,
             pull_request=PullRequestLink(12, "https://github.com/acme/widgets/pull/12", PullRequestState.OPEN),
-            reverted_parent="pr0",
             group="pr0",
         ),
     ]
@@ -705,7 +686,6 @@ def test_info_json_lists_every_branch(stack: Any, capsys: pytest.CaptureFixture[
             "parent": None,
             "status": None,
             "current": False,
-            "reverted_parent": None,
             "group": None,
             "pr": None,
         },
@@ -714,7 +694,6 @@ def test_info_json_lists_every_branch(stack: Any, capsys: pytest.CaptureFixture[
             "parent": "main",
             "status": "needs-restack",
             "current": True,
-            "reverted_parent": "pr0",
             "group": "pr0",
             "pr": {"number": 12, "url": "https://github.com/acme/widgets/pull/12", "state": "open"},
         },

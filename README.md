@@ -50,7 +50,6 @@ git stack sync                  # catch up: drop merged PRs, rebase what's left,
 | rename a branch in a stack | `git stack rename <new>` |
 | sync several stacks at once | `git stack group add <name> <branch-or-glob>...`, then `git stack sync -g <name>` |
 | clean up merged branches in every stack | `git stack clean` |
-| bring back a PR whose merge was reverted | `git stack unrevert <branch>` |
 | read all of this in the terminal | `git stack --help` |
 
 ## Words used here
@@ -391,10 +390,6 @@ git stack info
   with `git stack track <parent>`.
 - `group <name>`: the stacks below it are in the group `<name>` (see
   [Groups](#groups)).
-- `(<name> was reverted)`: it was stacked on `<name>` until that merged, and
-  its parent has since reverted some of `<name>`'s changes, so its pull
-  request is missing them. `sync` and `clean` say so too (see
-  [A merged branch was reverted](#a-merged-branch-was-reverted)).
 - With the [GitHub adapter](#github), each branch's pull request (open or
   merged) is linked in a column at the end of its line: blue if it's open,
   grey if it's a draft, and magenta if it was merged.
@@ -411,7 +406,6 @@ git stack info
   `status` are `null` for a root, and `status` is one of `up-to-date`,
   `needs-restack`, `merged`, `merged-with-new-commits`, `reverted` or
   `parent-missing`.
-  `reverted_parent` is the `<name>` of `(<name> was reverted)`, or `null`.
   `group` is the group of a branch on a stack's root, when `info` shows it
   (once the group has two or more stacks), or `null`.
   `pr` is the branch's pull request's `number`, `url` and `state` (`open`,
@@ -582,10 +576,8 @@ git stack sync -d both          # ...and their remote branches
   [A merged branch was reverted](#a-merged-branch-was-reverted)).
   `--ignore-revert <branch>` (which can be given more than once) says that
   wasn't really a revert: the branch counts as merged, and is untracked as
-  usual. It also stops the warning that the branch a stacked branch was on
-  until it merged was reverted. The branch has to be in the stacks being
-  synced (or recorded by one of their branches); `clean --ignore-revert`
-  works from anywhere, and doesn't restack or push.
+  usual. The branch has to be in the stacks being synced;
+  `clean --ignore-revert` works from anywhere, and doesn't restack or push.
 - A branch with broken metadata (e.g. its parent was deleted by hand) is
   skipped with a warning, along with everything stacked on it; the rest of the
   stack is still synced.
@@ -778,51 +770,6 @@ git stack prs
 - `-n`/`--dry-run` shows the stacks with the pull requests it would open, with
   their titles, in place of their links, without opening them.
 
-### `git stack unrevert [<branch>] [--remote origin]`
-
-Rebuild a branch (default: the current one) whose merge into its parent was
-reverted, as commits on its parent's tip that revert the reverts, and move the
-branches that were stacked on it back onto it.
-
-**When would I use it?** When `info` shows a branch as
-`(merged, then reverted)`, or a branch that was stacked on it as
-`(<branch> was reverted)`, and you want to bring its changes back, e.g. to fix
-whatever got it reverted and merge it again.
-
-```sh
-git stack unrevert add-api
-# rebuilt add-api on main, reverting 1 revert
-# note: run `git stack restack` to move use-api onto it
-# note: run `git stack push` and `git stack prs` to open a new pull request for it
-```
-
-- Only the reverts still in effect are reverted, newest first: if only some
-  of the branch's commits were reverted, only those come back, and a revert
-  that was itself reverted is left alone. The commits get git's usual
-  messages for reverting a revert; amend them as you like.
-- The branch's old commits are dropped, since its parent already has them (or
-  a squash of them) in its history. Its new base is its parent's tip.
-- It works whether or not `sync` or `clean` already stopped tracking it, and
-  even if they deleted it, as long as a branch stacked on it is still tracked:
-  that branch recorded what it was when it merged. If it still exists, it's
-  tracked again, unless it changed since it merged, in which case it's left
-  alone (rename it to have it recreated instead). If it was deleted, it's
-  recreated: git-stack keeps its commits from being garbage-collected for as
-  long as a branch records it.
-- The branches that were stacked on it are moved back onto it, which changes
-  their pull requests' bases the next time you push. Like the ones still
-  stacked on it, `restack` or `sync` moves them onto its new commits.
-- Its merged pull request can't be reopened, and no longer counts as the
-  branch's. If its remote branch was deleted when it was merged, its upstream
-  is unset, so `git stack push` pushes it again; then `git stack prs` opens a
-  new pull request.
-- If a revert stops on a conflict, resolve it and run `git revert --continue`;
-  the next git-stack command records the new base. To put the branch back as
-  it was instead, run `git revert --abort`, then `git reset --hard` to the
-  commit the error message names.
-- Works on the local parent, without fetching, so run `git stack sync` first
-  if the revert only happened on the remote. Needs a clean worktree.
-
 ## Scripting
 
 The commands below print one thing per line, for use in scripts, aliases,
@@ -937,7 +884,6 @@ What each command's result has, besides `type` and `events`:
 | `clean` | `stacks`: every stack |
 | `push` | `stacks`, and `pushed`, the branches it pushed |
 | `prs` | `stacks`, and `steps`, one for each branch: the `branch`, its `parent`, and the `action`: `open`, `exists` (it already has a pull request) or `no-commits` (skipped, since it has no commits of its own). `title` is an opened pull request's title, and `number` and `url` an opened or existing one's (an existing one has no `url`, and a dry run opens none); each is `null` otherwise |
-| `unrevert` | the `branch`, the `parent` it was rebuilt on, the `reverts` it reverted, and the `children` that still need restacking |
 | `parent`, `base` | the `parent` or `base` |
 | `show-stack` | `branches`, bottom first (`--quiet` can't be combined with `--json`) |
 
@@ -1003,27 +949,30 @@ If `pr1` is merged and then reverted on `main` (all of it, or some of its
 commits), `info` shows it as `(merged, then reverted)`, and `sync`, `clean`,
 `restack`, `push` and `prs` leave it, and the branches stacked on it, alone.
 
-If `sync` or `clean` had already stopped tracking `pr1` (and moved `pr2` onto
-`main`) by the time it was reverted, `info` shows `pr2` as
-`(pr1 was reverted)`, and `sync` and `clean` warn about it.
-
-Either way, to bring its changes back, rebuild it on `main` with
-[`unrevert`](#git-stack-unrevert-branch---remote-origin), which reverts the
-reverts, then restack its children onto it and open a new pull request:
+To bring its changes back, make a branch on `main` that reverts the revert,
+move `pr2` onto it, and open a new pull request for it:
 
 ```sh
-git stack unrevert pr1             # moves pr2 back onto it, if it had moved
-git stack restack                  # move pr2 onto the new pr1
+git switch main
+git stack branch pr1-unrevert
+git revert <the revert>
+git stack track pr1-unrevert pr2 --base pr1   # move pr2 onto it, keeping its own commits
+git stack untrack pr1
+git stack restack
 git stack push
-git stack prs                      # open a new one for pr1
+git stack prs
 ```
+
+A revert is only noticed while `pr1` is still tracked. Once `sync` or `clean`
+has stopped tracking it (and moved `pr2` onto `main`), a later revert of it
+isn't, so `pr2`'s pull request is missing `pr1`'s changes without a warning.
+Bring them back the same way.
 
 If it wasn't really reverted (git-stack only compares changes, so a later
 commit that happens to undo one of them, say setting a version number back,
 looks like a revert too), run `git stack clean --ignore-revert pr1`: `pr1`
 counts as merged, and `clean` stops tracking it as usual, moving `pr2` onto
-`main`, without restacking or pushing anything. If `pr1` was already
-untracked, that stops the warning about `pr2` instead. `sync` takes
+`main`, without restacking or pushing anything. `sync` takes
 `--ignore-revert` too, if you're syncing that stack anyway.
 
 ## How it works
@@ -1050,14 +999,6 @@ its new commits.
 
 When a merged branch on a stack's root stops being tracked, each branch that
 was stacked on it gets its group (or its name) in `branch.<name>.stackGroup`.
-
-When a merged branch stops being tracked, each branch that was stacked on it
-records what it was, in `branch.<name>.stackMergedParent`: its name, the
-parent it merged into, its base and tip, and (with the GitHub adapter) its pull
-request's merge commit. That's how a later revert of it is noticed, and how
-`unrevert` can bring it back even once it's untracked or deleted. So that its
-commits aren't garbage-collected once nothing else has them, its tip is kept
-as `refs/stack/merged/<commit>`, until no branch records it any more.
 
 Checking whether a branch conflicts with its parent, whether its changes
 already landed there, and whether they were reverted since, can take a second

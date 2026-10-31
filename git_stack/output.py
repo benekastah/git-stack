@@ -20,7 +20,6 @@ WARNINGS = (
     events.ParentSkipped,
     events.MergedWithNewCommits,
     events.Reverted,
-    events.MergedParentReverted,
     events.UpstreamGone,
     events.BrokenBranch,
     events.ParentMissing,
@@ -106,12 +105,6 @@ def message(event: events.Event) -> str:  # noqa: C901
                 f"skipping {event.branch}: it was merged into {event.parent}, then {event.parent} reverted "
                 f'some of its changes; see "A merged branch was reverted" in `git stack --help`, or if '
                 f"that wasn't a revert, run `git stack clean --ignore-revert {event.branch}`"
-            )
-        case events.MergedParentReverted():
-            return (
-                f"{event.branch} was stacked on {event.merged}, and {event.parent} has since reverted some of "
-                f"{event.merged}'s changes; run `git stack unrevert {event.merged}` to bring it back with "
-                f"{event.branch} on it, or if that wasn't a revert, `git stack clean --ignore-revert {event.merged}`"
             )
         case events.UpstreamGone():
             return f"{event.branch}'s remote branch is gone but its changes aren't in {event.parent}; leaving it alone"
