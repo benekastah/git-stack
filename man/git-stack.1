@@ -820,7 +820,9 @@ The children are rebased the next time you \f[CR]sync\f[R] or
 It ends by showing every stack, as \f[CR]info\f[R] does.
 .IP \(bu 2
 Runs from any branch, even one that isn\(aqt in a stack.
-Needs a clean worktree.
+Uncommitted changes are fine, unless you\(aqre on a stack\(aqs root,
+which \f[CR]clean\f[R] fast\-forwards, or, with \f[CR]\-d local\f[R] or
+\f[CR]\-d both\f[R], on a tracked branch, which it could delete.
 .IP \(bu 2
 \f[CR]\-\-json\f[R] prints one JSON object for scripts instead, and the
 usual messages on stderr.
@@ -1200,8 +1202,8 @@ then rerun the git\-stack command to finish the rest of the stack.
 The new parent and base (and the pulled upstream commits) are recorded
 only if the operation actually completed.
 .PP
-\f[CR]restack\f[R], \f[CR]sync\f[R] and \f[CR]clean\f[R] refuse to start
-with uncommitted changes, but not with untracked files.
+\f[CR]restack\f[R] and \f[CR]sync\f[R] refuse to start with uncommitted
+changes, but not with untracked files.
 If one is in the way of a commit being replayed, git stops without a
 conflict and says which file.
 Move or delete it, then run \f[CR]git rebase \-\-continue\f[R], or for a

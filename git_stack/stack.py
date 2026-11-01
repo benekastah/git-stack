@@ -1014,16 +1014,21 @@ class StackClient(StackCore):
         Returns every stack, as info() lists them."""
         git = self.git
         self.ensure_no_operation_in_progress()
-        self.ensure_clean_worktree()
         self.settle_all()
-        self.ensure_ignorable_reverts(ignore_reverts, list(self.tracked_branches()), "any stack")
+        parents = self.tracked_branches()
+        roots = sorted({stack_root(b, parents) for b in parents})
+        # Only fast-forwarding the current branch, or deleting it (and so
+        # switching away), touches the worktree, and either could fail partway
+        # with uncommitted changes in the way.
+        current = git.current_branch()
+        if current in roots or (delete in ("local", "both") and current in parents):
+            self.ensure_clean_worktree()
+        self.ensure_ignorable_reverts(ignore_reverts, list(parents), "any stack")
         # Where to leave the user afterwards: their branch (or the commit they had
         # detached at), or wherever deleting their branch left them.
         original = self.current_checkout()
         adapter = self.checked_adapter(remote)
         self.fetch(remote)
-        parents = self.tracked_branches()
-        roots = sorted({stack_root(b, parents) for b in parents})
         self.fast_forward_trunks(roots)
 
         # Parent-before-child, so a branch whose parent was merged is checked

@@ -100,7 +100,7 @@ def test_clean_json_reports_what_stopped_it(repo: Repo) -> None:
     repo.make_stack()
     (repo.path / "a").write_text("uncommitted\n")
 
-    result = repo.stack("clean", "--json", expect_success=False)
+    result = repo.stack("clean", "-d", "local", "--json", expect_success=False)
 
     assert result.returncode == 1
     assert json.loads(result.stdout) == {

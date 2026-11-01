@@ -594,8 +594,9 @@ git stack clean -d local
   the next time you `sync` or `restack` their stack.
 - `-d` and `--ignore-revert` work as for `sync`.
 - It ends by showing every stack, as `info` does.
-- Runs from any branch, even one that isn't in a stack. Needs a clean
-  worktree.
+- Runs from any branch, even one that isn't in a stack. Uncommitted changes
+  are fine, unless you're on a stack's root, which `clean` fast-forwards, or,
+  with `-d local` or `-d both`, on a tracked branch, which it could delete.
 - `--json` prints one JSON object for scripts instead, and the usual messages
   on stderr. `events` lists what happened, in order: each has a `type`, the
   `message` `clean` would print, whether it's a `warning`, and fields that
@@ -902,7 +903,7 @@ then rerun the git-stack command to finish the rest of the stack. The new
 parent and base (and the pulled upstream commits) are recorded only if the
 operation actually completed.
 
-`restack`, `sync` and `clean` refuse to start with uncommitted changes, but not
+`restack` and `sync` refuse to start with uncommitted changes, but not
 with untracked files. If one is in the way of a commit being replayed, git
 stops without a conflict and says which file. Move or delete it, then run
 `git rebase --continue`, or for a pull, `git cherry-pick --abort` (git's

@@ -77,3 +77,50 @@ def test_clean_ignore_revert_refuses_branch_with_no_revert_to_ignore(repo: Repo,
 
     with pytest.raises(StackError, match="there's no revert of nope to ignore in any stack"):
         client.clean(ignore_reverts=["nope"])
+
+
+@pytest.mark.parametrize(
+    ("checkout", "delete"),
+    [
+        ("main", None),  # a root, which clean fast-forwards
+        ("pr3", "local"),  # a tracked branch, which clean could delete
+        ("pr3", "both"),
+    ],
+)
+def test_clean_refuses_uncommitted_changes_it_could_get_in_the_way_of(
+    repo: Repo, client: StackClient, checkout: str, delete: str | None
+) -> None:
+    repo.make_stack()
+    client.push()
+    repo.squash_merge_on_forge("pr1")
+    repo.git("switch", "--quiet", checkout)
+    repo.write("a", "uncommitted\n")
+
+    with pytest.raises(StackError, match="uncommitted changes"):
+        client.clean(delete=delete)
+
+    assert repo.config("pr1", "stackParent") == "main"
+
+
+@pytest.mark.parametrize(
+    ("checkout", "delete"),
+    [
+        ("pr3", None),  # tracked, but not deleted
+        ("feature", "local"),  # neither a root nor tracked
+    ],
+)
+def test_clean_runs_with_uncommitted_changes_it_doesnt_touch(
+    repo: Repo, client: StackClient, checkout: str, delete: str | None
+) -> None:
+    repo.make_stack()
+    client.push()
+    repo.squash_merge_on_forge("pr1")
+    repo.git("switch", "--quiet", "-C", "feature", "pr3")
+    repo.git("switch", "--quiet", checkout)
+    repo.write("c", "uncommitted\n")
+
+    client.clean(delete=delete)
+
+    assert not repo.config_exists("pr1", "stackParent")
+    assert repo.git("branch", "--show-current") == checkout
+    assert (repo.path / "c").read_text() == "uncommitted\n"
