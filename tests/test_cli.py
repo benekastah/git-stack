@@ -29,6 +29,7 @@ from git_stack.stack import (
     StackClient,
     SyncResult,
     Tracked,
+    Unreverted,
     Untracked,
 )
 
@@ -439,14 +440,16 @@ def test_clean_json_prints_each_event_then_the_result(stack: Any, capsys: pytest
     assert main(["clean", "--json"], stack=stack) == 0
 
     out, err = capsys.readouterr()
+    fetching = {
+        "type": "fetching",
+        "message": "fetching origin, and pruning its deleted branches",
+        "warning": False,
+        "remote": "origin",
+    }
+    # The last line repeats every event, for consumers that only read it.
     assert [json.loads(line) for line in out.splitlines()] == [
-        {
-            "type": "fetching",
-            "message": "fetching origin, and pruning its deleted branches",
-            "warning": False,
-            "remote": "origin",
-        },
-        {"type": "result", "stacks": stacks_json(STACK)},
+        fetching,
+        {"type": "result", "stacks": stacks_json(STACK), "events": [fetching]},
     ]
     assert err == ""
     assert stack.git.passthrough_stdout is sys.stderr
@@ -464,7 +467,7 @@ def test_clean_json_ends_with_the_error_when_it_fails(stack: Any, capsys: pytest
     out, err = capsys.readouterr()
     lines = [json.loads(line) for line in out.splitlines()]
     assert [line["type"] for line in lines] == ["fetching", "error"]
-    assert lines[-1] == {"type": "error", "message": "fetching origin failed"}
+    assert lines[-1] == {"type": "error", "message": "fetching origin failed", "events": [lines[0]]}
     assert err == "git stack: fetching origin failed\n"
 
 
@@ -491,6 +494,41 @@ def test_clean_json_ends_with_the_error_when_it_fails(stack: Any, capsys: pytest
                 ],
             },
         ),
+        (["restack"], "restack", None, {}),
+        (
+            ["unrevert"],
+            "unrevert",
+            Unreverted("pr1", "main", ("abc",), ("pr2",)),
+            {"branch": "pr1", "parent": "main", "reverts": ["abc"], "children": ["pr2"]},
+        ),
+        (
+            ["track", "main"],
+            "track",
+            [Tracked("pr1", "main", "abc")],
+            {"tracked": [{"branch": "pr1", "parent": "main", "base": "abc"}]},
+        ),
+        (["untrack"], "untrack", [Untracked("pr1", ("pr2",))], {"untracked": [{"branch": "pr1", "children": ["pr2"]}]}),
+        (
+            ["rename", "new"],
+            "rename",
+            Renamed("old", "new", ("pr2",), "origin/old"),
+            {"old": "old", "new": "new", "children": ["pr2"], "upstream": "origin/old"},
+        ),
+        (["branch", "pr2", "--group", "g"], "branch", "pr1", {"branch": "pr2", "parent": "pr1", "group": "g"}),
+        (["group", "add", "g", "pr1"], "group_add", ["pr1"], {"group": "g", "bottoms": ["pr1"]}),
+        (["group", "remove"], "group_remove", [("pr1", "g")], {"removed": [{"bottom": "pr1", "group": "g"}]}),
+        (["ungroup"], "group_remove", [], {"removed": []}),
+        (
+            ["group", "rename", "new"],
+            "group_rename",
+            ("old", ["pr1"]),
+            {"old": "old", "new": "new", "branches": ["pr1"]},
+        ),
+        (["parent"], "parent", "main", {"parent": "main"}),
+        (["base"], "base", "abc", {"base": "abc"}),
+        (["show-stack"], "show_stack", ["pr1", "pr2"], {"branches": ["pr1", "pr2"]}),
+        (["next"], "next", "pr2", {"branch": "pr2"}),
+        (["prev"], "prev", "main", {"branch": "main"}),
         (
             ["autocreate"],
             "autocreate",
@@ -512,14 +550,14 @@ def test_clean_json_ends_with_the_error_when_it_fails(stack: Any, capsys: pytest
         ),
     ],
 )
-def test_json_prints_only_the_result_on_stdout(
+def test_json_prints_the_result_on_stdout(
     stack: Any, capsys: pytest.CaptureFixture[str], argv: list[str], method: str, returned: Any, result: Any
 ) -> None:
     getattr(stack, method).return_value = returned
 
     assert main([*argv, "--json"], stack=stack) == 0
 
-    assert json.loads(capsys.readouterr().out) == {"type": "result", **result}
+    assert json.loads(capsys.readouterr().out) == {"type": "result", **result, "events": []}
 
 
 def test_push_says_when_everything_looks_merged(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
@@ -657,3 +695,8 @@ def test_show_stack_outside_a_stack_says_so(stack: Any, capsys: pytest.CaptureFi
     assert main(["show-stack"], stack=stack) == 1
 
     assert capsys.readouterr() == ("", "git stack: main isn't in a stack\n")
+
+
+def test_show_stack_takes_quiet_or_json_but_not_both(stack: Any) -> None:
+    with pytest.raises(SystemExit):
+        main(["show-stack", "--quiet", "--json"], stack=stack)

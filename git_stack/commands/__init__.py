@@ -12,6 +12,7 @@ import sys
 from collections.abc import Callable, Sequence
 from typing import Any, TypeAlias, TypeVar
 
+from git_stack import events
 from git_stack.errors import StackError
 from git_stack.output import event_json
 from git_stack.stack import StackClient
@@ -70,7 +71,8 @@ def add_delete_argument(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("-d", "--delete", choices=("local", "remote", "both"), help=DELETE_HELP)
 
 
-def add_json_argument(parser: argparse.ArgumentParser) -> None:
+# parser can be a mutually exclusive group, whose type argparse doesn't export either.
+def add_json_argument(parser: argparse.ArgumentParser | argparse._MutuallyExclusiveGroup) -> None:
     parser.add_argument(
         "--json",
         action="store_true",
@@ -94,18 +96,24 @@ def run_for_json(
     """Run command for --json, which prints a JSON object per line, as it goes:
     each event it reports (see event_json), then {"type": "result", ...} with
     result_json of what it returns, or if it fails, {"type": "error",
-    "message": ...} before raising. stdout is kept for that, so git's output
-    goes to stderr."""
+    "message": ...} before raising. The last line also has "events", every
+    event again, so it alone says everything that happened. stdout is kept for
+    the JSON, so git's output goes to stderr."""
+    reported: list[dict[str, Any]] = []
 
     def emit(record: dict[str, Any]) -> None:
         print(json.dumps(record), flush=True)
 
-    stack.on_event = lambda event: emit(event_json(event))
+    def on_event(event: events.Event) -> None:
+        reported.append(event_json(event))
+        emit(reported[-1])
+
+    stack.on_event = on_event
     stack.git.passthrough_stdout = sys.stderr
     try:
         returned = command()
     except StackError as e:
-        emit({"type": "error", "message": str(e)})
+        emit({"type": "error", "message": str(e), "events": reported})
         raise
-    emit({"type": "result", **result_json(returned)})
+    emit({"type": "result", **result_json(returned), "events": reported})
     return returned

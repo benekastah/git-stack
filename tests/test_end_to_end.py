@@ -104,6 +104,7 @@ def test_clean_json_reports_what_stopped_it(repo: Repo) -> None:
     assert json.loads(result.stdout) == {
         "type": "error",
         "message": "you have uncommitted changes; commit or stash them first",
+        "events": [],
     }
     assert result.stderr == "git stack: you have uncommitted changes; commit or stash them first\n"
 
@@ -118,5 +119,5 @@ def test_sync_json_prints_only_json_on_stdout(repo: Repo) -> None:
     *events, last = [json.loads(line) for line in result.stdout.splitlines()]
     types = [e["type"] for e in events]
     assert "untracked" in types and "restacking" in types
-    assert last == {"type": "result", "stacks": last["stacks"], "unpushed": []}
+    assert last["unpushed"] == [] and last["events"] == events
     assert [b["name"] for b in last["stacks"]] == ["main", "pr2", "pr3"]

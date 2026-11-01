@@ -234,7 +234,7 @@ entry, it's their merge-base.
 - Nothing is written unless every branch can be tracked, so a bad argument
   doesn't leave the stack half-tracked.
 
-### `git stack autocreate [--remote origin] [-n] [--json]`
+### `git stack autocreate [--remote origin] [-n]`
 
 Track your open pull requests on GitHub, drafts included, as stacks: each
 pull request's branch on the branch it merges into.
@@ -278,13 +278,6 @@ git stack autocreate
   with `git stack track <parent> <branch> --base <sha>`.
 - `-n`/`--dry-run` prints what it would do without changing anything (besides
   fetching).
-- `--json` prints JSON for scripts (see [JSON output](#json-output)). Its result has
-  `stacks`, and `steps`, one for each pull request: its `branch`, the
-  `parent` it merges into, its `number`, and the `action`: `create`, `track`,
-  `already-tracked`, `parent-differs` or `skip`. `base` is the commit a
-  branch it creates or tracks is built on, `tracked_parent` the parent a
-  `parent-differs` branch is tracked on instead, and `reason` why it skipped
-  one; each is `null` otherwise.
 
 ### `git stack untrack [<branch|glob>...]`
 
@@ -510,7 +503,7 @@ git stack restack --latest              # also move the stack onto main's latest
 - A branch checked out in another worktree is skipped, with a warning; see
   [Branches checked out in other worktrees](#branches-checked-out-in-other-worktrees).
 
-### `git stack sync [<branch|glob>...] [-g <group>] [--remote origin] [-d local|remote|both] [--latest] [--no-push] [--ignore-revert <branch>] [--json]`
+### `git stack sync [<branch|glob>...] [-g <group>] [--remote origin] [-d local|remote|both] [--latest] [--no-push] [--ignore-revert <branch>]`
 
 Bring the current stack (or the ones named, see [Groups](#groups)) up to date
 with the remote:
@@ -581,11 +574,8 @@ git stack sync -d both          # ...and their remote branches
   `sync` pushes the rest, then fails, listing the branches it couldn't push
   for that reason (unless it was run with `--no-push`).
 - Needs a clean worktree, and refuses to run outside a stack.
-- `--json` prints JSON for scripts (see [JSON output](#json-output)). Its result has
-  `stacks`, and `unpushed`, the branches whose remote branch is out of date
-  because they weren't pushed (e.g. with `--no-push`).
 
-### `git stack clean [--remote origin] [-d local|remote|both] [--ignore-revert <branch>] [--json]`
+### `git stack clean [--remote origin] [-d local|remote|both] [--ignore-revert <branch>]`
 
 Fetch with `--prune`, fast-forward every stack's root, and stop tracking merged
 branches in every stack, moving their children onto their parent.
@@ -607,10 +597,8 @@ git stack clean -d local
 - Runs from any branch, even one that isn't in a stack. Uncommitted changes
   are fine, unless you're on a stack's root, which `clean` fast-forwards, or,
   with `-d local` or `-d both`, on a tracked branch, which it could delete.
-- `--json` prints JSON for scripts (see [JSON output](#json-output)). Its result has
-  `stacks`.
 
-### `git stack push [<branch|glob>...] [-g <group>] [--remote origin] [--force] [--json]`
+### `git stack push [<branch|glob>...] [-g <group>] [--remote origin] [--force]`
 
 Force-push (with lease) every branch in the current stack (or the ones named,
 see [Groups](#groups)), and set each one's upstream.
@@ -654,8 +642,6 @@ git stack push --force          # drop commits on the remote you didn't pull
 - With the [GitHub adapter](#github), points each open pull request at its
   stack parent (e.g. at `main` once the parent PR was merged), and lists the
   branches that have none, which `git stack prs` opens.
-- `--json` prints JSON for scripts (see [JSON output](#json-output)). Its result has
-  `stacks`, and `pushed`, the branches it pushed.
 
 ### `git stack group add <name> [<branch|glob>...] [-g <group>] [--move]`
 
@@ -688,7 +674,7 @@ git stack ungroup search-ui             # take search-ui's stack back out
   mistake. To merge them, run `git stack group add --move <name> -g <other group>`.
 - `info` shows a group once it has two or more stacks.
 
-### `git stack prs [<branch|glob>...] [-g <group>] [--remote origin] [-n] [--json]`
+### `git stack prs [<branch|glob>...] [-g <group>] [--remote origin] [-n]`
 
 Open a draft pull request on GitHub for each branch in the current stack (or
 the ones named, see [Groups](#groups)) that has none, into its stack parent,
@@ -766,13 +752,6 @@ git stack prs
 - `git stack pr` is an alias.
 - `-n`/`--dry-run` shows the stacks with the pull requests it would open, with
   their titles, in place of their links, without opening them.
-- `--json` prints JSON for scripts (see [JSON output](#json-output)). Its result has
-  `stacks`, and `steps`, one for each branch: the `branch`, its `parent`, and
-  the `action`: `open`, `exists` (it already has a pull request) or
-  `no-commits` (skipped, since it has no commits of its own). `title` is an
-  opened pull request's title, and `number` and `url` an opened or existing
-  one's (an existing one has no `url`, and a dry run opens none); each is
-  `null` otherwise.
 
 ### `git stack unrevert [<branch>] [--remote origin]`
 
@@ -829,7 +808,7 @@ status 1 for a branch that isn't in a stack.
 They don't change any branch. The only thing they write, like every command,
 is the result of a restack or pull you finished by hand after a conflict.
 
-For tools that run the commands that change stacks, see [JSON output](#json-output).
+Every command can also print JSON; see [JSON output](#json-output).
 
 ### `git stack parent [<branch>]`
 
@@ -885,17 +864,21 @@ fi
 
 ### JSON output
 
-`sync`, `clean`, `push`, `prs` and `autocreate` take `--json`, for scripts and
-tools that run them. In place of their usual output, they print a JSON object
-per line ([JSON Lines](https://jsonlines.org)) as they go: one for each thing
-that happens, then one with the result. git's own output, e.g. from fetching
-or rebasing, goes to stderr.
+Every command takes `--json`, for scripts and tools that run them. In place of
+its usual output, it prints a JSON object per line
+([JSON Lines](https://jsonlines.org)) as it goes: one for each thing that
+happens, then one with the result. git's own output, e.g. from fetching or
+rebasing, goes to stderr. (`info --json` is older, and prints a single list;
+see [`info`](#git-stack-info-branchglob--g-group---json---offline).)
 
 ```sh
 git stack clean -d local --json
 # {"type": "fetching", "message": "fetching origin, and pruning its deleted branches", "warning": false, "remote": "origin"}
 # {"type": "untracked", "message": "pr1 was merged into main; deleted it (was 0123456789ab) and moved pr2 onto main", "warning": false, "branch": "pr1", "parent": "main", "children": ["pr2"], "deleted_tip": "0123456789abcdef0123456789abcdef01234567"}
-# {"type": "result", "stacks": [...]}
+# {"type": "result", "stacks": [...], "events": [...]}
+
+git stack parent --json
+# {"type": "result", "parent": "main", "events": []}
 ```
 
 - Each thing that happens has a `type`, the `message` the command would print,
@@ -903,11 +886,36 @@ git stack clean -d local --json
   `untracked` (a merged branch was untracked) has the merged `branch`, the
   `parent` its `children` were moved onto, and `deleted_tip`, the commit the
   branch pointed at if it was deleted, or `null`.
-- The last line's `type` is `result`, with what the command did (see each
-  command), including `stacks`: the stacks it covered, as `info --json` lists
-  them. If the command fails, the last line is `{"type": "error", "message":
-  ...}` instead, and it exits with status 1.
+- The last line's `type` is `result`, with what the command did (see below),
+  and `events`: everything that happened again, so a script that only reads
+  the last line has all of it. If the command fails, the last line is
+  `{"type": "error", "message": ..., "events": [...]}` instead, and it exits
+  with status 1.
 - Types and field names don't change, though new ones may be added.
+
+What each command's result has, besides `type` and `events`:
+
+| Command | Result |
+| --- | --- |
+| `branch` | `branch`, the `parent` it was created on, and its `group` (or `null`) |
+| `track` | `tracked`: each branch's `branch`, `parent` and `base` |
+| `autocreate` | `stacks`, and `steps`, one for each pull request: its `branch`, the `parent` it merges into, its `number`, and the `action`: `create`, `track`, `already-tracked`, `parent-differs` or `skip`. `base` is the commit a branch it creates or tracks is built on, `tracked_parent` the parent a `parent-differs` branch is tracked on instead, and `reason` why it skipped one; each is `null` otherwise |
+| `untrack` | `untracked`: each `branch`, and the `children` still stacked on it |
+| `rename` | `old`, `new`, the `children` moved onto it, and the `upstream` it no longer tracks (or `null`) |
+| `group add` | the `group`, and the `bottoms` of the stacks put in it |
+| `group remove`, `ungroup` | `removed`: each stack's `bottom`, and the `group` it was in |
+| `group rename` | `old`, `new`, and the `branches` in it |
+| `next`, `prev` | the `branch` it switched to |
+| `restack` | nothing; what it did is in its events |
+| `sync` | `stacks`, and `unpushed`, the branches whose remote branch is out of date because they weren't pushed (e.g. with `--no-push`) |
+| `clean` | `stacks`: every stack |
+| `push` | `stacks`, and `pushed`, the branches it pushed |
+| `prs` | `stacks`, and `steps`, one for each branch: the `branch`, its `parent`, and the `action`: `open`, `exists` (it already has a pull request) or `no-commits` (skipped, since it has no commits of its own). `title` is an opened pull request's title, and `number` and `url` an opened or existing one's (an existing one has no `url`, and a dry run opens none); each is `null` otherwise |
+| `unrevert` | the `branch`, the `parent` it was rebuilt on, the `reverts` it reverted, and the `children` that still need restacking |
+| `parent`, `base` | the `parent` or `base` |
+| `show-stack` | `branches`, bottom first (`--quiet` can't be combined with `--json`) |
+
+`stacks` is the stacks the command covered, as `info --json` lists them.
 
 ## Conflicts
 

@@ -1,6 +1,6 @@
 import argparse
 
-from git_stack.commands import Subparsers, add_stack_arguments
+from git_stack.commands import Subparsers, add_json_argument, add_stack_arguments, run_for_json
 from git_stack.stack import StackClient
 
 
@@ -13,6 +13,7 @@ class Args(argparse.Namespace):
     move: bool
     old: str | None
     new: str
+    json: bool
 
 
 def register(subparsers: Subparsers) -> None:
@@ -23,29 +24,49 @@ def register(subparsers: Subparsers) -> None:
     add.add_argument("name", help="the group")
     add_stack_arguments(add, "group")
     add.add_argument("--move", action="store_true", help="move stacks that are in another group out of it")
+    add_json_argument(add)
     add.set_defaults(func=run_add)
 
     remove = actions.add_parser("remove", help="take stacks out of their groups (also `git stack ungroup`)")
     add_stack_arguments(remove, "ungroup")
+    add_json_argument(remove)
     remove.set_defaults(func=run_remove)
 
     rename = actions.add_parser("rename", help="rename a group (default: the current stack's)")
     rename.add_argument("old", nargs="?", help="group to rename (default: the current stack's)")
     rename.add_argument("new", help="new name")
+    add_json_argument(rename)
     rename.set_defaults(func=run_rename)
 
     ungroup = subparsers.add_parser("ungroup", help="take stacks out of their groups (`git stack group remove`)")
     add_stack_arguments(ungroup, "ungroup")
+    add_json_argument(ungroup)
     ungroup.set_defaults(func=run_remove)
 
 
 def run_add(stack: StackClient, args: Args) -> None:
-    bottoms = stack.group_add(args.name, args.branches, args.groups, move=args.move)
+    def group_add() -> list[str]:
+        return stack.group_add(args.name, args.branches, args.groups, move=args.move)
+
+    if args.json:
+        run_for_json(stack, group_add, lambda bottoms: {"group": args.name, "bottoms": bottoms})
+        return
+    bottoms = group_add()
     print(f"put the stacks of {', '.join(bottoms)} in group {args.name}")
 
 
 def run_remove(stack: StackClient, args: Args) -> None:
-    removed = stack.group_remove(args.branches, args.groups)
+    def group_remove() -> list[tuple[str, str]]:
+        return stack.group_remove(args.branches, args.groups)
+
+    if args.json:
+        run_for_json(
+            stack,
+            group_remove,
+            lambda removed: {"removed": [{"bottom": bottom, "group": group} for bottom, group in removed]},
+        )
+        return
+    removed = group_remove()
     if not removed:
         print("none of those stacks were in a group")
     for bottom, group in removed:
@@ -53,5 +74,11 @@ def run_remove(stack: StackClient, args: Args) -> None:
 
 
 def run_rename(stack: StackClient, args: Args) -> None:
-    old = stack.group_rename(args.new, old=args.old)[0]
+    def group_rename() -> tuple[str, list[str]]:
+        return stack.group_rename(args.new, old=args.old)
+
+    if args.json:
+        run_for_json(stack, group_rename, lambda renamed: {"old": renamed[0], "new": args.new, "branches": renamed[1]})
+        return
+    old = group_rename()[0]
     print(f"renamed group {old} to {args.new}")
