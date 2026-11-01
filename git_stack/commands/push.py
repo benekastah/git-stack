@@ -1,7 +1,7 @@
 import argparse
 
-from git_stack.commands import Subparsers, add_json_argument, add_stack_arguments, run_for_json
-from git_stack.commands.info import print_tree, stacks_json
+from git_stack.commands import Subparsers, add_json_argument, add_stack_arguments
+from git_stack.commands.info import print_tree
 from git_stack.git import DEFAULT_REMOTE
 from git_stack.stack import PushResult, StackClient
 
@@ -31,17 +31,14 @@ def register(subparsers: Subparsers) -> None:
         "have. Still fails if a remote branch changed since the last fetch",
     )
     add_json_argument(p)
-    p.set_defaults(func=run)
+    p.set_defaults(run=run, show=show)
 
 
-def run(stack: StackClient, args: Args) -> None:
-    def push() -> PushResult:
-        return stack.push(args.branches, args.groups, remote=args.remote, force=args.force)
+def run(stack: StackClient, args: Args) -> PushResult:
+    return stack.push(args.branches, args.groups, remote=args.remote, force=args.force)
 
-    if args.json:
-        run_for_json(stack, push, lambda result: {"stacks": stacks_json(result.branches), "pushed": result.pushed})
-        return
-    result = push()
+
+def show(stack: StackClient, args: Args, result: PushResult) -> None:
     if result.branches:
         print_tree(stack, result.branches)
     if not result.pushed:

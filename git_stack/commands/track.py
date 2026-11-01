@@ -1,7 +1,7 @@
 import argparse
-import dataclasses
+from dataclasses import dataclass
 
-from git_stack.commands import Subparsers, add_json_argument, run_for_json
+from git_stack.commands import Subparsers, add_json_argument
 from git_stack.stack import StackClient, Tracked
 
 
@@ -30,15 +30,18 @@ def register(subparsers: Subparsers) -> None:
         "Needed when PARENT has already been squash-merged",
     )
     add_json_argument(p)
-    p.set_defaults(func=run)
+    p.set_defaults(run=run, show=show)
 
 
-def run(stack: StackClient, args: Args) -> None:
-    def track() -> list[Tracked]:
-        return stack.track(args.parent, args.branches, base=args.base)
+@dataclass(frozen=True)
+class TrackResult:
+    tracked: list[Tracked]
 
-    if args.json:
-        run_for_json(stack, track, lambda tracked: {"tracked": [dataclasses.asdict(t) for t in tracked]})
-        return
-    for tracked in track():
+
+def run(stack: StackClient, args: Args) -> TrackResult:
+    return TrackResult(stack.track(args.parent, args.branches, base=args.base))
+
+
+def show(stack: StackClient, args: Args, result: TrackResult) -> None:
+    for tracked in result.tracked:
         print(f"tracking {tracked.branch} on top of {tracked.parent} (base {tracked.base[:12]})")

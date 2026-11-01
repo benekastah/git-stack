@@ -7,9 +7,8 @@ from git_stack.commands import (
     add_json_argument,
     add_latest_argument,
     add_stack_arguments,
-    run_for_json,
 )
-from git_stack.commands.info import print_tree, stacks_json
+from git_stack.commands.info import print_tree
 from git_stack.git import DEFAULT_REMOTE
 from git_stack.stack import StackClient, SyncResult
 
@@ -42,25 +41,22 @@ def register(subparsers: Subparsers) -> None:
         "--no-push", action="store_true", help="don't push, only list the branches whose remote branch is out of date"
     )
     add_json_argument(p)
-    p.set_defaults(func=run)
+    p.set_defaults(run=run, show=show)
 
 
-def run(stack: StackClient, args: Args) -> None:
-    def sync() -> SyncResult:
-        return stack.sync(
-            args.branches,
-            args.groups,
-            remote=args.remote,
-            delete=args.delete,
-            latest=args.latest,
-            push=not args.no_push,
-            ignore_reverts=args.ignore_reverts,
-        )
+def run(stack: StackClient, args: Args) -> SyncResult:
+    return stack.sync(
+        args.branches,
+        args.groups,
+        remote=args.remote,
+        delete=args.delete,
+        latest=args.latest,
+        push=not args.no_push,
+        ignore_reverts=args.ignore_reverts,
+    )
 
-    if args.json:
-        run_for_json(stack, sync, lambda result: {"stacks": stacks_json(result.branches), "unpushed": result.unpushed})
-        return
-    result = sync()
+
+def show(stack: StackClient, args: Args, result: SyncResult) -> None:
     if result.branches:
         print_tree(stack, result.branches)
     if result.unpushed:

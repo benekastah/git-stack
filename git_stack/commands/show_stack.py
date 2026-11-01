@@ -1,6 +1,7 @@
 import argparse
+from dataclasses import dataclass
 
-from git_stack.commands import Subparsers, add_json_argument, run_for_json
+from git_stack.commands import Subparsers, add_json_argument
 from git_stack.errors import StackError
 from git_stack.stack import StackClient
 
@@ -26,20 +27,30 @@ def register(subparsers: Subparsers) -> None:
         help="print nothing; exit with status 0 if the branch is in a stack, and 1 if it isn't",
     )
     add_json_argument(output)
-    p.set_defaults(func=run)
+    p.set_defaults(run=run, show=show)
 
 
-def run(stack: StackClient, args: Args) -> int:
-    if args.json:
-        run_for_json(stack, lambda: stack.show_stack(args.branch), lambda branches: {"branches": branches})
-        return 0
+@dataclass(frozen=True)
+class Shown:
+    """The branches in the stack, bottom first, or None if --quiet found the
+    branch isn't in one."""
+
+    branches: list[str] | None
+
+
+def run(stack: StackClient, args: Args) -> Shown:
     try:
-        branches = stack.show_stack(args.branch)
+        return Shown(stack.show_stack(args.branch))
     except StackError:
         if args.quiet:
-            return 1
+            return Shown(None)
         raise
+
+
+def show(stack: StackClient, args: Args, result: Shown) -> int:
+    if result.branches is None:
+        return 1
     if not args.quiet:
-        for branch in branches:
+        for branch in result.branches:
             print(branch)
     return 0

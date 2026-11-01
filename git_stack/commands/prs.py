@@ -1,7 +1,7 @@
 import argparse
 
-from git_stack.commands import Subparsers, add_json_argument, add_stack_arguments, run_for_json, steps_json
-from git_stack.commands.info import print_tree, stacks_json
+from git_stack.commands import Subparsers, add_json_argument, add_stack_arguments
+from git_stack.commands.info import print_tree
 from git_stack.git import DEFAULT_REMOTE
 from git_stack.stack import PrsResult, PullRequestAction, StackClient
 
@@ -29,24 +29,14 @@ def register(subparsers: Subparsers) -> None:
         "-n", "--dry-run", action="store_true", help="print the pull requests it would open, without opening them"
     )
     add_json_argument(p)
-    p.set_defaults(func=run)
+    p.set_defaults(run=run, show=show)
 
 
-def run(stack: StackClient, args: Args) -> None:
-    def prs() -> PrsResult:
-        return stack.prs(args.branches, args.groups, remote=args.remote, dry_run=args.dry_run)
+def run(stack: StackClient, args: Args) -> PrsResult:
+    return stack.prs(args.branches, args.groups, remote=args.remote, dry_run=args.dry_run)
 
-    if args.json:
-        run_for_json(
-            stack,
-            prs,
-            lambda result: {
-                "stacks": stacks_json(result.branches),
-                "steps": steps_json(result.steps),
-            },
-        )
-        return
-    result = prs()
+
+def show(stack: StackClient, args: Args, result: PrsResult) -> None:
     if not result.steps:
         print("nothing to open: every branch in the current stack looks merged")
     new_links = {}

@@ -1,7 +1,6 @@
 import argparse
-import dataclasses
 
-from git_stack.commands import Subparsers, add_json_argument, run_for_json
+from git_stack.commands import Subparsers, add_json_argument
 from git_stack.stack import Renamed, StackClient
 
 
@@ -20,17 +19,14 @@ def register(subparsers: Subparsers) -> None:
     p.add_argument("old", nargs="?", help="branch to rename (default: the current branch)")
     p.add_argument("name", metavar="new", help="new name")
     add_json_argument(p)
-    p.set_defaults(func=run)
+    p.set_defaults(run=run, show=show)
 
 
-def run(stack: StackClient, args: Args) -> None:
-    def rename() -> Renamed:
-        return stack.rename(args.name, old=args.old)
+def run(stack: StackClient, args: Args) -> Renamed:
+    return stack.rename(args.name, old=args.old)
 
-    if args.json:
-        run_for_json(stack, rename, dataclasses.asdict)
-        return
-    renamed = rename()
+
+def show(stack: StackClient, args: Args, renamed: Renamed) -> None:
     print(
         f"renamed {renamed.old} to {renamed.new}"
         + (f" and moved {', '.join(renamed.children)} onto it" if renamed.children else "")

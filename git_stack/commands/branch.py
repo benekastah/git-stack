@@ -1,6 +1,7 @@
 import argparse
+from dataclasses import dataclass
 
-from git_stack.commands import Subparsers, add_json_argument, run_for_json
+from git_stack.commands import Subparsers, add_json_argument
 from git_stack.stack import StackClient
 
 
@@ -21,15 +22,22 @@ def register(subparsers: Subparsers) -> None:
         "creating it if the stack is in another group already",
     )
     add_json_argument(p)
-    p.set_defaults(func=run)
+    p.set_defaults(run=run, show=show)
 
 
-def run(stack: StackClient, args: Args) -> None:
-    def branch() -> str:
-        return stack.branch(args.name, group=args.group)
+@dataclass(frozen=True)
+class Created:
+    branch: str
+    parent: str
+    group: str | None
 
-    if args.json:
-        run_for_json(stack, branch, lambda parent: {"branch": args.name, "parent": parent, "group": args.group})
-        return
-    parent = branch()
-    print(f"created {args.name} on top of {parent}" + (f", in group {args.group}" if args.group else ""))
+
+def run(stack: StackClient, args: Args) -> Created:
+    return Created(args.name, stack.branch(args.name, group=args.group), args.group)
+
+
+def show(stack: StackClient, args: Args, created: Created) -> None:
+    print(
+        f"created {created.branch} on top of {created.parent}"
+        + (f", in group {created.group}" if created.group else "")
+    )

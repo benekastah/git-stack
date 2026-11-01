@@ -1,10 +1,12 @@
-"""Turns events into the messages the CLI prints."""
+"""Turns events into the messages the CLI prints, and events and results into
+the JSON --json prints."""
 
-import dataclasses
+import json
 import sys
 from typing import Any, assert_never
 
 from git_stack import events
+from git_stack.json_fields import to_json
 
 WARNINGS = (
     events.TrunkDiverged,
@@ -151,7 +153,7 @@ def event_json(event: events.Event) -> dict[str, Any]:
         "type": event.event_type,
         "message": message(event),
         "warning": isinstance(event, WARNINGS),
-        **dataclasses.asdict(event),
+        **to_json(event),
     }
 
 
@@ -160,3 +162,28 @@ def print_event(event: events.Event) -> None:
         print(f"warning: {message(event)}", file=sys.stderr)
     else:
         print(message(event))
+
+
+class JsonStream:
+    """What --json prints: a JSON object per line, as a command goes. Each
+    event (see event_json), then {"type": "result", ...} with the command's
+    result (see to_json), or {"type": "error", "message": ...} if it fails.
+    The last line also has "events", every event again, so it alone says
+    everything that happened."""
+
+    def __init__(self) -> None:
+        self.events: list[dict[str, Any]] = []
+
+    def event(self, event: events.Event) -> None:
+        self.events.append(event_json(event))
+        self._print(self.events[-1])
+
+    def result(self, result: Any) -> None:
+        self._print({"type": "result", **to_json(result), "events": self.events})
+
+    def error(self, message: str) -> None:
+        self._print({"type": "error", "message": message, "events": self.events})
+
+    def _print(self, record: dict[str, Any]) -> None:
+        # Flushed, so a tool reading the stream sees each line as it happens.
+        print(json.dumps(record), flush=True)

@@ -1,13 +1,8 @@
 import argparse
+from dataclasses import dataclass
 
-from git_stack.commands import (
-    Subparsers,
-    add_delete_argument,
-    add_ignore_revert_argument,
-    add_json_argument,
-    run_for_json,
-)
-from git_stack.commands.info import print_tree, stacks_json
+from git_stack.commands import Subparsers, add_delete_argument, add_ignore_revert_argument, add_json_argument
+from git_stack.commands.info import print_tree
 from git_stack.git import DEFAULT_REMOTE
 from git_stack.stack import BranchInfo, StackClient
 
@@ -27,16 +22,20 @@ def register(subparsers: Subparsers) -> None:
     add_delete_argument(p)
     add_ignore_revert_argument(p)
     add_json_argument(p)
-    p.set_defaults(func=run)
+    p.set_defaults(run=run, show=show)
 
 
-def run(stack: StackClient, args: Args) -> None:
-    def clean() -> list[BranchInfo]:
-        return stack.clean(remote=args.remote, delete=args.delete, ignore_reverts=args.ignore_reverts)
+@dataclass(frozen=True)
+class Cleaned:
+    """Every stack, as info() lists them."""
 
-    if args.json:
-        run_for_json(stack, clean, lambda branches: {"stacks": stacks_json(branches)})
-        return
-    branches = clean()
-    if branches:
-        print_tree(stack, branches)
+    stacks: list[BranchInfo]
+
+
+def run(stack: StackClient, args: Args) -> Cleaned:
+    return Cleaned(stack.clean(remote=args.remote, delete=args.delete, ignore_reverts=args.ignore_reverts))
+
+
+def show(stack: StackClient, args: Args, result: Cleaned) -> None:
+    if result.stacks:
+        print_tree(stack, result.stacks)

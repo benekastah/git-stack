@@ -1,6 +1,7 @@
 import argparse
+from dataclasses import dataclass
 
-from git_stack.commands import Subparsers, add_json_argument, add_latest_argument, add_stack_arguments, run_for_json
+from git_stack.commands import Subparsers, add_json_argument, add_latest_argument, add_stack_arguments
 from git_stack.stack import StackClient
 
 
@@ -27,15 +28,18 @@ def register(subparsers: Subparsers) -> None:
     p.add_argument("--squash", action="store_true", help="first squash each branch in the stack into a single commit")
     add_latest_argument(p)
     add_json_argument(p)
-    p.set_defaults(func=run)
+    p.set_defaults(run=run, show=show)
 
 
-def run(stack: StackClient, args: Args) -> None:
-    def restack() -> None:
-        stack.restack(args.branches, args.groups, onto=args.onto, squash=args.squash, latest=args.latest)
+@dataclass(frozen=True)
+class Restacked:
+    """Nothing: what restack did is in its events."""
 
-    if args.json:
-        # What it did is all in its events.
-        run_for_json(stack, restack, lambda _: {})
-        return
-    restack()
+
+def run(stack: StackClient, args: Args) -> Restacked:
+    stack.restack(args.branches, args.groups, onto=args.onto, squash=args.squash, latest=args.latest)
+    return Restacked()
+
+
+def show(stack: StackClient, args: Args, result: Restacked) -> None:
+    pass

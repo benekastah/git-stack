@@ -1,7 +1,7 @@
 import argparse
-import dataclasses
+from dataclasses import dataclass
 
-from git_stack.commands import Subparsers, add_json_argument, run_for_json
+from git_stack.commands import Subparsers, add_json_argument
 from git_stack.stack import StackClient, Untracked
 
 
@@ -24,17 +24,20 @@ def register(subparsers: Subparsers) -> None:
         "default: the current branch",
     )
     add_json_argument(p)
-    p.set_defaults(func=run)
+    p.set_defaults(run=run, show=show)
 
 
-def run(stack: StackClient, args: Args) -> None:
-    def untrack() -> list[Untracked]:
-        return stack.untrack(args.branches)
+@dataclass(frozen=True)
+class UntrackResult:
+    untracked: list[Untracked]
 
-    if args.json:
-        run_for_json(stack, untrack, lambda untracked: {"untracked": [dataclasses.asdict(u) for u in untracked]})
-        return
-    for untracked in untrack():
+
+def run(stack: StackClient, args: Args) -> UntrackResult:
+    return UntrackResult(stack.untrack(args.branches))
+
+
+def show(stack: StackClient, args: Args, result: UntrackResult) -> None:
+    for untracked in result.untracked:
         print(f"stopped tracking {untracked.branch}")
         if untracked.children:
             print(

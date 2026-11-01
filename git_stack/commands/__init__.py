@@ -1,23 +1,15 @@
 """One module per `git stack` subcommand.
 
-Each module has register(subparsers), which adds its parser and sets func to
-its run(stack, args).
+Each module has register(subparsers), which adds its parser and sets run and
+show: run(stack, args) does the command and returns its result, a dataclass,
+and show(stack, args, result) prints the result as text, returning the exit
+status (or None for 0). With --json, the CLI prints the result as JSON (see
+git_stack.json_fields) instead of calling show, so the result has to hold
+everything the command reports.
 """
 
 import argparse
-import dataclasses
-import enum
-import json
-import sys
-from collections.abc import Callable, Sequence
-from typing import Any, TypeAlias, TypeVar
-
-from git_stack import events
-from git_stack.errors import StackError
-from git_stack.output import event_json
-from git_stack.stack import StackClient
-
-Result = TypeVar("Result")
+from typing import TypeAlias
 
 # argparse doesn't export the type of add_subparsers()'s result.
 Subparsers: TypeAlias = "argparse._SubParsersAction[argparse.ArgumentParser]"
@@ -78,42 +70,3 @@ def add_json_argument(parser: argparse.ArgumentParser | argparse._MutuallyExclus
         action="store_true",
         help="print what happens, then the result, for scripts: a JSON object per line",
     )
-
-
-def steps_json(steps: Sequence[Any]) -> list[dict[str, Any]]:
-    """steps, dataclasses whose action is an enum, as --json prints them: their
-    fields, with action's value."""
-    result = []
-    for step in steps:
-        action: enum.Enum = step.action
-        result.append({**dataclasses.asdict(step), "action": action.value})
-    return result
-
-
-def run_for_json(
-    stack: StackClient, command: Callable[[], Result], result_json: Callable[[Result], dict[str, Any]]
-) -> Result:
-    """Run command for --json, which prints a JSON object per line, as it goes:
-    each event it reports (see event_json), then {"type": "result", ...} with
-    result_json of what it returns, or if it fails, {"type": "error",
-    "message": ...} before raising. The last line also has "events", every
-    event again, so it alone says everything that happened. stdout is kept for
-    the JSON, so git's output goes to stderr."""
-    reported: list[dict[str, Any]] = []
-
-    def emit(record: dict[str, Any]) -> None:
-        print(json.dumps(record), flush=True)
-
-    def on_event(event: events.Event) -> None:
-        reported.append(event_json(event))
-        emit(reported[-1])
-
-    stack.on_event = on_event
-    stack.git.passthrough_stdout = sys.stderr
-    try:
-        returned = command()
-    except StackError as e:
-        emit({"type": "error", "message": str(e), "events": reported})
-        raise
-    emit({"type": "result", **result_json(returned), "events": reported})
-    return returned

@@ -61,7 +61,7 @@ def test_event_json_has_type_message_warning_and_fields() -> None:
         "warning": False,
         "branch": "pr1",
         "parent": "main",
-        "children": ("pr2",),
+        "children": ["pr2"],
         "deleted_tip": "0123456789abcdef",
     }
     assert event_json(events.TrunkDiverged("main", "origin/main"))["warning"] is True

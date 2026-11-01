@@ -12,9 +12,9 @@ import pytest
 from git_stack import events
 from git_stack.adapters.git import PullRequestLink, PullRequestState
 from git_stack.cli import main
-from git_stack.commands.info import stacks_json
 from git_stack.errors import StackError
 from git_stack.git import GitClient
+from git_stack.json_fields import to_json
 from git_stack.stack import (
     AutocreateAction,
     Autocreated,
@@ -62,6 +62,9 @@ def stack() -> Any:
     stack.parent.return_value = "main"
     stack.base.return_value = "a" * 40
     stack.show_stack.return_value = ["pr1", "pr2"]
+    stack.group_add.return_value = ["pr1"]
+    stack.group_remove.return_value = []
+    stack.group_rename.return_value = ("old", [])
     return stack
 
 
@@ -449,7 +452,7 @@ def test_clean_json_prints_each_event_then_the_result(stack: Any, capsys: pytest
     # The last line repeats every event, for consumers that only read it.
     assert [json.loads(line) for line in out.splitlines()] == [
         fetching,
-        {"type": "result", "stacks": stacks_json(STACK), "events": [fetching]},
+        {"type": "result", "stacks": to_json(STACK), "events": [fetching]},
     ]
     assert err == ""
     assert stack.git.passthrough_stdout is sys.stderr
@@ -474,14 +477,14 @@ def test_clean_json_ends_with_the_error_when_it_fails(stack: Any, capsys: pytest
 @pytest.mark.parametrize(
     ("argv", "method", "returned", "result"),
     [
-        (["sync"], "sync", SyncResult(["pr1"], STACK), {"stacks": stacks_json(STACK), "unpushed": ["pr1"]}),
-        (["push"], "push", PushResult(["pr1"], STACK), {"stacks": stacks_json(STACK), "pushed": ["pr1"]}),
+        (["sync"], "sync", SyncResult(["pr1"], STACK), {"stacks": to_json(STACK), "unpushed": ["pr1"]}),
+        (["push"], "push", PushResult(["pr1"], STACK), {"stacks": to_json(STACK), "pushed": ["pr1"]}),
         (
             ["prs"],
             "prs",
             PrsResult([PullRequestStep("pr1", "main", PullRequestAction.OPEN, "Add pr1", 12, "https://x/12")], STACK),
             {
-                "stacks": stacks_json(STACK),
+                "stacks": to_json(STACK),
                 "steps": [
                     {
                         "branch": "pr1",
@@ -534,7 +537,7 @@ def test_clean_json_ends_with_the_error_when_it_fails(stack: Any, capsys: pytest
             "autocreate",
             AutocreateResult([Autocreated("pr1", "main", 12, AutocreateAction.TRACK, base="a" * 40)], STACK),
             {
-                "stacks": stacks_json(STACK),
+                "stacks": to_json(STACK),
                 "steps": [
                     {
                         "branch": "pr1",

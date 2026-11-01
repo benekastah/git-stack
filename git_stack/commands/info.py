@@ -4,11 +4,12 @@ import os
 import sys
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any, TypeAlias
+from typing import TypeAlias
 
 from git_stack.adapters.git import PullRequestState
 from git_stack.commands import Subparsers, add_stack_arguments
 from git_stack.errors import StackError
+from git_stack.json_fields import to_json
 from git_stack.stack import BranchInfo, BranchStatus, StackClient
 
 NOTES: dict[BranchStatus, str | None] = {
@@ -51,15 +52,18 @@ class Args(argparse.Namespace):
 
     branches: list[str]
     groups: list[str]
-    json: bool
+    list_json: bool
     offline: bool
 
 
 def register(subparsers: Subparsers) -> None:
     p = subparsers.add_parser("info", help="show all tracked stacks (or the named ones)")
     add_stack_arguments(p, "show", default="every stack")
+    # Older than every other command's --json (see git_stack.commands), so it
+    # keeps printing a single list.
     p.add_argument(
         "--json",
+        dest="list_json",
         action="store_true",
         help="print a JSON list of every branch, each stack's root first, parent before child",
     )
@@ -68,7 +72,7 @@ def register(subparsers: Subparsers) -> None:
         action="store_true",
         help="don't ask GitHub about pull requests: check for merges locally, and show no links",
     )
-    p.set_defaults(func=run)
+    p.set_defaults(run=run, show=show, json=False)
 
 
 def use_color(stack: StackClient) -> bool:
@@ -122,42 +126,24 @@ def label(branch: BranchInfo | GroupHeader, paint: Paint) -> str:
     return " ".join(parts)
 
 
-def run(stack: StackClient, args: Args) -> None:
-    branches = stack.info(args.branches, args.groups, offline=args.offline)
-    if args.json:
-        print_json(branches)
-    elif not branches:
+@dataclass(frozen=True)
+class Info:
+    """The stacks, as info() lists them."""
+
+    stacks: list[BranchInfo]
+
+
+def run(stack: StackClient, args: Args) -> Info:
+    return Info(stack.info(args.branches, args.groups, offline=args.offline))
+
+
+def show(stack: StackClient, args: Args, result: Info) -> None:
+    if args.list_json:
+        print(json.dumps(to_json(result.stacks), indent=2))
+    elif not result.stacks:
         print("no tracked branches")
     else:
-        print_tree(stack, branches)
-
-
-def print_json(branches: list[BranchInfo]) -> None:
-    print(json.dumps(stacks_json(branches), indent=2))
-
-
-def stacks_json(branches: list[BranchInfo]) -> list[dict[str, Any]]:
-    """branches, as info() lists them, as --json prints them."""
-    return [branch_json(b) for b in branches]
-
-
-def branch_json(b: BranchInfo) -> dict[str, Any]:
-    """b as --json prints it."""
-    return {
-        "name": b.name,
-        "parent": b.parent,
-        "status": b.status.value if b.status else None,
-        "current": b.current,
-        "reverted_parent": b.reverted_parent,
-        "group": b.group,
-        "pr": {
-            "number": b.pull_request.number,
-            "url": b.pull_request.url,
-            "state": b.pull_request.state.value,
-        }
-        if b.pull_request
-        else None,
-    }
+        print_tree(stack, result.stacks)
 
 
 def tree_children(branches: list[BranchInfo]) -> dict[str | GroupHeader, list[BranchInfo | GroupHeader]]:

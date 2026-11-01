@@ -25,7 +25,7 @@ from git_stack.commands import (
 )
 from git_stack.errors import StackError
 from git_stack.git import GitClient
-from git_stack.output import print_event
+from git_stack.output import JsonStream, print_event
 from git_stack.stack import StackClient
 
 # In the order `git stack -h` lists them.
@@ -70,14 +70,25 @@ def main(argv: list[str] | None = None, stack: StackClient | None = None) -> int
         command.register(subparsers)
 
     args = parser.parse_args(argv)
+    if stack is None:
+        # os.path.join starts over at an absolute path, as git's -C does.
+        stack = StackClient(GitClient(os.path.join(".", *args.directories)))
+    # With --json, stdout is for the JSON, so git's output goes to stderr.
+    stream = JsonStream() if args.json else None
+    stack.on_event = stream.event if stream else print_event
+    if stream:
+        stack.git.passthrough_stdout = sys.stderr
     try:
-        if stack is None:
-            # os.path.join starts over at an absolute path, as git's -C does.
-            directory = os.path.join(".", *args.directories)
-            stack = StackClient(GitClient(directory), on_event=print_event)
-        # A command's run returns its exit status, or None for 0.
-        status: int | None = args.func(stack, args)
+        result = args.run(stack, args)
+        if stream:
+            stream.result(result)
+            return 0
+        # A command's show prints its result, and returns its exit status, or
+        # None for 0. It can fail too, e.g. on a bad setting for how to show it.
+        status: int | None = args.show(stack, args, result)
     except StackError as e:
+        if stream:
+            stream.error(str(e))
         print(f"git stack: {e}", file=sys.stderr)
         return 1
     return status or 0

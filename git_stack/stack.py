@@ -30,6 +30,7 @@ from git_stack.core import (
 )
 from git_stack.errors import BrokenStackError, StackError
 from git_stack.git import DEFAULT_REMOTE
+from git_stack.json_fields import json_name
 
 Client = TypeVar("Client", bound=StackCore)
 Params = ParamSpec("Params")
@@ -75,7 +76,7 @@ class BranchInfo:
     parent: str | None
     status: BranchStatus | None
     current: bool
-    pull_request: PullRequestLink | None = None
+    pull_request: PullRequestLink | None = field(default=None, metadata=json_name("pr"))
     reverted_parent: str | None = None
     group: str | None = None
 
@@ -174,7 +175,7 @@ class PrsResult:
     opened."""
 
     steps: list[PullRequestStep]
-    branches: list[BranchInfo]
+    branches: list[BranchInfo] = field(metadata=json_name("stacks"))
 
 
 @dataclass(frozen=True)
@@ -184,7 +185,7 @@ class AutocreateResult:
     (none in a dry run, which tracks nothing)."""
 
     steps: list[Autocreated]
-    branches: list[BranchInfo]
+    branches: list[BranchInfo] = field(metadata=json_name("stacks"))
 
 
 @dataclass(frozen=True)
@@ -193,7 +194,7 @@ class SyncResult:
     and the stacks it synced, as info() lists them."""
 
     unpushed: list[str]
-    branches: list[BranchInfo]
+    branches: list[BranchInfo] = field(metadata=json_name("stacks"))
 
 
 @dataclass(frozen=True)
@@ -202,7 +203,7 @@ class PushResult:
     info() lists them."""
 
     pushed: list[str]
-    branches: list[BranchInfo]
+    branches: list[BranchInfo] = field(metadata=json_name("stacks"))
 
 
 @dataclass
