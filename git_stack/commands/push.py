@@ -1,9 +1,9 @@
 import argparse
 
-from git_stack.commands import Subparsers, add_stack_arguments
-from git_stack.commands.info import print_tree
+from git_stack.commands import Subparsers, add_json_argument, add_stack_arguments, run_for_json
+from git_stack.commands.info import print_tree, stacks_json
 from git_stack.git import DEFAULT_REMOTE
-from git_stack.stack import StackClient
+from git_stack.stack import PushResult, StackClient
 
 
 class Args(argparse.Namespace):
@@ -13,6 +13,7 @@ class Args(argparse.Namespace):
     groups: list[str]
     remote: str
     force: bool
+    json: bool
 
 
 def register(subparsers: Subparsers) -> None:
@@ -29,11 +30,18 @@ def register(subparsers: Subparsers) -> None:
         help="push even if that drops commits on a remote branch that the local one doesn't "
         "have. Still fails if a remote branch changed since the last fetch",
     )
+    add_json_argument(p)
     p.set_defaults(func=run)
 
 
 def run(stack: StackClient, args: Args) -> None:
-    result = stack.push(args.branches, args.groups, remote=args.remote, force=args.force)
+    def push() -> PushResult:
+        return stack.push(args.branches, args.groups, remote=args.remote, force=args.force)
+
+    if args.json:
+        run_for_json(stack, push, lambda result: {"stacks": stacks_json(result.branches), "pushed": result.pushed})
+        return
+    result = push()
     if result.branches:
         print_tree(stack, result.branches)
     if not result.pushed:

@@ -87,13 +87,11 @@ def test_clean_json_prints_only_json_on_stdout(repo: Repo) -> None:
 
     result = repo.stack("clean", "-d", "local", "--json")
 
-    output = json.loads(result.stdout)
-    untracked = [e for e in output["events"] if e["type"] == "untracked"]
+    *events, last = [json.loads(line) for line in result.stdout.splitlines()]
+    untracked = [e for e in events if e["type"] == "untracked"]
     assert [(e["branch"], e["children"], e["deleted_tip"] is not None) for e in untracked] == [("pr1", ["pr2"], True)]
-    assert [b["name"] for b in output["result"]] == ["main", "pr2", "pr3"]
-    assert output["error"] is None
-    # The usual messages go to stderr instead.
-    assert "pr1 was merged into main; deleted it" in result.stderr
+    assert last["type"] == "result"
+    assert [b["name"] for b in last["stacks"]] == ["main", "pr2", "pr3"]
 
 
 def test_clean_json_reports_what_stopped_it(repo: Repo) -> None:
@@ -104,8 +102,21 @@ def test_clean_json_reports_what_stopped_it(repo: Repo) -> None:
 
     assert result.returncode == 1
     assert json.loads(result.stdout) == {
-        "events": [],
-        "result": None,
-        "error": "you have uncommitted changes; commit or stash them first",
+        "type": "error",
+        "message": "you have uncommitted changes; commit or stash them first",
     }
     assert result.stderr == "git stack: you have uncommitted changes; commit or stash them first\n"
+
+
+def test_sync_json_prints_only_json_on_stdout(repo: Repo) -> None:
+    repo.make_stack()
+    repo.stack("push")
+    repo.squash_merge_on_forge("pr1")
+
+    result = repo.stack("sync", "-d", "local", "--json")
+
+    *events, last = [json.loads(line) for line in result.stdout.splitlines()]
+    types = [e["type"] for e in events]
+    assert "untracked" in types and "restacking" in types
+    assert last == {"type": "result", "stacks": last["stacks"], "unpushed": []}
+    assert [b["name"] for b in last["stacks"]] == ["main", "pr2", "pr3"]

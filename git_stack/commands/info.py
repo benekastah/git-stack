@@ -133,7 +133,12 @@ def run(stack: StackClient, args: Args) -> None:
 
 
 def print_json(branches: list[BranchInfo]) -> None:
-    print(json.dumps([branch_json(b) for b in branches], indent=2))
+    print(json.dumps(stacks_json(branches), indent=2))
+
+
+def stacks_json(branches: list[BranchInfo]) -> list[dict[str, Any]]:
+    """branches, as info() lists them, as --json prints them."""
+    return [branch_json(b) for b in branches]
 
 
 def branch_json(b: BranchInfo) -> dict[str, Any]:

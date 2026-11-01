@@ -1,9 +1,9 @@
 import argparse
 
-from git_stack.commands import Subparsers
-from git_stack.commands.info import print_tree
+from git_stack.commands import Subparsers, add_json_argument, run_for_json, steps_json
+from git_stack.commands.info import print_tree, stacks_json
 from git_stack.git import DEFAULT_REMOTE
-from git_stack.stack import AutocreateAction, Autocreated, StackClient
+from git_stack.stack import AutocreateAction, Autocreated, AutocreateResult, StackClient
 
 
 class Args(argparse.Namespace):
@@ -11,6 +11,7 @@ class Args(argparse.Namespace):
 
     remote: str
     dry_run: bool
+    json: bool
 
 
 def register(subparsers: Subparsers) -> None:
@@ -26,6 +27,7 @@ def register(subparsers: Subparsers) -> None:
         action="store_true",
         help="print what it would do, without changing anything (besides fetching)",
     )
+    add_json_argument(p)
     p.set_defaults(func=run)
 
 
@@ -49,7 +51,20 @@ def describe(step: Autocreated, remote: str, dry_run: bool) -> str:
 
 
 def run(stack: StackClient, args: Args) -> None:
-    result = stack.autocreate(remote=args.remote, dry_run=args.dry_run)
+    def autocreate() -> AutocreateResult:
+        return stack.autocreate(remote=args.remote, dry_run=args.dry_run)
+
+    if args.json:
+        run_for_json(
+            stack,
+            autocreate,
+            lambda result: {
+                "stacks": stacks_json(result.branches),
+                "steps": steps_json(result.steps),
+            },
+        )
+        return
+    result = autocreate()
     if not result.steps:
         print("you have no open pull requests from branches in this repository")
     # Without a dry run, the stacks show what was tracked, with the pull

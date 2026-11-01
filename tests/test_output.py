@@ -1,7 +1,6 @@
 """How the CLI prints events."""
 
 import dataclasses
-import sys
 import typing
 
 import pytest
@@ -44,6 +43,8 @@ def test_every_event_has_its_own_type() -> None:
     types = [event.event_type for event in typing.get_args(events.Event)]
 
     assert len(set(types)) == len(types)
+    # The types of the lines --json ends with.
+    assert not {"result", "error"} & set(types)
 
 
 def test_no_event_field_hides_a_key_event_json_adds() -> None:
@@ -64,9 +65,3 @@ def test_event_json_has_type_message_warning_and_fields() -> None:
         "deleted_tip": "0123456789abcdef",
     }
     assert event_json(events.TrunkDiverged("main", "origin/main"))["warning"] is True
-
-
-def test_progress_can_go_elsewhere(capsys: pytest.CaptureFixture[str]) -> None:
-    print_event(events.Restacking("pr2", "pr1"), out=sys.stderr)
-
-    assert capsys.readouterr() == ("", "restacking pr2 onto pr1\n")

@@ -5,14 +5,15 @@ its run(stack, args).
 """
 
 import argparse
+import dataclasses
+import enum
 import json
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any, TypeAlias, TypeVar
 
-from git_stack import events
 from git_stack.errors import StackError
-from git_stack.output import event_json, print_event
+from git_stack.output import event_json
 from git_stack.stack import StackClient
 
 Result = TypeVar("Result")
@@ -73,32 +74,38 @@ def add_json_argument(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--json",
         action="store_true",
-        help="print one JSON object for scripts, with what happened and the result, and the usual messages on stderr",
+        help="print what happens, then the result, for scripts: a JSON object per line",
     )
 
 
-def run_for_json(stack: StackClient, command: Callable[[], Result], result_json: Callable[[Result], Any]) -> Result:
-    """Run command for --json: print {"events": [...], "result": ..., "error":
-    ...} with each event it reports (see event_json), result_json of what it
-    returns (null if it fails), and the error it fails with (null if it
-    doesn't). stdout is kept for that, so its messages, and git's output, go
-    to stderr. Failing, it still prints what happened before raising."""
-    reported: list[events.Event] = []
+def steps_json(steps: Sequence[Any]) -> list[dict[str, Any]]:
+    """steps, dataclasses whose action is an enum, as --json prints them: their
+    fields, with action's value."""
+    result = []
+    for step in steps:
+        action: enum.Enum = step.action
+        result.append({**dataclasses.asdict(step), "action": action.value})
+    return result
 
-    def on_event(event: events.Event) -> None:
-        reported.append(event)
-        print_event(event, out=sys.stderr)
 
-    stack.on_event = on_event
+def run_for_json(
+    stack: StackClient, command: Callable[[], Result], result_json: Callable[[Result], dict[str, Any]]
+) -> Result:
+    """Run command for --json, which prints a JSON object per line, as it goes:
+    each event it reports (see event_json), then {"type": "result", ...} with
+    result_json of what it returns, or if it fails, {"type": "error",
+    "message": ...} before raising. stdout is kept for that, so git's output
+    goes to stderr."""
+
+    def emit(record: dict[str, Any]) -> None:
+        print(json.dumps(record), flush=True)
+
+    stack.on_event = lambda event: emit(event_json(event))
     stack.git.passthrough_stdout = sys.stderr
-
-    def output(result: Any, error: str | None) -> None:
-        print(json.dumps({"events": [event_json(e) for e in reported], "result": result, "error": error}, indent=2))
-
     try:
         returned = command()
     except StackError as e:
-        output(None, str(e))
+        emit({"type": "error", "message": str(e)})
         raise
-    output(result_json(returned), None)
+    emit({"type": "result", **result_json(returned)})
     return returned

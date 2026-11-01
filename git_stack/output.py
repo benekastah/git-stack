@@ -2,7 +2,7 @@
 
 import dataclasses
 import sys
-from typing import Any, TextIO, assert_never
+from typing import Any, assert_never
 
 from git_stack import events
 
@@ -155,10 +155,8 @@ def event_json(event: events.Event) -> dict[str, Any]:
     }
 
 
-def print_event(event: events.Event, out: TextIO | None = None) -> None:
-    """Print event's message: a warning to stderr, anything else to out
-    (default: stdout)."""
+def print_event(event: events.Event) -> None:
     if isinstance(event, WARNINGS):
         print(f"warning: {message(event)}", file=sys.stderr)
     else:
-        print(message(event), file=out or sys.stdout)
+        print(message(event))

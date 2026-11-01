@@ -12,7 +12,7 @@ import pytest
 from git_stack import events
 from git_stack.adapters.git import PullRequestLink, PullRequestState
 from git_stack.cli import main
-from git_stack.commands.info import branch_json
+from git_stack.commands.info import stacks_json
 from git_stack.errors import StackError
 from git_stack.git import GitClient
 from git_stack.stack import (
@@ -429,7 +429,7 @@ def test_clean_shows_the_stacks(stack: Any, capsys: pytest.CaptureFixture[str]) 
     assert capsys.readouterr().out == STACK_TREE
 
 
-def test_clean_json_prints_what_happened_and_the_stacks(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
+def test_clean_json_prints_each_event_then_the_result(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
     def clean(**kwargs: Any) -> list[BranchInfo]:
         stack.on_event(events.Fetching("origin"))
         return STACK
@@ -439,23 +439,20 @@ def test_clean_json_prints_what_happened_and_the_stacks(stack: Any, capsys: pyte
     assert main(["clean", "--json"], stack=stack) == 0
 
     out, err = capsys.readouterr()
-    assert json.loads(out) == {
-        "events": [
-            {
-                "type": "fetching",
-                "message": "fetching origin, and pruning its deleted branches",
-                "warning": False,
-                "remote": "origin",
-            }
-        ],
-        "result": [branch_json(b) for b in STACK],
-        "error": None,
-    }
-    assert err == "fetching origin, and pruning its deleted branches\n"
+    assert [json.loads(line) for line in out.splitlines()] == [
+        {
+            "type": "fetching",
+            "message": "fetching origin, and pruning its deleted branches",
+            "warning": False,
+            "remote": "origin",
+        },
+        {"type": "result", "stacks": stacks_json(STACK)},
+    ]
+    assert err == ""
     assert stack.git.passthrough_stdout is sys.stderr
 
 
-def test_clean_json_still_prints_when_it_fails(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
+def test_clean_json_ends_with_the_error_when_it_fails(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
     def clean(**kwargs: Any) -> list[BranchInfo]:
         stack.on_event(events.Fetching("origin"))
         raise StackError("fetching origin failed")
@@ -465,10 +462,64 @@ def test_clean_json_still_prints_when_it_fails(stack: Any, capsys: pytest.Captur
     assert main(["clean", "--json"], stack=stack) == 1
 
     out, err = capsys.readouterr()
-    output = json.loads(out)
-    assert [e["type"] for e in output["events"]] == ["fetching"]
-    assert (output["result"], output["error"]) == (None, "fetching origin failed")
-    assert err.endswith("git stack: fetching origin failed\n")
+    lines = [json.loads(line) for line in out.splitlines()]
+    assert [line["type"] for line in lines] == ["fetching", "error"]
+    assert lines[-1] == {"type": "error", "message": "fetching origin failed"}
+    assert err == "git stack: fetching origin failed\n"
+
+
+@pytest.mark.parametrize(
+    ("argv", "method", "returned", "result"),
+    [
+        (["sync"], "sync", SyncResult(["pr1"], STACK), {"stacks": stacks_json(STACK), "unpushed": ["pr1"]}),
+        (["push"], "push", PushResult(["pr1"], STACK), {"stacks": stacks_json(STACK), "pushed": ["pr1"]}),
+        (
+            ["prs"],
+            "prs",
+            PrsResult([PullRequestStep("pr1", "main", PullRequestAction.OPEN, "Add pr1", 12, "https://x/12")], STACK),
+            {
+                "stacks": stacks_json(STACK),
+                "steps": [
+                    {
+                        "branch": "pr1",
+                        "parent": "main",
+                        "action": "open",
+                        "title": "Add pr1",
+                        "number": 12,
+                        "url": "https://x/12",
+                    }
+                ],
+            },
+        ),
+        (
+            ["autocreate"],
+            "autocreate",
+            AutocreateResult([Autocreated("pr1", "main", 12, AutocreateAction.TRACK, base="a" * 40)], STACK),
+            {
+                "stacks": stacks_json(STACK),
+                "steps": [
+                    {
+                        "branch": "pr1",
+                        "parent": "main",
+                        "number": 12,
+                        "action": "track",
+                        "base": "a" * 40,
+                        "tracked_parent": None,
+                        "reason": None,
+                    }
+                ],
+            },
+        ),
+    ],
+)
+def test_json_prints_only_the_result_on_stdout(
+    stack: Any, capsys: pytest.CaptureFixture[str], argv: list[str], method: str, returned: Any, result: Any
+) -> None:
+    getattr(stack, method).return_value = returned
+
+    assert main([*argv, "--json"], stack=stack) == 0
+
+    assert json.loads(capsys.readouterr().out) == {"type": "result", **result}
 
 
 def test_push_says_when_everything_looks_merged(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:

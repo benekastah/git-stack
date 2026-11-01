@@ -7,7 +7,7 @@ from git_stack.commands import (
     add_json_argument,
     run_for_json,
 )
-from git_stack.commands.info import branch_json, print_tree
+from git_stack.commands.info import print_tree, stacks_json
 from git_stack.git import DEFAULT_REMOTE
 from git_stack.stack import BranchInfo, StackClient
 
@@ -35,7 +35,7 @@ def run(stack: StackClient, args: Args) -> None:
         return stack.clean(remote=args.remote, delete=args.delete, ignore_reverts=args.ignore_reverts)
 
     if args.json:
-        run_for_json(stack, clean, lambda branches: [branch_json(b) for b in branches])
+        run_for_json(stack, clean, lambda branches: {"stacks": stacks_json(branches)})
         return
     branches = clean()
     if branches:
