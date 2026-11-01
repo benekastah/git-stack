@@ -2,10 +2,13 @@
 
 StackCore and its subclasses pass each event to the on_event callback they
 were created with; git_stack.output turns them into messages for the CLI.
+
+Each event's event_type is its type in --json output. Scripts rely on it, and
+on the event's field names, so they don't change once released.
 """
 
 from dataclasses import dataclass
-from typing import TypeAlias
+from typing import ClassVar, TypeAlias
 
 
 @dataclass(frozen=True)
@@ -13,10 +16,14 @@ class WaitingForLock:
     """Another git-stack command in the repository is running, so this one is
     waiting for it to finish."""
 
+    event_type: ClassVar[str] = "waiting-for-lock"
+
 
 @dataclass(frozen=True)
 class Fetching:
     """remote is being fetched, with --prune."""
+
+    event_type: ClassVar[str] = "fetching"
 
     remote: str
 
@@ -25,21 +32,29 @@ class Fetching:
 class LookingUpPullRequests:
     """autocreate is searching GitHub for the user's open pull requests."""
 
+    event_type: ClassVar[str] = "looking-up-pull-requests"
+
 
 @dataclass(frozen=True)
 class Squashing:
+    event_type: ClassVar[str] = "squashing"
+
     branch: str
     count: int
 
 
 @dataclass(frozen=True)
 class Restacking:
+    event_type: ClassVar[str] = "restacking"
+
     branch: str
     parent: str
 
 
 @dataclass(frozen=True)
 class PullingUpstream:
+    event_type: ClassVar[str] = "pulling-upstream"
+
     branch: str
     count: int
 
@@ -49,12 +64,16 @@ class TookUpstreamRebase:
     """branch was moved to upstream, its own commits rebased elsewhere (e.g. by
     GitHub's "Rebase stack" button)."""
 
+    event_type: ClassVar[str] = "took-upstream-rebase"
+
     branch: str
     upstream: str
 
 
 @dataclass(frozen=True)
 class FastForwarded:
+    event_type: ClassVar[str] = "fast-forwarded"
+
     branch: str
     upstream: str
 
@@ -62,6 +81,8 @@ class FastForwarded:
 @dataclass(frozen=True)
 class TrunkDiverged:
     """branch wasn't fast-forwarded because it has commits upstream doesn't."""
+
+    event_type: ClassVar[str] = "trunk-diverged"
 
     branch: str
     upstream: str
@@ -71,6 +92,8 @@ class TrunkDiverged:
 class TrunkInOtherWorktree:
     """branch wasn't fast-forwarded to upstream because it's checked out in the
     worktree at path."""
+
+    event_type: ClassVar[str] = "trunk-in-other-worktree"
 
     branch: str
     upstream: str
@@ -82,12 +105,16 @@ class NotRestackedInOtherWorktree:
     """branch needed restacking, but was skipped (along with the branches stacked
     on it) because it's checked out in the worktree at path."""
 
+    event_type: ClassVar[str] = "not-restacked-in-other-worktree"
+
     branch: str
     path: str
 
 
 @dataclass(frozen=True)
 class NotSquashedInOtherWorktree:
+    event_type: ClassVar[str] = "not-squashed-in-other-worktree"
+
     branch: str
     path: str
 
@@ -96,6 +123,8 @@ class NotSquashedInOtherWorktree:
 class NotPulledInOtherWorktree:
     """branch's upstream has new commits, but they weren't pulled because branch
     is checked out in the worktree at path."""
+
+    event_type: ClassVar[str] = "not-pulled-in-other-worktree"
 
     branch: str
     path: str
@@ -106,6 +135,8 @@ class NotDeletedInOtherWorktree:
     """branch was merged and untracked, but not deleted because it's checked out
     in the worktree at path."""
 
+    event_type: ClassVar[str] = "not-deleted-in-other-worktree"
+
     branch: str
     path: str
 
@@ -114,6 +145,8 @@ class NotDeletedInOtherWorktree:
 class SkippedMerged:
     """branch looks merged, so it was left out and its children moved onto parent,
     without changing the stack's metadata."""
+
+    event_type: ClassVar[str] = "skipped-merged"
 
     branch: str
     parent: str
@@ -127,6 +160,8 @@ class Untracked:
     if it was kept.
     """
 
+    event_type: ClassVar[str] = "untracked"
+
     branch: str
     parent: str
     children: tuple[str, ...]
@@ -135,12 +170,16 @@ class Untracked:
 
 @dataclass(frozen=True)
 class RemoteBranchDeleted:
+    event_type: ClassVar[str] = "remote-branch-deleted"
+
     upstream: str
 
 
 @dataclass(frozen=True)
 class RemoteBranchDeleteFailed:
     """upstream couldn't be deleted, so branch was left alone."""
+
+    event_type: ClassVar[str] = "remote-branch-delete-failed"
 
     branch: str
     upstream: str
@@ -150,6 +189,8 @@ class RemoteBranchDeleteFailed:
 class RemoteBranchKept:
     """A merged branch was untracked, but its remote branch still exists."""
 
+    event_type: ClassVar[str] = "remote-branch-kept"
+
     upstream: str
     remote: str
     name: str
@@ -157,6 +198,8 @@ class RemoteBranchKept:
 
 @dataclass(frozen=True)
 class ParentSkipped:
+    event_type: ClassVar[str] = "parent-skipped"
+
     branch: str
     parent: str
 
@@ -165,6 +208,8 @@ class ParentSkipped:
 class MergedWithNewCommits:
     """branch was merged into parent, but it or its remote branch has commits
     that weren't, so it was left alone."""
+
+    event_type: ClassVar[str] = "merged-with-new-commits"
 
     branch: str
     parent: str
@@ -175,6 +220,8 @@ class Reverted:
     """branch was merged into parent, then parent reverted some of its
     changes, so it was left alone."""
 
+    event_type: ClassVar[str] = "reverted"
+
     branch: str
     parent: str
 
@@ -183,6 +230,8 @@ class Reverted:
 class MergedParentReverted:
     """branch was stacked on merged until it merged into parent, and parent
     has since reverted some of merged's changes."""
+
+    event_type: ClassVar[str] = "merged-parent-reverted"
 
     branch: str
     merged: str
@@ -193,6 +242,8 @@ class MergedParentReverted:
 class UpstreamGone:
     """branch's remote branch was deleted, but it wasn't merged into parent."""
 
+    event_type: ClassVar[str] = "upstream-gone"
+
     branch: str
     parent: str
 
@@ -201,12 +252,16 @@ class UpstreamGone:
 class BrokenBranch:
     """branch was skipped because its metadata doesn't match the repository."""
 
+    event_type: ClassVar[str] = "broken-branch"
+
     branch: str
     reason: str
 
 
 @dataclass(frozen=True)
 class ParentMissing:
+    event_type: ClassVar[str] = "parent-missing"
+
     branch: str
     parent: str
 
@@ -216,12 +271,16 @@ class PullRequestLookupFailed:
     """GitHub couldn't be asked about pull requests, so merges are only
     detected locally."""
 
+    event_type: ClassVar[str] = "pull-request-lookup-failed"
+
     error: str
 
 
 @dataclass(frozen=True)
 class NoPullRequests:
     """branches were pushed but have no pull request."""
+
+    event_type: ClassVar[str] = "no-pull-requests"
 
     branches: tuple[str, ...]
 
@@ -230,6 +289,8 @@ class NoPullRequests:
 class GitHubStackLinked:
     """The pull requests numbers were put in a stack on GitHub, at its top."""
 
+    event_type: ClassVar[str] = "github-stack-linked"
+
     numbers: tuple[int, ...]
 
 
@@ -237,6 +298,8 @@ class GitHubStackLinked:
 class GitHubStackUnstacked:
     """The open pull requests of stack number on GitHub were taken out of it,
     so pull request pull_request's base could be changed."""
+
+    event_type: ClassVar[str] = "github-stack-unstacked"
 
     number: int
     pull_request: int
@@ -248,12 +311,16 @@ class GitHubStackMismatch:
     stack on GitHub, since some are in stacks (their numbers) there that
     don't fit them."""
 
+    event_type: ClassVar[str] = "github-stack-mismatch"
+
     numbers: tuple[int, ...]
     stacks: tuple[int, ...]
 
 
 @dataclass(frozen=True)
 class PullRequestRetargeted:
+    event_type: ClassVar[str] = "pull-request-retargeted"
+
     branch: str
     number: int
     base: str

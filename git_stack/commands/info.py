@@ -4,7 +4,7 @@ import os
 import sys
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import TypeAlias
+from typing import Any, TypeAlias
 
 from git_stack.adapters.git import PullRequestState
 from git_stack.commands import Subparsers, add_stack_arguments
@@ -133,29 +133,26 @@ def run(stack: StackClient, args: Args) -> None:
 
 
 def print_json(branches: list[BranchInfo]) -> None:
-    print(
-        json.dumps(
-            [
-                {
-                    "name": b.name,
-                    "parent": b.parent,
-                    "status": b.status.value if b.status else None,
-                    "current": b.current,
-                    "reverted_parent": b.reverted_parent,
-                    "group": b.group,
-                    "pr": {
-                        "number": b.pull_request.number,
-                        "url": b.pull_request.url,
-                        "state": b.pull_request.state.value,
-                    }
-                    if b.pull_request
-                    else None,
-                }
-                for b in branches
-            ],
-            indent=2,
-        )
-    )
+    print(json.dumps([branch_json(b) for b in branches], indent=2))
+
+
+def branch_json(b: BranchInfo) -> dict[str, Any]:
+    """b as --json prints it."""
+    return {
+        "name": b.name,
+        "parent": b.parent,
+        "status": b.status.value if b.status else None,
+        "current": b.current,
+        "reverted_parent": b.reverted_parent,
+        "group": b.group,
+        "pr": {
+            "number": b.pull_request.number,
+            "url": b.pull_request.url,
+            "state": b.pull_request.state.value,
+        }
+        if b.pull_request
+        else None,
+    }
 
 
 def tree_children(branches: list[BranchInfo]) -> dict[str | GroupHeader, list[BranchInfo | GroupHeader]]:

@@ -1,9 +1,13 @@
 """How the CLI prints events."""
 
+import dataclasses
+import sys
+import typing
+
 import pytest
 
 from git_stack import events
-from git_stack.output import message, print_event
+from git_stack.output import event_json, message, print_event
 
 
 def test_warning_goes_to_stderr(capsys: pytest.CaptureFixture[str]) -> None:
@@ -34,3 +38,35 @@ def test_progress_goes_to_stdout(capsys: pytest.CaptureFixture[str]) -> None:
 )
 def test_untracked_says_what_happened_to_branch_and_children(event: events.Event, expected: str) -> None:
     assert message(event) == expected
+
+
+def test_every_event_has_its_own_type() -> None:
+    types = [event.event_type for event in typing.get_args(events.Event)]
+
+    assert len(set(types)) == len(types)
+
+
+def test_no_event_field_hides_a_key_event_json_adds() -> None:
+    for event in typing.get_args(events.Event):
+        assert not {f.name for f in dataclasses.fields(event)} & {"type", "message", "warning"}
+
+
+def test_event_json_has_type_message_warning_and_fields() -> None:
+    event = events.Untracked("pr1", "main", ("pr2",), deleted_tip="0123456789abcdef")
+
+    assert event_json(event) == {
+        "type": "untracked",
+        "message": "pr1 was merged into main; deleted it (was 0123456789ab) and moved pr2 onto main",
+        "warning": False,
+        "branch": "pr1",
+        "parent": "main",
+        "children": ("pr2",),
+        "deleted_tip": "0123456789abcdef",
+    }
+    assert event_json(events.TrunkDiverged("main", "origin/main"))["warning"] is True
+
+
+def test_progress_can_go_elsewhere(capsys: pytest.CaptureFixture[str]) -> None:
+    print_event(events.Restacking("pr2", "pr1"), out=sys.stderr)
+
+    assert capsys.readouterr() == ("", "restacking pr2 onto pr1\n")

@@ -3,13 +3,16 @@ what it returns. StackClient is a mock; tests/test_end_to_end.py runs the
 real thing."""
 
 import json
+import sys
 from typing import Any
 from unittest.mock import create_autospec
 
 import pytest
 
+from git_stack import events
 from git_stack.adapters.git import PullRequestLink, PullRequestState
 from git_stack.cli import main
+from git_stack.commands.info import branch_json
 from git_stack.errors import StackError
 from git_stack.git import GitClient
 from git_stack.stack import (
@@ -424,6 +427,48 @@ def test_clean_shows_the_stacks(stack: Any, capsys: pytest.CaptureFixture[str]) 
     main(["clean"], stack=stack)
 
     assert capsys.readouterr().out == STACK_TREE
+
+
+def test_clean_json_prints_what_happened_and_the_stacks(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
+    def clean(**kwargs: Any) -> list[BranchInfo]:
+        stack.on_event(events.Fetching("origin"))
+        return STACK
+
+    stack.clean.side_effect = clean
+
+    assert main(["clean", "--json"], stack=stack) == 0
+
+    out, err = capsys.readouterr()
+    assert json.loads(out) == {
+        "events": [
+            {
+                "type": "fetching",
+                "message": "fetching origin, and pruning its deleted branches",
+                "warning": False,
+                "remote": "origin",
+            }
+        ],
+        "result": [branch_json(b) for b in STACK],
+        "error": None,
+    }
+    assert err == "fetching origin, and pruning its deleted branches\n"
+    assert stack.git.passthrough_stdout is sys.stderr
+
+
+def test_clean_json_still_prints_when_it_fails(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
+    def clean(**kwargs: Any) -> list[BranchInfo]:
+        stack.on_event(events.Fetching("origin"))
+        raise StackError("fetching origin failed")
+
+    stack.clean.side_effect = clean
+
+    assert main(["clean", "--json"], stack=stack) == 1
+
+    out, err = capsys.readouterr()
+    output = json.loads(out)
+    assert [e["type"] for e in output["events"]] == ["fetching"]
+    assert (output["result"], output["error"]) == (None, "fetching origin failed")
+    assert err.endswith("git stack: fetching origin failed\n")
 
 
 def test_push_says_when_everything_looks_merged(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:

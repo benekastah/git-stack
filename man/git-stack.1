@@ -794,7 +794,7 @@ couldn\(aqt push for that reason (unless it was run with
 \f[CR]\-\-no\-push\f[R]).
 .IP \(bu 2
 Needs a clean worktree, and refuses to run outside a stack.
-.SS \f[CR]git stack clean [\-\-remote origin] [\-d local|remote|both] [\-\-ignore\-revert <branch>]\f[R]
+.SS \f[CR]git stack clean [\-\-remote origin] [\-d local|remote|both] [\-\-ignore\-revert <branch>] [\-\-json]\f[R]
 Fetch with \f[CR]\-\-prune\f[R], fast\-forward every stack\(aqs root,
 and stop tracking merged branches in every stack, moving their children
 onto their parent.
@@ -821,6 +821,50 @@ It ends by showing every stack, as \f[CR]info\f[R] does.
 .IP \(bu 2
 Runs from any branch, even one that isn\(aqt in a stack.
 Needs a clean worktree.
+.IP \(bu 2
+\f[CR]\-\-json\f[R] prints one JSON object for scripts instead, and the
+usual messages on stderr.
+\f[CR]events\f[R] lists what happened, in order: each has a
+\f[CR]type\f[R], the \f[CR]message\f[R] \f[CR]clean\f[R] would print,
+whether it\(aqs a \f[CR]warning\f[R], and fields that depend on its
+type.
+For example, \f[CR]untracked\f[R] has the merged \f[CR]branch\f[R], the
+\f[CR]parent\f[R] its \f[CR]children\f[R] were moved onto, and
+\f[CR]deleted_tip\f[R], the commit the branch pointed at if it was
+deleted, or \f[CR]null\f[R].
+\f[CR]result\f[R] is every stack, as \f[CR]info \-\-json\f[R] lists
+them.
+If \f[CR]clean\f[R] fails, \f[CR]result\f[R] is \f[CR]null\f[R],
+\f[CR]error\f[R] says why (it\(aqs \f[CR]null\f[R] otherwise), and
+\f[CR]events\f[R] still lists what it did first.
+Types and field names don\(aqt change, though new ones may be added.
+.RS 2
+.IP
+.EX
+git stack clean \-d local \-\-json
+\f[I]# {\f[R]
+\f[I]#   \(dqevents\(dq: [\f[R]
+\f[I]#     {\f[R]
+\f[I]#       \(dqtype\(dq: \(dqfetching\(dq,\f[R]
+\f[I]#       \(dqmessage\(dq: \(dqfetching origin, and pruning its deleted branches\(dq,\f[R]
+\f[I]#       \(dqwarning\(dq: false,\f[R]
+\f[I]#       \(dqremote\(dq: \(dqorigin\(dq\f[R]
+\f[I]#     },\f[R]
+\f[I]#     {\f[R]
+\f[I]#       \(dqtype\(dq: \(dquntracked\(dq,\f[R]
+\f[I]#       \(dqmessage\(dq: \(dqpr1 was merged into main; deleted it (was 0123456789ab) and moved pr2 onto main\(dq,\f[R]
+\f[I]#       \(dqwarning\(dq: false,\f[R]
+\f[I]#       \(dqbranch\(dq: \(dqpr1\(dq,\f[R]
+\f[I]#       \(dqparent\(dq: \(dqmain\(dq,\f[R]
+\f[I]#       \(dqchildren\(dq: [\(dqpr2\(dq],\f[R]
+\f[I]#       \(dqdeleted_tip\(dq: \(dq0123456789abcdef0123456789abcdef01234567\(dq\f[R]
+\f[I]#     }\f[R]
+\f[I]#   ],\f[R]
+\f[I]#   \(dqresult\(dq: [...],\f[R]
+\f[I]#   \(dqerror\(dq: null\f[R]
+\f[I]# }\f[R]
+.EE
+.RE
 .SS \f[CR]git stack push [<branch|glob>...] [\-g <group>] [\-\-remote origin] [\-\-force]\f[R]
 Force\-push (with lease) every branch in the current stack (or the ones
 named, see Groups), and set each one\(aqs upstream.

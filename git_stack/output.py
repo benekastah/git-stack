@@ -1,7 +1,8 @@
 """Turns events into the messages the CLI prints."""
 
+import dataclasses
 import sys
-from typing import assert_never
+from typing import Any, TextIO, assert_never
 
 from git_stack import events
 
@@ -143,8 +144,21 @@ def pull_requests(numbers: tuple[int, ...]) -> str:
     return ", ".join(f"#{n}" for n in numbers)
 
 
-def print_event(event: events.Event) -> None:
+def event_json(event: events.Event) -> dict[str, Any]:
+    """event as --json prints it: its type, the message the CLI would print,
+    whether that's a warning, and its fields."""
+    return {
+        "type": event.event_type,
+        "message": message(event),
+        "warning": isinstance(event, WARNINGS),
+        **dataclasses.asdict(event),
+    }
+
+
+def print_event(event: events.Event, out: TextIO | None = None) -> None:
+    """Print event's message: a warning to stderr, anything else to out
+    (default: stdout)."""
     if isinstance(event, WARNINGS):
         print(f"warning: {message(event)}", file=sys.stderr)
     else:
-        print(message(event))
+        print(message(event), file=out or sys.stdout)

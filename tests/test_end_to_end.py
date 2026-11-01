@@ -2,6 +2,7 @@
 the mocked CLI tests can't: the entry point, and printing what StackClient
 reports."""
 
+import json
 import subprocess
 import sys
 
@@ -76,3 +77,35 @@ def test_show_stack_quiet_answers_with_exit_status(repo: Repo) -> None:
     repo.git("switch", "--quiet", "main")
     result = repo.stack("show-stack", "--quiet", expect_success=False)
     assert (result.returncode, result.stdout, result.stderr) == (1, "", "")
+
+
+def test_clean_json_prints_only_json_on_stdout(repo: Repo) -> None:
+    repo.make_stack()
+    repo.stack("push")
+    repo.squash_merge_on_forge("pr1")
+    repo.git("switch", "--quiet", "main")
+
+    result = repo.stack("clean", "-d", "local", "--json")
+
+    output = json.loads(result.stdout)
+    untracked = [e for e in output["events"] if e["type"] == "untracked"]
+    assert [(e["branch"], e["children"], e["deleted_tip"] is not None) for e in untracked] == [("pr1", ["pr2"], True)]
+    assert [b["name"] for b in output["result"]] == ["main", "pr2", "pr3"]
+    assert output["error"] is None
+    # The usual messages go to stderr instead.
+    assert "pr1 was merged into main; deleted it" in result.stderr
+
+
+def test_clean_json_reports_what_stopped_it(repo: Repo) -> None:
+    repo.make_stack()
+    (repo.path / "a").write_text("uncommitted\n")
+
+    result = repo.stack("clean", "--json", expect_success=False)
+
+    assert result.returncode == 1
+    assert json.loads(result.stdout) == {
+        "events": [],
+        "result": None,
+        "error": "you have uncommitted changes; commit or stash them first",
+    }
+    assert result.stderr == "git stack: you have uncommitted changes; commit or stash them first\n"

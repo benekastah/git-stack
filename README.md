@@ -575,7 +575,7 @@ git stack sync -d both          # ...and their remote branches
   for that reason (unless it was run with `--no-push`).
 - Needs a clean worktree, and refuses to run outside a stack.
 
-### `git stack clean [--remote origin] [-d local|remote|both] [--ignore-revert <branch>]`
+### `git stack clean [--remote origin] [-d local|remote|both] [--ignore-revert <branch>] [--json]`
 
 Fetch with `--prune`, fast-forward every stack's root, and stop tracking merged
 branches in every stack, moving their children onto their parent.
@@ -596,6 +596,40 @@ git stack clean -d local
 - It ends by showing every stack, as `info` does.
 - Runs from any branch, even one that isn't in a stack. Needs a clean
   worktree.
+- `--json` prints one JSON object for scripts instead, and the usual messages
+  on stderr. `events` lists what happened, in order: each has a `type`, the
+  `message` `clean` would print, whether it's a `warning`, and fields that
+  depend on its type. For example, `untracked` has the merged `branch`, the
+  `parent` its `children` were moved onto, and `deleted_tip`, the commit the
+  branch pointed at if it was deleted, or `null`. `result` is every stack, as
+  `info --json` lists them. If `clean` fails, `result` is `null`, `error` says
+  why (it's `null` otherwise), and `events` still lists what it did first.
+  Types and field names don't change, though new ones may be added.
+
+  ```sh
+  git stack clean -d local --json
+  # {
+  #   "events": [
+  #     {
+  #       "type": "fetching",
+  #       "message": "fetching origin, and pruning its deleted branches",
+  #       "warning": false,
+  #       "remote": "origin"
+  #     },
+  #     {
+  #       "type": "untracked",
+  #       "message": "pr1 was merged into main; deleted it (was 0123456789ab) and moved pr2 onto main",
+  #       "warning": false,
+  #       "branch": "pr1",
+  #       "parent": "main",
+  #       "children": ["pr2"],
+  #       "deleted_tip": "0123456789abcdef0123456789abcdef01234567"
+  #     }
+  #   ],
+  #   "result": [...],
+  #   "error": null
+  # }
+  ```
 
 ### `git stack push [<branch|glob>...] [-g <group>] [--remote origin] [--force]`
 

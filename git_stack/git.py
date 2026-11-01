@@ -1,6 +1,7 @@
 import os
 import subprocess
 import time
+from typing import TextIO
 
 from git_stack.errors import StackError
 
@@ -19,6 +20,9 @@ class GitClient:
         # See branch_config.
         self._config_stat: tuple[int, int, int] | None = None
         self._branch_config: dict[tuple[str, str], str] = {}
+        # Where passthrough sends git's stdout (default: ours), e.g. stderr when
+        # our stdout is for --json output.
+        self.passthrough_stdout: TextIO | None = None
 
     def _command(self, *args: str) -> list[str]:
         return ["git", "-C", self.directory, *args]
@@ -35,8 +39,9 @@ class GitClient:
         return subprocess.run(self._command(*args), capture_output=True, check=False).returncode == 0
 
     def passthrough(self, *args: str) -> bool:
-        """Run git with output going straight to the terminal."""
-        return subprocess.run(self._command(*args), check=False).returncode == 0
+        """Run git with output going straight to the terminal (stdout to
+        passthrough_stdout)."""
+        return subprocess.run(self._command(*args), stdout=self.passthrough_stdout, check=False).returncode == 0
 
     def common_dir(self) -> str:
         """The absolute path of the git directory every worktree shares."""
