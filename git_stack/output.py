@@ -126,14 +126,14 @@ def message(event: events.Event) -> str:  # noqa: C901
             return f"linked {pull_requests(event.numbers)} into a stack on GitHub"
         case events.GitHubStackUnstacked():
             return (
-                f"unstacked stack {event.number} on GitHub, which doesn't change the base of a pull request "
-                f"in a stack, to change #{event.pull_request}'s; `git stack prs` links them again"
+                f"unstacked stack {event.stack} on GitHub, which doesn't change the base of a pull request "
+                f"in a stack, to change #{event.number}'s; `git stack prs` links them again"
             )
         case events.GitHubStackMismatch():
-            stacks = ", ".join(map(str, event.stacks))
+            stacks = ", ".join(map(str, event.github_stacks))
             return (
                 f"didn't link {pull_requests(event.numbers)} into a stack on GitHub: some are in "
-                f"{'stacks' if len(event.stacks) > 1 else 'stack'} {stacks} there, which don't match "
+                f"{'stacks' if len(event.github_stacks) > 1 else 'stack'} {stacks} there, which don't match "
                 f"them, and pull requests can't be taken out of a stack"
             )
         case events.PullRequestRetargeted():
