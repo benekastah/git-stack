@@ -35,7 +35,8 @@ so these are interfaces:
 - **`info --json`**, which prints a single list, for compatibility.
 - **The scripting commands** (`parent`, `base`, `show-stack`), which print one
   thing per line, and `show-stack --quiet`'s exit status.
-- **Exit statuses**: 0 on success, 1 when a command fails.
+- **Exit statuses**: 0 on success, 1 when a command fails, and 2 (from
+  argparse) for arguments it doesn't understand.
 
 Adding an event type, a field or a result field is fine. Renaming, removing or
 changing the meaning of one isn't, nor changing a value's type (e.g. a string

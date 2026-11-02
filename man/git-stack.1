@@ -1188,6 +1188,8 @@ again, so a script that only reads the last line has all of it.
 If the command fails, the last line is
 \f[CR]{\(dqtype\(dq: \(dqerror\(dq, \(dqmessage\(dq: ..., \(dqevents\(dq: [...]}\f[R]
 instead, and it exits with status 1.
+Arguments it doesn\(aqt understand print no JSON: just usage, on stderr,
+with exit status 2.
 .IP \(bu 2
 Types and field names don\(aqt change, though new ones may be added.
 .PP

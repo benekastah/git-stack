@@ -890,7 +890,8 @@ git stack parent --json
   and `events`: everything that happened again, so a script that only reads
   the last line has all of it. If the command fails, the last line is
   `{"type": "error", "message": ..., "events": [...]}` instead, and it exits
-  with status 1.
+  with status 1. Arguments it doesn't understand print no JSON: just usage, on
+  stderr, with exit status 2.
 - Types and field names don't change, though new ones may be added.
 
 What each command's result has, besides `type` and `events`:
