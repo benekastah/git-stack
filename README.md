@@ -1320,3 +1320,7 @@ request with a merge commit rather than squashing it.
 which leaves out the Install and Development sections. The pre-commit hook
 keeps it up to date; without the hook, regenerate it with
 `.venv/bin/python man/build.py`. The tests fail if it's out of date.
+
+## License
+
+git-stack is released under the MIT License; see `LICENSE`.

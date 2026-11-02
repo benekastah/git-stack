@@ -7,6 +7,8 @@ name = "git-stack"
 version = "0.1.0"
 description = "Stacked branches that survive squash merges"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 
 [dependency-groups]
