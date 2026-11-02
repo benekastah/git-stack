@@ -22,7 +22,7 @@ Already have pull requests open, e.g. in a fresh clone or from before you used
 git-stack? Track them as stacks instead:
 
 ```sh
-git stack autocreate            # track your open PRs, each on the branch it merges into
+git stack import                # track your open PRs, each on the branch it merges into
 ```
 
 After that, day to day:
@@ -44,7 +44,8 @@ git stack sync                  # catch up: drop merged PRs, rebase what's left,
 | move to the next or previous branch in the stack | `git stack next` / `git stack prev` |
 | build a PR on a different parent | `git stack restack --onto <parent>` |
 | use git-stack with branches I already have | `git stack track main <branch>...` |
-| set up stacks from my open PRs (e.g. in a new clone) | `git stack autocreate` |
+| set up stacks from my open PRs (e.g. in a new clone) | `git stack import` |
+| build on a coworker's stack | `git stack import -n --author <login>`, then `git stack import -f --author <login> <branch>` |
 | open draft PRs for my stack | `git stack push`, then `git stack prs` |
 | rename a branch in a stack | `git stack rename <new>` |
 | sync several stacks at once | `git stack group add <name> <branch-or-glob>...`, then `git stack sync -g <name>` |
@@ -61,7 +62,7 @@ git stack sync                  # catch up: drop merged PRs, rebase what's left,
   doesn't manage it, but `sync` keeps it up to date.
 - **tracked**: a branch git-stack knows about, because you made it with
   `git stack branch`, or added it with `git stack track` or
-  `git stack autocreate`.
+  `git stack import`.
 - **restack**: rebase a branch onto its parent's latest commit, replaying only
   the branch's own commits.
 - **the current stack**: the whole stack the branch you're on is part of,
@@ -234,57 +235,71 @@ entry, it's their merge-base.
 - Nothing is written unless every branch can be tracked, so a bad argument
   doesn't leave the stack half-tracked.
 
-### `git stack autocreate [--remote origin] [-n]`
+### `git stack import [<branch>...] [--pr <number|url>]... [--author <login>] [--remote origin] [-n | -f]`
 
-Track your open pull requests on GitHub, drafts included, as stacks: each
-pull request's branch on the branch it merges into.
+Track open pull requests on GitHub, drafts included, as stacks: each pull
+request's branch on the branch it merges into. They're your own, or with
+`--author`, another GitHub user's. `autocreate` is another name for it.
 
 **When would I use it?** When you have pull requests open but git-stack doesn't
 know about their branches yet: in a fresh clone, on another machine, or for
-pull requests you opened before you started using git-stack.
+pull requests you opened before you started using git-stack. Or to build on a
+coworker's stack.
 
 ```sh
-git stack autocreate -n         # see what it would do
-git stack autocreate
+git stack import -n             # see what it would do
+git stack import
 # main
 # └── add-api     https://github.com/acme/widgets/pull/12
 #     └── use-api https://github.com/acme/widgets/pull/13
+
+git stack import -n --author alice        # alice's stacks
+git stack import -f --author alice search # the one with her search branch
+git stack import -f --pr 31               # the one with pull request #31, whoever's
+git stack import -f --pr https://github.com/acme/widgets/pull/31
 ```
 
 - It ends by showing the stacks it tracked, as `info` does, with the links of
-  the pull requests whose branches it just tracked in green. `-n` lists what
-  it would do for each pull request instead.
-
-- It only looks at your own open pull requests from branches in the
-  repository: GitHub finds them with a search for pull requests by you, so
+  the pull requests whose branches it just tracked in green.
+- Branches, and pull requests by `--pr` with their number or URL, narrow it to
+  the stack trees they're in: everything stacked on the bottom pull request of
+  each, wherever in it the one you named is. Naming someone else's pull
+  request looks up their pull requests too; with only `--pr`, yours aren't.
+- It only looks at the open pull requests of the people it imports, from
+  branches in the repository: GitHub finds them with a search by author, so
   other people's are never fetched, however many there are. Pull requests from
   forks don't count. It needs the [GitHub adapter](#github).
+- Someone else's work is only tracked with `-f`/`--force`: the branches of
+  their pull requests, and branches without a pull request with commits by
+  anyone but you (by email address). Without `-f`, those are skipped, along
+  with the pull requests built on them. Once tracked, they're stacks like
+  any other: `sync`, `push` and `prs` on a stack that includes their branches
+  restack, push and open pull requests for them too, so name your own branches
+  (e.g. `git stack sync my-branch`) to leave theirs alone.
+- `-n`/`--dry-run` prints what it would do with `-f`, saying what needs it,
+  without changing anything (besides fetching). It can't be used with `-f`.
 - A pull request without a local branch gets one, created from its remote
   branch, with that as its upstream. A local branch without an upstream gets
   its remote branch as its upstream.
 - Branches that are already tracked are left alone. If one is tracked on a
   different parent than its pull request merges into, it says so; run
   `git stack track <parent> <branch>` if GitHub is right.
-- If one of your pull requests merges into a branch you don't have locally
-  and that has no pull request, that branch is created from its remote branch
-  and tracked too, on the branch it's built on: of the remote's branches it
-  contains that the default branch doesn't, the closest, or else the default
-  branch. That's only if all of its own commits are yours (by your git email
-  address). If they aren't (e.g. you built on a coworker's branch), or it's
-  unclear which branch it's built on, the pull request is skipped, along with
-  your pull requests built on it; `git switch` to that branch and rerun to
-  track them on it. A branch built on an old version of its parent (one
-  rewritten since) looks built on what's below the parent; fix it with
-  `git stack track <parent> <branch>`.
+- If a pull request merges into a branch you don't have locally and that has no
+  pull request (or none it looked up), that branch is created from its remote
+  branch and tracked too, on the branch it's built on: of the remote's
+  branches it contains that the default branch doesn't, the closest, or else
+  the default branch. If it's unclear which branch that is, the pull request
+  is skipped, along with the pull requests built on it; `git switch` to that
+  branch and rerun to track them on it. A branch built on an old version of
+  its parent (one rewritten since) looks built on what's below the parent; fix
+  it with `git stack track <parent> <branch>`.
 - Each branch's base is found as for `git stack track`, after fast-forwarding
-  the branches your pull requests merge into that aren't tracked (e.g. `main`)
+  the branches the pull requests merge into that aren't tracked (e.g. `main`)
   to their upstreams, as `sync` does. If a parent's commits
   were rewritten after its child was built on them (e.g. the parent was
   rebased and force-pushed from another machine), the child's base can come
   out too old, and its next restack replays the parent's old commits; set it
   with `git stack track <parent> <branch> --base <sha>`.
-- `-n`/`--dry-run` prints what it would do without changing anything (besides
-  fetching).
 
 ### `git stack untrack [<branch|glob>...]`
 
@@ -907,7 +922,7 @@ What each command's result has, besides `type` and `events`:
 | --- | --- |
 | `branch` | `branch`, the `parent` it was created on, and its `group` (or `null`) |
 | `track` | `tracked`: each branch's `branch`, `parent` and `base` |
-| `autocreate` | `stacks`, and `steps`, one for each pull request: its `branch`, the `parent` it merges into, its `number`, and the `action`: `create`, `track`, `already-tracked`, `parent-differs` or `skip`. `base` is the commit a branch it creates or tracks is built on, `tracked_parent` the parent a `parent-differs` branch is tracked on instead, and `reason` why it skipped one; each is `null` otherwise. `without_prs` has the same for the branches without a pull request that your pull requests are built on, without `number` or `tracked_parent`, and only `create` or `skip`; `parent` is `null` if it couldn't tell which branch one is built on |
+| `import` | `stacks`, and `steps`, one for each pull request: its `branch`, the `parent` it merges into, its `number`, and the `action`: `create`, `track`, `already-tracked`, `parent-differs` or `skip`. `base` is the commit a branch it creates or tracks is built on, `tracked_parent` the parent a `parent-differs` branch is tracked on instead, and `reason` why it skipped one; each is `null` otherwise. `other_authors` has the pull request's author if it isn't you (so it needs `-f`), and is empty otherwise. `without_prs` has the same for the branches without a pull request that the pull requests are built on, without `number` or `tracked_parent`, and only `create` or `skip`; their `other_authors` are email addresses, and `parent` is `null` if it couldn't tell which branch one is built on |
 | `untrack` | `untracked`: each `branch`, and the `children` still stacked on it |
 | `rename` | `old`, `new`, the `children` moved onto it, and the `upstream` it no longer tracks (or `null`) |
 | `group add` | the `group`, and the `bottoms` of the stacks put in it |

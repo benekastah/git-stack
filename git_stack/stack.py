@@ -1,5 +1,6 @@
 import enum
 import functools
+import re
 from collections.abc import Callable, Iterable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -120,7 +121,19 @@ class Unreverted:
     children: tuple[str, ...]
 
 
-class AutocreateAction(enum.Enum):
+# What GitHub allows in a username, so one can't add to a search query.
+GITHUB_LOGIN = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})")
+
+
+def lookup_failed(error: StackError) -> StackError:
+    """The error for import when GitHub couldn't be asked for pull requests."""
+    return StackError(
+        f"couldn't look up pull requests on GitHub; check `gh auth status` (and, for "
+        f"an organization with SSO, that gh's token is authorized for it): {error}"
+    )
+
+
+class ImportAction(enum.Enum):
     CREATE = "create"  # create the local branch from its remote branch, and track it
     TRACK = "track"
     ALREADY_TRACKED = "already-tracked"
@@ -129,21 +142,24 @@ class AutocreateAction(enum.Enum):
 
 
 @dataclass(frozen=True)
-class Autocreated:
-    """What autocreate did, or in a dry run would do, for the pull request
+class ImportStep:
+    """What import did, or in a dry run would do, for the pull request
     number of branch into parent.
 
     base is the commit branch is tracked as built on (CREATE and TRACK),
     tracked_parent the parent it's already tracked on instead
-    (PARENT_DIFFERS), and reason why it was skipped (SKIP)."""
+    (PARENT_DIFFERS), and reason why it was skipped (SKIP). other_authors is
+    the pull request's author, if it isn't the gh user's (CREATE and TRACK,
+    which then need force)."""
 
     branch: str
     parent: str
     number: int
-    action: AutocreateAction
+    action: ImportAction
     base: str | None = None
     tracked_parent: str | None = None
     reason: str | None = None
+    other_authors: list[str] = field(default_factory=list)
 
 
 class PullRequestAction(enum.Enum):
@@ -179,33 +195,36 @@ class PrsResult:
 
 
 @dataclass(frozen=True)
-class AutocreatedWithoutPr:
-    """What autocreate did, or in a dry run would do, for branch: a branch on
+class ImportStepWithoutPr:
+    """What import did, or in a dry run would do, for branch: a branch on
     the remote, without a pull request or a local branch, that one of the
     user's pull requests is built on. Its parent is found from history (see
-    AutocreatePlanner.find_parent).
+    ImportPlanner.find_parent).
 
     action is CREATE or SKIP. base is the commit branch is tracked as built
-    on (CREATE), and reason why it was skipped (SKIP)."""
+    on (CREATE), and reason why it was skipped (SKIP). other_authors are the
+    email addresses of its commits' authors besides the user (CREATE, which
+    then needs force)."""
 
     branch: str
     parent: str | None
-    action: AutocreateAction
+    action: ImportAction
     base: str | None = None
     reason: str | None = None
+    other_authors: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
-class AutocreateResult:
-    """What autocreate did: an Autocreated for each pull request, and the
+class ImportResult:
+    """What import did: an ImportStep for each pull request, and the
     stacks of the branches it tracked or found tracked, as info() lists them
     (none in a dry run, which tracks nothing). without_prs has what it did for
     the branches without a pull request that pull requests are built on,
     parents before children."""
 
-    steps: list[Autocreated]
+    steps: list[ImportStep]
     branches: list[BranchInfo] = field(metadata=json_name("stacks"))
-    without_prs: list[AutocreatedWithoutPr] = field(default_factory=list)
+    without_prs: list[ImportStepWithoutPr] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -369,74 +388,109 @@ class StackClient(StackCore):
                 )
 
     @exclusive
-    def autocreate(self, remote: str = DEFAULT_REMOTE, dry_run: bool = False) -> AutocreateResult:
-        """Track the gh user's open pull requests on GitHub, drafts included, as
-        stacks: each one's branch on the branch it merges into, creating local
-        branches from remote for those that don't have one. Branches that are
-        already tracked are left alone. The untracked branches they merge into
-        (e.g. main) are fast-forwarded to their upstreams first.
+    def import_stacks(
+        self,
+        remote: str = DEFAULT_REMOTE,
+        dry_run: bool = False,
+        force: bool = False,
+        author: str | None = None,
+        branches: Sequence[str] = (),
+        prs: Sequence[str] = (),
+    ) -> ImportResult:
+        """Track open pull requests on GitHub, drafts included, as stacks: each
+        one's branch on the branch it merges into, creating local branches
+        from remote for those that don't have one. Branches that are already
+        tracked are left alone. The untracked branches they merge into (e.g.
+        main) are fast-forwarded to their upstreams first.
+
+        The pull requests are author's (a GitHub login), or the gh user's.
+        branches and prs (pull request numbers or URLs, whoever's they are)
+        narrow them to the stack trees containing those. The pull requests of
+        anyone but the gh user are only tracked with force.
 
         A pull request may merge into a branch that's only on remote, without a
         pull request: that branch is created and tracked too, on the branch
-        its history says it's built on, if all of its own commits are the
-        user's. Otherwise it's most likely someone else's, and the pull
-        requests built on it are skipped.
+        its history says it's built on. If it has commits by anyone but the
+        user, only with force.
 
-        Returns an Autocreated for each pull request, parents before children,
-        and the stacks of the branches it tracked or found tracked. With
-        dry_run, nothing is changed (besides fetching remote).
+        With dry_run, nothing is changed (besides fetching remote), and the
+        steps are what force would do.
         """
-        git = self.git
+        if author is not None and not GITHUB_LOGIN.fullmatch(author):
+            raise StackError(f"{author} isn't a GitHub username")
         self.ensure_no_operation_in_progress()
         self.settle_all()
         adapter = make_adapter(self, remote, fetch=True)
         if not isinstance(adapter, GitHubAdapter):
             raise StackError(
-                f"autocreate finds stacks from pull requests on GitHub, but {remote} isn't a "
+                f"import finds stacks from pull requests on GitHub, but {remote} isn't a "
                 f"GitHub repository, gh isn't installed, or {ADAPTER_SETTING} is git"
             )
-        self.emit(events.LookingUpPullRequests())
-        try:
-            prs = adapter.my_open_pull_requests()
-        except StackError as e:
-            raise StackError(
-                f"couldn't look up your pull requests on GitHub; check `gh auth status` (and, for "
-                f"an organization with SSO, that gh's token is authorized for it): {e}"
-            ) from e
+        numbers = sorted({adapter.pull_request_number(pr) for pr in prs})
+        self.emit(events.LookingUpPullRequests(author))
+        # The user's own pull requests, unless only pull requests were named.
+        mine = bool(branches) or not numbers
+        open_prs = self.look_up_open_pull_requests(adapter, author, numbers, mine)
         self.fetch(remote)
         if not dry_run:
-            # Bases are worked out from the local parents, so a stale main would
-            # make them too old for branches built on a newer origin/main.
-            heads, parents = {pr.head for pr in prs}, self.tracked_branches()
-            trunks = {pr.base for pr in prs if pr.base not in heads | parents.keys()}
-            # A branch without a pull request may turn out to be built on the
-            # default branch.
-            if adapter.default_branch is not None and not all(git.local_branch_exists(t) for t in trunks):
-                trunks.add(adapter.default_branch)
-            self.fast_forward_trunks(sorted(trunks))
-        planner = AutocreatePlanner(self, prs, remote, adapter.default_branch)
-        plan = planner.plan_all()
-        without_prs = list(planner.without_prs.values())
+            self.fast_forward_import_trunks(open_prs, adapter.default_branch)
+        planner = ImportPlanner(self, open_prs, remote, adapter.default_branch, adapter.viewer, force or dry_run)
+        plan, without_prs = planner.plan_all(), list(planner.without_prs.values())
+        if branches or numbers:
+            plan, without_prs = planner.select(branches, numbers, plan, without_prs)
         if dry_run:
-            return AutocreateResult(plan, [], without_prs)
-        self.apply_autocreate(plan, without_prs, remote)
+            return ImportResult(plan, [], without_prs)
+        self.apply_import(plan, without_prs, remote)
         shown = [s.branch for s in plan] + [s.branch for s in without_prs]
-        return AutocreateResult(plan, self.stack_infos(shown, adapter), without_prs)
+        return ImportResult(plan, self.stack_infos(shown, adapter), without_prs)
 
-    def apply_autocreate(self, plan: list[Autocreated], without_prs: list[AutocreatedWithoutPr], remote: str) -> None:
-        """Create and track the branches autocreate planned to."""
+    def look_up_open_pull_requests(
+        self, adapter: GitHubAdapter, author: str | None, numbers: Sequence[int], mine: bool
+    ) -> list[OpenPullRequest]:
+        """The open pull requests of author, of the authors of the pull
+        requests numbers, and (if author is None and mine) of the gh user."""
+        try:
+            logins = {number: adapter.open_pull_request_author(number) for number in numbers}
+        except StackError as e:
+            raise lookup_failed(e) from e
+        if closed := [number for number, login in logins.items() if login is None]:
+            raise StackError(f"#{closed[0]} isn't an open pull request")
+        authors = {author} if author else ({"@me"} if mine else set())
+        authors |= {login for login in logins.values() if login}
+        prs: dict[int, OpenPullRequest] = {}
+        try:
+            for login in sorted(authors):
+                prs |= {pr.number: pr for pr in adapter.open_pull_requests(login)}
+        except StackError as e:
+            raise lookup_failed(e) from e
+        return list(prs.values())
+
+    def fast_forward_import_trunks(self, prs: list[OpenPullRequest], default_branch: str | None) -> None:
+        """Fast-forward the untracked branches prs merge into (e.g. main), and
+        the default branch if a branch without a pull request may turn out to
+        be built on it."""
+        # Bases are worked out from the local parents, so a stale main would
+        # make them too old for branches built on a newer origin/main.
+        heads, parents = {pr.head for pr in prs}, self.tracked_branches()
+        trunks = {pr.base for pr in prs if pr.base not in heads | parents.keys()}
+        if default_branch is not None and not all(self.git.local_branch_exists(t) for t in trunks):
+            trunks.add(default_branch)
+        self.fast_forward_trunks(sorted(trunks))
+
+    def apply_import(self, plan: list[ImportStep], without_prs: list[ImportStepWithoutPr], remote: str) -> None:
+        """Create and track the branches import planned to."""
         git = self.git
         for without_pr in without_prs:
-            if without_pr.action is AutocreateAction.CREATE and without_pr.parent and without_pr.base:
+            if without_pr.action is ImportAction.CREATE and without_pr.parent and without_pr.base:
                 branch = without_pr.branch
                 git.run("branch", "--quiet", "--track", branch, f"refs/remotes/{remote}/{branch}")
                 self.set_parent(branch, without_pr.parent)
                 git.config_set(branch, BASE_KEY, without_pr.base)
         for step in plan:
-            if step.action is AutocreateAction.CREATE:
+            if step.action is ImportAction.CREATE:
                 git.run("branch", "--quiet", "--track", step.branch, f"refs/remotes/{remote}/{step.branch}")
             elif (
-                step.action is AutocreateAction.TRACK
+                step.action is ImportAction.TRACK
                 and git.config_get(step.branch, "remote") is None
                 and git.rev(f"refs/remotes/{remote}/{step.branch}") is not None
             ):
@@ -1301,31 +1355,45 @@ class StackClient(StackCore):
                 raise StackError(f"{root} isn't on {remote}, so pull requests can't merge into it")
 
 
-class AutocreatePlanner:
-    """Works out what autocreate should do for prs, without changing anything."""
+class ImportPlanner:
+    """Works out what import should do for prs, without changing anything.
 
-    def __init__(self, stack: StackClient, prs: list[OpenPullRequest], remote: str, default_branch: str | None) -> None:
+    viewer is the gh user's login. Branches of anyone else's pull requests,
+    or with commits by anyone else, are only planned to be tracked with
+    allow_others."""
+
+    def __init__(
+        self,
+        stack: StackClient,
+        prs: list[OpenPullRequest],
+        remote: str,
+        default_branch: str | None,
+        viewer: str | None,
+        allow_others: bool,
+    ) -> None:
         self.stack = stack
         self.git = stack.git
         self.prs = prs
         self.remote = remote
         self.default_branch = default_branch
+        self.viewer = viewer
+        self.allow_others = allow_others
         # The tracked branches, and the ones planned to be tracked so far.
         self.parents = stack.tracked_branches()
         self.by_head = {pr.head: pr for pr in prs}
-        self.planned: dict[str, Autocreated] = {}
+        self.planned: dict[str, ImportStep] = {}
         # The plans for branches without a pull request, parents first.
-        self.without_prs: dict[str, AutocreatedWithoutPr] = {}
+        self.without_prs: dict[str, ImportStepWithoutPr] = {}
         # Branches whose plan is being worked out, to catch a cycle.
         self.visiting: set[str] = set()
 
-    def plan_all(self) -> list[Autocreated]:
-        """An Autocreated for each pull request, parents before children."""
+    def plan_all(self) -> list[ImportStep]:
+        """An ImportStep for each pull request, parents before children."""
         for pr in self.prs:
             self.plan(pr)
         return list(self.planned.values())
 
-    def plan(self, pr: OpenPullRequest) -> Autocreated:
+    def plan(self, pr: OpenPullRequest) -> ImportStep:
         """pr's plan, working it out (after its parent's) if it hasn't been yet."""
         if pr.head not in self.planned:
             self.visiting.add(pr.head)
@@ -1333,17 +1401,15 @@ class AutocreatePlanner:
             self.visiting.discard(pr.head)
         return self.planned[pr.head]
 
-    def plan_one(self, pr: OpenPullRequest) -> Autocreated:
+    def plan_one(self, pr: OpenPullRequest) -> ImportStep:
         branch, parent = pr.head, pr.base
         if branch not in self.parents:
             return self.plan_untracked(pr)
         if self.parents[branch] == parent:
-            return Autocreated(branch, parent, pr.number, AutocreateAction.ALREADY_TRACKED)
-        return Autocreated(
-            branch, parent, pr.number, AutocreateAction.PARENT_DIFFERS, tracked_parent=self.parents[branch]
-        )
+            return ImportStep(branch, parent, pr.number, ImportAction.ALREADY_TRACKED)
+        return ImportStep(branch, parent, pr.number, ImportAction.PARENT_DIFFERS, tracked_parent=self.parents[branch])
 
-    def plan_untracked(self, pr: OpenPullRequest) -> Autocreated:
+    def plan_untracked(self, pr: OpenPullRequest) -> ImportStep:
         """The plan for pr, whose branch isn't tracked: track it, creating it
         first if there's no local branch, unless it has to be skipped."""
         git, remote = self.git, self.remote
@@ -1352,22 +1418,22 @@ class AutocreatePlanner:
         local = git.local_branch_exists(branch)
         if not local and git.rev(remote_ref) is None:
             return self.skip(pr, f"{remote}/{branch} doesn't exist")
+        try:
+            others = self.other_author(pr, local)
+        except StackError as e:
+            return self.skip(pr, str(e))
         if parent in self.by_head:
             if parent in self.visiting:
                 return self.skip(pr, "the pull requests it's based on are based on it")
-            if self.plan(self.by_head[parent]).action is AutocreateAction.SKIP:
+            if self.plan(self.by_head[parent]).action is ImportAction.SKIP:
                 return self.skip(pr, f"{parent}, which it merges into, was skipped")
             parent_ref = parent if git.local_branch_exists(parent) else f"refs/remotes/{remote}/{parent}"
         elif git.local_branch_exists(parent):
             parent_ref = parent
-        elif (without_pr := self.plan_without_pr(parent)).action is AutocreateAction.CREATE:
+        elif (without_pr := self.plan_without_pr(parent)).action is ImportAction.CREATE:
             parent_ref = f"refs/remotes/{remote}/{parent}"
         else:
-            return self.skip(
-                pr,
-                f"{parent}, which it merges into, isn't a local branch ({without_pr.reason}); "
-                f"create it with `git switch {parent}` and rerun",
-            )
+            return self.skip(pr, f"{parent}, which it merges into, isn't a local branch ({without_pr.reason})")
         try:
             ensure_no_cycle(branch, parent, self.parents)
         except StackError as e:
@@ -1376,13 +1442,27 @@ class AutocreatePlanner:
         if base is None:
             return self.skip(pr, f"it has no history in common with {parent}")
         self.parents[branch] = parent
-        action = AutocreateAction.TRACK if local else AutocreateAction.CREATE
-        return Autocreated(branch, parent, pr.number, action, base=base)
+        action = ImportAction.TRACK if local else ImportAction.CREATE
+        return ImportStep(branch, parent, pr.number, action, base=base, other_authors=others)
 
-    def skip(self, pr: OpenPullRequest, reason: str) -> Autocreated:
-        return Autocreated(pr.head, pr.base, pr.number, AutocreateAction.SKIP, reason=reason)
+    def other_author(self, pr: OpenPullRequest, local: bool) -> list[str]:
+        """pr's author, unless it's the gh user. Raises StackError if that means
+        pr's branch can't be tracked: without allow_others, or if local, the
+        user's local branch of the same name isn't the one on the remote."""
+        if pr.author == self.viewer:
+            return []
+        author = pr.author or "a deleted account"
+        if not self.allow_others:
+            raise StackError(f"it's {author}'s pull request; import it with -f")
+        if local and not self.git.tracks_same_name(pr.head, self.remote):
+            # Most likely the user's own branch that happens to share its name.
+            raise StackError(f"your local {pr.head} isn't {self.remote}/{pr.head}'s branch")
+        return [author]
 
-    def plan_without_pr(self, branch: str) -> AutocreatedWithoutPr:
+    def skip(self, pr: OpenPullRequest, reason: str) -> ImportStep:
+        return ImportStep(pr.head, pr.base, pr.number, ImportAction.SKIP, reason=reason)
+
+    def plan_without_pr(self, branch: str) -> ImportStepWithoutPr:
         """The plan for branch, which has no pull request or local branch,
         working it out (after its parent's) if it hasn't been yet."""
         if branch not in self.without_prs:
@@ -1391,28 +1471,30 @@ class AutocreatePlanner:
             self.visiting.discard(branch)
         return self.without_prs[branch]
 
-    def plan_one_without_pr(self, branch: str) -> AutocreatedWithoutPr:
+    def plan_one_without_pr(self, branch: str) -> ImportStepWithoutPr:
         """Create and track branch from its remote branch, on the parent its
         history says it's built on, if all of its own commits are the user's."""
         remote_ref = f"refs/remotes/{self.remote}/{branch}"
         if self.git.rev(remote_ref) is None:
             reason = f"{self.remote}/{branch} doesn't exist"
-            return AutocreatedWithoutPr(branch, None, AutocreateAction.SKIP, reason=reason)
+            return ImportStepWithoutPr(branch, None, ImportAction.SKIP, reason=reason)
         try:
             parent = self.find_parent(branch)
         except StackError as e:
-            return AutocreatedWithoutPr(branch, None, AutocreateAction.SKIP, reason=str(e))
+            return ImportStepWithoutPr(branch, None, ImportAction.SKIP, reason=str(e))
         try:
             parent_ref = self.built_on_ref(parent)
-            self.ensure_users_own(parent, parent_ref, remote_ref)
+            others = self.other_authors(parent, parent_ref, remote_ref)
+            if others and not self.allow_others:
+                raise StackError(f"it has commits by {', '.join(others)}; import it with -f")
             ensure_no_cycle(branch, parent, self.parents)
             base = self.stack.fork_point(parent_ref, remote_ref)
             if base is None:
                 raise StackError(f"it has no history in common with {parent}")
         except StackError as e:
-            return AutocreatedWithoutPr(branch, parent, AutocreateAction.SKIP, reason=str(e))
+            return ImportStepWithoutPr(branch, parent, ImportAction.SKIP, reason=str(e))
         self.parents[branch] = parent
-        return AutocreatedWithoutPr(branch, parent, AutocreateAction.CREATE, base=base)
+        return ImportStepWithoutPr(branch, parent, ImportAction.CREATE, base=base, other_authors=others)
 
     def built_on_ref(self, parent: str) -> str:
         """The ref of parent, which a branch without a pull request is built
@@ -1422,34 +1504,68 @@ class AutocreatePlanner:
         if parent in self.visiting:
             raise StackError(f"{parent}, which it's built on, is built on it")
         if parent in self.by_head:
-            if self.plan(self.by_head[parent]).action is AutocreateAction.SKIP:
+            if self.plan(self.by_head[parent]).action is ImportAction.SKIP:
                 raise StackError(f"{parent}, which it's built on, was skipped")
             return parent if git.local_branch_exists(parent) else f"refs/remotes/{remote}/{parent}"
         if parent == self.default_branch:
             if not git.local_branch_exists(parent):
                 raise StackError(f"{parent}, which it's built on, isn't a local branch")
-            # Where autocreate fast-forwards it to (which a dry run doesn't),
+            # Where import fast-forwards it to (which a dry run doesn't),
             # so main's newer commits don't look like the branch's own.
             return f"refs/remotes/{remote}/{parent}"
         if git.local_branch_exists(parent):
             return parent
-        if self.plan_without_pr(parent).action is AutocreateAction.SKIP:
+        if self.plan_without_pr(parent).action is ImportAction.SKIP:
             raise StackError(f"{parent}, which it's built on, was skipped")
         return f"refs/remotes/{remote}/{parent}"
 
-    def ensure_users_own(self, parent: str, parent_ref: str, remote_ref: str) -> None:
-        """Refuse to track the branch at remote_ref unless it has commits that
-        parent doesn't, all by the user (by email address): otherwise it's most
-        likely someone else's."""
+    def other_authors(self, parent: str, parent_ref: str, remote_ref: str) -> list[str]:
+        """The email addresses of the authors besides the user of the commits
+        at remote_ref that parent doesn't have. Raises StackError if there are
+        no such commits."""
         git = self.git
-        email = git.author_email()
-        if email is None:
-            raise StackError("git has no email address for you, to tell your commits by")
+        email = (git.author_email() or "").lower()
         authors = set(git.run("log", "--format=%ae", f"{parent_ref}..{remote_ref}").lower().splitlines())
         if not authors:
             raise StackError(f"it has no commits that {parent} doesn't")
-        if others := sorted(authors - {email.lower()}):
-            raise StackError(f"it has commits by {', '.join(others)}, so it's probably someone else's")
+        return sorted(authors - {email})
+
+    def select(
+        self,
+        branches: Sequence[str],
+        numbers: Sequence[int],
+        plan: list[ImportStep],
+        without_prs: list[ImportStepWithoutPr],
+    ) -> tuple[list[ImportStep], list[ImportStepWithoutPr]]:
+        """The steps of plan and without_prs in the stack trees containing
+        branches and the pull requests numbers. Raises StackError for one that
+        isn't in any."""
+        parents = {s.branch: s.parent for s in plan} | {s.branch: s.parent for s in without_prs if s.parent}
+        by_number = {s.number: s.branch for s in plan}
+
+        def bottom(branch: str) -> str:
+            seen = {branch}
+            while (parent := parents.get(branch)) in parents and parent not in seen:
+                branch = parent
+                seen.add(branch)
+            return branch
+
+        bottoms = set()
+        for number in numbers:
+            if number not in by_number:
+                # It's open, so its author's pull requests were looked up.
+                raise StackError(f"#{number} isn't from a branch in the repository (e.g. it's from a fork)")
+            bottoms.add(bottom(by_number[number]))
+        for branch in branches:
+            if branch not in parents:
+                raise StackError(
+                    f"{branch} isn't the branch of an open pull request it looked up, or a branch one is built on"
+                )
+            bottoms.add(bottom(branch))
+        return (
+            [s for s in plan if bottom(s.branch) in bottoms],
+            [s for s in without_prs if bottom(s.branch) in bottoms],
+        )
 
     def find_parent(self, branch: str) -> str:
         """The branch that remote branch is most likely built on: of the

@@ -30,9 +30,12 @@ class Fetching:
 
 @dataclass(frozen=True)
 class LookingUpPullRequests:
-    """autocreate is searching GitHub for the user's open pull requests."""
+    """import is searching GitHub for the open pull requests of author (a
+    GitHub login), or if None, the user's."""
 
     event_type: ClassVar[str] = "looking-up-pull-requests"
+
+    author: str | None = None
 
 
 @dataclass(frozen=True)

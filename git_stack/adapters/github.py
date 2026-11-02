@@ -2,6 +2,7 @@ import json
 import re
 import subprocess
 import threading
+import urllib.parse
 from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from typing import Self, TypeVar
@@ -16,6 +17,10 @@ from git_stack.git import GitClient
 # Matches https://host/owner/repo, ssh://user@host:port/owner/repo and
 # user@host:owner/repo, with or without .git.
 REMOTE_URL = re.compile(r"^(?:[a-z+]+://)?(?:[^@/]+@)?([^:/]+)(?::\d+)?[:/]([^/]+)/([^/]+?)(?:\.git)?/?$")
+# A pull request's number, and the path of its page (or one of its tabs, e.g.
+# /files) on GitHub.
+NUMBER = re.compile(r"[0-9]+")
+PULL_REQUEST_PATH = re.compile(r"/(?P<owner>[^/]+)/(?P<name>[^/]+)/pull/(?P<number>[0-9]+)(?:/.*)?")
 PR_FIELDS = "number state isDraft isCrossRepository headRefOid baseRefName mergeCommit { oid }"
 # How many of a branch's pull requests to look at, newest first. More than one
 # only if its name was reused, or a pull request was closed and replaced.
@@ -109,6 +114,13 @@ class OpenPullRequest:
     number: int
     head: str
     base: str
+    # Its author's login, or None if their account was deleted.
+    author: str | None = None
+
+
+def login_of(user: object) -> str | None:
+    """The login of a GraphQL user (an author), or None for a deleted account."""
+    return None if user is None else field(user, "login", str)
 
 
 class GitHubAdapter(GitAdapter):
@@ -132,6 +144,7 @@ class GitHubAdapter(GitAdapter):
         # So branches checked in parallel (as info does) look them up only once.
         self._pull_requests_lock = threading.Lock()
         self._default_branch: str | None = None
+        self._viewer: str | None = None
 
     def gh(self, *args: str, input: str | None = None) -> str:
         result = subprocess.run(
@@ -257,18 +270,24 @@ class GitHubAdapter(GitAdapter):
     @property
     def default_branch(self) -> str | None:
         """The repository's default branch, once pull requests were looked up
-        (by my_open_pull_requests or pull_requests), or None."""
+        (by open_pull_requests or pull_requests), or None."""
         return self._default_branch
 
-    def my_open_pull_requests(self) -> list[OpenPullRequest]:
-        """The gh user's open pull requests, drafts included, from branches in
-        the repository (not forks). Also looks up the default branch."""
+    @property
+    def viewer(self) -> str | None:
+        """The gh user's login, once open_pull_requests looked it up, or None."""
+        return self._viewer
+
+    def open_pull_requests(self, author: str = "@me") -> list[OpenPullRequest]:
+        """author's open pull requests (by login; default: the gh user's),
+        drafts included, from branches in the repository (not forks). Also
+        looks up the default branch and the gh user's login."""
         query = (
             "query($q: String!, $after: String, $owner: String!, $name: String!) "
-            "{ repository(owner: $owner, name: $name) { defaultBranchRef { name } } "
+            "{ viewer { login } repository(owner: $owner, name: $name) { defaultBranchRef { name } } "
             "search(query: $q, type: ISSUE, first: 100, after: $after) "
             "{ pageInfo { hasNextPage endCursor } "
-            "nodes { ... on PullRequest { number headRefName baseRefName isCrossRepository } } } }"
+            "nodes { ... on PullRequest { number headRefName baseRefName isCrossRepository author { login } } } } }"
         )
         prs: list[OpenPullRequest] = []
         after = None
@@ -279,7 +298,7 @@ class GitHubAdapter(GitAdapter):
                 "--hostname",
                 self.host,
                 "-f",
-                f"q=repo:{self.owner}/{self.name} is:pr is:open author:@me",
+                f"q=repo:{self.owner}/{self.name} is:pr is:open author:{author}",
                 "-f",
                 f"owner={self.owner}",
                 "-f",
@@ -290,12 +309,16 @@ class GitHubAdapter(GitAdapter):
             if after is not None:
                 args += ["-f", f"after={after}"]
             data = field(parse_json(self.gh(*args)), "data", dict)
+            self._viewer = field(field(data, "viewer", dict), "login", str)
             default_branch = optional_field(field(data, "repository", dict), "defaultBranchRef", dict)
             self._default_branch = field(default_branch, "name", str) if default_branch else None
             search = field(data, "search", dict)
             prs.extend(
                 OpenPullRequest(
-                    field(node, "number", int), field(node, "headRefName", str), field(node, "baseRefName", str)
+                    field(node, "number", int),
+                    field(node, "headRefName", str),
+                    field(node, "baseRefName", str),
+                    login_of(optional_field(node, "author", dict)),
                 )
                 for node in field(search, "nodes", list)
                 if not field(node, "isCrossRepository", bool)
@@ -304,6 +327,46 @@ class GitHubAdapter(GitAdapter):
             if not field(page, "hasNextPage", bool):
                 return prs
             after = field(page, "endCursor", str)
+
+    def pull_request_number(self, pr: str) -> int:
+        """The number of the pull request pr names: its number, or its URL on
+        GitHub (e.g. https://github.com/acme/widgets/pull/12/files). Raises
+        StackError for anything else, including another repository's URL."""
+        if NUMBER.fullmatch(pr):
+            return int(pr)
+        url = urllib.parse.urlsplit(pr)
+        match = PULL_REQUEST_PATH.fullmatch(url.path)
+        if (
+            url.scheme in ("http", "https")
+            and url.hostname == self.host.lower()
+            and match is not None
+            and (match["owner"].lower(), match["name"].lower()) == (self.owner.lower(), self.name.lower())
+        ):
+            return int(match["number"])
+        raise StackError(f"{pr} isn't a pull request number, or the URL of a pull request in {self.repo}")
+
+    def open_pull_request_author(self, number: int) -> str | None:
+        """The login of the author of pull request number, or None if it isn't
+        open (or doesn't exist, or its author's account was deleted)."""
+        query = (
+            "query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) "
+            "{ pullRequest(number: $number) { state author { login } } } }"
+        )
+        args = ["api", "graphql", "--hostname", self.host, "-f", f"owner={self.owner}", "-f", f"name={self.name}"]
+        args += ["-F", f"number={number}", "-f", f"query={query}"]
+        try:
+            output = self.gh(*args)
+        except StackError as e:
+            # GraphQL answers a number that isn't a pull request (e.g. an
+            # issue's) with an error.
+            if "Could not resolve to a PullRequest" in str(e):
+                return None
+            raise
+        repository = field(field(parse_json(output), "data", dict), "repository", dict)
+        pr = optional_field(repository, "pullRequest", dict)
+        if pr is None or field(pr, "state", str) != "OPEN":
+            return None
+        return login_of(optional_field(pr, "author", dict))
 
     def prefetch(self) -> None:
         self.pull_requests()

@@ -36,8 +36,10 @@ def message(event: events.Event) -> str:  # noqa: C901
             return "waiting for another git stack command in this repository to finish"
         case events.Fetching():
             return f"fetching {event.remote}, and pruning its deleted branches"
-        case events.LookingUpPullRequests():
+        case events.LookingUpPullRequests(author=None):
             return "looking up your open pull requests on GitHub"
+        case events.LookingUpPullRequests(author=author):
+            return f"looking up {author}'s open pull requests on GitHub"
         case events.Squashing():
             return f"squashing {event.count} commits on {event.branch}"
         case events.Restacking():

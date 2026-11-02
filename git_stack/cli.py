@@ -4,11 +4,11 @@ import sys
 
 import git_stack
 from git_stack.commands import (
-    autocreate,
     base,
     branch,
     clean,
     group,
+    import_stacks,
     info,
     next_branch,
     parent,
@@ -32,7 +32,7 @@ from git_stack.stack import StackClient
 COMMANDS = (
     branch,
     track,
-    autocreate,
+    import_stacks,
     untrack,
     rename,
     group,

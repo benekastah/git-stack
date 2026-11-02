@@ -16,12 +16,12 @@ from git_stack.errors import StackError
 from git_stack.git import GitClient
 from git_stack.json_fields import to_json
 from git_stack.stack import (
-    AutocreateAction,
-    Autocreated,
-    AutocreatedWithoutPr,
-    AutocreateResult,
     BranchInfo,
     BranchStatus,
+    ImportAction,
+    ImportResult,
+    ImportStep,
+    ImportStepWithoutPr,
     PrsResult,
     PullRequestAction,
     PullRequestStep,
@@ -50,7 +50,7 @@ def stack() -> Any:
     stack.git.run.return_value = ""  # e.g. git config --get of an unset setting
     stack.branch.return_value = "main"
     stack.track.return_value = []
-    stack.autocreate.return_value = AutocreateResult([], [])
+    stack.import_stacks.return_value = ImportResult([], [])
     stack.untrack.return_value = [Untracked("pr1", children=())]
     stack.rename.return_value = Renamed("old", "new", children=(), upstream=None)
     stack.info.return_value = []
@@ -76,8 +76,31 @@ def stack() -> Any:
         (["branch", "pr1", "--group", "feat"], "branch", ("pr1",), {"group": "feat"}),
         (["track", "main"], "track", ("main", []), {"base": None}),
         (["track", "main", "pr1", "pr2", "--base", "abc123"], "track", ("main", ["pr1", "pr2"]), {"base": "abc123"}),
-        (["autocreate"], "autocreate", (), {"remote": "origin", "dry_run": False}),
-        (["autocreate", "-n", "--remote", "upstream"], "autocreate", (), {"remote": "upstream", "dry_run": True}),
+        (
+            ["import"],
+            "import_stacks",
+            (),
+            {"remote": "origin", "dry_run": False, "force": False, "author": None, "branches": [], "prs": []},
+        ),
+        (
+            ["import", "-n", "--remote", "upstream", "--author", "alice", "api", "12", "--pr", "3", "--pr", "4"],
+            "import_stacks",
+            (),
+            {
+                "remote": "upstream",
+                "dry_run": True,
+                "force": False,
+                "author": "alice",
+                "branches": ["api", "12"],
+                "prs": ["3", "4"],
+            },
+        ),
+        (
+            ["autocreate", "-f"],
+            "import_stacks",
+            (),
+            {"remote": "origin", "dry_run": False, "force": True, "author": None, "branches": [], "prs": []},
+        ),
         (["untrack"], "untrack", ([],), {}),
         (["untrack", "pr1", "pr2"], "untrack", (["pr1", "pr2"],), {}),
         (["rename", "new"], "rename", ("new",), {"old": None}),
@@ -152,42 +175,44 @@ def test_command_calls_its_client_method(
     getattr(stack, method).assert_called_once_with(*args, **kwargs)
 
 
-AUTOCREATED = [
-    Autocreated("pr1", "main", 1, AutocreateAction.CREATE, base="a" * 40),
-    Autocreated("pr2", "pr1", 2, AutocreateAction.TRACK, base="b" * 40),
-    Autocreated("pr3", "pr2", 3, AutocreateAction.ALREADY_TRACKED),
-    Autocreated("pr4", "pr2", 4, AutocreateAction.PARENT_DIFFERS, tracked_parent="main"),
-    Autocreated("pr5", "theirs", 5, AutocreateAction.SKIP, reason="theirs isn't a local branch"),
+IMPORTED = [
+    ImportStep("pr1", "main", 1, ImportAction.CREATE, base="a" * 40),
+    ImportStep("pr2", "pr1", 2, ImportAction.TRACK, base="b" * 40),
+    ImportStep("pr3", "pr2", 3, ImportAction.ALREADY_TRACKED),
+    ImportStep("pr4", "pr2", 4, ImportAction.PARENT_DIFFERS, tracked_parent="main"),
+    ImportStep("pr5", "theirs", 5, ImportAction.SKIP, reason="theirs isn't a local branch"),
+    ImportStep("pr6", "main", 6, ImportAction.CREATE, base="d" * 40, other_authors=["alice"]),
 ]
 WITHOUT_PRS = [
-    AutocreatedWithoutPr("base", "main", AutocreateAction.CREATE, base="c" * 40),
-    AutocreatedWithoutPr("theirs", "main", AutocreateAction.SKIP, reason="it has commits by someone@example.com"),
+    ImportStepWithoutPr("base", "main", ImportAction.CREATE, base="c" * 40),
+    ImportStepWithoutPr("hers", "base", ImportAction.CREATE, base="e" * 40, other_authors=["alice@example.com"]),
+    ImportStepWithoutPr("theirs", "main", ImportAction.SKIP, reason="it has commits by someone@example.com"),
 ]
 PARENT_DIFFERS = (
     "pr4 is tracked on main, but #4 merges it into pr2; leaving it (to follow GitHub, run `git stack track pr2 pr4`)"
 )
 
 
-def test_autocreate_dry_run_says_what_it_would_do_for_each_pull_request(
+def test_import_dry_run_says_what_it_would_do_for_each_pull_request(
     stack: Any, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    stack.autocreate.return_value = AutocreateResult(AUTOCREATED, [], WITHOUT_PRS)
+    stack.import_stacks.return_value = ImportResult(IMPORTED, [], WITHOUT_PRS)
 
-    main(["autocreate", "--dry-run"], stack=stack)
+    main(["import", "--dry-run"], stack=stack)
 
     assert capsys.readouterr().out.splitlines() == [
         "would create base from origin/base, tracking it on main (no pull request)",
+        "would create hers from origin/hers, tracking it on base (no pull request, commits by alice@example.com, needs -f)",
         "would create pr1 from origin/pr1, tracking it on main (#1)",
         "would track pr2 on pr1 (#2)",
         "pr3 is already tracked on pr2 (#3)",
         PARENT_DIFFERS,
         "skipping pr5 (#5): theirs isn't a local branch",
+        "would create pr6 from origin/pr6, tracking it on main (#6, by alice, needs -f)",
     ]
 
 
-def test_autocreate_shows_the_stacks_with_what_it_tracked_in_green(
-    stack: Any, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_import_shows_the_stacks_with_what_it_tracked_in_green(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
     stack.git.run.side_effect = lambda *args, check=True: "true" if "--get-colorbool" in args else ""
 
     def info(name: str, parent: str, number: int) -> BranchInfo:
@@ -195,12 +220,12 @@ def test_autocreate_shows_the_stacks_with_what_it_tracked_in_green(
         link = PullRequestLink(number, url, PullRequestState.OPEN)
         return BranchInfo(name, parent, BranchStatus.UP_TO_DATE, current=False, pull_request=link)
 
-    stack.autocreate.return_value = AutocreateResult(
-        AUTOCREATED,
+    stack.import_stacks.return_value = ImportResult(
+        IMPORTED,
         [BranchInfo("main", None, None, current=False), info("pr1", "main", 1), info("pr2", "pr1", 2)],
     )
 
-    main(["autocreate"], stack=stack)
+    main(["import"], stack=stack)
 
     assert capsys.readouterr().out.splitlines() == [
         PARENT_DIFFERS,
@@ -211,10 +236,23 @@ def test_autocreate_shows_the_stacks_with_what_it_tracked_in_green(
     ]
 
 
-def test_autocreate_without_pull_requests_says_so(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
-    main(["autocreate"], stack=stack)
+def test_import_without_pull_requests_says_so(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
+    main(["import"], stack=stack)
 
     assert capsys.readouterr().out == "you have no open pull requests from branches in this repository\n"
+
+
+def test_import_without_another_authors_pull_requests_says_so(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
+    main(["import", "--author", "alice"], stack=stack)
+
+    assert capsys.readouterr().out == "alice has no open pull requests from branches in this repository\n"
+
+
+def test_import_takes_dry_run_or_force_but_not_both(stack: Any) -> None:
+    with pytest.raises(SystemExit):
+        main(["import", "-n", "-f"], stack=stack)
+
+    stack.import_stacks.assert_not_called()
 
 
 @pytest.mark.parametrize("dry_run", [False, True])
@@ -539,17 +577,24 @@ def test_clean_json_ends_with_the_error_when_it_fails(stack: Any, capsys: pytest
         (["next"], "next", "pr2", {"branch": "pr2"}),
         (["prev"], "prev", "main", {"branch": "main"}),
         (
-            ["autocreate"],
-            "autocreate",
-            AutocreateResult(
-                [Autocreated("pr1", "main", 12, AutocreateAction.TRACK, base="a" * 40)],
+            ["import"],
+            "import_stacks",
+            ImportResult(
+                [ImportStep("pr1", "main", 12, ImportAction.TRACK, base="a" * 40)],
                 STACK,
-                [AutocreatedWithoutPr("base", "main", AutocreateAction.CREATE, base="b" * 40)],
+                [ImportStepWithoutPr("base", "main", ImportAction.CREATE, base="b" * 40)],
             ),
             {
                 "stacks": to_json(STACK),
                 "without_prs": [
-                    {"branch": "base", "parent": "main", "action": "create", "base": "b" * 40, "reason": None}
+                    {
+                        "branch": "base",
+                        "parent": "main",
+                        "action": "create",
+                        "base": "b" * 40,
+                        "reason": None,
+                        "other_authors": [],
+                    }
                 ],
                 "steps": [
                     {
@@ -560,6 +605,7 @@ def test_clean_json_ends_with_the_error_when_it_fails(stack: Any, capsys: pytest
                         "base": "a" * 40,
                         "tracked_parent": None,
                         "reason": None,
+                        "other_authors": [],
                     }
                 ],
             },

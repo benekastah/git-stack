@@ -42,7 +42,9 @@ def respond(args: list[str], state: dict[str, Any]) -> str | None:
     if args[:2] == ["api", "graphql"]:
         query = opt_value(args, "query")
         if "search(" in query:
-            return my_open_pull_requests(prs)
+            return open_pull_requests(opt_value(args, "q"), prs)
+        if "pullRequest(number: $number)" in query:
+            return pull_request_author(int(opt_value(args, "number")), prs)
         if "pullRequest(number:" in query:
             if " stack {" in query and "stacks" not in state and state.get("no_stack_field"):
                 raise GhError("gh: Field 'stack' doesn't exist on type 'PullRequest'")
@@ -59,12 +61,29 @@ def respond(args: list[str], state: dict[str, Any]) -> str | None:
     sys.exit(f"fake gh: unexpected {args}")
 
 
-def my_open_pull_requests(prs: list[dict[str, Any]]) -> str:
-    """The gh user's open pull requests, all on one page."""
-    mine = [p for p in prs if p["state"] == "OPEN" and p.get("author", "me") == "me"]
-    nodes = [{k: p[k] for k in ("number", "headRefName", "baseRefName", "isCrossRepository")} for p in mine]
+def open_pull_requests(q: str, prs: list[dict[str, Any]]) -> str:
+    """The open pull requests of the author the search q names ("@me" is
+    "me", the gh user), all on one page."""
+    author = re.search(r"author:(\S+)", q)
+    login = "me" if author is None or author[1] == "@me" else author[1]
+    theirs = [p for p in prs if p["state"] == "OPEN" and p.get("author", "me") == login]
+    nodes = [
+        {**{k: p[k] for k in ("number", "headRefName", "baseRefName", "isCrossRepository")}, "author": {"login": login}}
+        for p in theirs
+    ]
     search = {"pageInfo": {"hasNextPage": False, "endCursor": None}, "nodes": nodes}
-    return json.dumps({"data": {"repository": {"defaultBranchRef": {"name": "main"}}, "search": search}})
+    repository = {"defaultBranchRef": {"name": "main"}}
+    return json.dumps({"data": {"viewer": {"login": "me"}, "repository": repository, "search": search}})
+
+
+def pull_request_author(number: int, prs: list[dict[str, Any]]) -> str:
+    """The state and author of pull request number, or GraphQL's error if
+    there's none."""
+    pr = next((p for p in prs if p["number"] == number), None)
+    if pr is None:
+        raise GhError(f"gh: Could not resolve to a PullRequest with the number of {number}.")
+    node = {"state": pr["state"], "author": {"login": pr.get("author", "me")}}
+    return json.dumps({"data": {"repository": {"pullRequest": node}}})
 
 
 def pull_requests_by_number(query: str, state: dict[str, Any]) -> str:

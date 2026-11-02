@@ -31,7 +31,7 @@ in a fresh clone or from before you used git\-stack?
 Track them as stacks instead:
 .IP
 .EX
-git stack autocreate            \f[I]# track your open PRs, each on the branch it merges into\f[R]
+git stack import                \f[I]# track your open PRs, each on the branch it merges into\f[R]
 .EE
 .PP
 After that, day to day:
@@ -100,7 +100,13 @@ T{
 set up stacks from my open PRs (e.g.
 in a new clone)
 T}@T{
-\f[CR]git stack autocreate\f[R]
+\f[CR]git stack import\f[R]
+T}
+T{
+build on a coworker\(aqs stack
+T}@T{
+\f[CR]git stack import \-n \-\-author <login>\f[R], then
+\f[CR]git stack import \-f \-\-author <login> <branch>\f[R]
 T}
 T{
 open draft PRs for my stack
@@ -151,7 +157,7 @@ date.
 .IP \(bu 2
 \f[B]tracked\f[R]: a branch git\-stack knows about, because you made it
 with \f[CR]git stack branch\f[R], or added it with
-\f[CR]git stack track\f[R] or \f[CR]git stack autocreate\f[R].
+\f[CR]git stack track\f[R] or \f[CR]git stack import\f[R].
 .IP \(bu 2
 \f[B]restack\f[R]: rebase a branch onto its parent\(aqs latest commit,
 replaying only the branch\(aqs own commits.
@@ -356,32 +362,63 @@ that.
 .IP \(bu 2
 Nothing is written unless every branch can be tracked, so a bad argument
 doesn\(aqt leave the stack half\-tracked.
-.SS \f[CR]git stack autocreate [\-\-remote origin] [\-n]\f[R]
-Track your open pull requests on GitHub, drafts included, as stacks:
-each pull request\(aqs branch on the branch it merges into.
+.SS \f[CR]git stack import [<branch>...] [\-\-pr <number|url>]... [\-\-author <login>] [\-\-remote origin] [\-n | \-f]\f[R]
+Track open pull requests on GitHub, drafts included, as stacks: each
+pull request\(aqs branch on the branch it merges into.
+They\(aqre your own, or with \f[CR]\-\-author\f[R], another GitHub
+user\(aqs.
+\f[CR]autocreate\f[R] is another name for it.
 .PP
 \f[B]When would I use it?\f[R] When you have pull requests open but
 git\-stack doesn\(aqt know about their branches yet: in a fresh clone,
 on another machine, or for pull requests you opened before you started
 using git\-stack.
+Or to build on a coworker\(aqs stack.
 .IP
 .EX
-git stack autocreate \-n         \f[I]# see what it would do\f[R]
-git stack autocreate
+git stack import \-n             \f[I]# see what it would do\f[R]
+git stack import
 \f[I]# main\f[R]
 \f[I]# └── add\-api     https://github.com/acme/widgets/pull/12\f[R]
 \f[I]#     └── use\-api https://github.com/acme/widgets/pull/13\f[R]
+
+git stack import \-n \-\-author alice        \f[I]# alice\(aqs stacks\f[R]
+git stack import \-f \-\-author alice search \f[I]# the one with her search branch\f[R]
+git stack import \-f \-\-pr 31               \f[I]# the one with pull request #31, whoever\(aqs\f[R]
+git stack import \-f \-\-pr https://github.com/acme/widgets/pull/31
 .EE
 .IP \(bu 2
 It ends by showing the stacks it tracked, as \f[CR]info\f[R] does, with
 the links of the pull requests whose branches it just tracked in green.
-\f[CR]\-n\f[R] lists what it would do for each pull request instead.
 .IP \(bu 2
-It only looks at your own open pull requests from branches in the
-repository: GitHub finds them with a search for pull requests by you, so
-other people\(aqs are never fetched, however many there are.
+Branches, and pull requests by \f[CR]\-\-pr\f[R] with their number or
+URL, narrow it to the stack trees they\(aqre in: everything stacked on
+the bottom pull request of each, wherever in it the one you named is.
+Naming someone else\(aqs pull request looks up their pull requests too;
+with only \f[CR]\-\-pr\f[R], yours aren\(aqt.
+.IP \(bu 2
+It only looks at the open pull requests of the people it imports, from
+branches in the repository: GitHub finds them with a search by author,
+so other people\(aqs are never fetched, however many there are.
 Pull requests from forks don\(aqt count.
 It needs the GitHub adapter.
+.IP \(bu 2
+Someone else\(aqs work is only tracked with
+\f[CR]\-f\f[R]/\f[CR]\-\-force\f[R]: the branches of their pull
+requests, and branches without a pull request with commits by anyone but
+you (by email address).
+Without \f[CR]\-f\f[R], those are skipped, along with the pull requests
+built on them.
+Once tracked, they\(aqre stacks like any other: \f[CR]sync\f[R],
+\f[CR]push\f[R] and \f[CR]prs\f[R] on a stack that includes their
+branches restack, push and open pull requests for them too, so name your
+own branches (e.g.
+\f[CR]git stack sync my\-branch\f[R]) to leave theirs alone.
+.IP \(bu 2
+\f[CR]\-n\f[R]/\f[CR]\-\-dry\-run\f[R] prints what it would do with
+\f[CR]\-f\f[R], saying what needs it, without changing anything (besides
+fetching).
+It can\(aqt be used with \f[CR]\-f\f[R].
 .IP \(bu 2
 A pull request without a local branch gets one, created from its remote
 branch, with that as its upstream.
@@ -393,24 +430,20 @@ If one is tracked on a different parent than its pull request merges
 into, it says so; run \f[CR]git stack track <parent> <branch>\f[R] if
 GitHub is right.
 .IP \(bu 2
-If one of your pull requests merges into a branch you don\(aqt have
-locally and that has no pull request, that branch is created from its
-remote branch and tracked too, on the branch it\(aqs built on: of the
-remote\(aqs branches it contains that the default branch doesn\(aqt, the
-closest, or else the default branch.
-That\(aqs only if all of its own commits are yours (by your git email
-address).
-If they aren\(aqt (e.g.
-you built on a coworker\(aqs branch), or it\(aqs unclear which branch
-it\(aqs built on, the pull request is skipped, along with your pull
-requests built on it; \f[CR]git switch\f[R] to that branch and rerun to
-track them on it.
+If a pull request merges into a branch you don\(aqt have locally and
+that has no pull request (or none it looked up), that branch is created
+from its remote branch and tracked too, on the branch it\(aqs built on:
+of the remote\(aqs branches it contains that the default branch
+doesn\(aqt, the closest, or else the default branch.
+If it\(aqs unclear which branch that is, the pull request is skipped,
+along with the pull requests built on it; \f[CR]git switch\f[R] to that
+branch and rerun to track them on it.
 A branch built on an old version of its parent (one rewritten since)
 looks built on what\(aqs below the parent; fix it with
 \f[CR]git stack track <parent> <branch>\f[R].
 .IP \(bu 2
 Each branch\(aqs base is found as for \f[CR]git stack track\f[R], after
-fast\-forwarding the branches your pull requests merge into that
+fast\-forwarding the branches the pull requests merge into that
 aren\(aqt tracked (e.g.
 \f[CR]main\f[R]) to their upstreams, as \f[CR]sync\f[R] does.
 If a parent\(aqs commits were rewritten after its child was built on
@@ -419,9 +452,6 @@ the parent was rebased and force\-pushed from another machine), the
 child\(aqs base can come out too old, and its next restack replays the
 parent\(aqs old commits; set it with
 \f[CR]git stack track <parent> <branch> \-\-base <sha>\f[R].
-.IP \(bu 2
-\f[CR]\-n\f[R]/\f[CR]\-\-dry\-run\f[R] prints what it would do without
-changing anything (besides fetching).
 .SS \f[CR]git stack untrack [<branch|glob>...]\f[R]
 Stop tracking branches (default: the current one), without deleting them
 or changing their commits.
@@ -1228,7 +1258,7 @@ T}@T{
 \f[CR]parent\f[R] and \f[CR]base\f[R]
 T}
 T{
-\f[CR]autocreate\f[R]
+\f[CR]import\f[R]
 T}@T{
 \f[CR]stacks\f[R], and \f[CR]steps\f[R], one for each pull request: its
 \f[CR]branch\f[R], the \f[CR]parent\f[R] it merges into, its
@@ -1239,11 +1269,14 @@ T}@T{
 \f[CR]tracked_parent\f[R] the parent a \f[CR]parent\-differs\f[R] branch
 is tracked on instead, and \f[CR]reason\f[R] why it skipped one; each is
 \f[CR]null\f[R] otherwise.
+\f[CR]other_authors\f[R] has the pull request\(aqs author if it isn\(aqt
+you (so it needs \f[CR]\-f\f[R]), and is empty otherwise.
 \f[CR]without_prs\f[R] has the same for the branches without a pull
-request that your pull requests are built on, without \f[CR]number\f[R]
+request that the pull requests are built on, without \f[CR]number\f[R]
 or \f[CR]tracked_parent\f[R], and only \f[CR]create\f[R] or
-\f[CR]skip\f[R]; \f[CR]parent\f[R] is \f[CR]null\f[R] if it couldn\(aqt
-tell which branch one is built on
+\f[CR]skip\f[R]; their \f[CR]other_authors\f[R] are email addresses, and
+\f[CR]parent\f[R] is \f[CR]null\f[R] if it couldn\(aqt tell which branch
+one is built on
 T}
 T{
 \f[CR]untrack\f[R]
