@@ -20,6 +20,27 @@ suggests `git push origin --delete release` instead.
 Only the same-name remote branch should be deleted (or suggested for
 deletion); any other upstream should be left alone, as if there were none.
 
+## `import` can track a shared branch, and `sync` rebase it onto `main`
+
+When a pull request merges into a branch that isn't local and has no pull
+request, `import` tracks that branch too, on the branch `find_parent` says
+it's built on. A long-lived shared branch is exactly that, e.g. `develop` in
+git-flow or `release/1.x`: its parent comes out as `main` (or whatever its
+history leads to), and it's tracked with `-f` (which allows other people's
+commits), or without it if all of its commits are the user's (e.g. a solo
+project's `develop`). From then on, `git stack sync` from a branch on top
+restacks `develop` onto `main`, and `git stack push` force-pushes it (with
+lease), rewriting the shared branch. `plan_one_without_pr` and
+`find_parent` are where it happens;
+`test_import_with_force_tracks_someone_elses_branch_without_a_pr` exercises
+the same path with a short branch.
+
+A branch that merged pull requests have targeted should count as a trunk: be
+created from its remote branch but left untracked, as a root like `main`, so
+`sync` only fast-forwards it. That takes one GraphQL query per branch without
+a pull request. Rules based on commits (e.g. "has merge commits") would
+misfire on feature branches that merged `main`.
+
 ## Old copies of rebased commits can be pulled back in
 
 `unpulled_commits` recognizes old copies of the branch's own rebased commits by
@@ -134,11 +155,36 @@ Most git calls pass bare names (`git rev-parse <parent>`,
 `git merge-tree <parent> <branch>`), so a tag with the same name as a branch
 wins over the branch.
 
+## `import` fast-forwards the trunks of stacks it doesn't import
+
+`fast_forward_import_trunks` gets every pull request it looked up, before the
+branches and `--pr` narrow them to the stack trees named, and before `-f` is
+checked. So the untracked branches the other trees merge into (e.g. a local
+`release/1.x`) are fast-forwarded too, even when nothing is imported. It's
+what `sync` would do to them anyway, but it's a change nobody asked for.
+Fast-forwarding only the trunks of the steps it creates or tracks would fix
+it.
+
 ## `prs` says "the current stack" for named stacks
 
 When every branch looks merged, `git stack prs` prints "nothing to open: every
 branch in the current stack looks merged", even when stacks were named with
 branches or `-g`. `git stack push` already words this by what was named.
+
+## `import --pr` says a deleted author's pull request isn't open
+
+`open_pull_request_author` returns None both when the pull request isn't open
+and when its author's account was deleted (GitHub's ghost user), so naming an
+open pull request by a deleted account with `--pr` fails with
+"#N isn't an open pull request". It should look the pull request up anyway
+(its author would show as "a deleted account", as for one found by search).
+
+## `import --pr` says it's looking up your pull requests
+
+With only `--pr` (and no `--author`), `import` looks up the pull requests of
+the authors of the ones named, not the user's, but its
+`looking-up-pull-requests` event has no author, so it prints "looking up your
+open pull requests on GitHub".
 
 ## No Windows support
 
@@ -147,3 +193,12 @@ git-stack is written for Unix-like systems. The git-stack lock
 won't even start there, and the tests rely on symlinks. Low priority until
 someone needs it: `msvcrt.locking`, or a lock file created with `O_EXCL`,
 would replace `flock`.
+
+## GitHub's username format is checked in `stack.py`
+
+`GITHUB_LOGIN`, which `import_stacks` checks `--author` against, is GitHub's
+format, but it lives in `git_stack/stack.py` rather than in
+`git_stack/adapters/github.py` with the rest of what's GitHub-specific (e.g.
+`pull_request_number`). It should move there, still checked before the pull
+requests are looked up, so its error doesn't get the "check `gh auth status`"
+hint.
