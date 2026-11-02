@@ -749,7 +749,10 @@ git stack prs
   (e.g. a branch is put in its middle), `push` and `prs` take its open pull
   requests out of their stack on GitHub to change their bases, and `prs`
   then links them again. To stop it linking them, run
-  `git config stack.githubStacks false`.
+  `git config stack.githubStacks false`. git-stack links them through
+  GitHub's API, with `gh`, so it doesn't need GitHub's own extension for
+  stacks, [gh-stack](https://github.com/github/gh-stack)
+  (`gh extension install github/gh-stack`).
 
   ```
   <!-- git-stack -->

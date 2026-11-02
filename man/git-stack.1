@@ -1033,6 +1033,12 @@ its open pull requests out of their stack on GitHub to change their
 bases, and \f[CR]prs\f[R] then links them again.
 To stop it linking them, run
 \f[CR]git config stack.githubStacks false\f[R].
+git\-stack links them through GitHub\(aqs API, with \f[CR]gh\f[R], so it
+doesn\(aqt need GitHub\(aqs own extension for stacks, \c
+.UR https://github.com/github/gh-stack
+gh\-stack
+.UE \c
+\ (\f[CR]gh extension install github/gh\-stack\f[R]).
 .RS 2
 .IP
 .EX
