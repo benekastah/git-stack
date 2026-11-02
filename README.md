@@ -1282,6 +1282,11 @@ Set `PYTEST_XDIST_AUTO_NUM_WORKERS` to use another number of workers, e.g.
 `PYTEST_XDIST_AUTO_NUM_WORKERS=4 ./check.sh`, or pass `-n 0` to run them one
 at a time, e.g. to debug a failing test.
 
+CI (`.github/workflows/ci.yml`) runs `./check.sh` on Linux and macOS, with the
+oldest and newest Python git-stack supports, for every push to `main` and
+every pull request. It also runs the tests on Windows, where they're allowed
+to fail until git-stack supports it.
+
 ### Git hooks
 
 `dev-install.sh` makes the clone use the hooks in `git_hooks/`. To turn them on

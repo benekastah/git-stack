@@ -62,9 +62,10 @@ Text meant for people (messages, `info`'s tree) can change.
 
 ## Linux, macOS and Windows
 
-git-stack should run on Linux, macOS and Windows. It doesn't run on Windows yet
-(see "No Windows support" in `ISSUES.md`): the lock uses `fcntl`, and the tests
-rely on symlinks. Don't add to that:
+git-stack should run on Linux, macOS and Windows. CI runs the checks on all
+three, but it doesn't run on Windows yet (see "No Windows support" in
+`ISSUES.md`): the lock uses `fcntl`, and the tests rely on symlinks, so the
+Windows jobs are allowed to fail. Don't add to that:
 
 - Use `os.path` or `pathlib` for paths, not strings joined with `/`.
 - Run git through `GitClient`, with arguments as a list, never through a shell,
