@@ -37,3 +37,17 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install --group dev
           python -m pytest
+
+  # The one check the ruleset on main requires, so changing the matrix doesn't
+  # change what's required. It runs even if a check failed (a skipped required
+  # check would count as passing), and fails unless every check but the Windows
+  # ones (which may fail) passed.
+  passed:
+    name: CI passed
+    if: always()
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail unless every check passed
+        if: needs.check.result != 'success'
+        run: exit 1
