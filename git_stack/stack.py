@@ -179,13 +179,33 @@ class PrsResult:
 
 
 @dataclass(frozen=True)
+class AutocreatedWithoutPr:
+    """What autocreate did, or in a dry run would do, for branch: a branch on
+    the remote, without a pull request or a local branch, that one of the
+    user's pull requests is built on. Its parent is found from history (see
+    AutocreatePlanner.find_parent).
+
+    action is CREATE or SKIP. base is the commit branch is tracked as built
+    on (CREATE), and reason why it was skipped (SKIP)."""
+
+    branch: str
+    parent: str | None
+    action: AutocreateAction
+    base: str | None = None
+    reason: str | None = None
+
+
+@dataclass(frozen=True)
 class AutocreateResult:
     """What autocreate did: an Autocreated for each pull request, and the
     stacks of the branches it tracked or found tracked, as info() lists them
-    (none in a dry run, which tracks nothing)."""
+    (none in a dry run, which tracks nothing). without_prs has what it did for
+    the branches without a pull request that pull requests are built on,
+    parents before children."""
 
     steps: list[Autocreated]
     branches: list[BranchInfo] = field(metadata=json_name("stacks"))
+    without_prs: list[AutocreatedWithoutPr] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -356,6 +376,12 @@ class StackClient(StackCore):
         already tracked are left alone. The untracked branches they merge into
         (e.g. main) are fast-forwarded to their upstreams first.
 
+        A pull request may merge into a branch that's only on remote, without a
+        pull request: that branch is created and tracked too, on the branch
+        its history says it's built on, if all of its own commits are the
+        user's. Otherwise it's most likely someone else's, and the pull
+        requests built on it are skipped.
+
         Returns an Autocreated for each pull request, parents before children,
         and the stacks of the branches it tracked or found tracked. With
         dry_run, nothing is changed (besides fetching remote).
@@ -382,24 +408,42 @@ class StackClient(StackCore):
             # Bases are worked out from the local parents, so a stale main would
             # make them too old for branches built on a newer origin/main.
             heads, parents = {pr.head for pr in prs}, self.tracked_branches()
-            self.fast_forward_trunks(sorted({pr.base for pr in prs if pr.base not in heads | parents.keys()}))
-        plan = AutocreatePlanner(self, prs, remote).plan_all()
-        if not dry_run:
-            for step in plan:
-                if step.action is AutocreateAction.CREATE:
-                    git.run("branch", "--quiet", "--track", step.branch, f"refs/remotes/{remote}/{step.branch}")
-                elif (
-                    step.action is AutocreateAction.TRACK
-                    and git.config_get(step.branch, "remote") is None
-                    and git.rev(f"refs/remotes/{remote}/{step.branch}") is not None
-                ):
-                    git.run("branch", "--quiet", f"--set-upstream-to=refs/remotes/{remote}/{step.branch}", step.branch)
-                if step.base is not None:
-                    self.set_parent(step.branch, step.parent)
-                    git.config_set(step.branch, BASE_KEY, step.base)
+            trunks = {pr.base for pr in prs if pr.base not in heads | parents.keys()}
+            # A branch without a pull request may turn out to be built on the
+            # default branch.
+            if adapter.default_branch is not None and not all(git.local_branch_exists(t) for t in trunks):
+                trunks.add(adapter.default_branch)
+            self.fast_forward_trunks(sorted(trunks))
+        planner = AutocreatePlanner(self, prs, remote, adapter.default_branch)
+        plan = planner.plan_all()
+        without_prs = list(planner.without_prs.values())
         if dry_run:
-            return AutocreateResult(plan, [])
-        return AutocreateResult(plan, self.stack_infos((s.branch for s in plan), adapter))
+            return AutocreateResult(plan, [], without_prs)
+        self.apply_autocreate(plan, without_prs, remote)
+        shown = [s.branch for s in plan] + [s.branch for s in without_prs]
+        return AutocreateResult(plan, self.stack_infos(shown, adapter), without_prs)
+
+    def apply_autocreate(self, plan: list[Autocreated], without_prs: list[AutocreatedWithoutPr], remote: str) -> None:
+        """Create and track the branches autocreate planned to."""
+        git = self.git
+        for without_pr in without_prs:
+            if without_pr.action is AutocreateAction.CREATE and without_pr.parent and without_pr.base:
+                branch = without_pr.branch
+                git.run("branch", "--quiet", "--track", branch, f"refs/remotes/{remote}/{branch}")
+                self.set_parent(branch, without_pr.parent)
+                git.config_set(branch, BASE_KEY, without_pr.base)
+        for step in plan:
+            if step.action is AutocreateAction.CREATE:
+                git.run("branch", "--quiet", "--track", step.branch, f"refs/remotes/{remote}/{step.branch}")
+            elif (
+                step.action is AutocreateAction.TRACK
+                and git.config_get(step.branch, "remote") is None
+                and git.rev(f"refs/remotes/{remote}/{step.branch}") is not None
+            ):
+                git.run("branch", "--quiet", f"--set-upstream-to=refs/remotes/{remote}/{step.branch}", step.branch)
+            if step.base is not None:
+                self.set_parent(step.branch, step.parent)
+                git.config_set(step.branch, BASE_KEY, step.base)
 
     def ensure_local_branch_parent(self, parent: str) -> None:
         """Refuse a parent that isn't a local branch: sync fast-forwards a stack's
@@ -1260,16 +1304,19 @@ class StackClient(StackCore):
 class AutocreatePlanner:
     """Works out what autocreate should do for prs, without changing anything."""
 
-    def __init__(self, stack: StackClient, prs: list[OpenPullRequest], remote: str) -> None:
+    def __init__(self, stack: StackClient, prs: list[OpenPullRequest], remote: str, default_branch: str | None) -> None:
         self.stack = stack
         self.git = stack.git
         self.prs = prs
         self.remote = remote
+        self.default_branch = default_branch
         # The tracked branches, and the ones planned to be tracked so far.
         self.parents = stack.tracked_branches()
         self.by_head = {pr.head: pr for pr in prs}
         self.planned: dict[str, Autocreated] = {}
-        # Branches whose plan is being worked out, to catch a cycle of pull requests.
+        # The plans for branches without a pull request, parents first.
+        self.without_prs: dict[str, AutocreatedWithoutPr] = {}
+        # Branches whose plan is being worked out, to catch a cycle.
         self.visiting: set[str] = set()
 
     def plan_all(self) -> list[Autocreated]:
@@ -1313,10 +1360,13 @@ class AutocreatePlanner:
             parent_ref = parent if git.local_branch_exists(parent) else f"refs/remotes/{remote}/{parent}"
         elif git.local_branch_exists(parent):
             parent_ref = parent
+        elif (without_pr := self.plan_without_pr(parent)).action is AutocreateAction.CREATE:
+            parent_ref = f"refs/remotes/{remote}/{parent}"
         else:
             return self.skip(
                 pr,
-                f"{parent}, which it merges into, isn't a local branch; create it with `git switch {parent}` and rerun",
+                f"{parent}, which it merges into, isn't a local branch ({without_pr.reason}); "
+                f"create it with `git switch {parent}` and rerun",
             )
         try:
             ensure_no_cycle(branch, parent, self.parents)
@@ -1331,3 +1381,106 @@ class AutocreatePlanner:
 
     def skip(self, pr: OpenPullRequest, reason: str) -> Autocreated:
         return Autocreated(pr.head, pr.base, pr.number, AutocreateAction.SKIP, reason=reason)
+
+    def plan_without_pr(self, branch: str) -> AutocreatedWithoutPr:
+        """The plan for branch, which has no pull request or local branch,
+        working it out (after its parent's) if it hasn't been yet."""
+        if branch not in self.without_prs:
+            self.visiting.add(branch)
+            self.without_prs[branch] = self.plan_one_without_pr(branch)
+            self.visiting.discard(branch)
+        return self.without_prs[branch]
+
+    def plan_one_without_pr(self, branch: str) -> AutocreatedWithoutPr:
+        """Create and track branch from its remote branch, on the parent its
+        history says it's built on, if all of its own commits are the user's."""
+        remote_ref = f"refs/remotes/{self.remote}/{branch}"
+        if self.git.rev(remote_ref) is None:
+            reason = f"{self.remote}/{branch} doesn't exist"
+            return AutocreatedWithoutPr(branch, None, AutocreateAction.SKIP, reason=reason)
+        try:
+            parent = self.find_parent(branch)
+        except StackError as e:
+            return AutocreatedWithoutPr(branch, None, AutocreateAction.SKIP, reason=str(e))
+        try:
+            parent_ref = self.built_on_ref(parent)
+            self.ensure_users_own(parent, parent_ref, remote_ref)
+            ensure_no_cycle(branch, parent, self.parents)
+            base = self.stack.fork_point(parent_ref, remote_ref)
+            if base is None:
+                raise StackError(f"it has no history in common with {parent}")
+        except StackError as e:
+            return AutocreatedWithoutPr(branch, parent, AutocreateAction.SKIP, reason=str(e))
+        self.parents[branch] = parent
+        return AutocreatedWithoutPr(branch, parent, AutocreateAction.CREATE, base=base)
+
+    def built_on_ref(self, parent: str) -> str:
+        """The ref of parent, which a branch without a pull request is built
+        on, after planning it if it's to be created. Raises StackError if it
+        won't be a local branch."""
+        git, remote = self.git, self.remote
+        if parent in self.visiting:
+            raise StackError(f"{parent}, which it's built on, is built on it")
+        if parent in self.by_head:
+            if self.plan(self.by_head[parent]).action is AutocreateAction.SKIP:
+                raise StackError(f"{parent}, which it's built on, was skipped")
+            return parent if git.local_branch_exists(parent) else f"refs/remotes/{remote}/{parent}"
+        if parent == self.default_branch:
+            if not git.local_branch_exists(parent):
+                raise StackError(f"{parent}, which it's built on, isn't a local branch")
+            # Where autocreate fast-forwards it to (which a dry run doesn't),
+            # so main's newer commits don't look like the branch's own.
+            return f"refs/remotes/{remote}/{parent}"
+        if git.local_branch_exists(parent):
+            return parent
+        if self.plan_without_pr(parent).action is AutocreateAction.SKIP:
+            raise StackError(f"{parent}, which it's built on, was skipped")
+        return f"refs/remotes/{remote}/{parent}"
+
+    def ensure_users_own(self, parent: str, parent_ref: str, remote_ref: str) -> None:
+        """Refuse to track the branch at remote_ref unless it has commits that
+        parent doesn't, all by the user (by email address): otherwise it's most
+        likely someone else's."""
+        git = self.git
+        email = git.author_email()
+        if email is None:
+            raise StackError("git has no email address for you, to tell your commits by")
+        authors = set(git.run("log", "--format=%ae", f"{parent_ref}..{remote_ref}").lower().splitlines())
+        if not authors:
+            raise StackError(f"it has no commits that {parent} doesn't")
+        if others := sorted(authors - {email.lower()}):
+            raise StackError(f"it has commits by {', '.join(others)}, so it's probably someone else's")
+
+    def find_parent(self, branch: str) -> str:
+        """The branch that remote branch is most likely built on: of the
+        remote's branches it contains that have commits the default branch
+        doesn't, the closest to it, or else the default branch. Raises
+        StackError if there's no one closest.
+
+        Only finds it while branch is built on the parent's current tip: if
+        the parent was rewritten since, its old commits are in branch, so it
+        looks built on what's below the parent."""
+        git, remote = self.git, self.remote
+        if self.default_branch is None:
+            raise StackError(f"{remote} has no default branch to look for its parent on")
+        prefix = f"refs/remotes/{remote}/"
+        tip = git.rev(prefix + branch)
+        below: dict[str, list[str]] = {}
+        listing = git.run(
+            "for-each-ref",
+            "--format=%(objectname) %(refname)",
+            f"--merged={prefix}{branch}",
+            f"--no-merged={prefix}{self.default_branch}",
+            prefix,
+        )
+        for line in listing.splitlines():
+            oid, ref = line.split(" ", 1)
+            if oid != tip:
+                below.setdefault(oid, []).append(ref.removeprefix(prefix))
+        if not below:
+            return self.default_branch
+        nearest = git.run("merge-base", "--independent", *below).split()
+        candidates = sorted(name for oid in nearest for name in below[oid])
+        if len(candidates) > 1:
+            raise StackError(f"it could be built on any of {', '.join(candidates)}")
+        return candidates[0]

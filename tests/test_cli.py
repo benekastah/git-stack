@@ -18,6 +18,7 @@ from git_stack.json_fields import to_json
 from git_stack.stack import (
     AutocreateAction,
     Autocreated,
+    AutocreatedWithoutPr,
     AutocreateResult,
     BranchInfo,
     BranchStatus,
@@ -158,6 +159,10 @@ AUTOCREATED = [
     Autocreated("pr4", "pr2", 4, AutocreateAction.PARENT_DIFFERS, tracked_parent="main"),
     Autocreated("pr5", "theirs", 5, AutocreateAction.SKIP, reason="theirs isn't a local branch"),
 ]
+WITHOUT_PRS = [
+    AutocreatedWithoutPr("base", "main", AutocreateAction.CREATE, base="c" * 40),
+    AutocreatedWithoutPr("theirs", "main", AutocreateAction.SKIP, reason="it has commits by someone@example.com"),
+]
 PARENT_DIFFERS = (
     "pr4 is tracked on main, but #4 merges it into pr2; leaving it (to follow GitHub, run `git stack track pr2 pr4`)"
 )
@@ -166,11 +171,12 @@ PARENT_DIFFERS = (
 def test_autocreate_dry_run_says_what_it_would_do_for_each_pull_request(
     stack: Any, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    stack.autocreate.return_value = AutocreateResult(AUTOCREATED, [])
+    stack.autocreate.return_value = AutocreateResult(AUTOCREATED, [], WITHOUT_PRS)
 
     main(["autocreate", "--dry-run"], stack=stack)
 
     assert capsys.readouterr().out.splitlines() == [
+        "would create base from origin/base, tracking it on main (no pull request)",
         "would create pr1 from origin/pr1, tracking it on main (#1)",
         "would track pr2 on pr1 (#2)",
         "pr3 is already tracked on pr2 (#3)",
@@ -535,9 +541,16 @@ def test_clean_json_ends_with_the_error_when_it_fails(stack: Any, capsys: pytest
         (
             ["autocreate"],
             "autocreate",
-            AutocreateResult([Autocreated("pr1", "main", 12, AutocreateAction.TRACK, base="a" * 40)], STACK),
+            AutocreateResult(
+                [Autocreated("pr1", "main", 12, AutocreateAction.TRACK, base="a" * 40)],
+                STACK,
+                [AutocreatedWithoutPr("base", "main", AutocreateAction.CREATE, base="b" * 40)],
+            ),
             {
                 "stacks": to_json(STACK),
+                "without_prs": [
+                    {"branch": "base", "parent": "main", "action": "create", "base": "b" * 40, "reason": None}
+                ],
                 "steps": [
                     {
                         "branch": "pr1",

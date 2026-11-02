@@ -118,6 +118,14 @@ class GitClient:
     def is_ancestor(self, ancestor: str, descendant: str) -> bool:
         return self.ok("merge-base", "--is-ancestor", ancestor, descendant)
 
+    def author_email(self) -> str | None:
+        """The email address git authors commits with, or None if it has none."""
+        ident = self.run("var", "GIT_AUTHOR_IDENT", check=False)
+        start, end = ident.find("<"), ident.rfind(">")
+        if not 0 <= start < end:
+            return None
+        return ident[start + 1 : end] or None
+
     def current_branch(self) -> str | None:
         return self.run("branch", "--show-current") or None
 

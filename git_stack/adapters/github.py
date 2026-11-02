@@ -254,11 +254,19 @@ class GitHubAdapter(GitAdapter):
         if refs:
             self.git.run("fetch", "--quiet", "--no-write-fetch-head", self.remote, *refs, check=False)
 
+    @property
+    def default_branch(self) -> str | None:
+        """The repository's default branch, once pull requests were looked up
+        (by my_open_pull_requests or pull_requests), or None."""
+        return self._default_branch
+
     def my_open_pull_requests(self) -> list[OpenPullRequest]:
         """The gh user's open pull requests, drafts included, from branches in
-        the repository (not forks)."""
+        the repository (not forks). Also looks up the default branch."""
         query = (
-            "query($q: String!, $after: String) { search(query: $q, type: ISSUE, first: 100, after: $after) "
+            "query($q: String!, $after: String, $owner: String!, $name: String!) "
+            "{ repository(owner: $owner, name: $name) { defaultBranchRef { name } } "
+            "search(query: $q, type: ISSUE, first: 100, after: $after) "
             "{ pageInfo { hasNextPage endCursor } "
             "nodes { ... on PullRequest { number headRefName baseRefName isCrossRepository } } } }"
         )
@@ -273,11 +281,18 @@ class GitHubAdapter(GitAdapter):
                 "-f",
                 f"q=repo:{self.owner}/{self.name} is:pr is:open author:@me",
                 "-f",
+                f"owner={self.owner}",
+                "-f",
+                f"name={self.name}",
+                "-f",
                 f"query={query}",
             ]
             if after is not None:
                 args += ["-f", f"after={after}"]
-            search = field(field(parse_json(self.gh(*args)), "data", dict), "search", dict)
+            data = field(parse_json(self.gh(*args)), "data", dict)
+            default_branch = optional_field(field(data, "repository", dict), "defaultBranchRef", dict)
+            self._default_branch = field(default_branch, "name", str) if default_branch else None
+            search = field(data, "search", dict)
             prs.extend(
                 OpenPullRequest(
                     field(node, "number", int), field(node, "headRefName", str), field(node, "baseRefName", str)

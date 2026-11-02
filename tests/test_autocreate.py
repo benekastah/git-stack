@@ -7,16 +7,24 @@ from git_stack.errors import StackError
 from git_stack.stack import AutocreateAction, Autocreated, BranchStatus, StackClient
 from tests.helpers import FakeGitHub, Repo
 
+SOMEONE = "Someone <someone@example.com>"
 
-def open_pr(repo: Repo, gh: FakeGitHub, number: int, branch: str, base: str, author: str = "me") -> None:
-    """Push branch, with one commit on base, from another clone, and open
-    pull request number of it into base."""
+
+def push_branch(repo: Repo, branch: str, base: str, author: str | None = None) -> None:
+    """Push branch, with one commit on base (by author, or else the user),
+    from another clone."""
     repo.git("fetch", "--quiet", cwd=repo.forge)
     repo.git("switch", "--quiet", "-C", branch, f"origin/{base}", cwd=repo.forge)
     (repo.forge / branch).write_text(f"{branch}\n")
     repo.git("add", branch, cwd=repo.forge)
-    repo.git("commit", "--quiet", "-m", f"{branch} c1", cwd=repo.forge)
+    repo.git("commit", "--quiet", *([f"--author={author}"] if author else []), "-m", f"{branch} c1", cwd=repo.forge)
     repo.git("push", "--quiet", "origin", branch, cwd=repo.forge)
+
+
+def open_pr(repo: Repo, gh: FakeGitHub, number: int, branch: str, base: str, author: str = "me") -> None:
+    """Push branch, with one commit on base (by the user, or by someone else
+    for another author), and open pull request number of it into base."""
+    push_branch(repo, branch, base, author=None if author == "me" else SOMEONE)
     gh.add_pr(
         number=number,
         state="OPEN",
@@ -97,6 +105,18 @@ def test_autocreate_fast_forwards_main_before_finding_bases(repo: Repo, gh: Fake
     repo.assert_stacked("pr1", "main", ["pr1 c1"])
 
 
+def test_autocreate_fast_forwards_main_for_a_branch_without_pr_on_it(
+    repo: Repo, gh: FakeGitHub, client: StackClient
+) -> None:
+    repo.commit_on_forge("main", "d", "main\n", "main c1")
+    push_branch(repo, "a", "main")  # built on the new origin/main, which main lacks
+    open_pr(repo, gh, 1, "pr1", "a")
+
+    client.autocreate()
+
+    repo.assert_stacked("a", "main", ["a c1"])
+
+
 def test_autocreate_leaves_tracked_branches_alone(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
     open_pr(repo, gh, 1, "pr1", "main")
     open_pr(repo, gh, 2, "pr2", "pr1")
@@ -130,6 +150,82 @@ def test_autocreate_skips_pr_into_branch_that_isnt_local(repo: Repo, gh: FakeGit
     assert actions(steps) == [("pr2", AutocreateAction.SKIP), ("pr3", AutocreateAction.SKIP)]
     assert "theirs, which it merges into, isn't a local branch" in (steps[0].reason or "")
     assert repo.git("branch", "--list", "pr2", "pr3") == ""
+
+
+def test_autocreate_skips_pr_into_someone_elses_branch_without_a_pr(
+    repo: Repo, gh: FakeGitHub, client: StackClient
+) -> None:
+    push_branch(repo, "theirs", "main", author=SOMEONE)
+    open_pr(repo, gh, 1, "pr1", "theirs")
+
+    result = client.autocreate()
+
+    assert actions(result.steps) == [("pr1", AutocreateAction.SKIP)]
+    assert [(s.branch, s.parent, s.action) for s in result.without_prs] == [("theirs", "main", AutocreateAction.SKIP)]
+    assert "commits by someone@example.com, so it's probably someone else's" in (result.steps[0].reason or "")
+    assert repo.git("branch", "--list", "theirs", "pr1") == ""
+
+
+def test_autocreate_tracks_my_branches_without_prs_that_prs_are_built_on(
+    repo: Repo, gh: FakeGitHub, client: StackClient
+) -> None:
+    push_branch(repo, "a", "main")
+    push_branch(repo, "b", "a")
+    open_pr(repo, gh, 1, "pr1", "b")
+
+    result = client.autocreate()
+
+    assert [(s.branch, s.parent, s.action) for s in result.without_prs] == [
+        ("a", "main", AutocreateAction.CREATE),
+        ("b", "a", AutocreateAction.CREATE),
+    ]
+    assert actions(result.steps) == [("pr1", AutocreateAction.CREATE)]
+    assert [b.name for b in result.branches] == ["main", "a", "b", "pr1"]
+    repo.assert_stacked("a", "main", ["a c1"])
+    repo.assert_stacked("b", "a", ["b c1"])
+    repo.assert_stacked("pr1", "b", ["pr1 c1"])
+    assert repo.git("rev-parse", "--abbrev-ref", "a@{upstream}") == "origin/a"
+
+
+def test_autocreate_finds_branch_without_pr_built_on_a_pr(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+    open_pr(repo, gh, 1, "pr1", "main")
+    push_branch(repo, "middle", "pr1")
+    open_pr(repo, gh, 2, "pr2", "middle")
+
+    result = client.autocreate()
+
+    assert [(s.branch, s.parent, s.action) for s in result.without_prs] == [("middle", "pr1", AutocreateAction.CREATE)]
+    assert actions(result.steps) == [("pr1", AutocreateAction.CREATE), ("pr2", AutocreateAction.CREATE)]
+    repo.assert_stacked("middle", "pr1", ["middle c1"])
+    repo.assert_stacked("pr2", "middle", ["pr2 c1"])
+
+
+def test_autocreate_skips_branch_without_pr_on_one_of_several_branches(
+    repo: Repo, gh: FakeGitHub, client: StackClient
+) -> None:
+    push_branch(repo, "a", "main")
+    repo.git("push", "--quiet", "origin", "a:refs/heads/a-copy", cwd=repo.forge)
+    push_branch(repo, "b", "a")
+    open_pr(repo, gh, 1, "pr1", "b")
+
+    result = client.autocreate()
+
+    assert [(s.branch, s.action, s.reason) for s in result.without_prs] == [
+        ("b", AutocreateAction.SKIP, "it could be built on any of a, a-copy")
+    ]
+    assert actions(result.steps) == [("pr1", AutocreateAction.SKIP)]
+    assert repo.git("branch", "--list", "a", "b", "pr1") == ""
+
+
+def test_autocreate_dry_run_creates_no_branches_without_prs(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+    repo.commit_on_forge("main", "d", "main\n", "main c1")  # by someone else; main lacks it
+    push_branch(repo, "a", "main")
+    open_pr(repo, gh, 1, "pr1", "a")
+
+    result = client.autocreate(dry_run=True)
+
+    assert [(s.branch, s.parent, s.action) for s in result.without_prs] == [("a", "main", AutocreateAction.CREATE)]
+    assert repo.git("branch", "--list", "a", "pr1") == ""
 
 
 def test_autocreate_refuses_without_github(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:

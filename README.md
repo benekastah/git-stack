@@ -266,9 +266,16 @@ git stack autocreate
   different parent than its pull request merges into, it says so; run
   `git stack track <parent> <branch>` if GitHub is right.
 - If one of your pull requests merges into a branch you don't have locally
-  (e.g. you built it on a coworker's branch), it's skipped, along with your
-  pull requests built on it. `git switch` to that branch and rerun to track
-  them.
+  and that has no pull request, that branch is created from its remote branch
+  and tracked too, on the branch it's built on: of the remote's branches it
+  contains that the default branch doesn't, the closest, or else the default
+  branch. That's only if all of its own commits are yours (by your git email
+  address). If they aren't (e.g. you built on a coworker's branch), or it's
+  unclear which branch it's built on, the pull request is skipped, along with
+  your pull requests built on it; `git switch` to that branch and rerun to
+  track them on it. A branch built on an old version of its parent (one
+  rewritten since) looks built on what's below the parent; fix it with
+  `git stack track <parent> <branch>`.
 - Each branch's base is found as for `git stack track`, after fast-forwarding
   the branches your pull requests merge into that aren't tracked (e.g. `main`)
   to their upstreams, as `sync` does. If a parent's commits
@@ -900,7 +907,7 @@ What each command's result has, besides `type` and `events`:
 | --- | --- |
 | `branch` | `branch`, the `parent` it was created on, and its `group` (or `null`) |
 | `track` | `tracked`: each branch's `branch`, `parent` and `base` |
-| `autocreate` | `stacks`, and `steps`, one for each pull request: its `branch`, the `parent` it merges into, its `number`, and the `action`: `create`, `track`, `already-tracked`, `parent-differs` or `skip`. `base` is the commit a branch it creates or tracks is built on, `tracked_parent` the parent a `parent-differs` branch is tracked on instead, and `reason` why it skipped one; each is `null` otherwise |
+| `autocreate` | `stacks`, and `steps`, one for each pull request: its `branch`, the `parent` it merges into, its `number`, and the `action`: `create`, `track`, `already-tracked`, `parent-differs` or `skip`. `base` is the commit a branch it creates or tracks is built on, `tracked_parent` the parent a `parent-differs` branch is tracked on instead, and `reason` why it skipped one; each is `null` otherwise. `without_prs` has the same for the branches without a pull request that your pull requests are built on, without `number` or `tracked_parent`, and only `create` or `skip`; `parent` is `null` if it couldn't tell which branch one is built on |
 | `untrack` | `untracked`: each `branch`, and the `children` still stacked on it |
 | `rename` | `old`, `new`, the `children` moved onto it, and the `upstream` it no longer tracks (or `null`) |
 | `group add` | the `group`, and the `bottoms` of the stacks put in it |

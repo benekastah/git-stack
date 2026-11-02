@@ -63,7 +63,8 @@ def my_open_pull_requests(prs: list[dict[str, Any]]) -> str:
     """The gh user's open pull requests, all on one page."""
     mine = [p for p in prs if p["state"] == "OPEN" and p.get("author", "me") == "me"]
     nodes = [{k: p[k] for k in ("number", "headRefName", "baseRefName", "isCrossRepository")} for p in mine]
-    return json.dumps({"data": {"search": {"pageInfo": {"hasNextPage": False, "endCursor": None}, "nodes": nodes}}})
+    search = {"pageInfo": {"hasNextPage": False, "endCursor": None}, "nodes": nodes}
+    return json.dumps({"data": {"repository": {"defaultBranchRef": {"name": "main"}}, "search": search}})
 
 
 def pull_requests_by_number(query: str, state: dict[str, Any]) -> str:

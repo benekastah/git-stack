@@ -3,7 +3,7 @@ import argparse
 from git_stack.commands import Subparsers, add_json_argument
 from git_stack.commands.info import print_tree
 from git_stack.git import DEFAULT_REMOTE
-from git_stack.stack import AutocreateAction, Autocreated, AutocreateResult, StackClient
+from git_stack.stack import AutocreateAction, Autocreated, AutocreatedWithoutPr, AutocreateResult, StackClient
 
 
 class Args(argparse.Namespace):
@@ -50,6 +50,13 @@ def describe(step: Autocreated, remote: str, dry_run: bool) -> str:
             return f"skipping {step.branch} ({pr}): {step.reason}"
 
 
+def describe_without_pr(step: AutocreatedWithoutPr, remote: str) -> str:
+    """What a dry run would do for a branch without a pull request that it
+    creates. (One it skips is in the reason the pull requests built on it
+    were skipped.)"""
+    return f"would create {step.branch} from {remote}/{step.branch}, tracking it on {step.parent} (no pull request)"
+
+
 def run(stack: StackClient, args: Args) -> AutocreateResult:
     return stack.autocreate(remote=args.remote, dry_run=args.dry_run)
 
@@ -59,6 +66,10 @@ def show(stack: StackClient, args: Args, result: AutocreateResult) -> None:
         print("you have no open pull requests from branches in this repository")
     # Without a dry run, the stacks show what was tracked, with the pull
     # requests of the branches it just tracked in green.
+    if args.dry_run:
+        for without_pr in result.without_prs:
+            if without_pr.action is AutocreateAction.CREATE:
+                print(describe_without_pr(without_pr, args.remote))
     for step in result.steps:
         if args.dry_run or step.action in (AutocreateAction.PARENT_DIFFERS, AutocreateAction.SKIP):
             print(describe(step, args.remote, args.dry_run))
