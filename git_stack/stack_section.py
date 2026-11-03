@@ -3,7 +3,7 @@ request's description: the stack as a tree from its root, with the pull
 request's own branch marked.
 
 A node is a pull request's number, or the name of a branch without one (or of
-the root).
+the root). Merged pull requests are marked.
 """
 
 import re
@@ -17,9 +17,10 @@ END = "<!-- /git-stack -->"
 NOTE = "<!-- Kept up to date by `git stack prs`, which overwrites any edits to this section. -->"
 SECTION = re.compile(f"{re.escape(START)}.*?{re.escape(END)}", re.DOTALL)
 ACTIVE = " 👈"
+MERGED = " (merged)"
 
 
-def render(root: str, tree: Tree, active: Node) -> str:
+def render(root: str, tree: Tree, merged: set[int], active: Node) -> str:
     """The stack section for active's pull request."""
     children: dict[Node, list[Node]] = {}
     # Pull requests in the order they were opened, then branches without one.
@@ -30,7 +31,8 @@ def render(root: str, tree: Tree, active: Node) -> str:
     def add(parent: Node, depth: int) -> None:
         for node in children.get(parent, []):
             label = f"#{node}" if isinstance(node, int) else f"`{node}`"
-            lines.append(f"{'  ' * depth}- {label}{ACTIVE if node == active else ''}")
+            notes = (MERGED if node in merged else "") + (ACTIVE if node == active else "")
+            lines.append(f"{'  ' * depth}- {label}{notes}")
             add(node, depth + 1)
 
     add(root, 1)

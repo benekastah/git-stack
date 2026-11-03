@@ -228,47 +228,97 @@ def test_prs_adds_new_pull_requests_to_the_stack_of_existing_ones(
     assert body(gh, 1) == stack("- `main`", "  - #1 👈", "    - #2")
 
 
-def merge_pr1(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
-    """Squash-merge pr1, the first pull request, on the forge, then sync."""
-    repo.squash_merge_on_forge("pr1")
+def merge(
+    repo: Repo, gh: FakeGitHub, client: StackClient, branch: str, number: int, delete_branch: bool = True
+) -> None:
+    """Squash-merge branch, pull request number, on the forge, then sync.
+    Deleting the branch, GitHub points the pull requests on it at main
+    itself; otherwise sync's push does."""
+    repo.squash_merge_on_forge(branch, delete_branch)
     state = gh.load()
-    state["prs"][0] |= {
-        "state": "MERGED",
-        "headRefOid": repo.git("rev-parse", "pr1"),
-        "mergeCommit": {"oid": repo.git("rev-parse", "HEAD", cwd=repo.forge)},
-    }
+    for pr in state["prs"]:
+        if pr["number"] == number:
+            pr |= {
+                "state": "MERGED",
+                "headRefOid": repo.git("rev-parse", branch),
+                "mergeCommit": {"oid": repo.git("rev-parse", "HEAD", cwd=repo.forge)},
+            }
+        elif delete_branch and pr["baseRefName"] == branch:
+            pr["baseRefName"] = "main"
+            pr.setdefault("baseChanges", []).append({"oldBase": branch, "createdAt": ""})
     gh.save(state)
     client.sync()
 
 
-def test_prs_leaves_merged_pull_requests_out_of_the_stack(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+def test_prs_shows_the_stack_on_the_merged_pull_request_it_was_on(
+    repo: Repo, gh: FakeGitHub, client: StackClient
+) -> None:
     repo.make_stack()
     client.push()
     client.prs()
-    merge_pr1(repo, gh, client)
+    merge(repo, gh, client, "pr1", 1)
     client.branch("pr4")
     repo.commit("c", "pr4\n", "pr4 c1")
     client.push()
 
     client.prs()
 
-    assert body(gh, 2) == stack("- `main`", "  - #2 👈", "    - #3", "      - #4")
+    assert body(gh, 2) == stack("- `main`", "  - #1 (merged)", "    - #2 👈", "      - #3", "        - #4")
     assert "#4" not in body(gh, 1)  # merged pull requests are left alone
 
 
-def test_prs_removes_the_stack_once_one_pull_request_is_left(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
-    client.branch("pr1")
-    repo.commit("a", "pr1\n", "pr1 c1")
-    client.branch("pr2")
-    repo.commit("b", "pr2\n", "pr2 c1")
+def test_prs_shows_only_the_last_merged_pull_request(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+    repo.make_stack()
     client.push()
     client.prs()
-    assert stack_section.START in body(gh, 2)
-    merge_pr1(repo, gh, client)
+    merge(repo, gh, client, "pr1", 1)
+    client.prs()
+    merge(repo, gh, client, "pr2", 2, delete_branch=False)
 
     client.prs()
 
-    assert body(gh, 2) == ""
+    # #2's own description still shows it on #1.
+    assert body(gh, 3) == stack("- `main`", "  - #2 (merged)", "    - #3 👈")
+
+
+def test_prs_shows_a_merged_pull_request_that_merged_before_the_base_changed(
+    repo: Repo, gh: FakeGitHub, client: StackClient
+) -> None:
+    repo.make_stack()
+    client.push()
+    client.prs()
+    merge(repo, gh, client, "pr1", 1)
+    # A later pull request from a new branch named pr1, merged after #2 moved
+    # off pr1, isn't the one #2 was on.
+    gh.add_pr(number=9, state="MERGED", headRefName="pr1", baseRefName="main", mergedAt="2026-12-31T00:00:00Z")
+
+    client.prs()
+
+    assert body(gh, 2) == stack("- `main`", "  - #1 (merged)", "    - #2 👈", "      - #3")
+
+
+def test_prs_shows_no_merged_pull_request_for_a_branch_moved_off_an_open_one(
+    repo: Repo, gh: FakeGitHub, client: StackClient
+) -> None:
+    repo.make_stack()
+    client.push()
+    client.prs()
+    # An earlier pull request from a branch named pr1, merged before.
+    gh.add_pr(
+        number=9,
+        state="MERGED",
+        headRefName="pr1",
+        headRefOid=repo.git("rev-parse", "main"),
+        baseRefName="main",
+        mergeCommit=None,
+    )
+    repo.git("switch", "--quiet", "pr2")
+    client.restack(onto="main")
+    client.push()
+
+    client.prs()
+
+    assert body(gh, 2) == stack("- `main`", "  - #2 👈", "    - #3")
 
 
 def test_prs_shows_a_merged_branch_it_skipped(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:

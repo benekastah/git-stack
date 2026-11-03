@@ -11,6 +11,12 @@ the "prs" in it, bottom first. Without a "stacks" key, the repository doesn't
 have them, so the stacks API is Not Found, and with a true "no_stack_field"
 key, GraphQL doesn't even know pull requests' stack field, like GitHub
 Enterprise without them.
+
+A pull request's "baseChanges" are its timeline's base changes, as GraphQL
+gives them. Changing its base adds one, a "previousRefName" and a
+"createdAt" from the "clock" key, a count of the base changes so far, as a
+timestamp. A merged pull request's "mergedAt" is earlier than any of them
+unless it says otherwise.
 """
 
 import json
@@ -19,7 +25,16 @@ import re
 import sys
 from typing import Any
 
-PR_FIELDS = ("number", "state", "isDraft", "isCrossRepository", "headRefOid", "baseRefName", "mergeCommit")
+PR_FIELDS = (
+    "number",
+    "state",
+    "isDraft",
+    "isCrossRepository",
+    "headRefOid",
+    "baseRefName",
+    "mergeCommit",
+    "mergedAt",
+)
 
 
 def opt(args: list[str], name: str) -> str:
@@ -95,11 +110,30 @@ def pull_requests_by_number(query: str, state: dict[str, Any]) -> str:
         r"(\w+): pullRequest\(number: (\d+)\) \{ (.*?) \}(?= \w+: pullRequest| \} \}$)", query
     ):
         pr = next((p for p in prs if p["number"] == int(number)), None)
-        names = re.sub(r"\{.*\}", "", fields).split()
-        by_alias[alias] = (
-            None if pr is None else {f: stack_of(pr["number"], state) if f == "stack" else pr.get(f, "") for f in names}
-        )
+        by_alias[alias] = None if pr is None else {f: field_of(pr, f, state) for f in top_level(fields)}
     return json.dumps({"data": {"repository": by_alias}})
+
+
+def top_level(fields: str) -> list[str]:
+    """The names of the fields in fields, without their arguments or
+    subfields."""
+    depth = 0
+    flat = ""
+    for c in fields:
+        depth += c in "({["
+        if depth == 0:
+            flat += c
+        depth -= c in ")}]"
+    return flat.split()
+
+
+def field_of(pr: dict[str, Any], name: str, state: dict[str, Any]) -> object:
+    """pr's field name, as GraphQL gives it."""
+    if name == "stack":
+        return stack_of(pr["number"], state)
+    if name == "timelineItems":
+        return {"nodes": pr.get("baseChanges", [])}
+    return pr.get(name, "")
 
 
 def stack_of(number: int, state: dict[str, Any]) -> object:
@@ -165,9 +199,21 @@ def pull_requests_by_head(args: list[str], query: str, prs: list[dict[str, Any]]
     for alias, variable in re.findall(r"(\w+): pullRequests\(headRefName: \$(\w+)", query):
         # Newest first, taking higher numbers as newer.
         matching = sorted(
-            (p for p in prs if p["headRefName"] == opt_value(args, variable)), key=lambda p: p["number"], reverse=True
+            (
+                p
+                for p in prs
+                if p["headRefName"] == opt_value(args, variable)
+                and (
+                    f"{alias}: pullRequests(headRefName: ${variable}, states: MERGED" not in query
+                    or p["state"] == "MERGED"
+                )
+            ),
+            key=lambda p: p["number"],
+            reverse=True,
         )
-        found[alias] = {"nodes": [{"isDraft": False, **{k: p[k] for k in PR_FIELDS if k in p}} for p in matching]}
+        found[alias] = {
+            "nodes": [{"isDraft": False, "mergedAt": "", **{k: p[k] for k in PR_FIELDS if k in p}} for p in matching]
+        }
     return json.dumps({"data": {"repository": found}})
 
 
@@ -198,9 +244,18 @@ def edit_pull_request(args: list[str], state: dict[str, Any]) -> None:
                 "GraphQL: Cannot change the base branch because the pull request is part of a stack. "
                 "(updatePullRequest)"
             )
+        state["clock"] = state.get("clock", 0) + 1
+        pr.setdefault("baseChanges", []).append(
+            {"previousRefName": pr["baseRefName"], "createdAt": timestamp(state["clock"])}
+        )
         pr["baseRefName"] = opt(args, "--base")
     if "--body-file" in args:
         pr["body"] = sys.stdin.read()
+
+
+def timestamp(tick: int) -> str:
+    """A GitHub timestamp, tick seconds into the fake's day."""
+    return f"2026-01-01T{tick // 3600:02d}:{tick // 60 % 60:02d}:{tick % 60:02d}Z"
 
 
 def main() -> None:

@@ -724,10 +724,13 @@ git stack prs
 - Then it adds the stack to the end of each open pull request's description,
   as a tree from the stack's root, with that pull request marked, and keeps
   it up to date each time it runs, showing each open one on what it's stacked
-  on now (e.g. `main` once its parent merged). Merged pull requests are left
-  out. A stack with only one pull request gets none, and once the rest have
-  merged, the last one's is removed. Text you add outside the stack is kept,
-  but edits to the stack itself are overwritten.
+  on now. Merged pull requests are left out, except the one each pull request
+  on the stack's root was last stacked on (whose branch its base was changed
+  from after it merged), marked as merged. That one's description still has
+  the stack as it was when it merged, with the one it was stacked on, so the
+  links lead back through the earlier pull requests. A stack with only one
+  pull request, counting that one, gets none, and one it had is removed. Text you add outside
+  the stack is kept, but edits to the stack itself are overwritten.
 - If the repository has GitHub's
   [stacked pull requests](https://docs.github.com/en/pull-requests/reference/stacked-pull-requests),
   and a stack's open pull requests are a chain, each on the one before, it
@@ -753,8 +756,9 @@ git stack prs
   ---
   **Stack**
   - `main`
-    - #13 👈
-      - #14
+    - #12 (merged)
+      - #13 👈
+        - #14
   <!-- /git-stack -->
   ```
 

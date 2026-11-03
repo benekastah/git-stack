@@ -35,6 +35,15 @@ GITHUB_STACKS_SETTING = "stack.githubStacks"
 # A pull request's stack on GitHub, as GraphQL gives it. GitHub only allows a
 # handful of pull requests in one.
 STACK_FIELDS = "stack { number entries(first: 100) { nodes { position pullRequest { number state } } } }"
+# The bases a pull request's base was changed from, oldest first: by GitHub,
+# when the pull request it was stacked on merged and its branch was deleted
+# (oldBase), or by hand or `git stack push` (previousRefName). Only the last
+# few matter, for the merged pull request it was last stacked on.
+BASE_CHANGES = (
+    f"timelineItems(last: {PRS_PER_BRANCH}, itemTypes: [BASE_REF_CHANGED_EVENT, AUTOMATIC_BASE_CHANGE_SUCCEEDED_EVENT]) "
+    "{ nodes { ... on BaseRefChangedEvent { previousRefName createdAt } "
+    "... on AutomaticBaseChangeSucceededEvent { oldBase createdAt } } }"
+)
 # What GitHub says when asked to change the base of a pull request in a stack.
 STACKED_BASE_ERROR = "Cannot change the base branch because the pull request is part of a stack"
 
@@ -564,9 +573,11 @@ class GitHubAdapter(GitAdapter):
         pull request of branches, a stack parent-before-child, show the stack,
         marking that pull request (see git_stack.stack_section).
 
-        Merged pull requests aren't shown. A stack with fewer than two pull
-        requests (e.g. once the rest merged) gets no section, and one it has
-        is removed.
+        Merged pull requests aren't shown, except that each pull request on
+        root is shown on the merged one it was last stacked on (see
+        merged_parents), which links to the pull requests before it. A stack
+        with fewer than two pull requests, counting those, gets no section, and
+        one it has is removed.
 
         If branches are a chain of open pull requests, each on the one before,
         they're linked into a stack on GitHub first (see link_github_stack).
@@ -582,13 +593,20 @@ class GitHubAdapter(GitAdapter):
         current = {node(b): node(parents[b]) if parents[b] in branches else root for b in branches}
         to_update = {b: prs[b].number for b in branches if b in prs and prs[b].state == "OPEN"}
         try:
-            fields = self.pull_request_fields(to_update.values(), f"body {STACK_FIELDS}")
+            fields = self.pull_request_fields(to_update.values(), f"body {BASE_CHANGES} {STACK_FIELDS}")
         except StackError:
             # E.g. GitHub Enterprise without stacked pull requests, which
             # doesn't know the field.
-            fields = self.pull_request_fields(to_update.values(), "body")
+            fields = self.pull_request_fields(to_update.values(), f"body {BASE_CHANGES}")
         bodies = {n: field(pr, "body", str) for n, pr in fields.items()}
-        shown = sum(isinstance(n, int) for n in current) >= 2
+        on_root = [n for b, n in to_update.items() if parents[b] not in branches]
+        merged = self.merged_parents({n: fields[n] for n in on_root}, root)
+        # Each pull request on root goes on the merged one it was on, on root.
+        tree = dict(current)
+        for number, parent in merged.items():
+            tree[number] = parent
+            tree[parent] = root
+        shown = sum(isinstance(n, int) for n in tree) >= 2
         chain = [to_update[b] for b in branches] if is_chain(branches, parents, root, to_update) else []
         stacks = {
             n: GitHubStack.from_json(stack) if (stack := optional_field(pr, "stack", dict)) is not None else None
@@ -600,9 +618,72 @@ class GitHubAdapter(GitAdapter):
             if linked or not shown:
                 new_body = stack_section.remove(body)
             else:
-                new_body = stack_section.replace(body, stack_section.render(root, current, number))
+                new_body = stack_section.replace(body, stack_section.render(root, tree, set(merged.values()), number))
             if new_body != body:
                 self.gh("pr", "edit", str(number), "--repo", self.repo, "--body-file", "-", input=new_body)
+
+    def merged_parents(self, prs: dict[int, object], root: str) -> dict[int, int]:
+        """{number: the merged pull request it was last stacked on} for the
+        pull requests prs, {number: its fields, with BASE_CHANGES}, on root.
+
+        That's the head of the first of the bases each was changed from,
+        newest first, to have a pull request merged before the change (the
+        newest, if several were, as the name may have been reused). Pull
+        requests whose base never changed, or only from root, from branches
+        with an open pull request, or from branches without a merged one, are
+        left out.
+        """
+        changes = {
+            n: [
+                (
+                    optional_field(change, "previousRefName", str) or field(change, "oldBase", str),
+                    field(change, "createdAt", str),
+                )
+                for change in reversed(field(field(pr, "timelineItems", dict), "nodes", list))
+            ]
+            for n, pr in prs.items()
+        }
+        open_heads = {b for b, pr in self.pull_requests().items() if pr.state == "OPEN"}
+        heads = {head for c in changes.values() for head, _ in c} - {root} - open_heads
+        merges = self.merged_pull_requests(sorted(heads))
+        found = {}
+        for n, c in changes.items():
+            # GitHub's timestamps are all UTC, in the same format, so they
+            # compare as strings.
+            parent = next((m for head, at in c for merged_at, m in merges.get(head, []) if merged_at <= at), None)
+            if parent is not None:
+                found[n] = parent
+        return found
+
+    def merged_pull_requests(self, heads: list[str]) -> dict[str, list[tuple[str, int]]]:
+        """{head: (when it merged, number) of each of its merged pull requests
+        in the repository, newest first} for the branches heads."""
+        if not heads:
+            return {}
+        # Branch names are passed as variables, so they needn't be escaped.
+        fields = " ".join(
+            f"h{i}: pullRequests(headRefName: $h{i}, states: MERGED, first: {PRS_PER_BRANCH}, "
+            f"orderBy: {{field: UPDATED_AT, direction: DESC}}) {{ nodes {{ number mergedAt isCrossRepository }} }}"
+            for i in range(len(heads))
+        )
+        variables = "".join(f", $h{i}: String!" for i in range(len(heads)))
+        query = f"query($owner: String!, $name: String!{variables}) {{ repository(owner: $owner, name: $name) {{ {fields} }} }}"
+        args = ["api", "graphql", "--hostname", self.host, "-f", f"owner={self.owner}", "-f", f"name={self.name}"]
+        args += ["-f", f"query={query}"]
+        for i, head in enumerate(heads):
+            args += ["-f", f"h{i}={head}"]
+        repository = field(field(parse_json(self.gh(*args)), "data", dict), "repository", dict)
+        return {
+            head: sorted(
+                (
+                    (field(pr, "mergedAt", str), field(pr, "number", int))
+                    for pr in field(field(repository, f"h{i}", dict), "nodes", list)
+                    if not field(pr, "isCrossRepository", bool)
+                ),
+                reverse=True,
+            )
+            for i, head in enumerate(heads)
+        }
 
     def link_github_stack(self, chain: list[int], stacks: dict[int, GitHubStack | None]) -> bool:
         """Put chain, open pull requests each on the one before, bottom first,
