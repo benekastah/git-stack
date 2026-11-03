@@ -228,10 +228,8 @@ def test_prs_adds_new_pull_requests_to_the_stack_of_existing_ones(
     assert body(gh, 1) == stack("- `main`", "  - #1 👈", "    - #2")
 
 
-def test_prs_keeps_merged_pull_requests_in_the_stack(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
-    repo.make_stack()
-    client.push()
-    client.prs()
+def merge_pr1(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+    """Squash-merge pr1, the first pull request, on the forge, then sync."""
     repo.squash_merge_on_forge("pr1")
     state = gh.load()
     state["prs"][0] |= {
@@ -241,14 +239,36 @@ def test_prs_keeps_merged_pull_requests_in_the_stack(repo: Repo, gh: FakeGitHub,
     }
     gh.save(state)
     client.sync()
+
+
+def test_prs_leaves_merged_pull_requests_out_of_the_stack(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+    repo.make_stack()
+    client.push()
+    client.prs()
+    merge_pr1(repo, gh, client)
     client.branch("pr4")
     repo.commit("c", "pr4\n", "pr4 c1")
     client.push()
 
     client.prs()
 
-    assert body(gh, 2) == stack("- `main`", "  - #1 (merged)", "  - #2 👈", "    - #3", "      - #4")
+    assert body(gh, 2) == stack("- `main`", "  - #2 👈", "    - #3", "      - #4")
     assert "#4" not in body(gh, 1)  # merged pull requests are left alone
+
+
+def test_prs_removes_the_stack_once_one_pull_request_is_left(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+    client.branch("pr1")
+    repo.commit("a", "pr1\n", "pr1 c1")
+    client.branch("pr2")
+    repo.commit("b", "pr2\n", "pr2 c1")
+    client.push()
+    client.prs()
+    assert stack_section.START in body(gh, 2)
+    merge_pr1(repo, gh, client)
+
+    client.prs()
+
+    assert body(gh, 2) == ""
 
 
 def test_prs_shows_a_merged_branch_it_skipped(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:

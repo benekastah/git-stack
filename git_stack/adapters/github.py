@@ -564,9 +564,9 @@ class GitHubAdapter(GitAdapter):
         pull request of branches, a stack parent-before-child, show the stack,
         marking that pull request (see git_stack.stack_section).
 
-        Merged pull requests the sections showed are kept, since branches no
-        longer has them. A stack with fewer than two pull requests gets no
-        section, but one it has isn't removed.
+        Merged pull requests aren't shown. A stack with fewer than two pull
+        requests (e.g. once the rest merged) gets no section, and one it has
+        is removed.
 
         If branches are a chain of open pull requests, each on the one before,
         they're linked into a stack on GitHub first (see link_github_stack).
@@ -588,30 +588,19 @@ class GitHubAdapter(GitAdapter):
             # doesn't know the field.
             fields = self.pull_request_fields(to_update.values(), "body")
         bodies = {n: field(pr, "body", str) for n, pr in fields.items()}
-        old: stack_section.Tree = {}
-        for body in bodies.values():
-            old = stack_section.find(body) | old
-        gone = [n for n in old if isinstance(n, int) and n not in current]
-        merged = {
-            n
-            for n, pr in self.pull_request_fields(gone, "state").items()
-            if pr is not None and field(pr, "state", str) == "MERGED"
-        }
-        if sum(isinstance(n, int) for n in current) + len(merged) < 2:
-            return
+        shown = sum(isinstance(n, int) for n in current) >= 2
         chain = [to_update[b] for b in branches] if is_chain(branches, parents, root, to_update) else []
         stacks = {
             n: GitHubStack.from_json(stack) if (stack := optional_field(pr, "stack", dict)) is not None else None
             for n, pr in fields.items()
         }
-        linked = len(chain) > 1 and self.link_github_stack(chain, stacks)
-        tree = stack_section.lay_out(root, current, old, merged)
+        linked = shown and len(chain) > 1 and self.link_github_stack(chain, stacks)
         for number in to_update.values():
             body = bodies[number]
-            if linked:
+            if linked or not shown:
                 new_body = stack_section.remove(body)
             else:
-                new_body = stack_section.replace(body, stack_section.render(root, tree, merged, number))
+                new_body = stack_section.replace(body, stack_section.render(root, current, number))
             if new_body != body:
                 self.gh("pr", "edit", str(number), "--repo", self.repo, "--body-file", "-", input=new_body)
 
