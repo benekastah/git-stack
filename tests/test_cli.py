@@ -142,14 +142,16 @@ def stack() -> Any:
             (),
             {"remote": "origin", "delete": "both", "ignore_reverts": ["a", "b"]},
         ),
-        (["push"], "push", ([], []), {"remote": "origin", "force": False}),
+        (["push"], "push", ([], []), {"remote": "origin", "force": False, "prs": False}),
         (
             ["push", "pr1", "b-*", "--remote", "upstream"],
             "push",
             (["pr1", "b-*"], []),
-            {"remote": "upstream", "force": False},
+            {"remote": "upstream", "force": False, "prs": False},
         ),
-        (["push", "--force"], "push", ([], []), {"remote": "origin", "force": True}),
+        (["push", "--force"], "push", ([], []), {"remote": "origin", "force": True, "prs": False}),
+        (["push", "--prs"], "push", ([], []), {"remote": "origin", "force": False, "prs": True}),
+        (["push", "--pr"], "push", ([], []), {"remote": "origin", "force": False, "prs": True}),
         (["group", "add", "feat", "feat-*", "-g", "old"], "group_add", ("feat", ["feat-*"], ["old"]), {"move": False}),
         (["group", "add", "--move", "feat"], "group_add", ("feat", [], []), {"move": True}),
         (["group", "remove"], "group_remove", ([], []), {}),
@@ -476,6 +478,40 @@ def test_push_shows_the_stacks(stack: Any, capsys: pytest.CaptureFixture[str]) -
     assert capsys.readouterr().out == STACK_TREE
 
 
+def test_push_with_prs_shows_what_it_skipped_then_the_stacks(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
+    stack.push.return_value = PushResult(["pr1"], STACK, [PullRequestStep("pr1", "main", PullRequestAction.NO_COMMITS)])
+
+    main(["push", "--prs"], stack=stack)
+
+    assert capsys.readouterr().out == f"skipping pr1: it has no commits of its own\n{STACK_TREE}"
+
+
+PUSHED_WITHOUT_PRS = PushResult(["pr1"], STACK, error="pushed, but didn't open or update any pull requests: no gh")
+
+
+def test_push_with_prs_shows_the_stacks_then_fails_if_it_opened_none(
+    stack: Any, capsys: pytest.CaptureFixture[str]
+) -> None:
+    stack.push.return_value = PUSHED_WITHOUT_PRS
+
+    assert main(["push", "--prs"], stack=stack) == 1
+
+    out, err = capsys.readouterr()
+    assert out == STACK_TREE
+    assert err == "git stack: pushed, but didn't open or update any pull requests: no gh\n"
+
+
+def test_push_with_prs_json_has_the_result_then_fails_if_it_opened_none(
+    stack: Any, capsys: pytest.CaptureFixture[str]
+) -> None:
+    stack.push.return_value = PUSHED_WITHOUT_PRS
+
+    assert main(["push", "--prs", "--json"], stack=stack) == 1
+
+    line = json.loads(capsys.readouterr().out)
+    assert (line["type"], line["pushed"], line["error"]) == ("result", ["pr1"], PUSHED_WITHOUT_PRS.error)
+
+
 def test_clean_shows_the_stacks(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
     stack.clean.return_value = STACK
 
@@ -529,7 +565,25 @@ def test_clean_json_ends_with_the_error_when_it_fails(stack: Any, capsys: pytest
     ("argv", "method", "returned", "result"),
     [
         (["sync"], "sync", SyncResult(["pr1"], STACK), {"stacks": to_json(STACK), "unpushed": ["pr1"]}),
-        (["push"], "push", PushResult(["pr1"], STACK), {"stacks": to_json(STACK), "pushed": ["pr1"]}),
+        (
+            ["push"],
+            "push",
+            PushResult(["pr1"], STACK),
+            {"stacks": to_json(STACK), "pushed": ["pr1"], "steps": None, "error": None},
+        ),
+        (
+            ["push", "--prs"],
+            "push",
+            PushResult(["pr1"], STACK, [PullRequestStep("pr1", "main", PullRequestAction.EXISTS, number=12)]),
+            {
+                "stacks": to_json(STACK),
+                "pushed": ["pr1"],
+                "steps": [
+                    {"branch": "pr1", "parent": "main", "action": "exists", "title": None, "number": 12, "url": None}
+                ],
+                "error": None,
+            },
+        ),
         (
             ["prs"],
             "prs",

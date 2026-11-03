@@ -52,4 +52,4 @@ def show(stack: StackClient, args: Args, unreverted: Unreverted) -> None:
     print(f"created {unreverted.branch} on {unreverted.parent}, reverting {count} revert{'s' if count != 1 else ''}")
     if unreverted.children:
         print(f"moved {', '.join(unreverted.children)} onto it")
-    print(f"note: run `git stack push` and `git stack prs` to open a pull request for {unreverted.branch}")
+    print(f"note: run `git stack push --prs` to open a pull request for {unreverted.branch}")

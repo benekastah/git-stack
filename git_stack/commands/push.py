@@ -2,6 +2,7 @@ import argparse
 
 from git_stack.commands import Subparsers, add_json_argument, add_stack_arguments
 from git_stack.commands.info import print_tree
+from git_stack.commands.prs import show_steps
 from git_stack.git import DEFAULT_REMOTE
 from git_stack.stack import PushResult, StackClient
 
@@ -13,6 +14,7 @@ class Args(argparse.Namespace):
     groups: list[str]
     remote: str
     force: bool
+    prs: bool
     json: bool
 
 
@@ -30,16 +32,24 @@ def register(subparsers: Subparsers) -> None:
         help="push even if that drops commits on a remote branch that the local one doesn't "
         "have. Still fails if a remote branch changed since the last fetch",
     )
+    p.add_argument(
+        "--prs",
+        "--pr",
+        action="store_true",
+        help="then open pull requests for them, as `git stack prs` does",
+    )
     add_json_argument(p)
-    p.set_defaults(run=run, show=show)
+    p.set_defaults(run=run, show=show, error=lambda result: result.error)
 
 
 def run(stack: StackClient, args: Args) -> PushResult:
-    return stack.push(args.branches, args.groups, remote=args.remote, force=args.force)
+    return stack.push(args.branches, args.groups, remote=args.remote, force=args.force, prs=args.prs)
 
 
 def show(stack: StackClient, args: Args, result: PushResult) -> None:
-    if result.branches:
+    if result.steps is not None:
+        show_steps(stack, result.steps, result.branches, dry_run=False)
+    elif result.branches:
         print_tree(stack, result.branches)
     if not result.pushed:
         where = "those stacks" if args.branches or args.groups else f"{stack.git.current_branch()}'s stack"

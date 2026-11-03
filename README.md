@@ -14,8 +14,7 @@ git stack branch add-api        # a branch for PR 1
 # ...commit...
 git stack branch use-api        # a branch for PR 2, built on PR 1
 # ...commit...
-git stack push                  # push both
-git stack prs                   # open draft PRs for both, each into the branch it's built on
+git stack push --prs            # push both, and open draft PRs for them, each into the branch it's built on
 ```
 
 Already have pull requests open, e.g. in a fresh clone or from before you used
@@ -46,7 +45,7 @@ git stack sync                  # catch up: drop merged PRs, rebase what's left,
 | use git-stack with branches I already have | `git stack track main <branch>...` |
 | set up stacks from my open PRs (e.g. in a new clone) | `git stack import` |
 | build on a coworker's stack | `git stack import -n --author <login>`, then `git stack import -f --author <login> <branch>` |
-| open draft PRs for my stack | `git stack push`, then `git stack prs` |
+| open draft PRs for my stack | `git stack push --prs` |
 | rename a branch in a stack | `git stack rename <new>` |
 | sync several stacks at once | `git stack group add <name> <branch-or-glob>...`, then `git stack sync -g <name>` |
 | clean up merged branches in every stack | `git stack clean` |
@@ -614,7 +613,7 @@ git stack clean -d local
   are fine, unless you're on a stack's root, which `clean` fast-forwards, or,
   with `-d local` or `-d both`, on a tracked branch, which it could delete.
 
-### `git stack push [<branch|glob>...] [-g <group>] [--remote origin] [--force]`
+### `git stack push [<branch|glob>...] [-g <group>] [--remote origin] [--force] [--prs]`
 
 Force-push (with lease) every branch in the current stack (or the ones named,
 see [Groups](#groups)), and set each one's upstream.
@@ -631,6 +630,7 @@ git stack push
 git stack push use-api          # push use-api's stack from anywhere
 git stack push 'search-*'       # the stacks of every search-* branch
 git stack push --force          # drop commits on the remote you didn't pull
+git stack push --prs            # then open pull requests, as `git stack prs` does
 ```
 
 - Each branch is pushed to a remote branch of the same name.
@@ -658,6 +658,11 @@ git stack push --force          # drop commits on the remote you didn't pull
 - With the [GitHub adapter](#github), points each open pull request at its
   stack parent (e.g. at `main` once the parent PR was merged), and lists the
   branches that have none, which `git stack prs` opens.
+- `--prs` (or `--pr`) then does what
+  [`git stack prs`](#git-stack-prs-branchglob--g-group---remote-origin--n) does
+  for the stacks it pushed, so it's `git stack push` and `git stack prs` in
+  one. Without the GitHub adapter, it still pushes and shows the stacks, but
+  then fails, saying it didn't open or update any pull requests.
 
 ### `git stack group add <name> [<branch|glob>...] [-g <group>] [--move]`
 
@@ -697,7 +702,8 @@ the ones named, see [Groups](#groups)) that has none, into its stack parent,
 bottom-up.
 
 **When would I use it?** After pushing a new stack, or new branches in one,
-to open their pull requests with the right bases.
+to open their pull requests with the right bases. `git stack push --prs`
+pushes and opens them in one go.
 
 ```sh
 git stack push
@@ -792,7 +798,7 @@ isn't.
 git stack unrevert add-api-unrevert 1a2b3c4d5e6f --stack use-api
 # created add-api-unrevert on main, reverting 1 revert
 # moved use-api onto it
-# note: run `git stack push` and `git stack prs` to open a pull request for add-api-unrevert
+# note: run `git stack push --prs` to open a pull request for add-api-unrevert
 ```
 
 - `<name>` must be a new branch, and like `branch`, it refuses a name a remote
@@ -906,8 +912,10 @@ git stack parent --json
   and `events`: everything that happened again, so a script that only reads
   the last line has all of it. If the command fails, the last line is
   `{"type": "error", "message": ..., "events": [...]}` instead, and it exits
-  with status 1. Arguments it doesn't understand print no JSON: just usage, on
-  stderr, with exit status 2.
+  with status 1. The exception is `push --prs` that pushed, but couldn't open
+  pull requests: its last line is still its result, with an `error`, and it
+  exits with status 1. Arguments it doesn't understand print no JSON: just
+  usage, on stderr, with exit status 2.
 - Types and field names don't change, though new ones may be added.
 
 What each command's result has, besides `type` and `events`:
@@ -926,7 +934,7 @@ What each command's result has, besides `type` and `events`:
 | `restack` | nothing; what it did is in its events |
 | `sync` | `stacks`, and `unpushed`, the branches whose remote branch is out of date because they weren't pushed (e.g. with `--no-push`) |
 | `clean` | `stacks`: every stack |
-| `push` | `stacks`, and `pushed`, the branches it pushed |
+| `push` | `stacks`, `pushed`, the branches it pushed, and with `--prs`, `steps`, as for `prs` (`null` without it, or if it couldn't open pull requests). `error` is why it couldn't, when it pushed but failed, or `null` |
 | `prs` | `stacks`, and `steps`, one for each branch: the `branch`, its `parent`, and the `action`: `open`, `exists` (it already has a pull request) or `no-commits` (skipped, since it has no commits of its own). `title` is an opened pull request's title, and `number` and `url` an opened or existing one's (an existing one has no `url`, and a dry run opens none); each is `null` otherwise |
 | `unrevert` | the `branch` it created, the `parent` it created it on, the `reverts` it reverted, newest first, and the `children` it moved onto it |
 | `parent`, `base` | the `parent` or `base` |
@@ -998,8 +1006,7 @@ command that brings it back as a new branch, with `pr2` moved onto it:
 
 ```sh
 git stack unrevert pr1-unrevert 1a2b3c4d5e6f --from main --stack pr2
-git stack push
-git stack prs                      # open a pull request for pr1-unrevert
+git stack push --prs               # push, and open a pull request for pr1-unrevert
 ```
 
 A revert is only noticed while `pr1` is still tracked. Once `sync` or `clean`

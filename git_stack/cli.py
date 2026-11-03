@@ -80,15 +80,23 @@ def main(argv: list[str] | None = None, stack: StackClient | None = None) -> int
         stack.git.passthrough_stdout = sys.stderr
     try:
         result = args.run(stack, args)
+        # A command can fail after doing part of its work (e.g. push --prs,
+        # which pushed, but couldn't open pull requests): then its error(result)
+        # says why, after its result is shown.
+        error: str | None = args.error(result) if getattr(args, "error", None) else None
         if stream:
             stream.result(result)
-            return 0
-        # A command's show prints its result, and returns its exit status, or
-        # None for 0. It can fail too, e.g. on a bad setting for how to show it.
-        status: int | None = args.show(stack, args, result)
+        else:
+            # A command's show prints its result, and returns its exit status,
+            # or None for 0. It can fail too, e.g. on a bad setting for how to
+            # show it.
+            status: int | None = args.show(stack, args, result)
     except StackError as e:
         if stream:
             stream.error(str(e))
         print(f"git stack: {e}", file=sys.stderr)
         return 1
-    return status or 0
+    if error is not None:
+        print(f"git stack: {error}", file=sys.stderr)
+        return 1
+    return 0 if stream else status or 0

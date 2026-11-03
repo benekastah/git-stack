@@ -449,16 +449,16 @@ class GitHubAdapter(GitAdapter):
             if self.git.rev(f"refs/remotes/{self.remote}/{parents[b]}") is not None:
                 self.retarget(b, parents[b])
 
-    def after_push(self, pushed: list[str], parents: Parents) -> None:
+    def after_push(self, pushed: list[str], parents: Parents, opening: bool = False) -> None:
         """Point the open pull requests of pushed branches at their stack parents,
         if before_push couldn't because the parent wasn't on the remote yet, and
-        say which pushed branches have none."""
+        say which pushed branches have none, unless they're opened next."""
         prs = self.pull_requests()
         for b in pushed:
             if b in prs:
                 self.retarget(b, parents[b])
         without = tuple(b for b in pushed if b not in prs)
-        if without:
+        if without and not opening:
             self.core.emit(events.NoPullRequests(without))
 
     def retarget(self, branch: str, base: str) -> None:

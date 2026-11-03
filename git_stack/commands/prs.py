@@ -3,7 +3,7 @@ import argparse
 from git_stack.commands import Subparsers, add_json_argument, add_stack_arguments
 from git_stack.commands.info import print_tree
 from git_stack.git import DEFAULT_REMOTE
-from git_stack.stack import PrsResult, PullRequestAction, StackClient
+from git_stack.stack import BranchInfo, PrsResult, PullRequestAction, PullRequestStep, StackClient
 
 
 class Args(argparse.Namespace):
@@ -39,11 +39,17 @@ def run(stack: StackClient, args: Args) -> PrsResult:
 def show(stack: StackClient, args: Args, result: PrsResult) -> None:
     if not result.steps:
         print("nothing to open: every branch in the current stack looks merged")
+    show_steps(stack, result.steps, result.branches, args.dry_run)
+
+
+def show_steps(stack: StackClient, steps: list[PullRequestStep], branches: list[BranchInfo], dry_run: bool) -> None:
+    """Print what opening pull requests did (or would do), then the stacks,
+    with the pull requests it opened in green."""
     new_links = {}
-    for step in result.steps:
+    for step in steps:
         if step.action is PullRequestAction.NO_COMMITS:
             print(f"skipping {step.branch}: it has no commits of its own")
         elif step.action is PullRequestAction.OPEN:
-            new_links[step.branch] = f"would open: {step.title}" if args.dry_run else step.url or ""
-    if result.branches:
-        print_tree(stack, result.branches, new_links)
+            new_links[step.branch] = f"would open: {step.title}" if dry_run else step.url or ""
+    if branches:
+        print_tree(stack, branches, new_links)

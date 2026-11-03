@@ -119,6 +119,18 @@ class Unreverted:
 GITHUB_LOGIN = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})")
 
 
+def not_github(remote: str) -> str:
+    """Why prs can't open pull requests, without the GitHub adapter."""
+    return f"{remote} isn't a GitHub repository, gh isn't installed, or {ADAPTER_SETTING} is git"
+
+
+def ensure_github(adapter: GitAdapter, remote: str) -> GitHubAdapter:
+    """adapter, failing unless it's the GitHub adapter, which prs needs."""
+    if not isinstance(adapter, GitHubAdapter):
+        raise StackError(f"prs opens pull requests on GitHub, but {not_github(remote)}")
+    return adapter
+
+
 def lookup_failed(error: StackError) -> StackError:
     """The error for import when GitHub couldn't be asked for pull requests."""
     return StackError(
@@ -233,10 +245,14 @@ class SyncResult:
 @dataclass(frozen=True)
 class PushResult:
     """What push did: the branches it pushed, and the stacks it pushed, as
-    info() lists them."""
+    info() lists them. With prs, steps is what opening pull requests did, as
+    for PrsResult, or None without it, or if they couldn't be opened: then
+    error says why, and the command fails, though it pushed (see cli.main)."""
 
     pushed: list[str]
     branches: list[BranchInfo] = field(metadata=json_name("stacks"))
+    steps: list[PullRequestStep] | None = None
+    error: str | None = None
 
 
 @dataclass
@@ -1136,11 +1152,14 @@ class StackClient(StackCore):
         groups: Sequence[str] = (),
         remote: str = DEFAULT_REMOTE,
         force: bool = False,
+        prs: bool = False,
     ) -> PushResult:
         """Force-push (with lease) every unmerged branch in the current stack, or
         in the stacks of the branches that branches and groups name (see named), then let
         the adapter update their pull requests. Returns the pushed branches,
-        which is empty if every branch looks merged, and the stacks.
+        which is empty if every branch looks merged, and the stacks. With prs,
+        then opens their pull requests as prs does; without the GitHub adapter,
+        it pushes anyway, and the result's error says it opened none.
 
         Unless force is set, a branch whose remote branch has its commits rebased
         (see take_upstream_rebase) is moved there first, so there's nothing
@@ -1153,18 +1172,30 @@ class StackClient(StackCore):
         parents = self.tracked_branches()
         stack = self.selected_stacks(branches, groups, parents, "push")
         adapter = self.checked_adapter(remote)
+        github = adapter if prs and isinstance(adapter, GitHubAdapter) else None
         branches = self.skip_merged(stack, parents, adapter)
         if not force:
             for b in branches:
                 self.take_upstream_rebase(b, parents[b], remote)
-        pushed = self.push_branches(branches, parents, adapter, remote, force)
-        return PushResult(pushed, self.stack_infos(stack, adapter))
+        pushed = self.push_branches(branches, parents, adapter, remote, force, opening=github is not None)
+        steps = self.open_pull_requests(pushed, parents, github, remote) if github and pushed else None
+        error = None
+        if prs and github is None and pushed:
+            error = f"pushed, but didn't open or update any pull requests: {not_github(remote)}"
+        return PushResult(pushed, self.stack_infos(stack, adapter), steps, error)
 
     def push_branches(
-        self, branches: list[str], parents: Parents, adapter: GitAdapter, remote: str, force: bool = False
+        self,
+        branches: list[str],
+        parents: Parents,
+        adapter: GitAdapter,
+        remote: str,
+        force: bool = False,
+        opening: bool = False,
     ) -> list[str]:
         """Force-push (with lease) branches, which must be unmerged, in one atomic
-        push, then let the adapter update their pull requests. Returns branches.
+        push, then let the adapter update their pull requests (see
+        GitAdapter.after_push for opening). Returns branches.
 
         Checks and fails as push does.
         """
@@ -1202,7 +1233,7 @@ class StackClient(StackCore):
         for b in branches:
             git.config_set(b, PULLED_KEY, git.tip(b))
         try:
-            adapter.after_push(branches, parents)
+            adapter.after_push(branches, parents, opening)
         except StackError as e:
             raise StackError(
                 f"pushed, but updating pull requests failed (set {ADAPTER_SETTING} to git to stop using GitHub): {e}"
@@ -1255,21 +1286,23 @@ class StackClient(StackCore):
         as info() lists them. With dry_run, nothing is opened, retargeted or
         rewritten.
         """
-        git = self.git
         self.ensure_no_operation_in_progress()
         self.settle_all()
         parents = self.tracked_branches()
         stack = self.selected_stacks(branches, groups, parents, "open pull requests for")
-        adapter = make_adapter(self, remote, fetch=True)
-        if not isinstance(adapter, GitHubAdapter):
-            raise StackError(
-                f"prs opens pull requests on GitHub, but {remote} isn't a GitHub repository, gh "
-                f"isn't installed, or {ADAPTER_SETTING} is git"
-            )
+        adapter = ensure_github(make_adapter(self, remote, fetch=True), remote)
         adapter.ensure_available()
         branches = self.skip_merged(stack, parents, adapter)
-        self.ensure_on_remote(branches, sorted({stack_root(b, parents) for b in branches}), remote)
+        steps = self.open_pull_requests(branches, parents, adapter, remote, dry_run)
+        return PrsResult(steps, self.stack_infos(stack, adapter))
 
+    def open_pull_requests(
+        self, branches: list[str], parents: Parents, adapter: GitHubAdapter, remote: str, dry_run: bool = False
+    ) -> list[PullRequestStep]:
+        """Do what prs does for branches, which must be unmerged,
+        parent-before-child. Returns a PullRequestStep for each."""
+        git = self.git
+        self.ensure_on_remote(branches, sorted({stack_root(b, parents) for b in branches}), remote)
         prs = adapter.pull_requests()
         template = adapter.pull_request_template() or ""
         steps: list[PullRequestStep] = []
@@ -1300,7 +1333,7 @@ class StackClient(StackCore):
             steps.append(PullRequestStep(b, parent, PullRequestAction.OPEN, title=title, number=number, url=url))
         if branches and not dry_run:
             self.update_stack_sections(branches, parents, adapter)
-        return PrsResult(steps, self.stack_infos(stack, adapter))
+        return steps
 
     def update_stack_sections(self, branches: list[str], parents: Parents, adapter: GitHubAdapter) -> None:
         """Update the stack sections of branches' pull requests (see

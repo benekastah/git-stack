@@ -22,8 +22,7 @@ git stack branch add\-api        \f[I]# a branch for PR 1\f[R]
 \f[I]# ...commit...\f[R]
 git stack branch use\-api        \f[I]# a branch for PR 2, built on PR 1\f[R]
 \f[I]# ...commit...\f[R]
-git stack push                  \f[I]# push both\f[R]
-git stack prs                   \f[I]# open draft PRs for both, each into the branch it\(aqs built on\f[R]
+git stack push \-\-prs            \f[I]# push both, and open draft PRs for them, each into the branch it\(aqs built on\f[R]
 .EE
 .PP
 Already have pull requests open, e.g.
@@ -111,7 +110,7 @@ T}
 T{
 open draft PRs for my stack
 T}@T{
-\f[CR]git stack push\f[R], then \f[CR]git stack prs\f[R]
+\f[CR]git stack push \-\-prs\f[R]
 T}
 T{
 rename a branch in a stack
@@ -854,7 +853,7 @@ Runs from any branch, even one that isn\(aqt in a stack.
 Uncommitted changes are fine, unless you\(aqre on a stack\(aqs root,
 which \f[CR]clean\f[R] fast\-forwards, or, with \f[CR]\-d local\f[R] or
 \f[CR]\-d both\f[R], on a tracked branch, which it could delete.
-.SS \f[CR]git stack push [<branch|glob>...] [\-g <group>] [\-\-remote origin] [\-\-force]\f[R]
+.SS \f[CR]git stack push [<branch|glob>...] [\-g <group>] [\-\-remote origin] [\-\-force] [\-\-prs]\f[R]
 Force\-push (with lease) every branch in the current stack (or the ones
 named, see Groups), and set each one\(aqs upstream.
 .PP
@@ -872,6 +871,7 @@ git stack push
 git stack push use\-api          \f[I]# push use\-api\(aqs stack from anywhere\f[R]
 git stack push \(aqsearch\-*\(aq       \f[I]# the stacks of every search\-* branch\f[R]
 git stack push \-\-force          \f[I]# drop commits on the remote you didn\(aqt pull\f[R]
+git stack push \-\-prs            \f[I]# then open pull requests, as \(gagit stack prs\(ga does\f[R]
 .EE
 .IP \(bu 2
 Each branch is pushed to a remote branch of the same name.
@@ -915,6 +915,12 @@ With the GitHub adapter, points each open pull request at its stack
 parent (e.g.
 at \f[CR]main\f[R] once the parent PR was merged), and lists the
 branches that have none, which \f[CR]git stack prs\f[R] opens.
+.IP \(bu 2
+\f[CR]\-\-prs\f[R] (or \f[CR]\-\-pr\f[R]) then does what
+\f[CR]git stack prs\f[R] does for the stacks it pushed, so it\(aqs
+\f[CR]git stack push\f[R] and \f[CR]git stack prs\f[R] in one.
+Without the GitHub adapter, it still pushes and shows the stacks, but
+then fails, saying it didn\(aqt open or update any pull requests.
 .SS \f[CR]git stack group add <name> [<branch|glob>...] [\-g <group>] [\-\-move]\f[R]
 Put stacks (default: the current one) in group \f[CR]<name>\f[R], so
 \f[CR]restack\f[R], \f[CR]sync\f[R], \f[CR]push\f[R] and \f[CR]prs\f[R]
@@ -964,6 +970,7 @@ bottom\-up.
 .PP
 \f[B]When would I use it?\f[R] After pushing a new stack, or new
 branches in one, to open their pull requests with the right bases.
+\f[CR]git stack push \-\-prs\f[R] pushes and opens them in one go.
 .IP
 .EX
 git stack push
@@ -1085,7 +1092,7 @@ for when it isn\(aqt.
 git stack unrevert add\-api\-unrevert 1a2b3c4d5e6f \-\-stack use\-api
 \f[I]# created add\-api\-unrevert on main, reverting 1 revert\f[R]
 \f[I]# moved use\-api onto it\f[R]
-\f[I]# note: run \(gagit stack push\(ga and \(gagit stack prs\(ga to open a pull request for add\-api\-unrevert\f[R]
+\f[I]# note: run \(gagit stack push \-\-prs\(ga to open a pull request for add\-api\-unrevert\f[R]
 .EE
 .IP \(bu 2
 \f[CR]<name>\f[R] must be a new branch, and like \f[CR]branch\f[R], it
@@ -1222,6 +1229,9 @@ again, so a script that only reads the last line has all of it.
 If the command fails, the last line is
 \f[CR]{\(dqtype\(dq: \(dqerror\(dq, \(dqmessage\(dq: ..., \(dqevents\(dq: [...]}\f[R]
 instead, and it exits with status 1.
+The exception is \f[CR]push \-\-prs\f[R] that pushed, but couldn\(aqt
+open pull requests: its last line is still its result, with an
+\f[CR]error\f[R], and it exits with status 1.
 Arguments it doesn\(aqt understand print no JSON: just usage, on stderr,
 with exit status 2.
 .IP \(bu 2
@@ -1325,7 +1335,11 @@ T}
 T{
 \f[CR]push\f[R]
 T}@T{
-\f[CR]stacks\f[R], and \f[CR]pushed\f[R], the branches it pushed
+\f[CR]stacks\f[R], \f[CR]pushed\f[R], the branches it pushed, and with
+\f[CR]\-\-prs\f[R], \f[CR]steps\f[R], as for \f[CR]prs\f[R]
+(\f[CR]null\f[R] without it, or if it couldn\(aqt open pull requests).
+\f[CR]error\f[R] is why it couldn\(aqt, when it pushed but failed, or
+\f[CR]null\f[R]
 T}
 T{
 \f[CR]prs\f[R]
@@ -1439,8 +1453,7 @@ as a new branch, with \f[CR]pr2\f[R] moved onto it:
 .IP
 .EX
 git stack unrevert pr1\-unrevert 1a2b3c4d5e6f \-\-from main \-\-stack pr2
-git stack push
-git stack prs                      \f[I]# open a pull request for pr1\-unrevert\f[R]
+git stack push \-\-prs               \f[I]# push, and open a pull request for pr1\-unrevert\f[R]
 .EE
 .PP
 A revert is only noticed while \f[CR]pr1\f[R] is still tracked.

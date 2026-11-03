@@ -361,6 +361,39 @@ def test_prs_moves_the_stack_to_the_end_keeping_the_rest(repo: Repo, gh: FakeGit
     assert [call[2] for call in gh.calls("pr", "edit")] == ["1"]  # the rest were up to date
 
 
+def test_push_with_prs_pushes_then_opens_pull_requests(
+    repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event]
+) -> None:
+    repo.make_stack()
+
+    result = client.push(prs=True)
+
+    assert result.pushed == ["pr1", "pr2", "pr3"]
+    assert [(s.branch, s.action, s.number) for s in result.steps or []] == [
+        ("pr1", PullRequestAction.OPEN, 1),
+        ("pr2", PullRequestAction.OPEN, 2),
+        ("pr3", PullRequestAction.OPEN, 3),
+    ]
+    assert [(head, base) for head, base, *_ in opened(gh)] == [("pr1", "main"), ("pr2", "pr1"), ("pr3", "pr2")]
+    assert [b.pull_request and b.pull_request.number for b in result.branches] == [None, 1, 2, 3]
+    # It doesn't say to open them with `git stack prs`.
+    assert not any(isinstance(e, events.NoPullRequests) for e in emitted)
+
+
+def test_push_with_prs_pushes_without_github(repo: Repo, client: StackClient) -> None:
+    client.branch("pr1")
+    repo.commit("a", "pr1\n", "pr1 c1")
+
+    result = client.push(prs=True)
+
+    assert result.pushed == ["pr1"]
+    assert repo.git("ls-remote", "origin", "pr1")
+    assert result.steps is None
+    assert result.error is not None and result.error.startswith(
+        "pushed, but didn't open or update any pull requests: origin isn't a GitHub repository"
+    )
+
+
 def test_prs_needs_github(repo: Repo, client: StackClient) -> None:
     client.branch("pr1")
 
