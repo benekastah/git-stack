@@ -14,6 +14,7 @@ from git_stack.adapters.merge_state import MergeState
 from git_stack.core import (
     BASE_KEY,
     GROUP_KEY,
+    OWNERSHIP_KEY,
     PULLED_KEY,
     TRACK_UPSTREAM_KEY,
     Parents,
@@ -142,6 +143,7 @@ def lookup_failed(error: StackError) -> StackError:
 
 class ImportAction(enum.Enum):
     CREATE = "create"  # create the local branch from its remote branch, and track it
+    CREATE_ROOT = "create-root"  # create a shared trunk without tracking it in a stack
     TRACK = "track"
     ALREADY_TRACKED = "already-tracked"
     PARENT_DIFFERS = "parent-differs"  # already tracked, on another parent
@@ -290,6 +292,35 @@ class StackClient(StackCore):
     Like StackCore's, they run git in the current directory, report progress
     and warnings through on_event, and raise StackError when they fail.
     """
+
+    def get_ownership(self, branches: Sequence[str] = (), groups: Sequence[str] = ()) -> tuple[str, list[str]]:
+        """Return the selected branches and whether any belongs to a shared stack."""
+        parents = self.tracked_branches()
+        selected = self.selected_stacks(branches, groups, parents, "inspect")
+        ownership = "shared" if any(self.git.config_get(b, OWNERSHIP_KEY) == "shared" for b in selected) else "owned"
+        return ownership, selected
+
+    @exclusive
+    def set_ownership(self, ownership: str, branches: Sequence[str] = (), groups: Sequence[str] = ()) -> list[str]:
+        """Mark the selected stacks as owned or shared."""
+        if ownership not in ("owned", "shared"):
+            raise StackError(f"unknown stack ownership: {ownership}")
+        self.ensure_no_operation_in_progress()
+        parents = self.tracked_branches()
+        selected = self.selected_stacks(branches, groups, parents, "mark")
+        for branch in selected:
+            self.git.config_set(branch, OWNERSHIP_KEY, ownership)
+        return selected
+
+    def ensure_owned(self, branches: Iterable[str], allow_shared: bool, command: str) -> None:
+        """Refuse an operation on a shared stack without an explicit override."""
+        if not allow_shared:
+            shared = [b for b in branches if self.git.config_get(b, OWNERSHIP_KEY) == "shared"]
+            if shared:
+                raise StackError(
+                    f"{', '.join(shared)} belong to a shared stack; "
+                    f"rerun `git stack {command} --allow-shared` with the same arguments to proceed"
+                )
 
     @exclusive
     def branch(self, name: str, group: str | None = None) -> str:
@@ -461,15 +492,47 @@ class StackClient(StackCore):
         self.fetch(remote)
         if not dry_run:
             self.fast_forward_import_trunks(open_prs, adapter.default_branch)
-        planner = ImportPlanner(self, open_prs, remote, adapter.default_branch, adapter.viewer, force or dry_run)
+        planner = ImportPlanner(
+            self, open_prs, remote, adapter.default_branch, adapter.viewer, force or dry_run, adapter
+        )
         plan, without_prs = planner.plan_all(), list(planner.without_prs.values())
         if branches or numbers:
             plan, without_prs = planner.select(branches, numbers, plan, without_prs)
         if dry_run:
             return ImportResult(plan, [], without_prs)
         self.apply_import(plan, without_prs, remote)
+        self.classify_imported_stacks(plan, without_prs, open_prs, adapter.viewer)
         shown = [s.branch for s in plan] + [s.branch for s in without_prs]
         return ImportResult(plan, self.stack_infos(shown, adapter), without_prs)
+
+    def classify_imported_stacks(
+        self,
+        plan: list[ImportStep],
+        without_prs: list[ImportStepWithoutPr],
+        prs: list[OpenPullRequest],
+        viewer: str | None,
+    ) -> None:
+        """Mark newly imported stacks shared when their contributors aren't solely the user."""
+        git = self.git
+        email = (git.author_email() or "").lower()
+        authors = {pr.number: pr.author for pr in prs}
+        parents = self.tracked_branches()
+        all_steps: list[ImportStep | ImportStepWithoutPr] = [*plan, *without_prs]
+        candidates = [step for step in all_steps if step.action in (ImportAction.CREATE, ImportAction.TRACK)]
+        for step in candidates:
+            if not step.base:
+                continue
+            members = stack_of(step.branch, parents)
+            # An explicit choice takes precedence over automatic classification.
+            if any(git.config_get(b, OWNERSHIP_KEY) == "owned" for b in members):
+                continue
+            commit_authors = set(
+                git.run("log", "--format=%ae", f"{step.base}..refs/heads/{step.branch}").lower().splitlines()
+            )
+            pr_is_other = isinstance(step, ImportStep) and (not viewer or authors.get(step.number) != viewer)
+            if not email or not commit_authors or commit_authors != {email} or pr_is_other:
+                for branch in members:
+                    git.config_set(branch, OWNERSHIP_KEY, "shared")
 
     def look_up_open_pull_requests(
         self, adapter: GitHubAdapter, author: str | None, numbers: Sequence[int], mine: bool
@@ -508,6 +571,8 @@ class StackClient(StackCore):
         """Create and track the branches import planned to."""
         git = self.git
         for without_pr in without_prs:
+            if without_pr.action is ImportAction.CREATE_ROOT:
+                git.run("branch", "--quiet", "--track", without_pr.branch, f"refs/remotes/{remote}/{without_pr.branch}")
             if without_pr.action is ImportAction.CREATE and without_pr.parent and without_pr.base:
                 branch = without_pr.branch
                 git.run("branch", "--quiet", "--track", branch, f"refs/remotes/{remote}/{branch}")
@@ -959,6 +1024,7 @@ class StackClient(StackCore):
         onto: str | None = None,
         squash: bool = False,
         latest: bool = False,
+        allow_shared: bool = False,
     ) -> None:
         """Rebase every branch that needs it onto its parent, bottom-up (see
         needs_restack), in the current stack, or in the stacks of the branches
@@ -983,6 +1049,7 @@ class StackClient(StackCore):
             parents[branch] = onto
         adapter = make_adapter(self, DEFAULT_REMOTE, fetch=False)
         to_restack = self.skip_merged(self.selected_stacks(branches, groups, parents, "restack"), parents, adapter)
+        self.ensure_owned(to_restack, allow_shared, "restack")
         if squash:
             for b in to_restack:
                 self.squash_branch(b, parents[b])
@@ -1000,6 +1067,7 @@ class StackClient(StackCore):
         latest: bool = False,
         push: bool = True,
         ignore_reverts: Sequence[str] = (),
+        allow_shared: bool = False,
         pull_tracked_upstream: bool = False,
     ) -> SyncResult:
         """Fetch, untrack the merged branches in the current stack, or in the
@@ -1024,6 +1092,7 @@ class StackClient(StackCore):
         self.settle_all()
         parents = self.tracked_branches()
         stack = self.selected_stacks(branches, groups, parents, "sync")
+        self.ensure_owned(stack, allow_shared, "sync")
         self.ensure_ignorable_reverts(ignore_reverts, stack, "the stacks being synced")
         original = self.current_checkout()
         adapter = self.checked_adapter(remote)
@@ -1173,6 +1242,7 @@ class StackClient(StackCore):
         remote: str = DEFAULT_REMOTE,
         force: bool = False,
         prs: bool = False,
+        allow_shared: bool = False,
     ) -> PushResult:
         """Force-push (with lease) every unmerged branch in the current stack, or
         in the stacks of the branches that branches and groups name (see named), then let
@@ -1191,6 +1261,7 @@ class StackClient(StackCore):
         self.settle_all()
         parents = self.tracked_branches()
         stack = self.selected_stacks(branches, groups, parents, "push")
+        self.ensure_owned(stack, allow_shared, "push")
         adapter = self.checked_adapter(remote)
         github = adapter if prs and isinstance(adapter, GitHubAdapter) else None
         branches = self.skip_merged(stack, parents, adapter)
@@ -1416,6 +1487,7 @@ class ImportPlanner:
         default_branch: str | None,
         viewer: str | None,
         allow_others: bool,
+        adapter: GitHubAdapter,
     ) -> None:
         self.stack = stack
         self.git = stack.git
@@ -1424,6 +1496,7 @@ class ImportPlanner:
         self.default_branch = default_branch
         self.viewer = viewer
         self.allow_others = allow_others
+        self.adapter = adapter
         # The tracked branches, and the ones planned to be tracked so far.
         self.parents = stack.tracked_branches()
         self.by_head = {pr.head: pr for pr in prs}
@@ -1478,7 +1551,7 @@ class ImportPlanner:
             )
         elif git.local_branch_exists(parent):
             parent_ref = f"refs/heads/{parent}"
-        elif (without_pr := self.plan_without_pr(parent)).action is ImportAction.CREATE:
+        elif (without_pr := self.plan_without_pr(parent)).action in (ImportAction.CREATE, ImportAction.CREATE_ROOT):
             parent_ref = f"refs/remotes/{remote}/{parent}"
         else:
             return self.skip(pr, f"{parent}, which it merges into, isn't a local branch ({without_pr.reason})")
@@ -1526,6 +1599,13 @@ class ImportPlanner:
         if self.git.rev(remote_ref) is None:
             reason = f"{self.remote}/{branch} doesn't exist"
             return ImportStepWithoutPr(branch, None, ImportAction.SKIP, reason=reason)
+        try:
+            if self.adapter.has_merged_pull_requests_into(branch):
+                return ImportStepWithoutPr(branch, None, ImportAction.CREATE_ROOT)
+        except StackError as e:
+            return ImportStepWithoutPr(
+                branch, None, ImportAction.SKIP, reason=f"couldn't check its merged pull requests: {e}"
+            )
         try:
             parent = self.find_parent(branch)
         except StackError as e:

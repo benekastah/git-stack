@@ -2,27 +2,6 @@
 
 Most severe first.
 
-## `import` can track a shared branch, and `sync` rebase it onto `main`
-
-When a pull request merges into a branch that isn't local and has no pull
-request, `import` tracks that branch too, on the branch `find_parent` says
-it's built on. A long-lived shared branch is exactly that, e.g. `develop` in
-git-flow or `release/1.x`: its parent comes out as `main` (or whatever its
-history leads to), and it's tracked with `-f` (which allows other people's
-commits), or without it if all of its commits are the user's (e.g. a solo
-project's `develop`). From then on, `git stack sync` from a branch on top
-restacks `develop` onto `main`, and `git stack push` force-pushes it (with
-lease), rewriting the shared branch. `plan_one_without_pr` and
-`find_parent` are where it happens;
-`test_import_with_force_tracks_someone_elses_branch_without_a_pr` exercises
-the same path with a short branch.
-
-A branch that merged pull requests have targeted should count as a trunk: be
-created from its remote branch but left untracked, as a root like `main`, so
-`sync` only fast-forwards it. That takes one GraphQL query per branch without
-a pull request. Rules based on commits (e.g. "has merge commits") would
-misfire on feature branches that merged `main`.
-
 ## Old copies of rebased commits can be pulled back in
 
 `unpulled_commits` recognizes old copies of the branch's own rebased commits by

@@ -26,6 +26,10 @@ def add_latest_argument(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def add_allow_shared_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--allow-shared", action="store_true", help="allow rewriting a shared stack")
+
+
 def add_stack_arguments(parser: argparse.ArgumentParser, verb: str, default: str = "the current stack") -> None:
     """Add the branches and --group arguments that name stacks, as
     StackCore.named takes them."""

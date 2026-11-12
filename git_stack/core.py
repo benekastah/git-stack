@@ -48,6 +48,8 @@ REVERTED_CHECK_KEY = "stackRevertedCheck"
 # name), so commands on one of them still cover the others, as they did before
 # it merged.
 GROUP_KEY = "stackGroup"
+# Ownership is stored on every tracked branch so it survives stack splits.
+OWNERSHIP_KEY = "stackOwnership"
 
 # {branch: the branch it is stacked on}
 Parents: TypeAlias = dict[str, str]
@@ -208,6 +210,8 @@ class StackCore:
         a stack's root and branch was higher up a stack (e.g. restack --onto
         main), branch joins that stack's group, so the two stay together."""
         git = self.git
+        if git.config_get(parent, OWNERSHIP_KEY) == "shared":
+            git.config_set(branch, OWNERSHIP_KEY, "shared")
         old_parent = git.config_get(branch, PARENT_KEY)
         if git.config_get(parent, PARENT_KEY) is not None:
             git.config_unset(branch, GROUP_KEY)
@@ -691,6 +695,7 @@ class StackCore:
             PENDING_PULLED_KEY,
             PENDING_PULL_IDENTITIES_KEY,
             GROUP_KEY,
+            OWNERSHIP_KEY,
             # Versions before the check cache kept these in git config too.
             CONFLICT_CHECK_KEY,
             LANDED_CHECK_KEY,

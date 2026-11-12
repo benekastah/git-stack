@@ -287,6 +287,30 @@ class GitHubAdapter(GitAdapter):
         """The gh user's login, once open_pull_requests looked it up, or None."""
         return self._viewer
 
+    def has_merged_pull_requests_into(self, branch: str) -> bool:
+        """Whether a branch has served as the base of a merged pull request."""
+        query = (
+            "query($owner: String!, $name: String!, $base: String!) "
+            "{ repository(owner: $owner, name: $name) "
+            "{ pullRequests(baseRefName: $base, states: MERGED, first: 1) { nodes { number } } } }"
+        )
+        args = [
+            "api",
+            "graphql",
+            "--hostname",
+            self.host,
+            "-f",
+            f"owner={self.owner}",
+            "-f",
+            f"name={self.name}",
+            "-f",
+            f"base={branch}",
+            "-f",
+            f"query={query}",
+        ]
+        repository = field(field(parse_json(self.gh(*args)), "data", dict), "repository", dict)
+        return bool(field(field(repository, "pullRequests", dict), "nodes", list))
+
     def open_pull_requests(self, author: str = "@me") -> list[OpenPullRequest]:
         """author's open pull requests (by login; default: the gh user's),
         drafts included, from branches in the repository (not forks). Also

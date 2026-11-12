@@ -59,6 +59,55 @@ def test_import_creates_and_tracks_branches_of_open_prs(repo: Repo, gh: FakeGitH
     repo.assert_stacked("pr2", "pr1", ["pr2 c1"])
     assert repo.git("rev-parse", "--abbrev-ref", "pr2@{upstream}") == "origin/pr2"
     assert [b.status for b in client.info()] == [None, BranchStatus.UP_TO_DATE, BranchStatus.UP_TO_DATE]
+    assert not repo.config_exists("pr1", "stackOwnership")
+    assert not repo.config_exists("pr2", "stackOwnership")
+
+
+def test_import_marks_a_stack_with_another_contributor_shared(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+    open_pr(repo, gh, 1, "pr1", "main", author="alice")
+    open_pr(repo, gh, 2, "pr2", "pr1")
+
+    client.import_stacks(force=True)
+    repo.git("switch", "--quiet", "pr2")
+
+    assert repo.config("pr1", "stackOwnership") == "shared"
+    assert repo.config("pr2", "stackOwnership") == "shared"
+    with pytest.raises(StackError, match="--allow-shared"):
+        client.restack()
+
+
+def test_import_marks_someone_elses_stack_shared(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+    open_pr(repo, gh, 1, "pr1", "main", author="alice")
+
+    client.import_stacks(force=True, author="alice")
+
+    assert repo.config("pr1", "stackOwnership") == "shared"
+
+
+def test_import_keeps_a_branch_targeted_by_merged_prs_as_a_root(
+    repo: Repo, gh: FakeGitHub, client: StackClient
+) -> None:
+    push_branch(repo, "release", "main")
+    gh.add_pr(
+        number=1,
+        state="MERGED",
+        author="me",
+        headRefName="old",
+        baseRefName="release",
+        headRefOid=repo.git("rev-parse", "HEAD", cwd=repo.forge),
+        mergeCommit=None,
+    )
+    open_pr(repo, gh, 2, "feature", "release")
+
+    preview = client.import_stacks(dry_run=True)
+    assert preview.without_prs[0].action is ImportAction.CREATE_ROOT
+    assert not client.git.local_branch_exists("release")
+    result = client.import_stacks()
+
+    assert result.without_prs[0].action is ImportAction.CREATE_ROOT
+    assert repo.git("rev-parse", "refs/heads/release") == repo.git("rev-parse", "refs/remotes/origin/release")
+    assert "release" not in client.tracked_branches()
+    assert client.tracked_branches()["feature"] == "release"
 
 
 def test_import_says_what_its_doing_before_the_slow_parts(

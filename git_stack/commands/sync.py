@@ -2,6 +2,7 @@ import argparse
 
 from git_stack.commands import (
     Subparsers,
+    add_allow_shared_argument,
     add_delete_argument,
     add_ignore_revert_argument,
     add_json_argument,
@@ -24,6 +25,7 @@ class Args(argparse.Namespace):
     no_push: bool
     ignore_reverts: list[str]
     json: bool
+    allow_shared: bool
     pull_tracked_upstream: bool
 
 
@@ -38,6 +40,7 @@ def register(subparsers: Subparsers) -> None:
     add_delete_argument(p)
     add_latest_argument(p)
     add_ignore_revert_argument(p)
+    add_allow_shared_argument(p)
     p.add_argument(
         "--pull-tracked-upstream",
         action="store_true",
@@ -59,6 +62,7 @@ def run(stack: StackClient, args: Args) -> SyncResult:
         latest=args.latest,
         push=not args.no_push,
         ignore_reverts=args.ignore_reverts,
+        allow_shared=args.allow_shared,
         pull_tracked_upstream=args.pull_tracked_upstream,
     )
 

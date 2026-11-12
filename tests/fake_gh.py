@@ -56,6 +56,10 @@ def respond(args: list[str], state: dict[str, Any]) -> str | None:
     prs: list[dict[str, Any]] = state["prs"]
     if args[:2] == ["api", "graphql"]:
         query = opt_value(args, "query")
+        if "pullRequests(baseRefName: $base, states: MERGED" in query:
+            base = opt_value(args, "base")
+            nodes = [{"number": p["number"]} for p in prs if p["baseRefName"] == base and p["state"] == "MERGED"]
+            return json.dumps({"data": {"repository": {"pullRequests": {"nodes": nodes[:1]}}}})
         if "search(" in query:
             return open_pull_requests(opt_value(args, "q"), prs)
         if "pullRequest(number: $number)" in query:

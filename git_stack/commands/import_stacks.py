@@ -81,12 +81,16 @@ def describe(step: ImportStep, remote: str, dry_run: bool) -> str:
             )
         case ImportAction.SKIP:
             return f"skipping {step.branch} ({pr}): {step.reason}"
+        case ImportAction.CREATE_ROOT:
+            raise ValueError("a pull request cannot be an import root")
 
 
 def describe_without_pr(step: ImportStepWithoutPr, remote: str) -> str:
     """What a dry run would do for a branch without a pull request that it
     creates. (One it skips is in the reason the pull requests built on it
     were skipped.)"""
+    if step.action is ImportAction.CREATE_ROOT:
+        return f"would create {step.branch} from {remote}/{step.branch} as a shared root"
     return (
         f"would create {step.branch} from {remote}/{step.branch}, tracking it on {step.parent} "
         f"(no pull request{needs_force('commits by', step.other_authors)})"
@@ -112,7 +116,7 @@ def show(stack: StackClient, args: Args, result: ImportResult) -> None:
     # requests of the branches it just tracked in green.
     if args.dry_run:
         for without_pr in result.without_prs:
-            if without_pr.action is ImportAction.CREATE:
+            if without_pr.action in (ImportAction.CREATE, ImportAction.CREATE_ROOT):
                 print(describe_without_pr(without_pr, args.remote))
     for step in result.steps:
         if args.dry_run or step.action in (ImportAction.PARENT_DIFFERS, ImportAction.SKIP):

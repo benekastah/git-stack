@@ -1,7 +1,13 @@
 import argparse
 from dataclasses import dataclass
 
-from git_stack.commands import Subparsers, add_json_argument, add_latest_argument, add_stack_arguments
+from git_stack.commands import (
+    Subparsers,
+    add_allow_shared_argument,
+    add_json_argument,
+    add_latest_argument,
+    add_stack_arguments,
+)
 from git_stack.stack import StackClient
 
 
@@ -14,6 +20,7 @@ class Args(argparse.Namespace):
     squash: bool
     latest: bool
     json: bool
+    allow_shared: bool
 
 
 def register(subparsers: Subparsers) -> None:
@@ -27,6 +34,7 @@ def register(subparsers: Subparsers) -> None:
     p.add_argument("--onto", help="first change the current branch's parent to ONTO")
     p.add_argument("--squash", action="store_true", help="first squash each branch in the stack into a single commit")
     add_latest_argument(p)
+    add_allow_shared_argument(p)
     add_json_argument(p)
     p.set_defaults(run=run, show=show)
 
@@ -37,7 +45,14 @@ class Restacked:
 
 
 def run(stack: StackClient, args: Args) -> Restacked:
-    stack.restack(args.branches, args.groups, onto=args.onto, squash=args.squash, latest=args.latest)
+    stack.restack(
+        args.branches,
+        args.groups,
+        onto=args.onto,
+        squash=args.squash,
+        latest=args.latest,
+        allow_shared=args.allow_shared,
+    )
     return Restacked()
 
 

@@ -271,10 +271,8 @@ git stack import -f --pr https://github.com/acme/widgets/pull/31
 - Someone else's work is only tracked with `-f`/`--force`: the branches of
   their pull requests, and branches without a pull request with commits by
   anyone but you (by email address). Without `-f`, those are skipped, along
-  with the pull requests built on them. Once tracked, they're stacks like
-  any other: `sync`, `push` and `prs` on a stack that includes their branches
-  restack, push and open pull requests for them too, so name your own branches
-  (e.g. `git stack sync my-branch`) to leave theirs alone.
+  with the pull requests built on them. Imported stacks with other contributors
+  are marked shared; `sync`, `push` and `restack` require `--allow-shared`.
 - `-n`/`--dry-run` prints what it would do with `-f`, saying what needs it,
   without changing anything (besides fetching). It can't be used with `-f`.
 - A pull request without a local branch gets one, created from its remote
@@ -285,7 +283,8 @@ git stack import -f --pr https://github.com/acme/widgets/pull/31
   `git stack track <parent> <branch>` if GitHub is right.
 - If a pull request merges into a branch you don't have locally and that has no
   pull request (or none it looked up), that branch is created from its remote
-  branch and tracked too, on the branch it's built on: of the remote's
+  branch. If merged pull requests targeted it, it is a shared root and isn't
+  tracked in a stack. Otherwise it is tracked on the branch it's built on: of the remote's
   branches it contains that the default branch doesn't, the closest, or else
   the default branch. If it's unclear which branch that is, the pull request
   is skipped, along with the pull requests built on it; `git switch` to that
@@ -477,7 +476,24 @@ git stack prev                  # to main
 
 - From the bottom of a stack, it switches to the stack's root (e.g. `main`).
 
-### `git stack restack [<branch|glob>...] [-g <group>] [--onto <parent>] [--squash] [--latest]`
+### `git stack ownership [show|owned|shared] [<branch|glob>...] [-g <group>]`
+
+Show the ownership of the current stack, or mark it or the named stacks as
+owned or shared. With multiple stacks, `show` reports shared if any is shared.
+A shared stack
+is protected against `restack`, `sync`, and `push` unless the command includes
+`--allow-shared`. The override is explicit on every invocation; it does not
+change ownership. Newly created branches inherit shared ownership from their
+parent, and ownership follows branches when stacks split.
+
+Import marks a stack shared when its imported commits include another author's
+email, have no commits by your configured Git author, or its pull requests
+include another GitHub author. Unknown identity is treated as shared. An
+explicit `ownership owned` or `ownership shared` choice can change the default.
+Existing stacks default to owned. Ownership is local to this clone, not a
+permission or a substitute for coordinating with contributors.
+
+### `git stack restack [<branch|glob>...] [-g <group>] [--onto <parent>] [--squash] [--latest] [--allow-shared]`
 
 Rebase every branch in the current stack (or the ones named, see
 [Groups](#groups)) onto its parent, bottom-up, except
@@ -521,7 +537,7 @@ git stack restack --latest              # also move the stack onto main's latest
 - A branch checked out in another worktree is skipped, with a warning; see
   [Branches checked out in other worktrees](#branches-checked-out-in-other-worktrees).
 
-### `git stack sync [<branch|glob>...] [-g <group>] [--remote origin] [-d local|remote|both] [--latest] [--no-push] [--ignore-revert <branch>] [--pull-tracked-upstream]`
+### `git stack sync [<branch|glob>...] [-g <group>] [--remote origin] [-d local|remote|both] [--latest] [--no-push] [--ignore-revert <branch>] [--allow-shared] [--pull-tracked-upstream]`
 
 Bring the current stack (or the ones named, see [Groups](#groups)) up to date
 with the remote:
@@ -622,7 +638,7 @@ git stack clean -d local
   are fine, unless you're on a stack's root, which `clean` fast-forwards, or,
   with `-d local` or `-d both`, on a tracked branch, which it could delete.
 
-### `git stack push [<branch|glob>...] [-g <group>] [--remote origin] [--force] [--prs]`
+### `git stack push [<branch|glob>...] [-g <group>] [--remote origin] [--force] [--prs] [--allow-shared]`
 
 Force-push (with lease) every branch in the current stack (or the ones named,
 see [Groups](#groups)), and set each one's upstream.
@@ -942,12 +958,13 @@ What each command's result has, besides `type` and `events`:
 | --- | --- |
 | `branch` | `branch`, the `parent` it was created on, and its `group` (or `null`) |
 | `track` | `tracked`: each branch's `branch`, `parent` and `base` |
-| `import` | `stacks`, and `steps`, one for each pull request: its `branch`, the `parent` it merges into, its `number`, and the `action`: `create`, `track`, `already-tracked`, `parent-differs` or `skip`. `base` is the commit a branch it creates or tracks is built on, `tracked_parent` the parent a `parent-differs` branch is tracked on instead, and `reason` why it skipped one; each is `null` otherwise. `other_authors` has the pull request's author if it isn't you (so it needs `-f`), and is empty otherwise. `without_prs` has the same for the branches without a pull request that the pull requests are built on, without `number` or `tracked_parent`, and only `create` or `skip`; their `other_authors` are email addresses, and `parent` is `null` if it couldn't tell which branch one is built on |
+| `import` | `stacks`, and `steps`, one for each pull request: its `branch`, the `parent` it merges into, its `number`, and the `action`: `create`, `track`, `already-tracked`, `parent-differs` or `skip`. `base` is the commit a branch it creates or tracks is built on, `tracked_parent` the parent a `parent-differs` branch is tracked on instead, and `reason` why it skipped one; each is `null` otherwise. `other_authors` has the pull request's author if it isn't you (so it needs `-f`), and is empty otherwise. `without_prs` has the same for the branches without a pull request that the pull requests are built on, without `number` or `tracked_parent`, and `create`, `create-root` or `skip`; their `other_authors` are email addresses, and `parent` is `null` for a root or if it couldn't tell which branch one is built on |
 | `untrack` | `untracked`: each `branch`, and the `children` still stacked on it |
 | `rename` | `old`, `new`, the `children` moved onto it, and the `upstream` it no longer tracks (or `null`) |
 | `group add` | the `group`, and the `bottoms` of the stacks put in it |
 | `group remove`, `ungroup` | `removed`: each stack's `bottom`, and the `group` it was in |
 | `group rename` | `old`, `new`, and the `branches` in it |
+| `ownership` | `ownership` and the `branches` marked |
 | `next`, `prev` | the `branch` it switched to |
 | `restack` | nothing; what it did is in its events |
 | `sync` | `stacks`, and `unpushed`, the branches whose remote branch is out of date because they weren't pushed (e.g. with `--no-push`) |

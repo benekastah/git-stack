@@ -111,6 +111,7 @@ def stack() -> Any:
         (["next"], "next", (), {}),
         (["prev"], "prev", (), {}),
         (["restack"], "restack", ([], []), {"onto": None, "squash": False, "latest": False}),
+        (["restack", "--allow-shared"], "restack", ([], []), {"onto": None, "squash": False, "latest": False}),
         (
             ["restack", "--onto", "main", "--squash", "--latest"],
             "restack",
@@ -128,6 +129,12 @@ def stack() -> Any:
             "sync",
             ([], []),
             {"remote": "origin", "delete": None, "latest": False, "push": False, "ignore_reverts": []},
+        ),
+        (
+            ["sync", "--allow-shared"],
+            "sync",
+            ([], []),
+            {"remote": "origin", "delete": None, "latest": False, "push": True, "ignore_reverts": []},
         ),
         (
             ["sync", "b", "-g", "one", "--group", "two", "--remote", "upstream", "-d", "local", "--latest"],
@@ -150,6 +157,7 @@ def stack() -> Any:
             {"remote": "upstream", "force": False, "prs": False},
         ),
         (["push", "--force"], "push", ([], []), {"remote": "origin", "force": True, "prs": False}),
+        (["push", "--allow-shared"], "push", ([], []), {"remote": "origin", "force": False, "prs": False}),
         (["push", "--prs"], "push", ([], []), {"remote": "origin", "force": False, "prs": True}),
         (["push", "--pr"], "push", ([], []), {"remote": "origin", "force": False, "prs": True}),
         (["group", "add", "feat", "feat-*", "-g", "old"], "group_add", ("feat", ["feat-*"], ["old"]), {"move": False}),
@@ -158,6 +166,7 @@ def stack() -> Any:
         (["ungroup", "pr1", "-g", "feat"], "group_remove", (["pr1"], ["feat"]), {}),
         (["group", "rename", "new"], "group_rename", ("new",), {"old": None}),
         (["group", "rename", "old", "new"], "group_rename", ("new",), {"old": "old"}),
+        (["ownership", "shared"], "set_ownership", ("shared", [], []), {}),
         (["prs"], "prs", ([], []), {"remote": "origin", "dry_run": False, "rebuild_stack": False}),
         (["pr", "--rebuild-stack"], "prs", ([], []), {"remote": "origin", "dry_run": False, "rebuild_stack": True}),
         (
@@ -187,6 +196,8 @@ def test_command_calls_its_client_method(
 ) -> None:
     assert main(argv, stack=stack) == 0
 
+    if method in ("restack", "sync", "push"):
+        kwargs = {**kwargs, "allow_shared": "--allow-shared" in argv}
     if method == "sync":
         kwargs = {**kwargs, "pull_tracked_upstream": "--pull-tracked-upstream" in argv}
     getattr(stack, method).assert_called_once_with(*args, **kwargs)
@@ -588,6 +599,7 @@ def test_clean_json_ends_with_the_error_when_it_fails(stack: Any, capsys: pytest
 @pytest.mark.parametrize(
     ("argv", "method", "returned", "result"),
     [
+        (["ownership", "shared"], "set_ownership", ["pr1"], {"ownership": "shared", "branches": ["pr1"]}),
         (["sync"], "sync", SyncResult(["pr1"], STACK), {"stacks": to_json(STACK), "unpushed": ["pr1"]}),
         (
             ["push"],

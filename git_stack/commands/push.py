@@ -1,6 +1,6 @@
 import argparse
 
-from git_stack.commands import Subparsers, add_json_argument, add_stack_arguments
+from git_stack.commands import Subparsers, add_allow_shared_argument, add_json_argument, add_stack_arguments
 from git_stack.commands.info import print_tree
 from git_stack.commands.prs import show_steps
 from git_stack.git import DEFAULT_REMOTE
@@ -16,6 +16,7 @@ class Args(argparse.Namespace):
     force: bool
     prs: bool
     json: bool
+    allow_shared: bool
 
 
 def register(subparsers: Subparsers) -> None:
@@ -39,11 +40,14 @@ def register(subparsers: Subparsers) -> None:
         help="then open pull requests for them, as `git stack prs` does",
     )
     add_json_argument(p)
+    add_allow_shared_argument(p)
     p.set_defaults(run=run, show=show, error=lambda result: result.error)
 
 
 def run(stack: StackClient, args: Args) -> PushResult:
-    return stack.push(args.branches, args.groups, remote=args.remote, force=args.force, prs=args.prs)
+    return stack.push(
+        args.branches, args.groups, remote=args.remote, force=args.force, prs=args.prs, allow_shared=args.allow_shared
+    )
 
 
 def show(stack: StackClient, args: Args, result: PushResult) -> None:
