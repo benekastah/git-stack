@@ -748,7 +748,9 @@ git stack prs
   ones they had are removed. A stack that branches out, or a group's stacks,
   can't be one stack on GitHub, so they keep theirs. Pull requests can't be
   taken out of a stack on GitHub, so if some are in one that doesn't match
-  (e.g. in another order), it warns and leaves them. GitHub doesn't change
+  (e.g. in another order, or ending with a merged pull request that a new
+  one isn't based on), it warns and leaves them, using description sections
+  instead. GitHub doesn't change
   the base of a pull request in a stack either, so when a stack is reshaped
   (e.g. a branch is put in its middle), `push` and `prs` take its open pull
   requests out of their stack on GitHub to change their bases, and `prs`

@@ -484,6 +484,26 @@ def test_prs_removes_the_stack_section_once_the_stack_is_on_github(
     assert [body(gh, n) for n in (1, 2, 3)] == ["", "", ""]
 
 
+def test_prs_falls_back_when_github_stack_ends_in_a_merged_pr(
+    repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event]
+) -> None:
+    repo.make_stack()
+    client.push()
+    client.prs()
+    gh.enable_stacks([1, 2])
+    state = gh.load()
+    state["prs"][1]["state"] = "MERGED"
+    gh.save(state)
+    client.untrack(["pr2"])
+    repo.git("config", "branch.pr3.stackParent", "pr1")
+
+    client.prs()
+
+    assert gh.stacks() == [[1, 2]]
+    assert events.GitHubStackMismatch((1, 3), (1000,)) in emitted
+    assert stack_section.START in body(gh, 3)
+
+
 def test_prs_doesnt_link_a_branching_stack_on_github(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
     gh.enable_stacks()
     client.branch("pr1")

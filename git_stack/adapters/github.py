@@ -705,7 +705,11 @@ class GitHubAdapter(GitAdapter):
             return True
         if not self.github_stacks_enabled():
             return False
-        if len(found) > 1 or bottom != chain[: len(bottom)]:
+        if (
+            len(found) > 1
+            or bottom != chain[: len(bottom)]
+            or (stack is not None and stack.entries and stack.entries[-1][1] != "OPEN")
+        ):
             self.core.emit(events.GitHubStackMismatch(tuple(chain), tuple(sorted(found))))
             return False
         if stack is None:

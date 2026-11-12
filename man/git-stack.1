@@ -1030,7 +1030,9 @@ A stack that branches out, or a group\(aqs stacks, can\(aqt be one stack
 on GitHub, so they keep theirs.
 Pull requests can\(aqt be taken out of a stack on GitHub, so if some are
 in one that doesn\(aqt match (e.g.
-in another order), it warns and leaves them.
+in another order, or ending with a merged pull request that a new one
+isn\(aqt based on), it warns and leaves them, using description sections
+instead.
 GitHub doesn\(aqt change the base of a pull request in a stack either,
 so when a stack is reshaped (e.g.
 a branch is put in its middle), \f[CR]push\f[R] and \f[CR]prs\f[R] take
