@@ -131,12 +131,6 @@ reproduced; on btrfs, where inode numbers aren't reused, it can't happen.
 Comparing the file's contents (or a hash of them) instead of its metadata
 would rule it out at little cost, since the file is small.
 
-## Branch and parent names are resolved like any revision
-
-Most git calls pass bare names (`git rev-parse <parent>`,
-`git merge-tree <parent> <branch>`), so a tag with the same name as a branch
-wins over the branch.
-
 ## `import` fast-forwards the trunks of stacks it doesn't import
 
 `fast_forward_import_trunks` gets every pull request it looked up, before the

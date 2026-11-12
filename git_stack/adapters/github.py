@@ -423,7 +423,7 @@ class GitHubAdapter(GitAdapter):
         if pr is None or pr.state != "MERGED":
             return None
         merge = pr.merge_oid
-        if not (merge and git.rev(merge) and git.is_ancestor(merge, parent) and git.rev(pr.head_oid)):
+        if not (merge and git.rev(merge) and git.is_ancestor(merge, f"refs/heads/{parent}") and git.rev(pr.head_oid)):
             return None
         return pr
 
@@ -434,7 +434,9 @@ class GitHubAdapter(GitAdapter):
     def unmerged_commits(self, ref: str, merged_head: str, parent: str) -> set[str]:
         """Non-merge commits on ref that aren't in parent and don't match a commit on merged_head."""
         unmatched = self.git.run("rev-list", "--cherry-pick", "--right-only", "--no-merges", f"{merged_head}...{ref}")
-        return set(unmatched.split()) & set(self.git.run("rev-list", "--no-merges", ref, "--not", parent).split())
+        return set(unmatched.split()) & set(
+            self.git.run("rev-list", "--no-merges", ref, "--not", f"refs/heads/{parent}").split()
+        )
 
     def before_push(self, to_push: list[str], parents: Parents) -> None:
         """Point the open pull requests of branches about to be pushed at their

@@ -361,7 +361,7 @@ class StackClient(StackCore):
                 raise StackError(
                     f"{base_arg} isn't a commit" if base_arg else f"{branch} has no history in common with {parent}"
                 )
-            if not git.is_ancestor(base, branch):
+            if not git.is_ancestor(base, f"refs/heads/{branch}"):
                 raise StackError(f"{base_arg} isn't in {branch}'s history")
             parents[branch] = parent
             plan.append(Tracked(branch, parent, base))
@@ -380,9 +380,11 @@ class StackClient(StackCore):
         built on rather than their (older) merge-base.
         """
         git = self.git
+        parent_ref = parent if parent.startswith("refs/") else f"refs/heads/{parent}"
+        branch_ref = branch if branch.startswith("refs/") else f"refs/heads/{branch}"
         return (
-            git.run("merge-base", "--fork-point", parent, branch, check=False)
-            or git.run("merge-base", parent, branch, check=False)
+            git.run("merge-base", "--fork-point", parent_ref, branch_ref, check=False)
+            or git.run("merge-base", parent_ref, branch_ref, check=False)
             or None
         )
 
@@ -705,7 +707,7 @@ class StackClient(StackCore):
         bottoms = [] if parent in parents else [ancestry(b, parents)[-2] for b in stack]
         group = next((g for b in bottoms if (g := git.config_get(b, GROUP_KEY))), None)
 
-        git.run("branch", "--quiet", "--no-track", name, parent)
+        git.run("branch", "--quiet", "--no-track", name, f"refs/heads/{parent}")
         self.set_parent(name, parent)
         git.config_set(name, BASE_KEY, git.tip(name))
         if group is not None:
@@ -745,7 +747,7 @@ class StackClient(StackCore):
             commit = git.rev(f"{revert}^{{commit}}")
             if commit is None:
                 raise StackError(f"{revert} isn't a commit")
-            if not git.is_ancestor(commit, parent):
+            if not git.is_ancestor(commit, f"refs/heads/{parent}"):
                 raise StackError(f"{revert} isn't in {parent}'s history")
             commits.append(commit)
 
@@ -839,7 +841,7 @@ class StackClient(StackCore):
 
         def status(branch: str) -> BranchStatus:
             parent = parents[branch]
-            parent_tip = git.rev(parent)
+            parent_tip = git.rev(f"refs/heads/{parent}")
             if parent_tip is None:
                 return BranchStatus.PARENT_MISSING
             # Worked out before merge_state, which may wait for the adapter's
@@ -1094,7 +1096,7 @@ class StackClient(StackCore):
             state.blocked.append(branch)
             return
         upstream_tip = git.rev(f"{branch}@{{upstream}}")
-        if upstream_tip and upstream_tip != git.rev(branch):
+        if upstream_tip and upstream_tip != git.rev(f"refs/heads/{branch}"):
             if state.push and git.tracks_same_name(branch, state.remote):
                 state.pushable.append(branch)
             else:
@@ -1131,7 +1133,7 @@ class StackClient(StackCore):
         order = [b for root in roots for b in descendants(root, children_map(parents))]
         for branch in order:
             parent = parents[branch]
-            if git.rev(parent) is None:
+            if git.rev(f"refs/heads/{parent}") is None:
                 self.emit(events.ParentMissing(branch, parent))
                 continue
             state = adapter.merge_state(branch, parent, ignore_revert=branch in ignore_reverts)
@@ -1453,9 +1455,11 @@ class ImportPlanner:
                 return self.skip(pr, "the pull requests it's based on are based on it")
             if self.plan(self.by_head[parent]).action is ImportAction.SKIP:
                 return self.skip(pr, f"{parent}, which it merges into, was skipped")
-            parent_ref = parent if git.local_branch_exists(parent) else f"refs/remotes/{remote}/{parent}"
+            parent_ref = (
+                f"refs/heads/{parent}" if git.local_branch_exists(parent) else f"refs/remotes/{remote}/{parent}"
+            )
         elif git.local_branch_exists(parent):
-            parent_ref = parent
+            parent_ref = f"refs/heads/{parent}"
         elif (without_pr := self.plan_without_pr(parent)).action is ImportAction.CREATE:
             parent_ref = f"refs/remotes/{remote}/{parent}"
         else:
@@ -1532,7 +1536,7 @@ class ImportPlanner:
         if parent in self.by_head:
             if self.plan(self.by_head[parent]).action is ImportAction.SKIP:
                 raise StackError(f"{parent}, which it's built on, was skipped")
-            return parent if git.local_branch_exists(parent) else f"refs/remotes/{remote}/{parent}"
+            return f"refs/heads/{parent}" if git.local_branch_exists(parent) else f"refs/remotes/{remote}/{parent}"
         if parent == self.default_branch:
             if not git.local_branch_exists(parent):
                 raise StackError(f"{parent}, which it's built on, isn't a local branch")
@@ -1540,7 +1544,7 @@ class ImportPlanner:
             # so main's newer commits don't look like the branch's own.
             return f"refs/remotes/{remote}/{parent}"
         if git.local_branch_exists(parent):
-            return parent
+            return f"refs/heads/{parent}"
         if self.plan_without_pr(parent).action is ImportAction.SKIP:
             raise StackError(f"{parent}, which it's built on, was skipped")
         return f"refs/remotes/{remote}/{parent}"

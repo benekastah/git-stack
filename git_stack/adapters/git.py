@@ -58,7 +58,7 @@ class GitAdapter:
         upstream_tip = git.rev(f"{branch}@{{upstream}}")
         if (
             upstream_tip
-            and not git.contained_in(upstream_tip, parent)
+            and not git.contained_in(upstream_tip, f"refs/heads/{parent}")
             and self.core.unpulled_commits(branch, parent, upstream_tip)
         ):
             return MergeState.MERGED_WITH_NEW_COMMITS
@@ -67,7 +67,7 @@ class GitAdapter:
     def landed(self, branch: str, parent: str) -> bool:
         """Whether parent has branch's changes, as a merge or as patches."""
         git = self.git
-        parent_tip = git.rev(parent)
+        parent_tip = git.rev(f"refs/heads/{parent}")
         if parent_tip is None:
             return False
         tip = git.tip(branch)
@@ -85,7 +85,7 @@ class GitAdapter:
         missing or not in its history.
         """
         base = self.git.config_get(branch, BASE_KEY)
-        if base is None or not self.git.is_ancestor(base, branch):
+        if base is None or not self.git.is_ancestor(base, f"refs/heads/{branch}"):
             return False
         return not self.git.ok("diff", "--quiet", base, f"refs/heads/{branch}")
 
@@ -98,7 +98,7 @@ class GitAdapter:
         """
         git = self.git
         base = git.config_get(branch, BASE_KEY)
-        if base is None or not git.is_ancestor(base, branch) or git.rev(parent) is None:
+        if base is None or not git.is_ancestor(base, f"refs/heads/{branch}") or git.rev(parent) is None:
             return False
         files = self.changed_files(base, f"refs/heads/{branch}")
         if not files:
@@ -116,9 +116,9 @@ class GitAdapter:
         """Whether parent, which has branch's changes, has since reverted some of
         them (see reverts)."""
         git = self.git
-        parent_tip = git.rev(parent)
+        parent_tip = git.rev(f"refs/heads/{parent}")
         base = git.config_get(branch, BASE_KEY)
-        if parent_tip is None or base is None or not git.is_ancestor(base, branch):
+        if parent_tip is None or base is None or not git.is_ancestor(base, f"refs/heads/{branch}"):
             return False
         tip = git.tip(branch)
         merges = self.landing_merges(branch, parent)
@@ -139,9 +139,9 @@ class GitAdapter:
         resolve a conflict), aren't recognized.
         """
         git = self.git
-        parent_tip = git.rev(parent)
+        parent_tip = git.rev(f"refs/heads/{parent}")
         base = git.config_get(branch, BASE_KEY)
-        if parent_tip is None or base is None or not git.is_ancestor(base, branch):
+        if parent_tip is None or base is None or not git.is_ancestor(base, f"refs/heads/{branch}"):
             return []
         return self.reverts_since(git.tip(branch), base, parent_tip, self.landing_merges(branch, parent))
 

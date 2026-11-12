@@ -34,6 +34,19 @@ def test_track_stacks_several_existing_branches(repo: Repo, client: StackClient)
     assert repo.git("branch", "--show-current") == "main"
 
 
+def test_track_uses_branches_when_tags_have_the_same_names(repo: Repo, client: StackClient) -> None:
+    repo.git("switch", "--quiet", "-c", "pr1")
+    repo.commit("a", "pr1\n", "pr1 c1")
+    repo.git("switch", "--quiet", "-c", "pr2")
+    repo.commit("b", "pr2\n", "pr2 c1")
+    repo.git("tag", "pr1", "refs/heads/main")
+    repo.git("tag", "pr2", "refs/heads/main")
+
+    client.track("pr1", ["pr2"])
+
+    assert repo.config("pr2", "stackBase") == repo.git("rev-parse", "refs/heads/pr1")
+
+
 def test_track_several_branches_writes_nothing_if_one_is_bad(repo: Repo, client: StackClient) -> None:
     repo.git("switch", "--quiet", "-c", "pr1")
     repo.commit("a", "pr1\n", "pr1 c1")

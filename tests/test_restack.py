@@ -23,6 +23,30 @@ def test_restack_moves_whole_stack_after_parent_changes(repo: Repo, client: Stac
     assert all(branch.status is not BranchStatus.NEEDS_RESTACK for branch in client.info())
 
 
+def test_info_uses_parent_branch_when_a_tag_has_the_same_name(repo: Repo, client: StackClient) -> None:
+    repo.make_stack()
+    repo.git("tag", "pr1", "refs/heads/main")
+    repo.git("switch", "--quiet", "pr1")
+    repo.commit("a", "review fix\n", "review fix")
+
+    statuses = {branch.name: branch.status for branch in client.info(offline=True)}
+
+    assert statuses["pr2"] is BranchStatus.NEEDS_RESTACK
+
+
+def test_restack_uses_branches_when_tags_have_the_same_names(repo: Repo, client: StackClient) -> None:
+    repo.make_stack()
+    repo.git("tag", "pr1", "refs/heads/main")
+    repo.git("tag", "pr2", "refs/heads/main")
+    repo.git("switch", "--quiet", "pr1")
+    repo.commit("a", "review fix\n", "review fix")
+    repo.git("switch", "--quiet", "pr3")
+
+    client.restack()
+
+    assert repo.config("pr2", "stackBase") == repo.git("rev-parse", "refs/heads/pr1")
+
+
 def test_restack_survives_scripting_command_run_before_each_rebase(
     repo: Repo, client: StackClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:

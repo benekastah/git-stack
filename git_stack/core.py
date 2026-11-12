@@ -330,7 +330,7 @@ class StackCore:
         if pending_parent is None:
             return
         pending_base = git.config_get(branch, PENDING_BASE_KEY)
-        if pending_base is not None and git.is_ancestor(pending_base, branch):
+        if pending_base is not None and git.is_ancestor(pending_base, f"refs/heads/{branch}"):
             self.set_parent(branch, pending_parent)
             git.config_set(branch, BASE_KEY, pending_base)
         elif not forget_unfinished or git.other_worktree_of(branch) is not None:
@@ -354,7 +354,7 @@ class StackCore:
         if (
             pull_from
             and picked
-            and git.is_ancestor(pull_from, branch)
+            and git.is_ancestor(pull_from, f"refs/heads/{branch}")
             and picked <= git.identities(f"{pull_from}..refs/heads/{branch}")
         ):
             git.config_set(branch, PULLED_KEY, pending_pulled)
@@ -371,7 +371,7 @@ class StackCore:
     def recorded_base(self, branch: str, parent: str) -> str:
         """Return branch's base, checking that it is still in the branch's history."""
         base = self.git.config_get(branch, BASE_KEY)
-        if base is None or not self.git.is_ancestor(base, branch):
+        if base is None or not self.git.is_ancestor(base, f"refs/heads/{branch}"):
             raise BrokenStackError(
                 f"{branch}'s recorded base isn't in its history (was it rebased by hand?); "
                 f"fix it with `git stack track {parent} --base <sha>`"
@@ -464,7 +464,7 @@ class StackCore:
         out in another worktree.
         """
         git = self.git
-        parent_tip = git.rev(parent)
+        parent_tip = git.rev(f"refs/heads/{parent}")
         if parent_tip is None:
             raise BrokenStackError(
                 f"{branch}'s parent {parent} doesn't exist; retarget it with `git stack track <parent> --base <sha>`"
@@ -514,7 +514,7 @@ class StackCore:
         """
         git = self.git
         known = [f"refs/heads/{branch}", *git.reflog_tips(branch)]
-        for ref in (parent, git.config_get(branch, PULLED_KEY)):
+        for ref in (f"refs/heads/{parent}", git.config_get(branch, PULLED_KEY)):
             commit = git.rev(ref) if ref else None
             if commit:
                 known.append(commit)
@@ -592,7 +592,10 @@ class StackCore:
         own = git.identities(f"{base}..{tip}")
         # The upstream may be on commits the local parent doesn't have yet,
         # e.g. main's latest, when it hasn't been fetched and fast-forwarded.
-        forks = (git.run("merge-base", ref, upstream_tip, check=False) for ref in (parent, f"{parent}@{{upstream}}"))
+        forks = (
+            git.run("merge-base", ref, upstream_tip, check=False)
+            for ref in (f"refs/heads/{parent}", f"{parent}@{{upstream}}")
+        )
         new_base = next((f for f in forks if f and git.identities(f"{f}..{upstream_tip}") == own), None)
         if not own or new_base is None:
             return False
@@ -639,14 +642,15 @@ class StackCore:
             upstream = git.run("rev-parse", "--abbrev-ref", f"{root}@{{upstream}}", check=False)
             if not upstream:
                 continue
-            old, new = git.tip(root), git.rev(upstream)
+            upstream_ref = git.run("rev-parse", "--symbolic-full-name", f"{root}@{{upstream}}", check=False)
+            old, new = git.tip(root), git.rev(upstream_ref) if upstream_ref else None
             if new is None or old == new:
                 continue
             if not git.is_ancestor(old, new):
                 self.emit(events.TrunkDiverged(root, upstream))
                 continue
             if root == current:
-                git.run("merge", "--ff-only", "--quiet", upstream)
+                git.run("merge", "--ff-only", "--quiet", new)
             elif (worktree := git.worktree_of(root)) is not None:
                 # Moving the branch would leave that worktree's files behind.
                 self.emit(events.TrunkInOtherWorktree(root, upstream, worktree))
@@ -716,7 +720,7 @@ class StackCore:
             if target is not None:
                 git.switch(target)
             else:
-                git.run("switch", "--quiet", "--detach", new_parent)
+                git.run("switch", "--quiet", "--detach", f"refs/heads/{new_parent}")
         tip = git.tip(branch)
         git.run("branch", "--quiet", "--delete", "--force", branch)
         self.emit(events.Untracked(branch, new_parent, children, deleted_tip=tip))
