@@ -15,6 +15,7 @@ from git_stack.core import (
     BASE_KEY,
     GROUP_KEY,
     PULLED_KEY,
+    TRACK_UPSTREAM_KEY,
     Parents,
     StackCore,
     ancestry,
@@ -276,6 +277,7 @@ class SyncState:
     latest: bool
     push: bool
     ignore_reverts: frozenset[str] = frozenset()
+    pull_tracked_upstream: bool = False
     skipped: set[str] = field(default_factory=set)
     blocked: list[str] = field(default_factory=list)
     pushable: list[str] = field(default_factory=list)
@@ -353,6 +355,7 @@ class StackClient(StackCore):
         # doesn't leave the stack half-tracked.
         parents = self.tracked_branches()
         plan = []
+        explicit_base = base is not None
         base_arg = base
         for branch in branches:
             ensure_no_cycle(branch, parent, parents)
@@ -370,7 +373,19 @@ class StackClient(StackCore):
         for tracked in plan:
             self.set_parent(tracked.branch, tracked.parent)
             git.config_set(tracked.branch, BASE_KEY, tracked.base)
+        self.remember_tracked_upstream(plan[0].branch, explicit_base)
         return plan
+
+    def remember_tracked_upstream(self, branch: str, explicit_base: bool) -> None:
+        """Remember the same-named upstream present at an explicit re-track."""
+        if not explicit_base:
+            return
+        git = self.git
+        remote = git.remote_branch(branch)
+        if remote and git.tracks_same_name(branch, remote[0]):
+            git.config_set(branch, TRACK_UPSTREAM_KEY, remote[2])
+        else:
+            git.config_unset(branch, TRACK_UPSTREAM_KEY)
 
     def fork_point(self, parent: str, branch: str) -> str | None:
         """Where branch forked from parent, or None if they share no history.
@@ -985,6 +1000,7 @@ class StackClient(StackCore):
         latest: bool = False,
         push: bool = True,
         ignore_reverts: Sequence[str] = (),
+        pull_tracked_upstream: bool = False,
     ) -> SyncResult:
         """Fetch, untrack the merged branches in the current stack, or in the
         stacks of the branches that branches and groups name (see named), deleting what
@@ -1015,7 +1031,9 @@ class StackClient(StackCore):
         # A group's stacks can be on different roots.
         self.fast_forward_trunks(sorted({stack_root(b, parents) for b in stack}))
 
-        state = SyncState(original, parents, remote, delete, latest, push, frozenset(ignore_reverts))
+        state = SyncState(
+            original, parents, remote, delete, latest, push, frozenset(ignore_reverts), pull_tracked_upstream
+        )
         # Parent-before-child, so by the time we reach a branch its parent is
         # final: merged branches have been removed (and their children reparented
         # in `parents`), and the rest have been restacked and pulled.
@@ -1092,7 +1110,7 @@ class StackClient(StackCore):
             if git.other_worktree_of(branch) is not None:
                 state.blocked.append(branch)
             return
-        if not self.pull_upstream(branch, parent, state.remote):
+        if not self.pull_upstream(branch, parent, state.remote, state.pull_tracked_upstream):
             state.blocked.append(branch)
             return
         upstream_tip = git.rev(f"{branch}@{{upstream}}")

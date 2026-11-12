@@ -24,6 +24,7 @@ class Args(argparse.Namespace):
     no_push: bool
     ignore_reverts: list[str]
     json: bool
+    pull_tracked_upstream: bool
 
 
 def register(subparsers: Subparsers) -> None:
@@ -37,6 +38,11 @@ def register(subparsers: Subparsers) -> None:
     add_delete_argument(p)
     add_latest_argument(p)
     add_ignore_revert_argument(p)
+    p.add_argument(
+        "--pull-tracked-upstream",
+        action="store_true",
+        help="pull unseen upstream commits that existed before a branch was re-tracked with --base",
+    )
     p.add_argument(
         "--no-push", action="store_true", help="don't push, only list the branches whose remote branch is out of date"
     )
@@ -53,6 +59,7 @@ def run(stack: StackClient, args: Args) -> SyncResult:
         latest=args.latest,
         push=not args.no_push,
         ignore_reverts=args.ignore_reverts,
+        pull_tracked_upstream=args.pull_tracked_upstream,
     )
 
 

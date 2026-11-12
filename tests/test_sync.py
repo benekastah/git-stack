@@ -360,6 +360,46 @@ def test_sync_doesnt_pull_from_upstream_of_another_name(repo: Repo, client: Stac
     repo.assert_stacked("pr2", "pr1", ["pr2 c1"])
 
 
+def test_sync_requires_a_choice_before_pulling_commits_seen_when_retracked(repo: Repo, client: StackClient) -> None:
+    client.branch("pr1")
+    repo.commit("a", "local\n", "local")
+    client.push()
+    repo.commit_on_forge("pr1", "b", "remote\n", "remote")
+    repo.git("fetch", "--quiet")
+    client.track("main", base=repo.git("rev-parse", "refs/heads/main"))
+    before = repo.git("rev-parse", "refs/heads/pr1")
+
+    with pytest.raises(StackError, match="sync --pull-tracked-upstream"):
+        client.sync()
+
+    assert repo.git("rev-parse", "refs/heads/pr1") == before
+    client.sync(pull_tracked_upstream=True)
+    assert "remote" in repo.own_commits("pr1", "main")
+
+
+def test_sync_does_not_replay_old_history_after_retracking_a_rewritten_branch(repo: Repo, client: StackClient) -> None:
+    client.branch("pr1")
+    repo.commit("a", "old\n", "old work")
+    client.push()
+    repo.git("switch", "--quiet", "main")
+    repo.git("switch", "--quiet", "-c", "rewritten")
+    repo.commit("a", "new\n", "rewritten work")
+    repo.git("branch", "--force", "pr1", "rewritten")
+    repo.git("switch", "--quiet", "pr1")
+    repo.git("reflog", "expire", "--expire=all", "refs/heads/pr1")
+    repo.git("config", "branch.pr1.stackPulled", repo.git("rev-parse", "refs/heads/pr1"))
+    client.track("main", base=repo.git("rev-parse", "refs/heads/main"))
+    before = repo.git("rev-parse", "refs/heads/pr1")
+
+    with pytest.raises(StackError, match="upstream has unseen commits"):
+        client.sync()
+
+    assert repo.git("rev-parse", "refs/heads/pr1") == before
+    client.push(force=True)
+    client.sync()
+    assert repo.own_commits("pr1", "main") == ["rewritten work"]
+
+
 def test_sync_pull_conflict_resolved_with_cherry_pick_continue(repo: Repo, client: StackClient) -> None:
     repo.make_stack()
     client.push()
@@ -367,8 +407,10 @@ def test_sync_pull_conflict_resolved_with_cherry_pick_continue(repo: Repo, clien
     repo.git("switch", "--quiet", "pr1")
     repo.commit("a", "pr1 third\n", "pr1 c3")
 
-    with pytest.raises(StackError, match="pulling upstream commits into pr1 stopped on a conflict"):
+    with pytest.raises(StackError, match="pulling upstream commits into pr1 stopped on a conflict") as failure:
         client.sync()
+    assert "git cherry-pick --abort" in str(failure.value)
+    assert "inspect the remote history" in str(failure.value)
     repo.write("a", "resolved\n")
     repo.git("add", "a")
     repo.git("cherry-pick", "--continue")

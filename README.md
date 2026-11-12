@@ -521,7 +521,7 @@ git stack restack --latest              # also move the stack onto main's latest
 - A branch checked out in another worktree is skipped, with a warning; see
   [Branches checked out in other worktrees](#branches-checked-out-in-other-worktrees).
 
-### `git stack sync [<branch|glob>...] [-g <group>] [--remote origin] [-d local|remote|both] [--latest] [--no-push] [--ignore-revert <branch>]`
+### `git stack sync [<branch|glob>...] [-g <group>] [--remote origin] [-d local|remote|both] [--latest] [--no-push] [--ignore-revert <branch>] [--pull-tracked-upstream]`
 
 Bring the current stack (or the ones named, see [Groups](#groups)) up to date
 with the remote:
@@ -551,6 +551,11 @@ git stack sync -d both          # ...and their remote branches
 
 - Only the current stack is synced; to untrack merged branches in every stack,
   use `clean`.
+- After tracking a branch with `--base`, `sync` refuses to pull unseen commits
+  that were already on its upstream at that point: they could be old copies of
+  rewritten commits. Inspect them, then use `--pull-tracked-upstream` if you
+  want them, or `git stack push --force` if they are obsolete and should be
+  replaced. The usual force-push lease still applies.
 - It ends by showing the stacks it synced, as `info` does.
 - Merged branches are kept unless `-d`/`--delete` says to delete their local
   branches, their remote branches, or both. A branch is untracked by the first

@@ -187,6 +187,8 @@ def test_command_calls_its_client_method(
 ) -> None:
     assert main(argv, stack=stack) == 0
 
+    if method == "sync":
+        kwargs = {**kwargs, "pull_tracked_upstream": "--pull-tracked-upstream" in argv}
     getattr(stack, method).assert_called_once_with(*args, **kwargs)
 
 

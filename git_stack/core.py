@@ -17,6 +17,9 @@ BASE_KEY = "stackBase"
 # Commits it contains aren't new to the branch, even if the branch has since
 # rebased them and its reflog no longer has them.
 PULLED_KEY = "stackPulled"
+# Upstream tip seen when explicitly re-tracking a branch with --base. It may
+# contain either old rewritten commits or work that still needs to be pulled.
+TRACK_UPSTREAM_KEY = "stackTrackUpstream"
 # Written before a rebase starts and promoted to PARENT_KEY/BASE_KEY once the
 # rebase is known to have finished. This lets the user resolve conflicts with a
 # plain `git rebase --continue` (or back out with `git rebase --abort`).
@@ -532,7 +535,7 @@ class StackCore:
         ).split()
         return [commit for commit in new_patches if commit in unknown]
 
-    def pull_upstream(self, branch: str, parent: str, remote: str) -> bool:
+    def pull_upstream(self, branch: str, parent: str, remote: str, pull_tracked_upstream: bool = False) -> bool:
         """Cherry-pick commits that others pushed to branch's upstream onto branch.
 
         Only an upstream that's the branch of the same name on remote, as
@@ -552,6 +555,17 @@ class StackCore:
         commits = self.unpulled_commits(branch, parent, upstream_tip)
         if not commits:
             return True
+        tracked_upstream = git.config_get(branch, TRACK_UPSTREAM_KEY)
+        if (
+            tracked_upstream
+            and not pull_tracked_upstream
+            and any(git.is_ancestor(commit, tracked_upstream) for commit in commits)
+        ):
+            raise StackError(
+                f"{branch}'s upstream has unseen commits from before it was re-tracked; "
+                "inspect them before proceeding. If they are wanted, rerun `git stack sync --pull-tracked-upstream`; "
+                "if they are obsolete copies of your own work, use `git stack push --force` to replace them"
+            )
         if (worktree := git.other_worktree_of(branch)) is not None:
             self.emit(events.NotPulledInOtherWorktree(branch, worktree))
             return False
@@ -562,9 +576,14 @@ class StackCore:
         git.switch(branch)
         if git.passthrough("cherry-pick", "--ff", *commits):
             self.settle(branch)
+            git.config_unset(branch, TRACK_UPSTREAM_KEY)
             return True
         if git.operation_in_progress():
-            raise self.stopped(f"pulling upstream commits into {branch}", "cherry-pick", "rerun `git stack sync`")
+            stopped = self.stopped(f"pulling upstream commits into {branch}", "cherry-pick", "rerun `git stack sync`")
+            raise StackError(
+                f"{stopped}\nIf these are old copies of your own rewritten commits, "
+                "run `git cherry-pick --abort` and inspect the remote history before using `git stack push --force`."
+            ) from stopped
         git.config_unset(branch, PENDING_PULLED_KEY)
         git.config_unset(branch, PENDING_PULL_FROM_KEY)
         git.config_unset(branch, PENDING_PULL_IDENTITIES_KEY)
@@ -665,6 +684,7 @@ class StackCore:
             PARENT_KEY,
             BASE_KEY,
             PULLED_KEY,
+            TRACK_UPSTREAM_KEY,
             PENDING_PARENT_KEY,
             PENDING_BASE_KEY,
             PENDING_PULL_FROM_KEY,
