@@ -106,11 +106,13 @@ class GroupHeader:
     root: str
 
 
-def label(branch: BranchInfo | GroupHeader, paint: Paint) -> str:
+def label(branch: BranchInfo | GroupHeader, paint: Paint, color: bool) -> str:
     if isinstance(branch, GroupHeader):
         return paint(f"group {branch.group}", ROOT)
     if branch.parent is None:
         parts = [paint(branch.name, ROOT)]
+    elif branch.status is BranchStatus.NEEDS_RESTACK and color:
+        parts = [paint(branch.name + (" *" if branch.current else ""), "1;33" if branch.current else "33"), "!"]
     elif branch.current:
         parts = [paint(f"{branch.name} *", CURRENT)]
     else:
@@ -119,7 +121,7 @@ def label(branch: BranchInfo | GroupHeader, paint: Paint) -> str:
         parts.append(paint(f"(parent {branch.parent} missing)", STATUS_COLORS[branch.status]))
     elif branch.status is not None:
         note = NOTES[branch.status]
-        if note:
+        if note and not (color and branch.status is BranchStatus.NEEDS_RESTACK):
             parts.append(paint(note, STATUS_COLORS[branch.status]))
     return " ".join(parts)
 
@@ -141,7 +143,29 @@ def show(stack: StackClient, args: Args, result: Info) -> None:
     elif not result.stacks:
         print("no tracked branches")
     else:
-        print_tree(stack, result.stacks)
+        color = use_color(stack)
+        if color:
+            paint = painter(True)
+            print("Key: " + paint("branch", "33") + " ! needs restack; * current branch")
+            print(
+                "     status: "
+                + paint("cyan", "36")
+                + " merged; "
+                + paint("yellow", "33")
+                + " needs attention; "
+                + paint("red", "31")
+                + " missing parent"
+            )
+            print(
+                "     PR: "
+                + paint("blue", "34")
+                + " open; "
+                + paint("grey", "90")
+                + " draft; "
+                + paint("magenta", "35")
+                + " merged\n"
+            )
+        print_tree(stack, result.stacks, color=color, highlight_restack=True)
 
 
 def tree_children(branches: list[BranchInfo]) -> dict[str | GroupHeader, list[BranchInfo | GroupHeader]]:
@@ -162,12 +186,21 @@ def tree_children(branches: list[BranchInfo]) -> dict[str | GroupHeader, list[Br
     return children
 
 
-def print_tree(stack: StackClient, branches: list[BranchInfo], new_links: Mapping[str, str] = {}) -> None:
+def print_tree(
+    stack: StackClient,
+    branches: list[BranchInfo],
+    new_links: Mapping[str, str] = {},
+    *,
+    color: bool | None = None,
+    highlight_restack: bool = False,
+) -> None:
     """Print branches, which isn't empty, as a tree for each stack, with each
     branch's pull request linked at the end of its line. new_links is
     {branch: text}, shown in NEW_LINK's color in place of its link, for pull
     requests that were just opened, or would be."""
-    paint = painter(use_color(stack))
+    if color is None:
+        color = use_color(stack)
+    paint = painter(color)
     flip = root_at_bottom(stack)
     children = tree_children(branches)
 
@@ -188,14 +221,14 @@ def print_tree(stack: StackClient, branches: list[BranchInfo], new_links: Mappin
             # Upside down, the tree reads the same, mirrored.
             rows.extend(reversed(drawn) if flip else drawn)
     # Pull request links go in a right-aligned column after the longest line.
-    widths = [len(tree) + len(label(row, painter(False))) for tree, row in rows]
+    widths = [len(tree) + len(label(row, painter(False), color and highlight_restack)) for tree, row in rows]
     links = [link_of(row, new_links) for _, row in rows]
     link_width = max(len(link[0]) if link else 0 for link in links)
     for (tree, row), width, link in zip(rows, widths, links, strict=True):
-        line = paint(tree, TREE) + label(row, paint)
+        line = paint(tree, TREE) + label(row, paint, color and highlight_restack)
         if link:
-            text, color = link
-            line += " " * (max(widths) - width + 2) + paint(text.rjust(link_width), color)
+            text, link_color = link
+            line += " " * (max(widths) - width + 2) + paint(text.rjust(link_width), link_color)
         print(line)
 
 

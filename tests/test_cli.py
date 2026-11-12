@@ -413,16 +413,32 @@ def test_info_colors_each_part(stack: Any, capsys: pytest.CaptureFixture[str]) -
 
     main(["info"], stack=stack)
 
-    assert capsys.readouterr().out == (
-        "\033[1mmain\033[m\n"
-        "\033[2m└── \033[mpr1 \033[36m(merged)\033[m"
-        + " "
-        * 15
-        + "\033[35mhttps://github.com/acme/widgets/pull/1\033[m\n"
-        "\033[2m    └── \033[m\033[1;32mpr2 *\033[m \033[33m(needs restack)\033[m"
-        "  \033[34mhttps://github.com/acme/widgets/pull/2\033[m\n"
-        "\033[2m        └── \033[mpr3" + " " * 16 + "\033[90mhttps://github.com/acme/widgets/pull/3\033[m\n"
-    )
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[:4] == [
+        "Key: \033[33mbranch\033[m ! needs restack; * current branch",
+        "     status: \033[36mcyan\033[m merged; \033[33myellow\033[m needs attention; \033[31mred\033[m missing parent",
+        "     PR: \033[34mblue\033[m open; \033[90mgrey\033[m draft; \033[35mmagenta\033[m merged",
+        "",
+    ]
+    assert lines[4] == "\033[1mmain\033[m"
+    assert "pr1 \033[36m(merged)\033[m" in lines[5]
+    assert "\033[1;33mpr2 *\033[m !" in lines[6]
+    assert "(needs restack)" not in lines[6]
+    assert "\033[35mhttps://github.com/acme/widgets/pull/1\033[m" in lines[5]
+    assert "\033[34mhttps://github.com/acme/widgets/pull/2\033[m" in lines[6]
+    assert "\033[90mhttps://github.com/acme/widgets/pull/3\033[m" in lines[7]
+
+
+def test_info_colors_non_current_branch_needing_restack(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
+    stack.git.run.side_effect = lambda *args, check=True: "true" if "--get-colorbool" in args else ""
+    stack.info.return_value = [
+        BranchInfo("main", None, None, current=False),
+        BranchInfo("pr1", "main", BranchStatus.NEEDS_RESTACK, current=False),
+    ]
+
+    main(["info"], stack=stack)
+
+    assert "\033[33mpr1\033[m !" in capsys.readouterr().out
 
 
 def test_info_can_draw_each_stack_with_its_root_at_the_bottom(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:

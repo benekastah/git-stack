@@ -375,7 +375,8 @@ git stack info
   ```
 - `(needs restack)`: it's missing its parent's latest commits (or, for a
   branch on `main`, it conflicts with `main`). Run `git stack sync` or
-  `git stack restack`.
+  `git stack restack`. With color on, the branch is yellow and marked `!`
+  instead; the marker makes its status visible without relying on color.
 - `(merged)`: it was merged into its parent (see
   [When does `sync` consider a branch merged?](#when-does-sync-consider-a-branch-merged));
   `sync` or `clean` will stop tracking it.
@@ -393,7 +394,8 @@ git stack info
 - With the [GitHub adapter](#github), each branch's pull request (open or
   merged) is linked in a column at the end of its line: blue if it's open,
   grey if it's a draft, and magenta if it was merged.
-- On a terminal, the parts of each line are colored. Like git, it follows the
+- On a terminal, the parts of each line are colored and a key explains the
+  colors. Like git, it follows the
   `color.stack` setting (or `color.ui`): set it to `never` to turn colors
   off, or `always` to keep them when piping. `NO_COLOR` also turns them off.
 - `info` doesn't fetch, and compares each branch with its local parent, so a
