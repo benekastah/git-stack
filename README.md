@@ -697,7 +697,7 @@ git stack ungroup search-ui             # take search-ui's stack back out
   mistake. To merge them, run `git stack group add --move <name> -g <other group>`.
 - `info` shows a group once it has two or more stacks.
 
-### `git stack prs [<branch|glob>...] [-g <group>] [--remote origin] [-n]`
+### `git stack prs [<branch|glob>...] [-g <group>] [--remote origin] [-n] [--rebuild-stack]`
 
 Open a draft pull request on GitHub for each branch in the current stack (or
 the ones named, see [Groups](#groups)) that has none, into its stack parent,
@@ -759,6 +759,13 @@ git stack prs
   GitHub's API, with `gh`, so it doesn't need GitHub's own extension for
   stacks, [gh-stack](https://github.com/github/gh-stack)
   (`gh extension install github/gh-stack`).
+
+  Use `git stack prs --rebuild-stack` to unstack the selected pull requests on
+  GitHub and create a new stack when the existing stack doesn't match. Merged
+  pull requests remain in the old stack. It refuses if unstacking would also
+  remove an unmerged pull request outside the selected stack. If creating the
+  new stack fails, the pull requests remain unstacked; rerun `prs` to retry.
+  Add `--dry-run` to see the planned unstack and creation without changing them.
 
   ```
   <!-- git-stack -->

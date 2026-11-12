@@ -568,7 +568,9 @@ class GitHubAdapter(GitAdapter):
         )
         return {n: repository.get(f"p{n}") for n in numbers}
 
-    def update_stack_sections(self, branches: list[str], parents: Parents) -> None:
+    def update_stack_sections(
+        self, branches: list[str], parents: Parents, rebuild_stack: bool = False, dry_run: bool = False
+    ) -> None:
         """Make the stack section at the end of the description of each open
         pull request of branches, a stack parent-before-child, show the stack,
         marking that pull request (see git_stack.stack_section).
@@ -612,7 +614,9 @@ class GitHubAdapter(GitAdapter):
             n: GitHubStack.from_json(stack) if (stack := optional_field(pr, "stack", dict)) is not None else None
             for n, pr in fields.items()
         }
-        linked = shown and len(chain) > 1 and self.link_github_stack(chain, stacks)
+        linked = shown and len(chain) > 1 and self.link_github_stack(chain, stacks, rebuild_stack, dry_run)
+        if dry_run:
+            return
         for number in to_update.values():
             body = bodies[number]
             if linked or not shown:
@@ -685,7 +689,13 @@ class GitHubAdapter(GitAdapter):
             for i, head in enumerate(heads)
         }
 
-    def link_github_stack(self, chain: list[int], stacks: dict[int, GitHubStack | None]) -> bool:
+    def link_github_stack(
+        self,
+        chain: list[int],
+        stacks: dict[int, GitHubStack | None],
+        rebuild_stack: bool = False,
+        dry_run: bool = False,
+    ) -> bool:
         """Put chain, open pull requests each on the one before, bottom first,
         in one stack on GitHub, unless GITHUB_STACKS_SETTING turns that off.
         stacks is each one's stack on GitHub, if it's in one. Returns whether
@@ -705,6 +715,28 @@ class GitHubAdapter(GitAdapter):
             return True
         if not self.github_stacks_enabled():
             return False
+        if dry_run and not found:
+            self.core.emit(events.GitHubStackRebuildPlanned((), tuple(chain)))
+            return False
+        if rebuild_stack and found:
+            unrelated = sorted(
+                n
+                for existing in found.values()
+                for n, state in existing.entries
+                if state != "MERGED" and n not in chain
+            )
+            if unrelated:
+                raise StackError(
+                    "can't rebuild GitHub stacks containing other unmerged pull requests: "
+                    + ", ".join(f"#{n}" for n in unrelated)
+                )
+            if dry_run:
+                self.core.emit(events.GitHubStackRebuildPlanned(tuple(sorted(found)), tuple(chain)))
+                return False
+            for existing in found.values():
+                representative = next(n for n, state in existing.entries if state == "OPEN" and n in chain)
+                self.unstack(representative)
+            return self.stacks_api("", chain)
         if (
             len(found) > 1
             or bottom != chain[: len(bottom)]

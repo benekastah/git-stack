@@ -966,7 +966,7 @@ To merge them, run
 \f[CR]git stack group add \-\-move <name> \-g <other group>\f[R].
 .IP \(bu 2
 \f[CR]info\f[R] shows a group once it has two or more stacks.
-.SS \f[CR]git stack prs [<branch|glob>...] [\-g <group>] [\-\-remote origin] [\-n]\f[R]
+.SS \f[CR]git stack prs [<branch|glob>...] [\-g <group>] [\-\-remote origin] [\-n] [\-\-rebuild\-stack]\f[R]
 Open a draft pull request on GitHub for each branch in the current stack
 (or the ones named, see Groups) that has none, into its stack parent,
 bottom\-up.
@@ -1047,6 +1047,17 @@ gh\-stack
 .UE \c
 \ (\f[CR]gh extension install github/gh\-stack\f[R]).
 .RS 2
+.PP
+Use \f[CR]git stack prs \-\-rebuild\-stack\f[R] to unstack the selected
+pull requests on GitHub and create a new stack when the existing stack
+doesn\(aqt match.
+Merged pull requests remain in the old stack.
+It refuses if unstacking would also remove an unmerged pull request
+outside the selected stack.
+If creating the new stack fails, the pull requests remain unstacked;
+rerun \f[CR]prs\f[R] to retry.
+Add \f[CR]\-\-dry\-run\f[R] to see the planned unstack and creation
+without changing them.
 .IP
 .EX
 <!\-\- git\-stack \-\->

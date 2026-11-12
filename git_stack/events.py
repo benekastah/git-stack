@@ -300,6 +300,15 @@ class GitHubStackUnstacked:
 
 
 @dataclass(frozen=True)
+class GitHubStackRebuildPlanned:
+    """GitHub stacks to unstack and pull requests to put in a new stack."""
+
+    event_type: ClassVar[str] = "github-stack-rebuild-planned"
+    github_stacks: tuple[int, ...]
+    numbers: tuple[int, ...]
+
+
+@dataclass(frozen=True)
 class GitHubStackMismatch:
     """The pull requests numbers, a chain bottom first, weren't linked into a
     stack on GitHub, since some are in stacks there (github_stacks, by their
@@ -353,4 +362,5 @@ Event: TypeAlias = (
     | GitHubStackLinked
     | GitHubStackMismatch
     | GitHubStackUnstacked
+    | GitHubStackRebuildPlanned
 )

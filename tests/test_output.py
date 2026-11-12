@@ -21,6 +21,12 @@ def test_progress_goes_to_stdout(capsys: pytest.CaptureFixture[str]) -> None:
     assert capsys.readouterr() == ("restacking pr2 onto pr1\n", "")
 
 
+def test_stack_mismatch_suggests_rebuild(capsys: pytest.CaptureFixture[str]) -> None:
+    print_event(events.GitHubStackMismatch((1, 2), (42,)))
+
+    assert "git stack prs --rebuild-stack" in capsys.readouterr().err
+
+
 @pytest.mark.parametrize(
     ("event", "expected"),
     [

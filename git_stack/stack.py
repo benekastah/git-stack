@@ -1270,6 +1270,7 @@ class StackClient(StackCore):
         groups: Sequence[str] = (),
         remote: str = DEFAULT_REMOTE,
         dry_run: bool = False,
+        rebuild_stack: bool = False,
     ) -> PrsResult:
         """Open a draft pull request into its stack parent for each unmerged
         branch in the current stack (or in the stacks of the branches that
@@ -1293,11 +1294,17 @@ class StackClient(StackCore):
         adapter = ensure_github(make_adapter(self, remote, fetch=True), remote)
         adapter.ensure_available()
         branches = self.skip_merged(stack, parents, adapter)
-        steps = self.open_pull_requests(branches, parents, adapter, remote, dry_run)
+        steps = self.open_pull_requests(branches, parents, adapter, remote, dry_run, rebuild_stack)
         return PrsResult(steps, self.stack_infos(stack, adapter))
 
     def open_pull_requests(
-        self, branches: list[str], parents: Parents, adapter: GitHubAdapter, remote: str, dry_run: bool = False
+        self,
+        branches: list[str],
+        parents: Parents,
+        adapter: GitHubAdapter,
+        remote: str,
+        dry_run: bool = False,
+        rebuild_stack: bool = False,
     ) -> list[PullRequestStep]:
         """Do what prs does for branches, which must be unmerged,
         parent-before-child. Returns a PullRequestStep for each."""
@@ -1331,17 +1338,26 @@ class StackClient(StackCore):
                     f"opening a pull request for {b} failed{f' (after opening {opened})' if opened else ''}: {e}"
                 ) from e
             steps.append(PullRequestStep(b, parent, PullRequestAction.OPEN, title=title, number=number, url=url))
-        if branches and not dry_run:
-            self.update_stack_sections(branches, parents, adapter)
+        if branches and (not dry_run or rebuild_stack):
+            self.update_stack_sections(branches, parents, adapter, rebuild_stack, dry_run)
         return steps
 
-    def update_stack_sections(self, branches: list[str], parents: Parents, adapter: GitHubAdapter) -> None:
+    def update_stack_sections(
+        self,
+        branches: list[str],
+        parents: Parents,
+        adapter: GitHubAdapter,
+        rebuild_stack: bool = False,
+        dry_run: bool = False,
+    ) -> None:
         """Update the stack sections of branches' pull requests (see
         GitHubAdapter.update_stack_sections), one for each root, since a
         group's stacks can be on several."""
         try:
             for root in sorted({stack_root(b, parents) for b in branches}):
-                adapter.update_stack_sections([b for b in branches if stack_root(b, parents) == root], parents)
+                adapter.update_stack_sections(
+                    [b for b in branches if stack_root(b, parents) == root], parents, rebuild_stack, dry_run
+                )
         except StackError as e:
             raise StackError(f"updating the stack in pull request descriptions failed: {e}") from e
 

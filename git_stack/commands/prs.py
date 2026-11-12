@@ -13,6 +13,7 @@ class Args(argparse.Namespace):
     groups: list[str]
     remote: str
     dry_run: bool
+    rebuild_stack: bool
     json: bool
 
 
@@ -26,6 +27,11 @@ def register(subparsers: Subparsers) -> None:
     add_stack_arguments(p, "open pull requests for")
     p.add_argument("--remote", default=DEFAULT_REMOTE)
     p.add_argument(
+        "--rebuild-stack",
+        action="store_true",
+        help="unstack matching open pull requests on GitHub and rebuild their stack if it doesn't match",
+    )
+    p.add_argument(
         "-n", "--dry-run", action="store_true", help="print the pull requests it would open, without opening them"
     )
     add_json_argument(p)
@@ -33,7 +39,9 @@ def register(subparsers: Subparsers) -> None:
 
 
 def run(stack: StackClient, args: Args) -> PrsResult:
-    return stack.prs(args.branches, args.groups, remote=args.remote, dry_run=args.dry_run)
+    return stack.prs(
+        args.branches, args.groups, remote=args.remote, dry_run=args.dry_run, rebuild_stack=args.rebuild_stack
+    )
 
 
 def show(stack: StackClient, args: Args, result: PrsResult) -> None:

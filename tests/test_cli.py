@@ -158,9 +158,15 @@ def stack() -> Any:
         (["ungroup", "pr1", "-g", "feat"], "group_remove", (["pr1"], ["feat"]), {}),
         (["group", "rename", "new"], "group_rename", ("new",), {"old": None}),
         (["group", "rename", "old", "new"], "group_rename", ("new",), {"old": "old"}),
-        (["prs"], "prs", ([], []), {"remote": "origin", "dry_run": False}),
-        (["prs", "pr1", "-n", "--remote", "upstream"], "prs", (["pr1"], []), {"remote": "upstream", "dry_run": True}),
-        (["pr"], "prs", ([], []), {"remote": "origin", "dry_run": False}),
+        (["prs"], "prs", ([], []), {"remote": "origin", "dry_run": False, "rebuild_stack": False}),
+        (["pr", "--rebuild-stack"], "prs", ([], []), {"remote": "origin", "dry_run": False, "rebuild_stack": True}),
+        (
+            ["prs", "pr1", "-n", "--remote", "upstream"],
+            "prs",
+            (["pr1"], []),
+            {"remote": "upstream", "dry_run": True, "rebuild_stack": False},
+        ),
+        (["pr"], "prs", ([], []), {"remote": "origin", "dry_run": False, "rebuild_stack": False}),
         (["unrevert", "pr1-unrevert", "abc"], "unrevert", ("pr1-unrevert", ["abc"], None, []), {"remote": "origin"}),
         (
             ["unrevert", "new", "abc", "def", "--from", "release", "--stack", "pr2", "--stack", "pr2b"],

@@ -503,6 +503,51 @@ def test_prs_falls_back_when_github_stack_ends_in_a_merged_pr(
     assert events.GitHubStackMismatch((1, 3), (1000,)) in emitted
     assert stack_section.START in body(gh, 3)
 
+    before = gh.load()
+    client.prs(rebuild_stack=True, dry_run=True)
+    after = gh.load()
+    assert after["prs"] == before["prs"]
+    assert after["stacks"] == before["stacks"]
+    assert events.GitHubStackRebuildPlanned((1000,), (1, 3)) in emitted
+
+    client.prs(rebuild_stack=True)
+
+    assert gh.stacks() == [[2], [1, 3]]
+    assert stack_section.START not in body(gh, 3)
+
+
+def test_prs_rebuild_refuses_to_unstack_unrelated_pull_requests(
+    repo: Repo, gh: FakeGitHub, client: StackClient
+) -> None:
+    repo.make_stack()
+    client.push()
+    client.prs()
+    gh.enable_stacks([1, 2, 3])
+    state = gh.load()
+    state["prs"][2]["baseRefName"] = "pr1"
+    gh.save(state)
+    client.untrack(["pr2"])
+    repo.git("config", "branch.pr3.stackParent", "pr1")
+
+    with pytest.raises(StackError, match="other unmerged pull requests: #2"):
+        client.prs(rebuild_stack=True)
+
+    assert gh.stacks() == [[1, 2, 3]]
+
+
+def test_prs_rebuild_dry_run_does_not_create_a_stack(
+    repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event]
+) -> None:
+    repo.make_stack()
+    client.push()
+    client.prs()
+    gh.enable_stacks()
+
+    client.prs(rebuild_stack=True, dry_run=True)
+
+    assert gh.stacks() == []
+    assert events.GitHubStackRebuildPlanned((), (1, 2, 3)) in emitted
+
 
 def test_prs_doesnt_link_a_branching_stack_on_github(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
     gh.enable_stacks()
