@@ -556,7 +556,9 @@ git stack sync -d both          # ...and their remote branches
   branches, their remote branches, or both. A branch is untracked by the first
   `sync` or `clean` that sees it merged, so pass `-d` on that run if you want
   it deleted. Deleting a remote branch is leased to the fetched tip, so it
-  fails rather than deleting commits pushed since. Deleting the branch you're
+  fails rather than deleting commits pushed since. Only a same-named upstream
+  is deleted or suggested for deletion; a different upstream is left alone.
+  Deleting the branch you're
   on switches to its first child, or to its parent if it has none.
 - Only branches that already have a remote branch of the same name, as
   `git stack push` sets it, are pushed. A branch that was never pushed isn't,

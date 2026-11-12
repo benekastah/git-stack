@@ -730,7 +730,7 @@ class StackCore:
         git = self.git
         delete_local = delete in ("local", "both")
         remote = git.remote_branch(branch)
-        if remote is None:
+        if remote is None or not git.tracks_same_name(branch, remote[0]):
             self.remove_merged(branch, parents, delete_local)
             return True
         upstream = git.run("rev-parse", "--abbrev-ref", f"{branch}@{{upstream}}")

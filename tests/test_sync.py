@@ -107,6 +107,24 @@ def test_sync_delete_remote_deletes_only_remote_branch(repo: Repo, client: Stack
     repo.assert_stacked("pr2", "main", ["pr2 c1"])
 
 
+@pytest.mark.parametrize("delete", [None, "remote", "both"])
+def test_sync_never_deletes_or_suggests_deleting_a_different_upstream(
+    repo: Repo, client: StackClient, emitted: list[events.Event], delete: str | None
+) -> None:
+    client.branch("feature")
+    repo.commit("a", "feature\n", "feature")
+    repo.git("branch", "--set-upstream-to=origin/main", "feature")
+    repo.git("switch", "--quiet", "main")
+    repo.git("merge", "--quiet", "--ff-only", "feature")
+    repo.git("push", "--quiet")
+    repo.git("switch", "--quiet", "feature")
+
+    client.sync(delete=delete)
+
+    assert repo.git("branch", "--list", "main", cwd=repo.origin) == "* main"
+    assert not any(isinstance(e, (events.RemoteBranchKept, events.RemoteBranchDeleted)) for e in emitted)
+
+
 def test_sync_delete_both_deletes_local_and_remote_branches(repo: Repo, client: StackClient) -> None:
     repo.make_stack()
     client.push()

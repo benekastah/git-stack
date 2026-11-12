@@ -2,24 +2,6 @@
 
 Most severe first.
 
-## Deleting a merged branch's remote branch can delete someone else's
-
-`untrack_merged` deletes (with `-d remote` or `-d both`) whatever the merged
-branch's upstream is, not only the branch of the same name that
-`git stack push` sets up. `pull_upstream` already refuses other upstreams for
-this reason, but `untrack_merged` doesn't check `tracks_same_name`.
-
-A branch made with `git switch -c feature origin/release` tracks
-`origin/release`. If it's tracked with `git stack track release feature`, never
-pushed with `git stack push` (which would change its upstream), and its change
-lands in `release`, then `git stack sync -d both` runs
-`git push origin :refs/heads/release` and deletes the shared branch.
-Reproduced with the git adapter. Without `-d remote`, the note it prints
-suggests `git push origin --delete release` instead.
-
-Only the same-name remote branch should be deleted (or suggested for
-deletion); any other upstream should be left alone, as if there were none.
-
 ## `import` can track a shared branch, and `sync` rebase it onto `main`
 
 When a pull request merges into a branch that isn't local and has no pull
