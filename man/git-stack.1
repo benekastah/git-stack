@@ -570,11 +570,19 @@ With the GitHub adapter, each branch\(aqs pull request (open or merged)
 is linked in a column at the end of its line: blue if it\(aqs open, grey
 if it\(aqs a draft, and magenta if it was merged.
 .IP \(bu 2
-On a terminal, the parts of each line are colored and a key explains the
-colors.
-Like git, it follows the \f[CR]color.stack\f[R] setting (or
-\f[CR]color.ui\f[R]): set it to \f[CR]never\f[R] to turn colors off, or
-\f[CR]always\f[R] to keep them when piping.
+On a terminal, \f[CR]info\f[R] and commands that show stacks use these
+colors: yellow branches marked \f[CR]!\f[R] need restacking; the current
+branch is bold and green unless it needs restacking; cyan notes mark
+merged branches, yellow notes need attention, and red notes mark a
+missing parent.
+Pull request links are blue for open, grey for draft, magenta for
+merged, and green when just opened or imported.
+The \f[CR]*\f[R], \f[CR]!\f[R], and status text identify branch states
+without relying on color.
+When color is off, \f[CR](needs restack)\f[R] replaces \f[CR]!\f[R].
+Like git, it follows \f[CR]color.stack\f[R] (or \f[CR]color.ui\f[R]):
+set it to \f[CR]never\f[R] to turn colors off, or \f[CR]always\f[R] to
+keep them when piping.
 \f[CR]NO_COLOR\f[R] also turns them off.
 .IP \(bu 2
 \f[CR]info\f[R] doesn\(aqt fetch, and compares each branch with its

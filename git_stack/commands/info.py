@@ -143,29 +143,7 @@ def show(stack: StackClient, args: Args, result: Info) -> None:
     elif not result.stacks:
         print("no tracked branches")
     else:
-        color = use_color(stack)
-        if color:
-            paint = painter(True)
-            print("Key: " + paint("branch", "33") + " ! needs restack; * current branch")
-            print(
-                "     status: "
-                + paint("cyan", "36")
-                + " merged; "
-                + paint("yellow", "33")
-                + " needs attention; "
-                + paint("red", "31")
-                + " missing parent"
-            )
-            print(
-                "     PR: "
-                + paint("blue", "34")
-                + " open; "
-                + paint("grey", "90")
-                + " draft; "
-                + paint("magenta", "35")
-                + " merged\n"
-            )
-        print_tree(stack, result.stacks, color=color, highlight_restack=True)
+        print_tree(stack, result.stacks)
 
 
 def tree_children(branches: list[BranchInfo]) -> dict[str | GroupHeader, list[BranchInfo | GroupHeader]]:
@@ -190,16 +168,12 @@ def print_tree(
     stack: StackClient,
     branches: list[BranchInfo],
     new_links: Mapping[str, str] = {},
-    *,
-    color: bool | None = None,
-    highlight_restack: bool = False,
 ) -> None:
     """Print branches, which isn't empty, as a tree for each stack, with each
     branch's pull request linked at the end of its line. new_links is
     {branch: text}, shown in NEW_LINK's color in place of its link, for pull
     requests that were just opened, or would be."""
-    if color is None:
-        color = use_color(stack)
+    color = use_color(stack)
     paint = painter(color)
     flip = root_at_bottom(stack)
     children = tree_children(branches)
@@ -221,11 +195,11 @@ def print_tree(
             # Upside down, the tree reads the same, mirrored.
             rows.extend(reversed(drawn) if flip else drawn)
     # Pull request links go in a right-aligned column after the longest line.
-    widths = [len(tree) + len(label(row, painter(False), color and highlight_restack)) for tree, row in rows]
+    widths = [len(tree) + len(label(row, painter(False), color)) for tree, row in rows]
     links = [link_of(row, new_links) for _, row in rows]
     link_width = max(len(link[0]) if link else 0 for link in links)
     for (tree, row), width, link in zip(rows, widths, links, strict=True):
-        line = paint(tree, TREE) + label(row, paint, color and highlight_restack)
+        line = paint(tree, TREE) + label(row, paint, color)
         if link:
             text, link_color = link
             line += " " * (max(widths) - width + 2) + paint(text.rjust(link_width), link_color)

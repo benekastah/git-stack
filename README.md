@@ -393,10 +393,15 @@ git stack info
 - With the [GitHub adapter](#github), each branch's pull request (open or
   merged) is linked in a column at the end of its line: blue if it's open,
   grey if it's a draft, and magenta if it was merged.
-- On a terminal, the parts of each line are colored and a key explains the
-  colors. Like git, it follows the
-  `color.stack` setting (or `color.ui`): set it to `never` to turn colors
-  off, or `always` to keep them when piping. `NO_COLOR` also turns them off.
+- On a terminal, `info` and commands that show stacks use these colors:
+  yellow branches marked `!` need restacking; the current branch is bold and
+  green unless it needs restacking; cyan notes mark merged branches, yellow
+  notes need attention, and red notes mark a missing parent. Pull request links
+  are blue for open, grey for draft, magenta for merged, and green when just
+  opened or imported. The `*`, `!`, and status text identify branch states
+  without relying on color. When color is off, `(needs restack)` replaces `!`.
+  Like git, it follows `color.stack` (or `color.ui`): set it to `never` to turn
+  colors off, or `always` to keep them when piping. `NO_COLOR` also turns them off.
 - `info` doesn't fetch, and compares each branch with its local parent, so a
   merge on the remote only shows up once the local parent has it. `git fetch`
   alone isn't enough, since it doesn't update `main`; run `git stack clean`
