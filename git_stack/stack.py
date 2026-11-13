@@ -798,8 +798,11 @@ class StackClient(StackCore):
         for branch in stack:
             if branch not in parents:
                 raise StackError(f"{branch} isn't in a stack")
-        self.ensure_owned((b for branch in stack for b in self.stack(branch, parents)), allow_shared, "unrevert")
         parent = from_branch or (stack_root(stack[0], parents) if stack else self.default_branch(remote))
+        affected = (
+            b for branch in (*stack, parent) if stack and branch in parents for b in self.stack(branch, parents)
+        )
+        self.ensure_owned(affected, allow_shared, "unrevert")
         self.ensure_local_branch_parent(parent)
         for branch in stack:
             ensure_no_cycle(branch, name, {**parents, name: parent})

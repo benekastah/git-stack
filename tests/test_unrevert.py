@@ -54,6 +54,26 @@ def test_unrevert_requires_override_for_a_shared_stack(repo: Repo, client: Stack
     assert repo.git("rev-parse", "refs/heads/pr2") != before
 
 
+def test_unrevert_requires_override_when_destination_is_shared(repo: Repo, client: StackClient) -> None:
+    repo.make_stack()
+    client.set_ownership("owned")
+    repo.git("switch", "--quiet", "main")
+    client.branch("shared")
+    repo.write("d", "shared\n")
+    repo.git("add", "d")
+    repo.git("commit", "--quiet", "-m", "shared")
+    client.set_ownership("shared")
+    before = repo.git("rev-parse", "pr1")
+
+    with pytest.raises(StackError, match="unrevert --allow-shared"):
+        client.unrevert("restore", ["shared"], from_branch="shared", stack=["pr1"])
+    assert not client.git.local_branch_exists("restore")
+    assert repo.git("rev-parse", "pr1") == before
+
+    client.unrevert("restore", ["shared"], from_branch="shared", stack=["pr1"], allow_shared=True)
+    assert repo.git("rev-parse", "pr1") != before
+
+
 def test_unrevert_after_sync_moved_the_stack_onto_main(repo: Repo, client: StackClient) -> None:
     repo.make_stack()
     client.push()
