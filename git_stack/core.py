@@ -29,7 +29,7 @@ PENDING_BASE_KEY = "stackPendingBase"
 PENDING_RESTACK_FROM_KEY = "stackPendingRestackFrom"
 # Same idea for pulling upstream commits with `git cherry-pick`: the branch tip
 # before the pull, the upstream tip being pulled, and the identity (see
-# GitClient.identities) of each commit being cherry-picked, one per line.
+# GitClient.identity_counts) of each commit being cherry-picked, one per line.
 PENDING_PULL_FROM_KEY = "stackPendingPullFrom"
 PENDING_PULLED_KEY = "stackPendingPulled"
 LEGACY_PULL_IDENTITIES_KEY = "stackPendingPullIdentities"
@@ -629,16 +629,28 @@ class StackCore:
         base = git.config_get(branch, BASE_KEY)
         if upstream_tip in (None, tip) or base is None or git.config_get(branch, PULLED_KEY) != tip:
             return False
-        own = git.identities(f"{base}..{tip}")
+        own = git.identity_counts(f"{base}..{tip}")
         # The upstream may be on commits the local parent doesn't have yet,
         # e.g. main's latest, when it hasn't been fetched and fast-forwarded.
         forks = (
             git.run("merge-base", ref, upstream_tip, check=False)
             for ref in (f"refs/heads/{parent}", f"{parent}@{{upstream}}")
         )
-        new_base = next((f for f in forks if f and git.identities(f"{f}..{upstream_tip}") == own), None)
+        new_base = next((f for f in forks if f and git.identity_counts(f"{f}..{upstream_tip}") == own), None)
         if not own or new_base is None:
             return False
+        if git.run("rev-list", "--merges", f"{base}..{tip}") or git.run(
+            "rev-list", "--merges", f"{new_base}..{upstream_tip}"
+        ):
+            raise StackError(
+                f"{remote}/{branch} may be a rebased copy of {branch}, but contains merge commits; "
+                "inspect both histories before deciding how to proceed"
+            )
+        if git.commit_changes(f"{base}..{tip}") != git.commit_changes(f"{new_base}..{upstream_tip}"):
+            raise StackError(
+                f"{remote}/{branch} has commits matching {branch}'s authors, dates and subjects "
+                "but different changes; inspect both histories before deciding how to proceed"
+            )
         if branch == git.current_branch():
             # Like a fast-forward, it keeps uncommitted changes, or fails
             # without touching them.

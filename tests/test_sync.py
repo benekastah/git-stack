@@ -377,6 +377,31 @@ def test_sync_requires_a_choice_before_pulling_commits_seen_when_retracked(repo:
     assert "remote" in repo.own_commits("pr1", "main")
 
 
+@pytest.mark.parametrize("command", ["sync", "push"])
+@pytest.mark.parametrize("remote_content", ["different work\n", "my work \n"])
+def test_remote_commit_with_same_identity_but_changed_content_is_not_taken(
+    repo: Repo, client: StackClient, command: str, remote_content: str
+) -> None:
+    client.branch("pr1")
+    repo.commit("a", "my work\n", "work")
+    client.push()
+    original = repo.git("rev-parse", "refs/heads/pr1")
+    repo.git("fetch", "--quiet", cwd=repo.forge)
+    repo.git("switch", "--quiet", "-C", "pr1", "origin/pr1", cwd=repo.forge)
+    (repo.forge / "a").write_text(remote_content)
+    repo.git("add", "a", cwd=repo.forge)
+    repo.git("commit", "--quiet", "--amend", "--no-edit", cwd=repo.forge)
+    repo.git("push", "--quiet", "--force-with-lease", "origin", "pr1", cwd=repo.forge)
+    repo.git("fetch", "--quiet")
+    remote_tip = repo.git("rev-parse", "refs/remotes/origin/pr1")
+
+    with pytest.raises(StackError, match="different changes"):
+        getattr(client, command)()
+
+    assert repo.git("rev-parse", "refs/heads/pr1") == original
+    assert repo.git("rev-parse", "refs/heads/pr1", cwd=repo.origin) == remote_tip
+
+
 def test_sync_does_not_replay_old_history_after_retracking_a_rewritten_branch(repo: Repo, client: StackClient) -> None:
     client.branch("pr1")
     repo.commit("a", "old\n", "old work")

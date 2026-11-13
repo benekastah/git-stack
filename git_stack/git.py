@@ -1,4 +1,5 @@
 import os
+import re
 import subprocess
 import time
 from collections import Counter
@@ -280,11 +281,27 @@ class GitClient:
         lines = self.run("patch-id", "--stable", input=patches + "\n").splitlines()
         return [(patch_id, commit) for patch_id, commit in (line.split() for line in lines)]
 
-    def identities(self, *args: str) -> set[str]:
-        """The author, author date and subject of each commit `git log <args>`
-        lists, e.g. "Jane Doe <jane@example.com> 1700000000 +0100 Fix the parser"."""
-        return set(self.run("log", "--format=%an <%ae> %ad %s", "--date=raw", *args).splitlines())
-
     def identity_counts(self, *args: str) -> Counter[str]:
         """Count commit identities, including repeated author, date and subject."""
         return Counter(self.run("log", "--format=%an <%ae> %ad %s", "--date=raw", *args).splitlines())
+
+    def commit_changes(self, revision_range: str) -> Counter[tuple[str, bytes]]:
+        """Count commit identities and changed lines, ignoring their context and offsets."""
+        commits = self.run("log", "--format=%H%x00%an <%ae> %ad %s", "--date=raw", revision_range).splitlines()
+        changes: Counter[tuple[str, bytes]] = Counter()
+        for entry in commits:
+            commit, _, identity = entry.partition("\0")
+            result = subprocess.run(
+                self._command("show", "--format=", "--binary", "--no-ext-diff", "--unified=0", commit),
+                capture_output=True,
+                check=False,
+            )
+            if result.returncode:
+                raise StackError(f"git show {commit} failed:\n{result.stderr.decode(errors='replace').strip()}")
+            lines = []
+            for line in result.stdout.splitlines(keepends=True):
+                if line.startswith(b"index "):
+                    continue
+                lines.append(re.sub(rb"^@@ .*? @@[^\n]*", b"@@", line) if line.startswith(b"@@ ") else line)
+            changes[identity, b"".join(lines)] += 1
+        return changes

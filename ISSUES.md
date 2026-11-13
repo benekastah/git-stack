@@ -2,20 +2,6 @@
 
 Most severe first.
 
-## Changed remote commits can be mistaken for a rebase of local work
-
-`take_upstream_rebase` decides that an upstream branch is a rebased copy of
-the local branch by comparing each commit's author, author date, and subject,
-without comparing its changes. If another clone amends a commit's contents
-without changing those identity fields and force-pushes it, `sync` (or `push`
-without `--force`) can move the local branch to the changed remote commit. The
-local commit is no longer on the branch, although it may be recoverable from
-the reflog. Reproduced by amending a pushed commit's file in another clone with
-the same subject and author date, then running `sync`: the local branch moved
-to the amended content. Refuse or ask for an explicit choice when matching
-identities have different changes; conflict resolution during a real rebase
-needs special care.
-
 ## `unrevert` rewrites shared stacks without an override
 
 `unrevert --stack` moves the named branches and calls `restack_all` directly,
