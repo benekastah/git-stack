@@ -462,7 +462,9 @@ class GitHubAdapter(GitAdapter):
             self.git.run("rev-list", "--no-merges", ref, "--not", f"refs/heads/{parent}").split()
         )
 
-    def before_push(self, to_push: list[str], parents: Parents, rebuild_stack: bool = False) -> None:
+    def before_push(
+        self, to_push: list[str], parents: Parents, rebuild_stack: bool = False, scope: list[str] | None = None
+    ) -> None:
         """Point the open pull requests of branches about to be pushed at their
         stack parents, where the parent is already on the remote.
 
@@ -475,6 +477,9 @@ class GitHubAdapter(GitAdapter):
         # until after the push. Check its stack now to avoid pushing first and
         # only then discovering that unstacking requires consent.
         prs = self.pull_requests()
+        allowed = {
+            prs[b].number for b in (scope if scope is not None else to_push) if b in prs and prs[b].state == "OPEN"
+        }
         pending = {
             prs[b].number
             for b in to_push
@@ -483,41 +488,53 @@ class GitHubAdapter(GitAdapter):
             and prs[b].base != parents[b]
             and self.git.rev(f"refs/remotes/{self.remote}/{parents[b]}") is None
         }
-        if pending and not rebuild_stack:
+        if pending:
             try:
                 fields = self.pull_request_fields(pending, STACK_FIELDS)
             except StackError as e:
                 if "Field 'stack' doesn't exist on type 'PullRequest'" not in str(e):
                     raise StackError(
-                        "couldn't check whether pull requests need unstacking before pushing; "
-                        "rerun with --rebuild-stack to allow it"
+                        "couldn't check whether pull requests need unstacking before pushing; nothing was pushed"
                     ) from e
                 fields = {}
             stacked = sorted(n for n, pr in fields.items() if optional_field(pr, "stack", dict) is not None)
-            if stacked:
+            if stacked and not rebuild_stack:
                 raise StackError(
                     f"changing the base of {', '.join(f'#{n}' for n in stacked)} requires unstacking its "
                     "GitHub stack; rerun with --rebuild-stack to allow it"
                 )
+            if rebuild_stack:
+                for n in stacked:
+                    stack = optional_field(fields[n], "stack", dict)
+                    if stack is not None:
+                        self.ensure_stack_scope(GitHubStack.from_json(stack), allowed)
         for b in to_push:
             if self.git.rev(f"refs/remotes/{self.remote}/{parents[b]}") is not None:
-                self.retarget(b, parents[b], rebuild_stack)
+                self.retarget(b, parents[b], rebuild_stack, allowed)
 
     def after_push(
-        self, pushed: list[str], parents: Parents, opening: bool = False, rebuild_stack: bool = False
+        self,
+        pushed: list[str],
+        parents: Parents,
+        opening: bool = False,
+        rebuild_stack: bool = False,
+        scope: list[str] | None = None,
     ) -> None:
         """Point the open pull requests of pushed branches at their stack parents,
         if before_push couldn't because the parent wasn't on the remote yet, and
         say which pushed branches have none, unless they're opened next."""
         prs = self.pull_requests()
+        allowed = {
+            prs[b].number for b in (scope if scope is not None else pushed) if b in prs and prs[b].state == "OPEN"
+        }
         for b in pushed:
             if b in prs:
-                self.retarget(b, parents[b], rebuild_stack)
+                self.retarget(b, parents[b], rebuild_stack, allowed)
         without = tuple(b for b in pushed if b not in prs)
         if without and not opening:
             self.core.emit(events.NoPullRequests(without))
 
-    def retarget(self, branch: str, base: str, rebuild_stack: bool = False) -> None:
+    def retarget(self, branch: str, base: str, rebuild_stack: bool = False, allowed: set[int] | None = None) -> None:
         """Point branch's pull request at base, if it's open and isn't already."""
         prs = self.pull_requests()
         pr = prs.get(branch)
@@ -537,18 +554,38 @@ class GitHubAdapter(GitAdapter):
                     f"changing #{pr.number}'s base requires unstacking its GitHub stack; "
                     "rerun this command with --rebuild-stack to allow it"
                 ) from e
-            self.unstack(pr.number)
+            self.unstack(pr.number, allowed or set())
             self.gh(*edit)
         prs[branch] = replace(pr, base=base)
         self.core.emit(events.PullRequestRetargeted(branch, pr.number, base))
 
-    def unstack(self, number: int) -> None:
+    def ensure_stack_scope(self, stack: GitHubStack, allowed: set[int]) -> None:
+        """Refuse to unstack PRs outside the selected local stack."""
+        unrelated = sorted(n for n, state in stack.entries if state != "MERGED" and n not in allowed)
+        if unrelated:
+            raise StackError(
+                "can't rebuild GitHub stacks containing other unmerged pull requests: "
+                + ", ".join(f"#{n}" for n in unrelated)
+            )
+
+    def unstack(self, number: int, allowed: set[int]) -> None:
         """Take the open pull requests of pull request number's stack on GitHub
         out of it. Merged ones stay in it."""
+        fields = self.pull_request_fields([number], STACK_FIELDS)
+        stack_field = optional_field(fields[number], "stack", dict)
+        if stack_field is None:
+            raise StackError(f"GitHub no longer reports #{number} in a stack; retry the command")
+        github_stack = GitHubStack.from_json(stack_field)
+        self.ensure_stack_scope(github_stack, allowed)
         found = parse_json(self.gh("api", "--hostname", self.host, f"{self.stacks_path()}?pull_request={number}"))
         if not isinstance(found, list) or not found:
             raise StackError(f"GitHub says #{number} is in a stack, but doesn't say which: {found!r}")
         stack = field(found[0], "number", int)
+        if stack != github_stack.number:
+            raise StackError(f"#{number}'s GitHub stack changed while checking it; retry the command")
+        current = {field(pr, "number", int) for pr in field(found[0], "pull_requests", list)}
+        if current != {n for n, _ in github_stack.entries}:
+            raise StackError(f"GitHub stack {stack} changed while checking it; retry the command")
         self.gh("api", "--hostname", self.host, "-X", "POST", f"{self.stacks_path()}/{stack}/unstack")
         self.core.emit(events.GitHubStackUnstacked(stack, number))
 
@@ -675,6 +712,8 @@ class GitHubAdapter(GitAdapter):
             n: GitHubStack.from_json(stack) if (stack := optional_field(pr, "stack", dict)) is not None else None
             for n, pr in fields.items()
         }
+        if dry_run and rebuild_stack and self.plan_retargets(to_update, prs, parents, stacks, chain):
+            return
         linked = shown and len(chain) > 1 and self.link_github_stack(chain, stacks, rebuild_stack, dry_run)
         if dry_run:
             return
@@ -686,6 +725,30 @@ class GitHubAdapter(GitAdapter):
                 new_body = stack_section.replace(body, stack_section.render(root, tree, set(merged.values()), number))
             if new_body != body:
                 self.gh("pr", "edit", str(number), "--repo", self.repo, "--body-file", "-", input=new_body)
+
+    def plan_retargets(
+        self,
+        to_update: dict[str, int],
+        prs: dict[str, PullRequest],
+        parents: Parents,
+        stacks: dict[int, GitHubStack | None],
+        chain: list[int],
+    ) -> bool:
+        """Report unstacking needed for retargets in a dry run, if any."""
+        affected = [n for b, n in to_update.items() if prs[b].base != parents[b] and stacks[n] is not None]
+        if not affected:
+            return False
+        can_link = len(chain) > 1 and self.github_stacks_enabled()
+        found = {
+            stack.number: stack for n, stack in stacks.items() if stack is not None and (n in affected or can_link)
+        }
+        for stack in found.values():
+            self.ensure_stack_scope(stack, set(to_update.values()))
+        if can_link:
+            self.core.emit(events.GitHubStackRebuildPlanned(tuple(sorted(found)), tuple(chain)))
+        else:
+            self.core.emit(events.GitHubStackUnstackPlanned(tuple(sorted(found)), tuple(sorted(affected))))
+        return True
 
     def merged_parents(self, prs: dict[int, object], root: str) -> dict[int, int]:
         """{number: the merged pull request it was last stacked on} for the
@@ -796,7 +859,7 @@ class GitHubAdapter(GitAdapter):
                 return False
             for existing in found.values():
                 representative = next(n for n, state in existing.entries if state == "OPEN" and n in chain)
-                self.unstack(representative)
+                self.unstack(representative, set(chain))
             return self.stacks_api("", chain)
         if (
             len(found) > 1

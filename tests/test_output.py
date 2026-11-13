@@ -27,6 +27,12 @@ def test_stack_mismatch_suggests_rebuild(capsys: pytest.CaptureFixture[str]) -> 
     assert "git stack prs --rebuild-stack" in capsys.readouterr().err
 
 
+def test_unstack_preview_reports_stack_and_pull_requests() -> None:
+    assert message(events.GitHubStackUnstackPlanned((42,), (12,))) == (
+        "would unstack GitHub stack 42 to retarget #12 (merged pull requests remain)"
+    )
+
+
 @pytest.mark.parametrize(
     ("event", "expected"),
     [

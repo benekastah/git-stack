@@ -211,11 +211,18 @@ class GitAdapter:
         """Fail now if whatever the adapter asks about merges can't answer,
         rather than falling back to the repository alone."""
 
-    def before_push(self, to_push: list[str], parents: Parents, rebuild_stack: bool = False) -> None:
+    def before_push(
+        self, to_push: list[str], parents: Parents, rebuild_stack: bool = False, scope: list[str] | None = None
+    ) -> None:
         """Called before to_push, a stack's unmerged branches, are pushed."""
 
     def after_push(
-        self, pushed: list[str], parents: Parents, opening: bool = False, rebuild_stack: bool = False
+        self,
+        pushed: list[str],
+        parents: Parents,
+        opening: bool = False,
+        rebuild_stack: bool = False,
+        scope: list[str] | None = None,
     ) -> None:
         """Called once pushed, a stack's unmerged branches, were pushed. opening
         says pull requests are opened for them next."""

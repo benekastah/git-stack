@@ -2,24 +2,6 @@
 
 Most severe first.
 
-## Retargeting can unstack unrelated pull requests
-
-With `--rebuild-stack`, a PR base change that GitHub rejects calls `unstack`
-on its entire GitHub stack. Unlike the separate rebuild path, this doesn't
-check for unmerged PRs outside the selected local stack. Reproduced with an
-unrelated open PR in the same GitHub stack: `prs --rebuild-stack` removed it
-from that stack too. The option authorizes rebuilding, but doesn't identify the
-additional PRs before doing so.
-
-## A rebuild dry run can omit the unstack it would need
-
-`prs --rebuild-stack --dry-run` skips PR retargeting. If the GitHub stack has
-the right PR numbers but a PR's base differs from its local parent, the dry run
-reports no rebuild, while the real command must unstack that GitHub stack to
-retarget the PR. Reproduced by changing the stored base of a PR in a stack
-without changing its membership. The preview should report the affected stack
-and its PRs before the user opts in.
-
 ## Old copies of rebased commits can be pulled back in
 
 `unpulled_commits` recognizes old copies of the branch's own rebased commits by

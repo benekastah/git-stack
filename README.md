@@ -785,8 +785,9 @@ git stack prs
   instead. GitHub doesn't change
   the base of a pull request in a stack either. When a stack is reshaped
   (e.g. a branch is put in its middle), `push`, `sync`, and `prs` refuse to
-  unstack it to change those bases unless given `--rebuild-stack`. That option
-  can unstack other open pull requests in the same GitHub stack. Run `prs` to
+  unstack it to change those bases unless given `--rebuild-stack`. It refuses
+  if the GitHub stack includes unmerged PRs outside the selected local stacks.
+  Run `prs` to
   link them again, or use `push --prs --rebuild-stack` to do both together.
   `sync` may already have changed local branches before it reaches this check.
   To stop it linking them, run
