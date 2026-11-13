@@ -1451,6 +1451,10 @@ run \f[CR]git rebase \-\-continue\f[R] /
 then rerun the git\-stack command to finish the rest of the stack.
 The new parent and base (and the pulled upstream commits) are recorded
 only if the operation actually completed.
+To recognize a manually completed restack, git\-stack uses the
+branch\(aqs reflog.
+If that entry is unavailable, inspect the branch and re\-track it with
+\f[CR]git stack track <parent> \-\-base <sha>\f[R].
 .PP
 \f[CR]restack\f[R] and \f[CR]sync\f[R] refuse to start with uncommitted
 changes, but not with untracked files.

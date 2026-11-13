@@ -227,6 +227,20 @@ class GitClient:
         """Every commit branch has pointed at, as far back as its reflog goes."""
         return self.run("log", "--walk-reflogs", "--format=%H", f"refs/heads/{branch}", check=False).split()
 
+    def finished_rebase(self, branch: str, before: str, onto: str) -> bool:
+        """Whether the branch reflog records a rebase onto onto since before."""
+        entries = self.run(
+            "log", "--walk-reflogs", "--format=%H%x00%gs", f"refs/heads/{branch}", check=False
+        ).splitlines()
+        finished = False
+        for entry in entries:
+            tip, _, message = entry.partition("\0")
+            if tip == before:
+                return finished
+            if message == f"rebase (finish): refs/heads/{branch} onto {onto}":
+                finished = True
+        return False
+
     def conflicts(self, branch: str, target: str) -> bool:
         """Whether merging branch into target would conflict."""
         result = subprocess.run(

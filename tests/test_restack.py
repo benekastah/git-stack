@@ -176,6 +176,44 @@ def test_aborted_restack_keeps_previous_base(repo: Repo, client: StackClient) ->
     assert repo.config("pr1", "stackBase") == old_base
 
 
+@pytest.mark.parametrize("commit_after_abort", [False, True])
+def test_aborted_restack_onto_ancestor_keeps_parent_and_base(
+    repo: Repo, client: StackClient, commit_after_abort: bool
+) -> None:
+    client.branch("parent")
+    repo.commit("a", "parent\n", "parent")
+    client.branch("child")
+    repo.commit("a", "child\n", "child")
+    old_base = repo.config("child", "stackBase")
+
+    with pytest.raises(StackError, match="stopped on a conflict"):
+        client.restack(onto="main")
+    repo.git("rebase", "--abort")
+    if commit_after_abort:
+        repo.commit("b", "more work\n", "more work")
+    client.info(offline=True)
+
+    assert repo.config("child", "stackParent") == "parent"
+    assert repo.config("child", "stackBase") == old_base
+
+
+def test_manually_completed_restack_onto_ancestor_records_parent(repo: Repo, client: StackClient) -> None:
+    client.branch("parent")
+    repo.commit("a", "parent\n", "parent")
+    client.branch("child")
+    repo.commit("a", "child\n", "child")
+
+    with pytest.raises(StackError, match="stopped on a conflict"):
+        client.restack(onto="main")
+    repo.write("a", "child\n")
+    repo.git("add", "a")
+    repo.git("rebase", "--continue")
+    client.info(offline=True)
+
+    assert repo.config("child", "stackParent") == "main"
+    assert repo.config("child", "stackBase") == repo.git("rev-parse", "refs/heads/main")
+
+
 def test_aborted_restack_onto_keeps_previous_parent(repo: Repo, client: StackClient) -> None:
     repo.make_stack()
     old_base = repo.config("pr2", "stackBase")

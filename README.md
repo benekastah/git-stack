@@ -992,7 +992,9 @@ If a rebase, cherry-pick or revert stops on a conflict, resolve it and run
 `git revert --continue` (or `--abort`) as usual,
 then rerun the git-stack command to finish the rest of the stack. The new
 parent and base (and the pulled upstream commits) are recorded only if the
-operation actually completed.
+operation actually completed. To recognize a manually completed restack,
+git-stack uses the branch's reflog. If that entry is unavailable, inspect the
+branch and re-track it with `git stack track <parent> --base <sha>`.
 
 `restack` and `sync` refuse to start with uncommitted changes, but not
 with untracked files. If one is in the way of a commit being replayed, git

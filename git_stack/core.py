@@ -25,6 +25,7 @@ TRACK_UPSTREAM_KEY = "stackTrackUpstream"
 # plain `git rebase --continue` (or back out with `git rebase --abort`).
 PENDING_PARENT_KEY = "stackPendingParent"
 PENDING_BASE_KEY = "stackPendingBase"
+PENDING_RESTACK_FROM_KEY = "stackPendingRestackFrom"
 # Same idea for pulling upstream commits with `git cherry-pick`: the branch tip
 # before the pull, the upstream tip being pulled, and the identity (see
 # GitClient.identities) of each commit being cherry-picked, one per line.
@@ -307,7 +308,7 @@ class StackCore:
         if self.git.run("status", "--porcelain", "--untracked-files=no"):
             raise StackError("you have uncommitted changes; commit or stash them first")
 
-    def settle(self, branch: str, forget_unfinished: bool = True) -> None:
+    def settle(self, branch: str, forget_unfinished: bool = True, restack_completed: bool = False) -> None:
         """Record the result of an interrupted restack or pull, if there was one.
 
         If the rebase finished, the pending parent commit is now in the branch's
@@ -328,16 +329,21 @@ class StackCore:
         Must not be called while a rebase or cherry-pick is in progress, since the
         branch hasn't been updated yet.
         """
-        self.settle_restack(branch, forget_unfinished)
+        self.settle_restack(branch, forget_unfinished, restack_completed)
         self.settle_pull(branch, forget_unfinished)
 
-    def settle_restack(self, branch: str, forget_unfinished: bool) -> None:
+    def settle_restack(self, branch: str, forget_unfinished: bool, completed: bool = False) -> None:
         git = self.git
         pending_parent = git.config_get(branch, PENDING_PARENT_KEY)
         if pending_parent is None:
             return
         pending_base = git.config_get(branch, PENDING_BASE_KEY)
-        if pending_base is not None and git.is_ancestor(pending_base, f"refs/heads/{branch}"):
+        before = git.config_get(branch, PENDING_RESTACK_FROM_KEY)
+        if (
+            pending_base is not None
+            and (completed or (before is not None and git.finished_rebase(branch, before, pending_base)))
+            and git.is_ancestor(pending_base, f"refs/heads/{branch}")
+        ):
             self.set_parent(branch, pending_parent)
             git.config_set(branch, BASE_KEY, pending_base)
         elif not forget_unfinished or git.other_worktree_of(branch) is not None:
@@ -347,6 +353,7 @@ class StackCore:
         # restack since we read them.
         git.config_unset(branch, PENDING_PARENT_KEY, pending_parent)
         git.config_unset(branch, PENDING_BASE_KEY, pending_base)
+        git.config_unset(branch, PENDING_RESTACK_FROM_KEY, before)
 
     def settle_pull(self, branch: str, forget_unfinished: bool) -> None:
         git = self.git
@@ -485,15 +492,17 @@ class StackCore:
             self.emit(events.NotRestackedInOtherWorktree(branch, worktree))
             return False
         self.emit(events.Restacking(branch, parent))
+        git.config_set(branch, PENDING_RESTACK_FROM_KEY, git.tip(branch))
         git.config_set(branch, PENDING_PARENT_KEY, parent)
         git.config_set(branch, PENDING_BASE_KEY, parent_tip)
         if git.passthrough("rebase", "--no-update-refs", "--onto", parent_tip, base, branch):
-            self.settle(branch)
+            self.settle(branch, restack_completed=True)
             return True
         if git.operation_in_progress():
             raise self.stopped(f"restacking {branch}", "rebase", "rerun this command to finish the stack")
         git.config_unset(branch, PENDING_PARENT_KEY)
         git.config_unset(branch, PENDING_BASE_KEY)
+        git.config_unset(branch, PENDING_RESTACK_FROM_KEY)
         raise StackError(f"restacking {branch} onto {parent} failed; see git's output above")
 
     def restack_all(self, branches: Iterable[str], parents: Parents, latest: bool = False) -> None:
@@ -691,6 +700,7 @@ class StackCore:
             TRACK_UPSTREAM_KEY,
             PENDING_PARENT_KEY,
             PENDING_BASE_KEY,
+            PENDING_RESTACK_FROM_KEY,
             PENDING_PULL_FROM_KEY,
             PENDING_PULLED_KEY,
             PENDING_PULL_IDENTITIES_KEY,

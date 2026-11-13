@@ -2,19 +2,6 @@
 
 Most severe first.
 
-## Aborting a restack onto an ancestor can record it as completed
-
-`settle_restack` treats the pending parent tip being an ancestor of the branch
-as proof that a rebase finished. If `restack --onto` targets an ancestor
-already in the branch's history, that is true before the rebase starts. When
-the rebase stops on a conflict and the user runs `git rebase --abort`, the
-next command that settles metadata records the new parent and base anyway.
-Reproduced with `main -> parent -> child`, where both branches edit the same
-line: `restack --onto main` from `child` conflicts, aborting restores the old
-branch, and `info` then changes its recorded parent from `parent` to `main`.
-Later restacks can replay the old parent's commits as if they belong to the
-child. Record enough pre-rebase state to distinguish an abort from completion.
-
 ## Skipping a pulled commit can cause it to be dropped from the remote
 
 `settle_pull` checks completion using sets of commit identities (author, author
