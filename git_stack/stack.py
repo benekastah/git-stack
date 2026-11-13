@@ -932,13 +932,15 @@ class StackClient(StackCore):
         if not self.git.passthrough("switch", "--quiet", branch):
             raise StackError(f"switching to {branch} failed; see git's output above")
 
-    def info(self, branches: Sequence[str] = (), groups: Sequence[str] = (), offline: bool = False) -> list[BranchInfo]:
+    def info(
+        self, branches: Sequence[str] = (), groups: Sequence[str] = (), offline: bool = False, current: bool = False
+    ) -> list[BranchInfo]:
         """Every tracked stack (or the stacks of the branches that branches and
         groups name, see named), as a list of BranchInfo: each stack's root, then its
         branches, parent-before-child. offline checks for merges like the git
         adapter does, without asking GitHub about pull requests."""
         parents = self.settled_branches()
-        if branches or groups:
+        if current or branches or groups:
             parents = {b: parents[b] for b in self.selected_stacks(branches, groups, parents, "show")}
         adapter = GitAdapter(self) if offline else make_adapter(self, DEFAULT_REMOTE, fetch=False)
         return self.branch_infos(parents, adapter)

@@ -265,6 +265,9 @@ argument can be a branch (its stack) or a glob of branch names, matched
 like \f[CR]git branch \-\-list\f[R] does (the stacks of the branches it
 matches), and \f[CR]\-g\f[R]/\f[CR]\-\-group <group>\f[R], which can be
 given more than once, names a group\(aqs stacks.
+Without a name, \f[CR]\-g\f[R] selects the current stack and its group;
+put it after positional branches, since the following word is read as a
+group name.
 \f[CR]untrack\f[R] takes globs too, but untracks the branches
 themselves, not their stacks, and doesn\(aqt take \f[CR]\-g\f[R].
 Quote a glob, so the shell doesn\(aqt expand it:
@@ -504,10 +507,17 @@ The renamed branch\(aqs upstream is unset, so the next
 open its pull request again.
 Delete the old remote branch yourself
 (\f[CR]git push origin :add\-api\f[R]) if you no longer want it.
-.SS \f[CR]git stack info [<branch|glob>...] [\-g <group>] [\-\-json] [\-\-offline]\f[R]
+.SS \f[CR]git stack info [<branch|glob>...] [\-g [<group>]] [\-c] [\-\-json] [\-\-offline]\f[R]
 Show every tracked stack (or the ones named, see Groups) as a tree, with
 its root (e.g.
 \f[CR]main\f[R]) on top and the branches built on it below.
+Use \f[CR]\-\-current\f[R] (or \f[CR]\-c\f[R]) to show the current
+stack, including stacks in its group.
+It cannot be combined with branch or group selectors and requires a
+tracked current branch.
+It also filters \f[CR]\-\-json\f[R] output.
+\f[CR]\-g\f[R] without a name also selects the current stack and its
+group, and can be combined with other selectors.
 .PP
 \f[B]When would I use it?\f[R] When you want to see your stacks and what
 needs doing: which branches depend on which, which need a restack, and

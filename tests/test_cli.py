@@ -108,6 +108,9 @@ def stack() -> Any:
         (["info"], "info", ([], []), {"offline": False}),
         (["info", "fix-*", "-g", "search", "--offline"], "info", (["fix-*"], ["search"]), {"offline": True}),
         (["info", "--json"], "info", ([], []), {"offline": False}),
+        (["info", "--current", "--json"], "info", (), {"current": True, "offline": False}),
+        (["info", "-c"], "info", (), {"current": True, "offline": False}),
+        (["info", "-g", "--offline"], "info", ([], [""]), {"offline": True}),
         (["next"], "next", (), {}),
         (["prev"], "prev", (), {}),
         (["restack"], "restack", ([], []), {"onto": None, "squash": False, "latest": False}),
@@ -490,6 +493,15 @@ def test_info_without_stacks(stack: Any, capsys: pytest.CaptureFixture[str]) -> 
     main(["info"], stack=stack)
 
     assert capsys.readouterr().out == "no tracked branches\n"
+
+
+@pytest.mark.parametrize("selectors", [["pr1"], ["--group", "feature"]])
+def test_info_current_rejects_other_selectors(
+    stack: Any, capsys: pytest.CaptureFixture[str], selectors: list[str]
+) -> None:
+    assert main(["info", "--current", *selectors], stack=stack) == 1
+    assert "--current cannot be combined with branches or groups" in capsys.readouterr().err
+    stack.info.assert_not_called()
 
 
 def test_sync_shows_the_stacks_then_lists_branches_left_to_push(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:

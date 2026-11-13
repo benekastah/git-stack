@@ -158,7 +158,9 @@ one when you name them, from any branch, and `info` shows only the stacks you
 name: each argument can be a branch (its stack) or a glob of branch names,
 matched like `git branch --list` does (the stacks of the branches it matches),
 and `-g`/`--group <group>`, which can be given more than once, names a group's
-stacks. `untrack` takes globs too, but untracks the branches themselves, not
+stacks. Without a name, `-g` selects the current stack and its group; put it
+after positional branches, since the following word is read as a group name.
+`untrack` takes globs too, but untracks the branches themselves, not
 their stacks, and doesn't take `-g`. Quote a glob, so the shell doesn't
 expand it:
 
@@ -344,10 +346,15 @@ git stack rename add-api api-v2
   Delete the old remote branch yourself (`git push origin :add-api`) if you
   no longer want it.
 
-### `git stack info [<branch|glob>...] [-g <group>] [--json] [--offline]`
+### `git stack info [<branch|glob>...] [-g [<group>]] [-c] [--json] [--offline]`
 
 Show every tracked stack (or the ones named, see [Groups](#groups)) as a tree,
 with its root (e.g. `main`) on top and the branches built on it below.
+Use `--current` (or `-c`) to show the current stack, including stacks in its
+group. It cannot be combined with branch or group selectors and requires a
+tracked current branch. It also filters `--json` output.
+`-g` without a name also selects the current stack and its group, and can be
+combined with other selectors.
 
 **When would I use it?** When you want to see your stacks and what needs doing:
 which branches depend on which, which need a restack, and which were merged.
@@ -938,7 +945,7 @@ its usual output, it prints a JSON object per line
 ([JSON Lines](https://jsonlines.org)) as it goes: one for each thing that
 happens, then one with the result. git's own output, e.g. from fetching or
 rebasing, goes to stderr. (`info --json` is older, and prints a single list;
-see [`info`](#git-stack-info-branchglob--g-group---json---offline).)
+see [`info`](#git-stack-info-branchglob--g-group--c---json---offline).)
 
 ```sh
 git stack clean -d local --json

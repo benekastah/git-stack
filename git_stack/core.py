@@ -259,6 +259,13 @@ class StackCore:
         named = [b for selector in branches for b in self.matching(selector, parents)]
         all_groups = self.groups(parents)
         for group in groups:
+            if not group:
+                current = self.current_stacked_branch(parents, "select")
+                bottom = ancestry(current, parents)[-2]
+                group = all_groups.get(bottom, "")
+                if not group:
+                    named.append(current)
+                    continue
             bottoms = [b for b, g in all_groups.items() if g == group and parents[b] not in parents]
             if not bottoms:
                 raise StackError(f"there's no group {group}")

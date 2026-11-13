@@ -1,5 +1,8 @@
 """git stack info."""
 
+import pytest
+
+from git_stack.errors import StackError
 from git_stack.stack import BranchInfo, BranchStatus, StackClient
 from tests.helpers import Repo
 
@@ -24,6 +27,32 @@ def test_info_lists_every_stack_parent_before_child(repo: Repo, client: StackCli
         BranchInfo("pr2b", "pr1", BranchStatus.NEEDS_RESTACK, current=False),
         BranchInfo("solo", "main", BranchStatus.UP_TO_DATE, current=True),
     ]
+
+
+def test_info_current_selects_only_the_current_stack(repo: Repo, client: StackClient) -> None:
+    repo.make_stack()
+    repo.git("switch", "--quiet", "main")
+    client.branch("other")
+    repo.git("switch", "--quiet", "pr2")
+
+    assert [branch.name for branch in client.info(current=True, offline=True)] == ["main", "pr1", "pr2", "pr3"]
+    assert [branch.name for branch in client.info(groups=[""], offline=True)] == ["main", "pr1", "pr2", "pr3"]
+
+
+def test_info_current_requires_a_tracked_branch(repo: Repo, client: StackClient) -> None:
+    with pytest.raises(StackError, match="main isn't in a stack"):
+        client.info(current=True, offline=True)
+
+
+def test_bare_group_selects_all_current_group_stacks(repo: Repo, client: StackClient) -> None:
+    repo.make_stack()
+    repo.git("switch", "--quiet", "main")
+    client.branch("other")
+    client.group_add("feature", ["pr1", "other"])
+    repo.git("switch", "--quiet", "pr2")
+
+    assert set(client.selected_bottoms([], [""], client.tracked_branches(), "show")) == {"pr1", "other"}
+    assert {b.name for b in client.info(groups=[""], offline=True)} == {"main", "pr1", "pr2", "pr3", "other"}
 
 
 def test_info_remembers_whether_a_branch_on_main_conflicts_with_it(repo: Repo, client: StackClient) -> None:

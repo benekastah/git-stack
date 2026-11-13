@@ -52,7 +52,9 @@ def add_stack_arguments(parser: argparse.ArgumentParser, verb: str, default: str
         dest="groups",
         action="append",
         default=[],
-        help=f"{verb} the stacks in GROUP too (can be given more than once)",
+        nargs="?",
+        const="",
+        help=f"{verb} the stacks in GROUP too (default: current stack's group; can be given more than once)",
     )
 
 
