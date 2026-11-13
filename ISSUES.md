@@ -2,17 +2,6 @@
 
 Most severe first.
 
-## Skipping a pulled commit can cause it to be dropped from the remote
-
-`settle_pull` checks completion using sets of commit identities (author, author
-date, and subject). Two different upstream commits can share an identity. If
-the first conflicts, the user skips it, and the second is applied, the set
-comparison says both were picked and records the whole upstream tip as pulled.
-Reproduced with two commits with the same author, date, and subject but changes
-to different files: after `git cherry-pick --skip`, the next `sync` force-pushed
-the branch without the skipped change. Compare the individual commits or their
-occurrences, and do not mark the upstream as fully pulled after a skip.
-
 ## Changed remote commits can be mistaken for a rebase of local work
 
 `take_upstream_rebase` decides that an upstream branch is a rebased copy of

@@ -611,6 +611,29 @@ def test_sync_latest_moves_branch_on_main_onto_its_tip(repo: Repo, client: Stack
     repo.assert_stacked("pr3", "pr2", ["pr3 c1"])
 
 
+def test_sync_does_not_record_a_skipped_commit_with_a_duplicate_identity(repo: Repo, client: StackClient) -> None:
+    client.branch("pr1")
+    repo.commit("a", "initial\n", "initial")
+    client.push()
+    repo.git("fetch", "--quiet", cwd=repo.forge)
+    repo.git("switch", "--quiet", "-C", "pr1", "origin/pr1", cwd=repo.forge)
+    for name, content in (("a", "remote\n"), ("b", "other\n")):
+        (repo.forge / name).write_text(content)
+        repo.git("add", name, cwd=repo.forge)
+        repo.git("commit", "--quiet", "--date=2020-01-01T00:00:00Z", "-m", "same subject", cwd=repo.forge)
+    repo.git("push", "--quiet", "origin", "pr1", cwd=repo.forge)
+    remote_tip = repo.git("rev-parse", "HEAD", cwd=repo.forge)
+    repo.commit("a", "local\n", "local")
+
+    with pytest.raises(StackError, match="stopped on a conflict"):
+        client.sync()
+    repo.git("cherry-pick", "--skip")
+    with pytest.raises(StackError, match="stopped on a conflict"):
+        client.sync()
+
+    assert repo.git("rev-parse", "refs/heads/pr1", cwd=repo.origin) == remote_tip
+
+
 def test_sync_pushes_the_branches_it_restacked(repo: Repo, client: StackClient) -> None:
     repo.make_stack()
     client.push()

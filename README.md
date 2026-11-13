@@ -995,6 +995,8 @@ parent and base (and the pulled upstream commits) are recorded only if the
 operation actually completed. To recognize a manually completed restack,
 git-stack uses the branch's reflog. If that entry is unavailable, inspect the
 branch and re-track it with `git stack track <parent> --base <sha>`.
+For a pull, each upstream commit must be accounted for, even when commits share
+an author, date, and subject; a skipped commit is not counted as pulled.
 
 `restack` and `sync` refuse to start with uncommitted changes, but not
 with untracked files. If one is in the way of a commit being replayed, git

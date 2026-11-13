@@ -1455,6 +1455,9 @@ To recognize a manually completed restack, git\-stack uses the
 branch\(aqs reflog.
 If that entry is unavailable, inspect the branch and re\-track it with
 \f[CR]git stack track <parent> \-\-base <sha>\f[R].
+For a pull, each upstream commit must be accounted for, even when
+commits share an author, date, and subject; a skipped commit is not
+counted as pulled.
 .PP
 \f[CR]restack\f[R] and \f[CR]sync\f[R] refuse to start with uncommitted
 changes, but not with untracked files.

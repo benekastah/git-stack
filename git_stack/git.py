@@ -1,6 +1,7 @@
 import os
 import subprocess
 import time
+from collections import Counter
 from typing import TextIO
 
 from git_stack.errors import StackError
@@ -283,3 +284,7 @@ class GitClient:
         """The author, author date and subject of each commit `git log <args>`
         lists, e.g. "Jane Doe <jane@example.com> 1700000000 +0100 Fix the parser"."""
         return set(self.run("log", "--format=%an <%ae> %ad %s", "--date=raw", *args).splitlines())
+
+    def identity_counts(self, *args: str) -> Counter[str]:
+        """Count commit identities, including repeated author, date and subject."""
+        return Counter(self.run("log", "--format=%an <%ae> %ad %s", "--date=raw", *args).splitlines())

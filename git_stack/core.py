@@ -2,6 +2,7 @@ import fcntl
 import fnmatch
 import os
 import tempfile
+from collections import Counter
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from typing import TypeAlias
@@ -31,7 +32,8 @@ PENDING_RESTACK_FROM_KEY = "stackPendingRestackFrom"
 # GitClient.identities) of each commit being cherry-picked, one per line.
 PENDING_PULL_FROM_KEY = "stackPendingPullFrom"
 PENDING_PULLED_KEY = "stackPendingPulled"
-PENDING_PULL_IDENTITIES_KEY = "stackPendingPullIdentities"
+LEGACY_PULL_IDENTITIES_KEY = "stackPendingPullIdentities"
+PENDING_PULL_IDENTITIES_KEY = "stackPendingPullIdentityCounts"
 # The last answers to whether the branch conflicts with its parent, whether its
 # changes landed in its parent, and whether its parent then reverted them (see
 # StackCore.remembered), kept in CHECK_CACHE_FILE. Each can take a second or
@@ -362,14 +364,14 @@ class StackCore:
             return
         pull_from = git.config_get(branch, PENDING_PULL_FROM_KEY)
         identities = git.config_get(branch, PENDING_PULL_IDENTITIES_KEY)
-        picked = set((identities or "").splitlines())
+        picked = Counter((identities or "").splitlines())
         # Cherry-picking keeps each commit's author, date and subject, even
         # when the user resolves a conflict.
         if (
             pull_from
             and picked
             and git.is_ancestor(pull_from, f"refs/heads/{branch}")
-            and picked <= git.identities(f"{pull_from}..refs/heads/{branch}")
+            and picked <= git.identity_counts(f"{pull_from}..refs/heads/{branch}")
         ):
             git.config_set(branch, PULLED_KEY, pending_pulled)
         elif not forget_unfinished or git.other_worktree_of(branch) is not None:
@@ -377,6 +379,7 @@ class StackCore:
         git.config_unset(branch, PENDING_PULLED_KEY, pending_pulled)
         git.config_unset(branch, PENDING_PULL_FROM_KEY, pull_from)
         git.config_unset(branch, PENDING_PULL_IDENTITIES_KEY, identities)
+        git.config_unset(branch, LEGACY_PULL_IDENTITIES_KEY)
 
     def settle_all(self, forget_unfinished: bool = True) -> None:
         for branch in self.tracked_branches():
@@ -585,7 +588,11 @@ class StackCore:
         self.emit(events.PullingUpstream(branch, len(commits)))
         git.config_set(branch, PENDING_PULL_FROM_KEY, git.tip(branch))
         git.config_set(branch, PENDING_PULLED_KEY, upstream_tip)
-        git.config_set(branch, PENDING_PULL_IDENTITIES_KEY, "\n".join(sorted(git.identities("--no-walk", *commits))))
+        git.config_set(
+            branch,
+            PENDING_PULL_IDENTITIES_KEY,
+            "\n".join(sorted(git.identity_counts("--no-walk", *commits).elements())),
+        )
         git.switch(branch)
         if git.passthrough("cherry-pick", "--ff", *commits):
             self.settle(branch)
@@ -600,6 +607,7 @@ class StackCore:
         git.config_unset(branch, PENDING_PULLED_KEY)
         git.config_unset(branch, PENDING_PULL_FROM_KEY)
         git.config_unset(branch, PENDING_PULL_IDENTITIES_KEY)
+        git.config_unset(branch, LEGACY_PULL_IDENTITIES_KEY)
         raise StackError(f"pulling upstream commits into {branch} failed; see git's output above")
 
     def take_upstream_rebase(self, branch: str, parent: str, remote: str) -> bool:
@@ -704,6 +712,7 @@ class StackCore:
             PENDING_PULL_FROM_KEY,
             PENDING_PULLED_KEY,
             PENDING_PULL_IDENTITIES_KEY,
+            LEGACY_PULL_IDENTITIES_KEY,
             GROUP_KEY,
             OWNERSHIP_KEY,
             # Versions before the check cache kept these in git config too.
