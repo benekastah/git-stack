@@ -40,6 +40,20 @@ def test_unrevert_brings_back_a_branch_and_moves_the_stack_onto_it(
     assert repo.git("branch", "--show-current") == "pr1-unrevert"
 
 
+def test_unrevert_requires_override_for_a_shared_stack(repo: Repo, client: StackClient) -> None:
+    revert = merge_and_revert_pr1(repo, client)
+    client.set_ownership("shared")
+    before = repo.git("rev-parse", "refs/heads/pr2")
+
+    with pytest.raises(StackError, match="unrevert --allow-shared"):
+        client.unrevert("restore", [revert], stack=["pr2"])
+    assert not client.git.local_branch_exists("restore")
+    assert repo.git("rev-parse", "refs/heads/pr2") == before
+
+    client.unrevert("restore", [revert], stack=["pr2"], allow_shared=True)
+    assert repo.git("rev-parse", "refs/heads/pr2") != before
+
+
 def test_unrevert_after_sync_moved_the_stack_onto_main(repo: Repo, client: StackClient) -> None:
     repo.make_stack()
     client.push()

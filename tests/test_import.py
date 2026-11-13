@@ -84,6 +84,37 @@ def test_import_marks_someone_elses_stack_shared(repo: Repo, gh: FakeGitHub, cli
     assert repo.config("pr1", "stackOwnership") == "shared"
 
 
+def test_failed_import_leaves_created_branches_shared(
+    repo: Repo, gh: FakeGitHub, client: StackClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    open_pr(repo, gh, 1, "pr1", "main", author="alice")
+    run = client.git.run
+
+    def fail_author_lookup(*args: str, check: bool = True, input: str | None = None) -> str:
+        if args[:2] == ("log", "--format=%ae"):
+            raise StackError("author lookup failed")
+        return run(*args, check=check, input=input)
+
+    monkeypatch.setattr(client.git, "run", fail_author_lookup)
+    with pytest.raises(StackError, match="author lookup failed"):
+        client.import_stacks(force=True, author="alice")
+
+    assert repo.config("pr1", "stackOwnership") == "shared"
+    with pytest.raises(StackError, match="--allow-shared"):
+        client.restack(["pr1"])
+
+
+def test_import_classifies_an_already_tracked_stack(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+    open_pr(repo, gh, 1, "pr1", "main", author="alice")
+    repo.git("fetch", "--quiet")
+    repo.git("branch", "--quiet", "--track", "pr1", "origin/pr1")
+    client.track("main", ["pr1"])
+
+    client.import_stacks(author="alice", force=True)
+
+    assert client.get_ownership(["pr1"])[0] == "shared"
+
+
 def test_import_keeps_a_branch_targeted_by_merged_prs_as_a_root(
     repo: Repo, gh: FakeGitHub, client: StackClient
 ) -> None:

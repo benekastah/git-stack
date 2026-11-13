@@ -2,43 +2,6 @@
 
 Most severe first.
 
-## `unrevert` rewrites shared stacks without an override
-
-`unrevert --stack` moves the named branches and calls `restack_all` directly,
-without `ensure_owned` or an `--allow-shared` option. It can rebase branches
-marked shared even though `restack` and `sync` would refuse. Reproduced with
-a shared stack on a merged and reverted branch: `unrevert` moved and rebased
-its child without asking for an override.
-
-## Shared ownership can disappear when a stack splits
-
-Ownership is stored per branch. `set_parent` copies shared ownership to the
-branch being moved, but not to its existing descendants. If an owned stack is
-attached under a shared branch, then the shared branch at their join is
-untracked or merged, its descendants can become a separate stack whose stored
-ownership is still owned. Reproduced by attaching an owned `pr1 -> pr2 -> pr3`
-stack to a shared branch and untracking `pr1`: `pr2` then reports owned.
-That permits subsequent rewrites without `--allow-shared`.
-
-## A failed import can leave shared branches marked owned
-
-`import` creates and tracks branches in `apply_import` before
-`classify_imported_stacks` marks them shared. If the process stops, a Git
-command fails, or a config write fails in between, those branches remain
-tracked without a shared marker and are treated as owned. Reproduced by
-failing the author lookup after importing someone else's PR; `restack`, `sync`,
-and `push` would then lack the intended shared-stack protection. Compute the
-classification before applying the plan, and ensure partial application fails
-closed.
-
-## `clean -d` deletes branches in shared stacks without an override
-
-`clean` processes every tracked stack and doesn't call `ensure_owned`. With
-`-d local`, `-d remote`, or `-d both`, it can delete merged branches marked
-shared without `--allow-shared`. Reproduced with `clean -d both`, which deleted
-both the local and remote branch. The deletion is still subject to the normal
-merge check and remote lease, but the shared ownership choice is ignored.
-
 ## Retargeting can unstack unrelated pull requests
 
 With `--rebuild-stack`, a PR base change that GitHub rejects calls `unstack`

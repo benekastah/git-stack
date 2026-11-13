@@ -278,7 +278,8 @@ git stack import -f --pr https://github.com/acme/widgets/pull/31
 - A pull request without a local branch gets one, created from its remote
   branch, with that as its upstream. A local branch without an upstream gets
   its remote branch as its upstream.
-- Branches that are already tracked are left alone. If one is tracked on a
+- Already tracked branches keep their parent and base; import also classifies
+  their ownership unless it was explicitly set. If one is tracked on a
   different parent than its pull request merges into, it says so; run
   `git stack track <parent> <branch>` if GitHub is right.
 - If a pull request merges into a branch you don't have locally and that has no
@@ -486,14 +487,17 @@ git stack prev                  # to main
 Show the ownership of the current stack, or mark it or the named stacks as
 owned or shared. With multiple stacks, `show` reports shared if any is shared.
 A shared stack
-is protected against `restack`, `sync`, and `push` unless the command includes
-`--allow-shared`. The override is explicit on every invocation; it does not
+is protected against `restack`, `sync`, `push`, `unrevert --stack`, and
+`clean --delete` unless the command includes `--allow-shared`. The override
+is explicit on every invocation; it does not
 change ownership. Newly created branches inherit shared ownership from their
 parent, and ownership follows branches when stacks split.
 
 Import marks a stack shared when its imported commits include another author's
 email, have no commits by your configured Git author, or its pull requests
 include another GitHub author. Unknown identity is treated as shared. An
+interrupted import leaves newly tracked branches shared; inspect and set their
+ownership if import fails. An
 explicit `ownership owned` or `ownership shared` choice can change the default.
 Existing stacks default to owned. Ownership is local to this clone, not a
 permission or a substitute for coordinating with contributors.
@@ -620,7 +624,7 @@ git stack sync -d both          # ...and their remote branches
   for that reason (unless it was run with `--no-push`).
 - Needs a clean worktree, and refuses to run outside a stack.
 
-### `git stack clean [--remote origin] [-d local|remote|both] [--ignore-revert <branch>]`
+### `git stack clean [--remote origin] [-d local|remote|both] [--ignore-revert <branch>] [--allow-shared]`
 
 Fetch with `--prune`, fast-forward every stack's root, and stop tracking merged
 branches in every stack, moving their children onto their parent.
@@ -822,7 +826,7 @@ git stack prs
 - `-n`/`--dry-run` shows the stacks with the pull requests it would open, with
   their titles, in place of their links, without opening them.
 
-### `git stack unrevert <name> <revert>... [--from <branch>] [--stack <branch>...] [--remote origin]`
+### `git stack unrevert <name> <revert>... [--from <branch>] [--stack <branch>...] [--remote origin] [--allow-shared]`
 
 Create `<name>` on `--from`, with commits that revert the given reverts, to
 bring back the changes of a merged branch they reverted, and move the

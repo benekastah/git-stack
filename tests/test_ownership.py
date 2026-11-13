@@ -42,3 +42,34 @@ def test_new_branch_inherits_shared_ownership(repo: Repo, client: StackClient) -
 
     with pytest.raises(StackError, match="shared stack"):
         client.restack()
+
+
+def test_shared_ownership_survives_joining_and_splitting_stacks(repo: Repo, client: StackClient) -> None:
+    repo.make_stack()
+    client.set_ownership("owned")
+    repo.git("switch", "--quiet", "main")
+    client.branch("shared")
+    repo.commit("a", "shared\n", "shared")
+    client.set_ownership("shared")
+    client.track("shared", ["pr1"])
+    client.untrack(["pr1"])
+
+    assert client.get_ownership(["pr2"])[0] == "shared"
+    with pytest.raises(StackError, match="--allow-shared"):
+        client.restack(["pr2"])
+
+
+def test_clean_requires_override_to_delete_shared_branches(repo: Repo, client: StackClient) -> None:
+    repo.make_stack()
+    client.set_ownership("shared")
+    client.push(allow_shared=True)
+    repo.squash_merge_on_forge("pr1", delete_branch=False)
+
+    with pytest.raises(StackError, match="clean --allow-shared"):
+        client.clean(delete="both")
+    assert client.git.local_branch_exists("pr1")
+    assert repo.git("branch", "--list", "pr1", cwd=repo.origin)
+
+    client.clean(delete="both", allow_shared=True)
+    assert not client.git.local_branch_exists("pr1")
+    assert not repo.git("branch", "--list", "pr1", cwd=repo.origin)

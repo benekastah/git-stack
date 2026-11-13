@@ -213,9 +213,18 @@ class StackCore:
         a stack's root and branch was higher up a stack (e.g. restack --onto
         main), branch joins that stack's group, so the two stay together."""
         git = self.git
-        if git.config_get(parent, OWNERSHIP_KEY) == "shared":
-            git.config_set(branch, OWNERSHIP_KEY, "shared")
         old_parent = git.config_get(branch, PARENT_KEY)
+        if old_parent != parent:
+            parents = self.tracked_branches()
+            connected = set()
+            for member in (branch, parent):
+                if member in parents:
+                    connected.update(stack_of(member, parents))
+            if git.config_get(branch, OWNERSHIP_KEY) == "shared" or any(
+                git.config_get(member, OWNERSHIP_KEY) == "shared" for member in connected
+            ):
+                for member in (branch, *descendants(branch, children_map(parents))):
+                    git.config_set(member, OWNERSHIP_KEY, "shared")
         if git.config_get(parent, PARENT_KEY) is not None:
             git.config_unset(branch, GROUP_KEY)
         elif old_parent is not None and git.config_get(old_parent, PARENT_KEY) is not None:

@@ -1,6 +1,6 @@
 import argparse
 
-from git_stack.commands import Subparsers, add_json_argument
+from git_stack.commands import Subparsers, add_allow_shared_argument, add_json_argument
 from git_stack.git import DEFAULT_REMOTE
 from git_stack.stack import StackClient, Unreverted
 
@@ -14,6 +14,7 @@ class Args(argparse.Namespace):
     stack: list[str]
     remote: str
     json: bool
+    allow_shared: bool
 
 
 def register(subparsers: Subparsers) -> None:
@@ -40,11 +41,14 @@ def register(subparsers: Subparsers) -> None:
     )
     p.add_argument("--remote", default=DEFAULT_REMOTE)
     add_json_argument(p)
+    add_allow_shared_argument(p)
     p.set_defaults(run=run, show=show)
 
 
 def run(stack: StackClient, args: Args) -> Unreverted:
-    return stack.unrevert(args.name, args.reverts, args.from_branch, args.stack, remote=args.remote)
+    return stack.unrevert(
+        args.name, args.reverts, args.from_branch, args.stack, remote=args.remote, allow_shared=args.allow_shared
+    )
 
 
 def show(stack: StackClient, args: Args, unreverted: Unreverted) -> None:

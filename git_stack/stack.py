@@ -500,8 +500,9 @@ class StackClient(StackCore):
             plan, without_prs = planner.select(branches, numbers, plan, without_prs)
         if dry_run:
             return ImportResult(plan, [], without_prs)
+        previous_ownership = {b: self.git.config_get(b, OWNERSHIP_KEY) for b in self.tracked_branches()}
         self.apply_import(plan, without_prs, remote)
-        self.classify_imported_stacks(plan, without_prs, open_prs, adapter.viewer)
+        self.classify_imported_stacks(plan, without_prs, open_prs, adapter.viewer, previous_ownership)
         shown = [s.branch for s in plan] + [s.branch for s in without_prs]
         return ImportResult(plan, self.stack_infos(shown, adapter), without_prs)
 
@@ -511,6 +512,7 @@ class StackClient(StackCore):
         without_prs: list[ImportStepWithoutPr],
         prs: list[OpenPullRequest],
         viewer: str | None,
+        previous_ownership: dict[str, str | None],
     ) -> None:
         """Mark newly imported stacks shared when their contributors aren't solely the user."""
         git = self.git
@@ -518,21 +520,42 @@ class StackClient(StackCore):
         authors = {pr.number: pr.author for pr in prs}
         parents = self.tracked_branches()
         all_steps: list[ImportStep | ImportStepWithoutPr] = [*plan, *without_prs]
-        candidates = [step for step in all_steps if step.action in (ImportAction.CREATE, ImportAction.TRACK)]
+        candidates = [
+            step
+            for step in all_steps
+            if step.action
+            in (ImportAction.CREATE, ImportAction.TRACK, ImportAction.ALREADY_TRACKED, ImportAction.PARENT_DIFFERS)
+        ]
+        shared: set[str] = set()
+        imported: set[str] = set()
         for step in candidates:
-            if not step.base:
-                continue
             members = stack_of(step.branch, parents)
+            imported.update(members)
             # An explicit choice takes precedence over automatic classification.
-            if any(git.config_get(b, OWNERSHIP_KEY) == "owned" for b in members):
+            if any(previous_ownership.get(b) == "owned" for b in members):
                 continue
-            commit_authors = set(
-                git.run("log", "--format=%ae", f"{step.base}..refs/heads/{step.branch}").lower().splitlines()
+            base = step.base or git.config_get(step.branch, BASE_KEY)
+            commit_authors = (
+                set(git.run("log", "--format=%ae", f"{base}..refs/heads/{step.branch}").lower().splitlines())
+                if base
+                else set()
             )
             pr_is_other = isinstance(step, ImportStep) and (not viewer or authors.get(step.number) != viewer)
-            if not email or not commit_authors or commit_authors != {email} or pr_is_other:
-                for branch in members:
-                    git.config_set(branch, OWNERSHIP_KEY, "shared")
+            if (
+                not email
+                or not commit_authors
+                or commit_authors != {email}
+                or pr_is_other
+                or any(previous_ownership.get(b) == "shared" for b in members)
+            ):
+                shared.update(members)
+        for branch in imported:
+            if branch in shared:
+                git.config_set(branch, OWNERSHIP_KEY, "shared")
+            elif previous_ownership.get(branch) is None:
+                git.config_unset(branch, OWNERSHIP_KEY)
+            else:
+                git.config_set(branch, OWNERSHIP_KEY, previous_ownership[branch] or "owned")
 
     def look_up_open_pull_requests(
         self, adapter: GitHubAdapter, author: str | None, numbers: Sequence[int], mine: bool
@@ -576,6 +599,7 @@ class StackClient(StackCore):
             if without_pr.action is ImportAction.CREATE and without_pr.parent and without_pr.base:
                 branch = without_pr.branch
                 git.run("branch", "--quiet", "--track", branch, f"refs/remotes/{remote}/{branch}")
+                git.config_set(branch, OWNERSHIP_KEY, "shared")
                 self.set_parent(branch, without_pr.parent)
                 git.config_set(branch, BASE_KEY, without_pr.base)
         for step in plan:
@@ -587,6 +611,8 @@ class StackClient(StackCore):
                 and git.rev(f"refs/remotes/{remote}/{step.branch}") is not None
             ):
                 git.run("branch", "--quiet", f"--set-upstream-to=refs/remotes/{remote}/{step.branch}", step.branch)
+            if step.action is not ImportAction.SKIP and git.config_get(step.branch, OWNERSHIP_KEY) is None:
+                git.config_set(step.branch, OWNERSHIP_KEY, "shared")
             if step.base is not None:
                 self.set_parent(step.branch, step.parent)
                 git.config_set(step.branch, BASE_KEY, step.base)
@@ -699,6 +725,10 @@ class StackClient(StackCore):
         ]
         branches = [branch for selector in selectors for branch in self.matching(selector, parents)]
         for branch in branches:
+            if any(self.git.config_get(b, OWNERSHIP_KEY) == "shared" for b in stack_of(branch, parents)):
+                for child in descendants(branch, children_map(parents)):
+                    self.git.config_set(child, OWNERSHIP_KEY, "shared")
+        for branch in branches:
             self.forget(branch)
         # Children untracked along with their parent aren't still stacked on it.
         return [
@@ -742,6 +772,7 @@ class StackClient(StackCore):
         from_branch: str | None = None,
         stack: Sequence[str] = (),
         remote: str = DEFAULT_REMOTE,
+        allow_shared: bool = False,
     ) -> Unreverted:
         """Create name on from_branch (default: the root of stack's first
         branch, or else remote's default branch), track it, and revert reverts
@@ -767,6 +798,7 @@ class StackClient(StackCore):
         for branch in stack:
             if branch not in parents:
                 raise StackError(f"{branch} isn't in a stack")
+        self.ensure_owned((b for branch in stack for b in self.stack(branch, parents)), allow_shared, "unrevert")
         parent = from_branch or (stack_root(stack[0], parents) if stack else self.default_branch(remote))
         self.ensure_local_branch_parent(parent)
         for branch in stack:
@@ -1192,7 +1224,11 @@ class StackClient(StackCore):
 
     @exclusive
     def clean(
-        self, remote: str = DEFAULT_REMOTE, delete: str | None = None, ignore_reverts: Sequence[str] = ()
+        self,
+        remote: str = DEFAULT_REMOTE,
+        delete: str | None = None,
+        ignore_reverts: Sequence[str] = (),
+        allow_shared: bool = False,
     ) -> list[BranchInfo]:
         """Fetch and untrack merged branches in every stack, deleting what delete
         says, without restacking anything. ignore_reverts is as for sync.
@@ -1201,6 +1237,8 @@ class StackClient(StackCore):
         self.ensure_no_operation_in_progress()
         self.settle_all()
         parents = self.tracked_branches()
+        if delete is not None:
+            self.ensure_owned(parents, allow_shared, "clean")
         roots = sorted({stack_root(b, parents) for b in parents})
         # Only fast-forwarding the current branch, or deleting it (and so
         # switching away), touches the worktree, and either could fail partway

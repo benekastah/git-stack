@@ -203,7 +203,7 @@ def test_command_calls_its_client_method(
 ) -> None:
     assert main(argv, stack=stack) == 0
 
-    if method in ("restack", "sync", "push"):
+    if method in ("restack", "sync", "push", "clean", "unrevert"):
         kwargs = {**kwargs, "allow_shared": "--allow-shared" in argv}
     if method in ("sync", "push"):
         kwargs = {**kwargs, "rebuild_stack": "--rebuild-stack" in argv}

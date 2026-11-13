@@ -422,7 +422,8 @@ branch, with that as its upstream.
 A local branch without an upstream gets its remote branch as its
 upstream.
 .IP \(bu 2
-Branches that are already tracked are left alone.
+Already tracked branches keep their parent and base; import also
+classifies their ownership unless it was explicitly set.
 If one is tracked on a different parent than its pull request merges
 into, it says so; run \f[CR]git stack track <parent> <branch>\f[R] if
 GitHub is right.
@@ -679,7 +680,8 @@ Show the ownership of the current stack, or mark it or the named stacks
 as owned or shared.
 With multiple stacks, \f[CR]show\f[R] reports shared if any is shared.
 A shared stack is protected against \f[CR]restack\f[R], \f[CR]sync\f[R],
-and \f[CR]push\f[R] unless the command includes
+\f[CR]push\f[R], \f[CR]unrevert \-\-stack\f[R], and
+\f[CR]clean \-\-delete\f[R] unless the command includes
 \f[CR]\-\-allow\-shared\f[R].
 The override is explicit on every invocation; it does not change
 ownership.
@@ -690,6 +692,8 @@ Import marks a stack shared when its imported commits include another
 author\(aqs email, have no commits by your configured Git author, or its
 pull requests include another GitHub author.
 Unknown identity is treated as shared.
+An interrupted import leaves newly tracked branches shared; inspect and
+set their ownership if import fails.
 An explicit \f[CR]ownership owned\f[R] or \f[CR]ownership shared\f[R]
 choice can change the default.
 Existing stacks default to owned.
@@ -867,7 +871,7 @@ couldn\(aqt push for that reason (unless it was run with
 \f[CR]\-\-no\-push\f[R]).
 .IP \(bu 2
 Needs a clean worktree, and refuses to run outside a stack.
-.SS \f[CR]git stack clean [\-\-remote origin] [\-d local|remote|both] [\-\-ignore\-revert <branch>]\f[R]
+.SS \f[CR]git stack clean [\-\-remote origin] [\-d local|remote|both] [\-\-ignore\-revert <branch>] [\-\-allow\-shared]\f[R]
 Fetch with \f[CR]\-\-prune\f[R], fast\-forward every stack\(aqs root,
 and stop tracking merged branches in every stack, moving their children
 onto their parent.
@@ -1135,7 +1139,7 @@ Needs the GitHub adapter.
 \f[CR]\-n\f[R]/\f[CR]\-\-dry\-run\f[R] shows the stacks with the pull
 requests it would open, with their titles, in place of their links,
 without opening them.
-.SS \f[CR]git stack unrevert <name> <revert>... [\-\-from <branch>] [\-\-stack <branch>...] [\-\-remote origin]\f[R]
+.SS \f[CR]git stack unrevert <name> <revert>... [\-\-from <branch>] [\-\-stack <branch>...] [\-\-remote origin] [\-\-allow\-shared]\f[R]
 Create \f[CR]<name>\f[R] on \f[CR]\-\-from\f[R], with commits that
 revert the given reverts, to bring back the changes of a merged branch
 they reverted, and move the branches given with \f[CR]\-\-stack\f[R]
