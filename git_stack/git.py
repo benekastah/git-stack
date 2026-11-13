@@ -1,6 +1,6 @@
 import os
-import re
 import subprocess
+import tempfile
 import time
 from collections import Counter
 from typing import TextIO
@@ -285,23 +285,31 @@ class GitClient:
         """Count commit identities, including repeated author, date and subject."""
         return Counter(self.run("log", "--format=%an <%ae> %ad %s", "--date=raw", *args).splitlines())
 
-    def commit_changes(self, revision_range: str) -> Counter[tuple[str, bytes]]:
-        """Count commit identities and changed lines, ignoring their context and offsets."""
-        commits = self.run("log", "--format=%H%x00%an <%ae> %ad %s", "--date=raw", revision_range).splitlines()
-        changes: Counter[tuple[str, bytes]] = Counter()
-        for entry in commits:
-            commit, _, identity = entry.partition("\0")
-            result = subprocess.run(
-                self._command("show", "--format=", "--binary", "--no-ext-diff", "--unified=0", commit),
-                capture_output=True,
-                check=False,
-            )
-            if result.returncode:
-                raise StackError(f"git show {commit} failed:\n{result.stderr.decode(errors='replace').strip()}")
-            lines = []
-            for line in result.stdout.splitlines(keepends=True):
-                if line.startswith(b"index "):
-                    continue
-                lines.append(re.sub(rb"^@@ .*? @@[^\n]*", b"@@", line) if line.startswith(b"@@ ") else line)
-            changes[identity, b"".join(lines)] += 1
-        return changes
+    def is_rebased_copy(self, base: str, tip: str, new_base: str, new_tip: str) -> bool:
+        """Compare an upstream history with replaying our commits into an isolated index."""
+
+        def commits(revisions: str) -> list[tuple[str, str]]:
+            lines = self.run("log", "--reverse", "--format=%H%x00%an <%ae> %ad %s", "--date=raw", revisions)
+            return [(commit, identity) for commit, _, identity in (line.partition("\0") for line in lines.splitlines())]
+
+        ours, theirs = commits(f"{base}..{tip}"), commits(f"{new_base}..{new_tip}")
+        if len(ours) != len(theirs) or [i for _, i in ours] != [i for _, i in theirs]:
+            return False
+        with tempfile.TemporaryDirectory(prefix="git-stack-index-") as directory:
+            env = {**os.environ, "GIT_INDEX_FILE": os.path.join(directory, "index")}
+
+            def run(*args: str, input: bytes | None = None) -> subprocess.CompletedProcess[bytes]:
+                return subprocess.run(self._command(*args), input=input, env=env, capture_output=True, check=False)
+
+            if run("read-tree", new_base).returncode:
+                raise StackError("couldn't prepare an index to check the upstream rebase")
+            for (commit, _), (upstream, _) in zip(ours, theirs, strict=True):
+                patch = run("show", "--format=", "--binary", "--full-index", "--no-color", "--no-ext-diff", commit)
+                if patch.returncode:
+                    raise StackError(f"couldn't read changes in {commit}")
+                if patch.stdout and run("apply", "--cached", "--3way", input=patch.stdout).returncode:
+                    return False
+                tree = run("write-tree")
+                if tree.returncode or tree.stdout.decode().strip() != self.run("rev-parse", f"{upstream}^{{tree}}"):
+                    return False
+        return True

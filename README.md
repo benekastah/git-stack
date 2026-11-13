@@ -1244,10 +1244,11 @@ GitHub's "Rebase stack" button (or `gh stack rebase` on another machine)
 rebases a stack's remote branches and force-pushes them, so they have your
 commits as new commits, which `sync` would otherwise try to pull in again.
 Instead, before restacking a branch, `sync` moves it to its remote branch
-if that has the same commits, by author, date, subject and changed lines,
-rebased onto its parent (or onto its parent's upstream, e.g. `origin/main`),
-and nothing else. If identities match but changes differ, or either history
-contains merge commits, it stops for you to inspect both histories.
+if that has the same commits, in order, by author, date and subject, rebased
+onto its parent (or its parent's upstream, e.g. `origin/main`), and nothing
+else. It checks the result of replaying each change in a temporary index; if
+the replay conflicts or differs, or either history contains merge commits,
+it stops for you to inspect both histories.
 `push` does the same, rather than refusing. This only happens if the branch
 hasn't changed since you last pushed it, so no local commit is dropped; if
 it has, pull the remote branch's commits in by hand, or push over them with

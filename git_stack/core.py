@@ -655,7 +655,7 @@ class StackCore:
                 f"{remote}/{branch} may be a rebased copy of {branch}, but contains merge commits; "
                 "inspect both histories before deciding how to proceed"
             )
-        if git.commit_changes(f"{base}..{tip}") != git.commit_changes(f"{new_base}..{upstream_tip}"):
+        if not git.is_rebased_copy(base, tip, new_base, upstream_tip):
             raise StackError(
                 f"{remote}/{branch} has commits matching {branch}'s authors, dates and subjects "
                 "but different changes; inspect both histories before deciding how to proceed"

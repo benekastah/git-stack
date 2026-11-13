@@ -104,6 +104,37 @@ def test_push_takes_a_rebase_from_the_remote(repo: Repo, client: StackClient) ->
     assert repo.config("pr1", "stackBase") == repo.git("rev-parse", "origin/main")
 
 
+def test_upstream_rebase_must_change_the_same_occurrence(repo: Repo, client: StackClient) -> None:
+    repo.write("d", "old\nseparator\nold\n")
+    repo.git("add", "d")
+    repo.git("commit", "--quiet", "-m", "add d")
+    base = repo.git("rev-parse", "HEAD")
+    client.branch("pr1")
+    repo.commit("d", "new\nseparator\nold\n", "edit")
+    local = repo.git("rev-parse", "HEAD")
+    repo.commit("d", "old\nseparator\nnew\n", "temporary")
+    repo.git("reset", "--soft", "HEAD~")
+    repo.git("commit", "--quiet", "--amend", "--no-edit")
+    remote = repo.git("rev-parse", "HEAD")
+
+    assert not client.git.is_rebased_copy(base, local, base, remote)
+
+
+def test_upstream_rebase_must_preserve_commit_order(repo: Repo, client: StackClient) -> None:
+    base = repo.git("rev-parse", "HEAD")
+    client.branch("pr1")
+    repo.commit("a", "first\n", "first")
+    first = repo.git("rev-parse", "HEAD")
+    repo.commit("b", "second\n", "second")
+    second = repo.git("rev-parse", "HEAD")
+    repo.git("switch", "--quiet", "--detach", base)
+    repo.git("cherry-pick", "--quiet", second)
+    repo.git("cherry-pick", "--quiet", first)
+    reordered = repo.git("rev-parse", "HEAD")
+
+    assert not client.git.is_rebased_copy(base, second, base, reordered)
+
+
 def test_push_doesnt_take_a_rebase_over_local_commits(repo: Repo, client: StackClient) -> None:
     rebased = edit_near_on_main_then_rebase_on_forge(repo, client)
     repo.commit("a", "pr1 again\n", "pr1 c2")
