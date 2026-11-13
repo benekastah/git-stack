@@ -115,6 +115,27 @@ def test_import_classifies_an_already_tracked_stack(repo: Repo, gh: FakeGitHub, 
     assert client.get_ownership(["pr1"])[0] == "shared"
 
 
+def test_import_preserves_shared_ownership_in_a_mixed_stack(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+    repo.make_stack()
+    client.set_ownership("owned")
+    repo.git("switch", "--quiet", "main")
+    client.branch("shared")
+    repo.write("d", "shared\n")
+    repo.git("add", "d")
+    repo.git("commit", "--quiet", "-m", "shared")
+    client.set_ownership("shared")
+    client.track("pr1", ["shared"])
+    client.push(allow_shared=True)
+    open_pr(repo, gh, 99, "new", "shared")
+
+    client.import_stacks()
+
+    assert repo.config("new", "stackOwnership") == "shared"
+    repo.git("switch", "--quiet", "main")
+    repo.git("branch", "--delete", "--force", "shared")
+    assert client.get_ownership(["new"])[0] == "shared"
+
+
 def test_import_keeps_a_branch_targeted_by_merged_prs_as_a_root(
     repo: Repo, gh: FakeGitHub, client: StackClient
 ) -> None:

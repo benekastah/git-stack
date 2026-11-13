@@ -531,6 +531,9 @@ class StackClient(StackCore):
         for step in candidates:
             members = stack_of(step.branch, parents)
             imported.update(members)
+            if any(previous_ownership.get(b) == "shared" for b in members):
+                shared.update(members)
+                continue
             # An explicit choice takes precedence over automatic classification.
             if any(previous_ownership.get(b) == "owned" for b in members):
                 continue
@@ -541,13 +544,7 @@ class StackClient(StackCore):
                 else set()
             )
             pr_is_other = isinstance(step, ImportStep) and (not viewer or authors.get(step.number) != viewer)
-            if (
-                not email
-                or not commit_authors
-                or commit_authors != {email}
-                or pr_is_other
-                or any(previous_ownership.get(b) == "shared" for b in members)
-            ):
+            if not email or not commit_authors or commit_authors != {email} or pr_is_other:
                 shared.update(members)
         for branch in imported:
             if branch in shared:
