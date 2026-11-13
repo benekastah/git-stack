@@ -137,6 +137,12 @@ def stack() -> Any:
             {"remote": "origin", "delete": None, "latest": False, "push": True, "ignore_reverts": []},
         ),
         (
+            ["sync", "--rebuild-stack"],
+            "sync",
+            ([], []),
+            {"remote": "origin", "delete": None, "latest": False, "push": True, "ignore_reverts": []},
+        ),
+        (
             ["sync", "b", "-g", "one", "--group", "two", "--remote", "upstream", "-d", "local", "--latest"],
             "sync",
             (["b"], ["one", "two"]),
@@ -157,6 +163,7 @@ def stack() -> Any:
             {"remote": "upstream", "force": False, "prs": False},
         ),
         (["push", "--force"], "push", ([], []), {"remote": "origin", "force": True, "prs": False}),
+        (["push", "--rebuild-stack"], "push", ([], []), {"remote": "origin", "force": False, "prs": False}),
         (["push", "--allow-shared"], "push", ([], []), {"remote": "origin", "force": False, "prs": False}),
         (["push", "--prs"], "push", ([], []), {"remote": "origin", "force": False, "prs": True}),
         (["push", "--pr"], "push", ([], []), {"remote": "origin", "force": False, "prs": True}),
@@ -198,6 +205,8 @@ def test_command_calls_its_client_method(
 
     if method in ("restack", "sync", "push"):
         kwargs = {**kwargs, "allow_shared": "--allow-shared" in argv}
+    if method in ("sync", "push"):
+        kwargs = {**kwargs, "rebuild_stack": "--rebuild-stack" in argv}
     if method == "sync":
         kwargs = {**kwargs, "pull_tracked_upstream": "--pull-tracked-upstream" in argv}
     getattr(stack, method).assert_called_once_with(*args, **kwargs)

@@ -1069,6 +1069,7 @@ class StackClient(StackCore):
         ignore_reverts: Sequence[str] = (),
         allow_shared: bool = False,
         pull_tracked_upstream: bool = False,
+        rebuild_stack: bool = False,
     ) -> SyncResult:
         """Fetch, untrack the merged branches in the current stack, or in the
         stacks of the branches that branches and groups name (see named), deleting what
@@ -1110,7 +1111,7 @@ class StackClient(StackCore):
             self.sync_branch(branch, adapter, state)
 
         self.restore_checkout(state.original)
-        self.push_branches(state.pushable, parents, adapter, remote)
+        self.push_branches(state.pushable, parents, adapter, remote, rebuild_stack=rebuild_stack)
         if push and state.blocked:
             raise StackError(
                 f"didn't push {', '.join(state.blocked)}: checked out in another worktree, or stacked on a branch "
@@ -1243,6 +1244,7 @@ class StackClient(StackCore):
         force: bool = False,
         prs: bool = False,
         allow_shared: bool = False,
+        rebuild_stack: bool = False,
     ) -> PushResult:
         """Force-push (with lease) every unmerged branch in the current stack, or
         in the stacks of the branches that branches and groups name (see named), then let
@@ -1268,8 +1270,14 @@ class StackClient(StackCore):
         if not force:
             for b in branches:
                 self.take_upstream_rebase(b, parents[b], remote)
-        pushed = self.push_branches(branches, parents, adapter, remote, force, opening=github is not None)
-        steps = self.open_pull_requests(pushed, parents, github, remote) if github and pushed else None
+        pushed = self.push_branches(
+            branches, parents, adapter, remote, force, opening=github is not None, rebuild_stack=rebuild_stack
+        )
+        steps = (
+            self.open_pull_requests(pushed, parents, github, remote, rebuild_stack=rebuild_stack)
+            if github and pushed
+            else None
+        )
         error = None
         if prs and github is None and pushed:
             error = f"pushed, but didn't open or update any pull requests: {not_github(remote)}"
@@ -1283,6 +1291,7 @@ class StackClient(StackCore):
         remote: str,
         force: bool = False,
         opening: bool = False,
+        rebuild_stack: bool = False,
     ) -> list[str]:
         """Force-push (with lease) branches, which must be unmerged, in one atomic
         push, then let the adapter update their pull requests (see
@@ -1309,7 +1318,7 @@ class StackClient(StackCore):
                 )
             leases.append(f"--force-with-lease={b}:{remote_tip or ''}")
         try:
-            adapter.before_push(branches, parents)
+            adapter.before_push(branches, parents, rebuild_stack)
         except StackError as e:
             raise StackError(
                 f"updating pull requests failed, so nothing was pushed (set {ADAPTER_SETTING} "
@@ -1324,7 +1333,7 @@ class StackClient(StackCore):
         for b in branches:
             git.config_set(b, PULLED_KEY, git.tip(b))
         try:
-            adapter.after_push(branches, parents, opening)
+            adapter.after_push(branches, parents, opening, rebuild_stack)
         except StackError as e:
             raise StackError(
                 f"pushed, but updating pull requests failed (set {ADAPTER_SETTING} to git to stop using GitHub): {e}"
@@ -1409,7 +1418,7 @@ class StackClient(StackCore):
             pr = prs.get(b)
             if pr is not None:
                 if not dry_run:
-                    adapter.retarget(b, parent)
+                    adapter.retarget(b, parent, rebuild_stack)
                 steps.append(PullRequestStep(b, parent, PullRequestAction.EXISTS, number=pr.number))
                 continue
             base = self.recorded_base(b, parent)

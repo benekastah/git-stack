@@ -1,6 +1,12 @@
 import argparse
 
-from git_stack.commands import Subparsers, add_allow_shared_argument, add_json_argument, add_stack_arguments
+from git_stack.commands import (
+    Subparsers,
+    add_allow_shared_argument,
+    add_json_argument,
+    add_rebuild_stack_argument,
+    add_stack_arguments,
+)
 from git_stack.commands.info import print_tree
 from git_stack.commands.prs import show_steps
 from git_stack.git import DEFAULT_REMOTE
@@ -17,6 +23,7 @@ class Args(argparse.Namespace):
     prs: bool
     json: bool
     allow_shared: bool
+    rebuild_stack: bool
 
 
 def register(subparsers: Subparsers) -> None:
@@ -41,12 +48,19 @@ def register(subparsers: Subparsers) -> None:
     )
     add_json_argument(p)
     add_allow_shared_argument(p)
+    add_rebuild_stack_argument(p)
     p.set_defaults(run=run, show=show, error=lambda result: result.error)
 
 
 def run(stack: StackClient, args: Args) -> PushResult:
     return stack.push(
-        args.branches, args.groups, remote=args.remote, force=args.force, prs=args.prs, allow_shared=args.allow_shared
+        args.branches,
+        args.groups,
+        remote=args.remote,
+        force=args.force,
+        prs=args.prs,
+        allow_shared=args.allow_shared,
+        rebuild_stack=args.rebuild_stack,
     )
 
 

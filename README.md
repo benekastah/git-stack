@@ -542,7 +542,7 @@ git stack restack --latest              # also move the stack onto main's latest
 - A branch checked out in another worktree is skipped, with a warning; see
   [Branches checked out in other worktrees](#branches-checked-out-in-other-worktrees).
 
-### `git stack sync [<branch|glob>...] [-g <group>] [--remote origin] [-d local|remote|both] [--latest] [--no-push] [--ignore-revert <branch>] [--allow-shared] [--pull-tracked-upstream]`
+### `git stack sync [<branch|glob>...] [-g <group>] [--remote origin] [-d local|remote|both] [--latest] [--no-push] [--ignore-revert <branch>] [--allow-shared] [--pull-tracked-upstream] [--rebuild-stack]`
 
 Bring the current stack (or the ones named, see [Groups](#groups)) up to date
 with the remote:
@@ -643,7 +643,7 @@ git stack clean -d local
   are fine, unless you're on a stack's root, which `clean` fast-forwards, or,
   with `-d local` or `-d both`, on a tracked branch, which it could delete.
 
-### `git stack push [<branch|glob>...] [-g <group>] [--remote origin] [--force] [--prs] [--allow-shared]`
+### `git stack push [<branch|glob>...] [-g <group>] [--remote origin] [--force] [--prs] [--allow-shared] [--rebuild-stack]`
 
 Force-push (with lease) every branch in the current stack (or the ones named,
 see [Groups](#groups)), and set each one's upstream.
@@ -774,15 +774,18 @@ git stack prs
   of the one they're in. Once they're all in one, GitHub shows the stack on
   each pull request, so they get no stack in their descriptions, and the
   ones they had are removed. A stack that branches out, or a group's stacks,
-  can't be one stack on GitHub, so they keep theirs. Pull requests can't be
-  taken out of a stack on GitHub, so if some are in one that doesn't match
+  can't be one stack on GitHub, so they keep theirs. Merged pull requests can't
+  be taken out of a stack on GitHub, so if some are in one that doesn't match
   (e.g. in another order, or ending with a merged pull request that a new
   one isn't based on), it warns and leaves them, using description sections
   instead. GitHub doesn't change
-  the base of a pull request in a stack either, so when a stack is reshaped
-  (e.g. a branch is put in its middle), `push` and `prs` take its open pull
-  requests out of their stack on GitHub to change their bases, and `prs`
-  then links them again. To stop it linking them, run
+  the base of a pull request in a stack either. When a stack is reshaped
+  (e.g. a branch is put in its middle), `push`, `sync`, and `prs` refuse to
+  unstack it to change those bases unless given `--rebuild-stack`. That option
+  can unstack other open pull requests in the same GitHub stack. Run `prs` to
+  link them again, or use `push --prs --rebuild-stack` to do both together.
+  `sync` may already have changed local branches before it reaches this check.
+  To stop it linking them, run
   `git config stack.githubStacks false`. git-stack links them through
   GitHub's API, with `gh`, so it doesn't need GitHub's own extension for
   stacks, [gh-stack](https://github.com/github/gh-stack)

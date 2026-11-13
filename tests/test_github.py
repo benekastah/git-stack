@@ -244,9 +244,13 @@ def test_push_retargets_pr_before_pushing_when_parent_was_merged(
     assert gh.load()["prs"][0]["baseRefName"] == "main"
 
 
+@pytest.mark.parametrize("no_stack_field", [False, True])
 def test_push_retargets_pr_after_pushing_new_parent(
-    repo: Repo, gh: FakeGitHub, client: StackClient, monkeypatch: pytest.MonkeyPatch
+    repo: Repo, gh: FakeGitHub, client: StackClient, monkeypatch: pytest.MonkeyPatch, no_stack_field: bool
 ) -> None:
+    state = gh.load()
+    state["no_stack_field"] = no_stack_field
+    gh.save(state)
     repo.make_stack()
     client.push()
     gh.add_pr(

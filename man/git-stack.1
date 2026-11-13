@@ -755,7 +755,7 @@ If a rebase stops on a conflict, see Conflicts.
 .IP \(bu 2
 A branch checked out in another worktree is skipped, with a warning; see
 Branches checked out in other worktrees.
-.SS \f[CR]git stack sync [<branch|glob>...] [\-g <group>] [\-\-remote origin] [\-d local|remote|both] [\-\-latest] [\-\-no\-push] [\-\-ignore\-revert <branch>] [\-\-allow\-shared] [\-\-pull\-tracked\-upstream]\f[R]
+.SS \f[CR]git stack sync [<branch|glob>...] [\-g <group>] [\-\-remote origin] [\-d local|remote|both] [\-\-latest] [\-\-no\-push] [\-\-ignore\-revert <branch>] [\-\-allow\-shared] [\-\-pull\-tracked\-upstream] [\-\-rebuild\-stack]\f[R]
 Bring the current stack (or the ones named, see Groups) up to date with
 the remote:
 .IP "1." 3
@@ -896,7 +896,7 @@ Runs from any branch, even one that isn\(aqt in a stack.
 Uncommitted changes are fine, unless you\(aqre on a stack\(aqs root,
 which \f[CR]clean\f[R] fast\-forwards, or, with \f[CR]\-d local\f[R] or
 \f[CR]\-d both\f[R], on a tracked branch, which it could delete.
-.SS \f[CR]git stack push [<branch|glob>...] [\-g <group>] [\-\-remote origin] [\-\-force] [\-\-prs] [\-\-allow\-shared]\f[R]
+.SS \f[CR]git stack push [<branch|glob>...] [\-g <group>] [\-\-remote origin] [\-\-force] [\-\-prs] [\-\-allow\-shared] [\-\-rebuild\-stack]\f[R]
 Force\-push (with lease) every branch in the current stack (or the ones
 named, see Groups), and set each one\(aqs upstream.
 .PP
@@ -1068,16 +1068,22 @@ so they get no stack in their descriptions, and the ones they had are
 removed.
 A stack that branches out, or a group\(aqs stacks, can\(aqt be one stack
 on GitHub, so they keep theirs.
-Pull requests can\(aqt be taken out of a stack on GitHub, so if some are
-in one that doesn\(aqt match (e.g.
+Merged pull requests can\(aqt be taken out of a stack on GitHub, so if
+some are in one that doesn\(aqt match (e.g.
 in another order, or ending with a merged pull request that a new one
 isn\(aqt based on), it warns and leaves them, using description sections
 instead.
-GitHub doesn\(aqt change the base of a pull request in a stack either,
-so when a stack is reshaped (e.g.
-a branch is put in its middle), \f[CR]push\f[R] and \f[CR]prs\f[R] take
-its open pull requests out of their stack on GitHub to change their
-bases, and \f[CR]prs\f[R] then links them again.
+GitHub doesn\(aqt change the base of a pull request in a stack either.
+When a stack is reshaped (e.g.
+a branch is put in its middle), \f[CR]push\f[R], \f[CR]sync\f[R], and
+\f[CR]prs\f[R] refuse to unstack it to change those bases unless given
+\f[CR]\-\-rebuild\-stack\f[R].
+That option can unstack other open pull requests in the same GitHub
+stack.
+Run \f[CR]prs\f[R] to link them again, or use
+\f[CR]push \-\-prs \-\-rebuild\-stack\f[R] to do both together.
+\f[CR]sync\f[R] may already have changed local branches before it
+reaches this check.
 To stop it linking them, run
 \f[CR]git config stack.githubStacks false\f[R].
 git\-stack links them through GitHub\(aqs API, with \f[CR]gh\f[R], so it

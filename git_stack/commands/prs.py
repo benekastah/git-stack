@@ -1,6 +1,6 @@
 import argparse
 
-from git_stack.commands import Subparsers, add_json_argument, add_stack_arguments
+from git_stack.commands import Subparsers, add_json_argument, add_rebuild_stack_argument, add_stack_arguments
 from git_stack.commands.info import print_tree
 from git_stack.git import DEFAULT_REMOTE
 from git_stack.stack import BranchInfo, PrsResult, PullRequestAction, PullRequestStep, StackClient
@@ -26,11 +26,7 @@ def register(subparsers: Subparsers) -> None:
     )
     add_stack_arguments(p, "open pull requests for")
     p.add_argument("--remote", default=DEFAULT_REMOTE)
-    p.add_argument(
-        "--rebuild-stack",
-        action="store_true",
-        help="unstack matching open pull requests on GitHub and rebuild their stack if it doesn't match",
-    )
+    add_rebuild_stack_argument(p)
     p.add_argument(
         "-n", "--dry-run", action="store_true", help="print the pull requests it would open, without opening them"
     )

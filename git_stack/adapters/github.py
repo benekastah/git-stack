@@ -462,7 +462,7 @@ class GitHubAdapter(GitAdapter):
             self.git.run("rev-list", "--no-merges", ref, "--not", f"refs/heads/{parent}").split()
         )
 
-    def before_push(self, to_push: list[str], parents: Parents) -> None:
+    def before_push(self, to_push: list[str], parents: Parents, rebuild_stack: bool = False) -> None:
         """Point the open pull requests of branches about to be pushed at their
         stack parents, where the parent is already on the remote.
 
@@ -471,23 +471,53 @@ class GitHubAdapter(GitAdapter):
         request would show every commit the new base gained since. The other
         way round, it shows at most the old parent's commits.
         """
+        # A new parent is not on the remote yet, so its PR cannot be retargeted
+        # until after the push. Check its stack now to avoid pushing first and
+        # only then discovering that unstacking requires consent.
+        prs = self.pull_requests()
+        pending = {
+            prs[b].number
+            for b in to_push
+            if b in prs
+            and prs[b].state == "OPEN"
+            and prs[b].base != parents[b]
+            and self.git.rev(f"refs/remotes/{self.remote}/{parents[b]}") is None
+        }
+        if pending and not rebuild_stack:
+            try:
+                fields = self.pull_request_fields(pending, STACK_FIELDS)
+            except StackError as e:
+                if "Field 'stack' doesn't exist on type 'PullRequest'" not in str(e):
+                    raise StackError(
+                        "couldn't check whether pull requests need unstacking before pushing; "
+                        "rerun with --rebuild-stack to allow it"
+                    ) from e
+                fields = {}
+            stacked = sorted(n for n, pr in fields.items() if optional_field(pr, "stack", dict) is not None)
+            if stacked:
+                raise StackError(
+                    f"changing the base of {', '.join(f'#{n}' for n in stacked)} requires unstacking its "
+                    "GitHub stack; rerun with --rebuild-stack to allow it"
+                )
         for b in to_push:
             if self.git.rev(f"refs/remotes/{self.remote}/{parents[b]}") is not None:
-                self.retarget(b, parents[b])
+                self.retarget(b, parents[b], rebuild_stack)
 
-    def after_push(self, pushed: list[str], parents: Parents, opening: bool = False) -> None:
+    def after_push(
+        self, pushed: list[str], parents: Parents, opening: bool = False, rebuild_stack: bool = False
+    ) -> None:
         """Point the open pull requests of pushed branches at their stack parents,
         if before_push couldn't because the parent wasn't on the remote yet, and
         say which pushed branches have none, unless they're opened next."""
         prs = self.pull_requests()
         for b in pushed:
             if b in prs:
-                self.retarget(b, parents[b])
+                self.retarget(b, parents[b], rebuild_stack)
         without = tuple(b for b in pushed if b not in prs)
         if without and not opening:
             self.core.emit(events.NoPullRequests(without))
 
-    def retarget(self, branch: str, base: str) -> None:
+    def retarget(self, branch: str, base: str, rebuild_stack: bool = False) -> None:
         """Point branch's pull request at base, if it's open and isn't already."""
         prs = self.pull_requests()
         pr = prs.get(branch)
@@ -502,6 +532,11 @@ class GitHubAdapter(GitAdapter):
             # was put in the middle of it) has to be unstacked first.
             if STACKED_BASE_ERROR not in str(e):
                 raise
+            if not rebuild_stack:
+                raise StackError(
+                    f"changing #{pr.number}'s base requires unstacking its GitHub stack; "
+                    "rerun this command with --rebuild-stack to allow it"
+                ) from e
             self.unstack(pr.number)
             self.gh(*edit)
         prs[branch] = replace(pr, base=base)

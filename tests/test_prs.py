@@ -618,7 +618,7 @@ def test_prs_works_where_github_has_no_stacked_pull_requests(repo: Repo, gh: Fak
     assert stack_section.START in body(gh, 1)
 
 
-def test_push_unstacks_on_github_to_put_a_branch_in_the_middle_then_prs_links_it_again(
+def test_push_requires_rebuild_stack_to_retarget_a_stacked_pull_request(
     repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event]
 ) -> None:
     gh.enable_stacks()
@@ -633,13 +633,64 @@ def test_push_unstacks_on_github_to_put_a_branch_in_the_middle_then_prs_links_it
     repo.git("switch", "--quiet", "pr2")
     client.restack(onto="pr1b")
 
-    client.push()
+    before = repo.git("rev-parse", "refs/remotes/origin/pr2")
+    with pytest.raises(StackError, match="--rebuild-stack"):
+        client.push()
+
+    assert gh.stacks() == [[1, 2, 3]]
+    assert repo.git("rev-parse", "refs/remotes/origin/pr2") == before
+    client.push(rebuild_stack=True)
 
     # GitHub doesn't change the base of a pull request in a stack.
     assert events.GitHubStackUnstacked(1000, 2) in emitted
     assert gh.stacks() == []
     assert next(pr for pr in gh.load()["prs"] if pr["number"] == 2)["baseRefName"] == "pr1b"
 
-    client.prs()
+    client.prs(rebuild_stack=True)
 
     assert gh.stacks() == [[1, 4, 2, 3]]
+
+
+def test_prs_requires_rebuild_stack_to_retarget_a_stacked_pull_request(
+    repo: Repo, gh: FakeGitHub, client: StackClient
+) -> None:
+    gh.enable_stacks()
+    repo.make_stack()
+    client.push()
+    client.prs()
+    state = gh.load()
+    state["prs"][1]["baseRefName"] = "main"
+    gh.save(state)
+
+    with pytest.raises(StackError, match="--rebuild-stack"):
+        client.prs()
+    assert gh.stacks() == [[1, 2, 3]]
+    assert gh.load()["prs"][1]["baseRefName"] == "main"
+
+    client.prs(rebuild_stack=True)
+    assert gh.stacks() == [[1, 2, 3]]
+    assert gh.load()["prs"][1]["baseRefName"] == "pr1"
+
+
+def test_sync_requires_rebuild_stack_before_pushing_a_retargeted_pull_request(
+    repo: Repo, gh: FakeGitHub, client: StackClient
+) -> None:
+    gh.enable_stacks()
+    repo.make_stack()
+    client.push()
+    client.prs()
+    state = gh.load()
+    state["prs"][1]["baseRefName"] = "main"
+    gh.save(state)
+    repo.git("switch", "--quiet", "pr2")
+    repo.commit("b", "updated\n", "pr2 update")
+    before = repo.git("rev-parse", "refs/remotes/origin/pr2")
+
+    with pytest.raises(StackError, match="--rebuild-stack"):
+        client.sync()
+    assert gh.stacks() == [[1, 2, 3]]
+    assert repo.git("rev-parse", "refs/remotes/origin/pr2") == before
+
+    client.sync(rebuild_stack=True)
+    assert gh.stacks() == []
+    assert gh.load()["prs"][1]["baseRefName"] == "pr1"

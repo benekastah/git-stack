@@ -7,6 +7,7 @@ from git_stack.commands import (
     add_ignore_revert_argument,
     add_json_argument,
     add_latest_argument,
+    add_rebuild_stack_argument,
     add_stack_arguments,
 )
 from git_stack.commands.info import print_tree
@@ -27,6 +28,7 @@ class Args(argparse.Namespace):
     json: bool
     allow_shared: bool
     pull_tracked_upstream: bool
+    rebuild_stack: bool
 
 
 def register(subparsers: Subparsers) -> None:
@@ -41,6 +43,7 @@ def register(subparsers: Subparsers) -> None:
     add_latest_argument(p)
     add_ignore_revert_argument(p)
     add_allow_shared_argument(p)
+    add_rebuild_stack_argument(p)
     p.add_argument(
         "--pull-tracked-upstream",
         action="store_true",
@@ -64,6 +67,7 @@ def run(stack: StackClient, args: Args) -> SyncResult:
         ignore_reverts=args.ignore_reverts,
         allow_shared=args.allow_shared,
         pull_tracked_upstream=args.pull_tracked_upstream,
+        rebuild_stack=args.rebuild_stack,
     )
 
 
