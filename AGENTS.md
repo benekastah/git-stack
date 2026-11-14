@@ -62,17 +62,22 @@ Text meant for people (messages, `info`'s tree) can change.
 
 ## Linux, macOS and Windows
 
-git-stack should run on Linux, macOS and Windows. CI runs the checks on all
-three, but it doesn't run on Windows yet (see "No Windows support" in
-`ISSUES.md`): the lock uses `fcntl`, and the tests rely on symlinks, so the
-Windows jobs are allowed to fail. Don't add to that:
+git-stack runs on Linux, macOS and Windows, and CI runs the tests on all
+three. Keep it that way:
 
 - Use `os.path` or `pathlib` for paths, not strings joined with `/`.
 - Run git through `GitClient`, with arguments as a list, never through a shell,
   and don't call other Unix tools (`sed`, `grep`, ...) from Python.
-- Don't use Unix-only modules or calls (`fcntl`, `os.fork`, `signal`, ...)
-  beyond the lock, which `ISSUES.md` already lists. If a feature needs one, keep
-  it behind a function with a plan for Windows, and add it to that issue.
+- Don't use Unix-only modules or calls (`fcntl`, `os.fork`, `signal`, ...). If
+  a feature needs one, keep it behind a function with a Windows version too,
+  as `git_stack/file_lock.py` does. `check.sh` type-checks as if on Windows as
+  well, so mypy sees the Windows version.
+- Decode git's output, and read and write files, as UTF-8 (`encoding="utf-8"`,
+  not `text=True`), not in the locale's encoding, which on Windows usually
+  isn't UTF-8.
+- In tests, make a fake command with `install_command` (`tests/helpers.py`),
+  not a shell script or a symlink, which Windows can't run or usually can't
+  make.
 - Don't assume `\n` line endings in files git or the user wrote, or a
   case-sensitive filesystem (macOS and Windows usually aren't).
 - Shell scripts (`check.sh`, the hooks) are for development only; git-stack

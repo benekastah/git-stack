@@ -1,6 +1,5 @@
 """Commands running at once: the git-stack lock, and git config's."""
 
-import fcntl
 import subprocess
 import sys
 import threading
@@ -27,14 +26,13 @@ def main_moves_on(repo: Repo) -> None:
 def test_command_waits_for_another_holding_the_lock(repo: Repo, client: StackClient) -> None:
     repo.make_stack()
     main_moves_on(repo)
-    with open(repo.path / ".git" / "git-stack.lock", "a") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
+    with client.exclusive():
         restack = subprocess.Popen(
             [sys.executable, "-m", "git_stack", "-C", str(repo.path), "restack", "--latest"],
             cwd=repo.tmp,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True,
+            encoding="utf-8",
         )
         time.sleep(1)
         assert restack.poll() is None

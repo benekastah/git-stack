@@ -25,6 +25,39 @@ def test_stack_through_squash_merge(repo: Repo) -> None:
     assert repo.stack("info").stdout == "main\n└── pr2 *\n"
 
 
+def test_non_ascii_branch_names_and_messages(repo: Repo) -> None:
+    # Decoded and printed as UTF-8 whatever the locale, e.g. on Windows, where
+    # it's usually not.
+    repo.stack("branch", "née")
+    repo.commit("a", "née\n", "café ☕")
+    repo.stack("push")
+    repo.commit_on_forge("née", "b", "naïve\n", "naïve fix ✓")
+    repo.stack("branch", "über")
+
+    repo.git("switch", "--quiet", "née")
+    repo.stack("pull")
+    repo.git("switch", "--quiet", "über")
+
+    assert repo.git("log", "--format=%s", "-2", "née").splitlines() == ["naïve fix ✓", "café ☕"]
+    assert repo.stack("info").stdout == "main\n└── née\n    └── über *\n"
+    assert repo.stack("parent").stdout == "née\n"
+
+
+def test_files_that_arent_utf_8(repo: Repo) -> None:
+    # Checking for a squash merge compares the branch's diff, which has the
+    # file's Latin-1 bytes in it, with main's.
+    repo.stack("branch", "pr1")
+    (repo.path / "a").write_bytes(b"caf\xe9\n")
+    repo.git("commit", "--quiet", "-am", "Latin-1")
+    repo.stack("push")
+    repo.squash_merge_on_forge("pr1", delete_branch=False)
+    repo.git("switch", "--quiet", "main")
+
+    repo.stack("clean")
+
+    repo.assert_untracked("pr1")
+
+
 def test_warnings_go_to_stderr(repo: Repo) -> None:
     repo.make_stack()
     repo.git("switch", "--quiet", "main")
@@ -62,7 +95,7 @@ def test_each_directory_is_relative_to_the_one_before(repo: Repo) -> None:
         [sys.executable, "-m", "git_stack", "-C", "elsewhere", "-C", "../local", "track", "main"],
         cwd=repo.tmp,
         capture_output=True,
-        text=True,
+        encoding="utf-8",
         check=False,
     )
 

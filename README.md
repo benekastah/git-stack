@@ -1328,8 +1328,9 @@ it has, pull the remote branch's commits in by hand, or push over them with
 
 ## Install
 
-Requires Python 3.11+ and git 2.38+. The GitHub integration also needs
-[`gh`](https://cli.github.com), logged in with `gh auth login`.
+Runs on Linux, macOS and Windows. Requires Python 3.11+ and git 2.38+. The
+GitHub integration also needs [`gh`](https://cli.github.com), logged in with
+`gh auth login`.
 
 Install it with [pipx](https://pipx.pypa.io) or
 [uv](https://docs.astral.sh/uv/):
@@ -1430,8 +1431,7 @@ at a time, e.g. to debug a failing test.
 
 CI (`.github/workflows/ci.yml`) runs `./check.sh` on Linux and macOS, with the
 oldest and newest Python git-stack supports, for every push to `main` and
-every pull request. It also runs the tests on Windows, where they're allowed
-to fail until git-stack supports it.
+every pull request, and the tests on Windows, where `check.sh` can't run.
 
 ### Git hooks
 

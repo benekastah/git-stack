@@ -156,12 +156,14 @@ class GitHubAdapter(GitAdapter):
         self._viewer: str | None = None
 
     def gh(self, *args: str, input: str | None = None) -> str:
+        # As bytes, so Windows doesn't turn the \n in input (e.g. a pull
+        # request's description) into \r\n.
         result = subprocess.run(
-            ["gh", *args], capture_output=True, text=True, encoding="utf-8", input=input, check=False
+            ["gh", *args], capture_output=True, input=None if input is None else input.encode("utf-8"), check=False
         )
         if result.returncode != 0:
-            raise StackError(f"gh {' '.join(args)} failed:\n{result.stderr.strip()}")
-        return result.stdout.strip()
+            raise StackError(f"gh {' '.join(args)} failed:\n{result.stderr.decode('utf-8', 'replace').strip()}")
+        return result.stdout.decode("utf-8").strip()
 
     def pull_requests(self) -> dict[str, PullRequest]:
         """{branch: pull request} for tracked branches with a pull request.
@@ -987,7 +989,6 @@ class GitHubAdapter(GitAdapter):
                 "-",
             ],
             capture_output=True,
-            text=True,
             encoding="utf-8",
             input=json.dumps({"pull_requests": numbers}),
             check=False,
@@ -1033,7 +1034,7 @@ def ssh_hostname(host: str) -> str:
     host itself if ssh can't tell."""
     try:
         result = subprocess.run(
-            ["ssh", "-G", host], capture_output=True, text=True, stdin=subprocess.DEVNULL, check=False
+            ["ssh", "-G", host], capture_output=True, encoding="utf-8", stdin=subprocess.DEVNULL, check=False
         )
     except OSError:
         return host

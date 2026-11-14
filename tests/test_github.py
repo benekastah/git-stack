@@ -1,6 +1,5 @@
 """The GitHub adapter, with tests/fake_gh.py standing in for gh."""
 
-import os
 import pathlib
 import subprocess
 
@@ -12,7 +11,7 @@ from git_stack.adapters.github import github_repo
 from git_stack.errors import StackError
 from git_stack.git import GitClient
 from git_stack.stack import BranchStatus, StackClient
-from tests.helpers import FakeGitHub, Repo
+from tests.helpers import FakeGitHub, Repo, install_command
 
 
 def merge_pr1_on_forge_with_a_tweak(repo: Repo, gh: FakeGitHub) -> None:
@@ -790,17 +789,10 @@ def test_git_adapter_setting_leaves_github_alone(repo: Repo, gh: FakeGitHub, cli
 
 
 @pytest.fixture
-def fake_ssh(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """An ssh whose config has `Host github-work` with `HostName github.com`."""
-    bin_dir = tmp_path / "ssh-bin"
-    bin_dir.mkdir()
-    ssh = bin_dir / "ssh"
-    ssh.write_text(
-        '#!/bin/sh\n[ "$1" = -G ] || exit 255\n'
-        'if [ "$2" = github-work ]; then echo "hostname github.com"; else echo "hostname $2"; fi\n'
-    )
-    ssh.chmod(0o755)
-    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
+def fake_ssh(repo: Repo, tmp_path: pathlib.Path) -> None:
+    """An ssh whose config has `Host github-work` with `HostName github.com`
+    (see tests/fake_ssh.py)."""
+    install_command(tmp_path / "bin", "ssh", "tests.fake_ssh")
 
 
 @pytest.mark.parametrize("url", ["git@github-work:acme/widgets.git", "ssh://git@github-work/acme/widgets.git"])
