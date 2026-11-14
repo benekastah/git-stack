@@ -16,18 +16,6 @@ merge-resolution changes. Check for unaccounted merge commits or their full
 tree changes before treating a GitHub-merged branch as safe to untrack or
 delete; the upstream pull guard alone doesn't cover this merge-detection path.
 
-## Patch-based merge detection can discard merge-only local changes
-
-The git adapter's patch-based landing check compares the parent's commits with
-the branch's non-merge commits. If the parent independently acquired all those
-patches, it can classify the branch as merged even though a merge commit on
-the branch made an additional change that is absent from the parent.
-`sync -d local` can then delete the only branch containing that change.
-
-Reproduced through `sync` with a merge-only edit that remained absent from
-the parent. Check the complete branch changes, including merge commits,
-before treating matching non-merge patches as evidence that it has landed.
-
 ## A branch can look merged when its parent made the same change
 
 When the git adapter decides (with the GitHub adapter, that's a branch without

@@ -192,6 +192,27 @@ def test_sync_requires_force_to_push_to_a_stack_roots_remote_branch(repo: Repo, 
     assert repo.git("rev-parse", "release", cwd=repo.origin) == before
 
 
+def test_sync_keeps_a_branch_whose_merge_changed_more_than_its_commits(repo: Repo, client: StackClient) -> None:
+    repo.git("switch", "--quiet", "--create", "side")
+    repo.commit("c", "side\n", "side c1")
+    repo.git("switch", "--quiet", "main")
+    client.branch("feature")
+    repo.commit("a", "feature\n", "feature c1")
+    repo.merge_with_an_edit("side", "d", "resolved\n")
+    # main gets the same changes as each of feature's commits, but not the
+    # change its merge made.
+    repo.git("switch", "--quiet", "main")
+    repo.commit("b", "main moved\n", "main moved")
+    repo.git("cherry-pick", "feature^1", "side")
+    repo.git("push", "--quiet", "origin", "main")
+    repo.git("switch", "--quiet", "feature")
+
+    repo.stack("sync", "-d", "local")
+
+    assert repo.config("feature", "stackParent") == "main"
+    assert repo.git("show", "feature:d") == "resolved"
+
+
 def test_sync_refuses_multiple_upstream_remotes_before_changing_branches(repo: Repo, client: StackClient) -> None:
     repo.make_stack()
     client.push()

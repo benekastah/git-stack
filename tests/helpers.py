@@ -108,6 +108,16 @@ class Repo:
         self.git("commit", "--quiet", f"--author={author}", "-m", message, cwd=self.forge)
         self.git("push", "--quiet", "origin", branch, cwd=self.forge)
 
+    def merge_with_an_edit(self, other: str, name: str, content: str, cwd: pathlib.Path | None = None) -> None:
+        """Merge other into the current branch (in cwd, default: path), writing
+        content to name in the merge commit, so the merge changes something
+        neither of its parents does, as resolving a conflict can."""
+        cwd = cwd or self.path
+        self.git("merge", "--quiet", "--no-ff", "--no-commit", other, cwd=cwd)
+        (cwd / name).write_text(content)
+        self.git("add", name, cwd=cwd)
+        self.git("commit", "--quiet", "--no-edit", cwd=cwd)
+
     def rebase_stack_on_forge(self, *branches: str) -> None:
         """Rebase origin/<branch> for each of branches, a stack bottom first,
         onto origin/main's tip or the rebased branch before it, and force-push

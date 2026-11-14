@@ -79,6 +79,25 @@ def test_clean_delete_remote_refuses_without_the_servers_default_branch(repo: Re
     assert repo.git("branch", "--list", "pr1", cwd=repo.origin) != ""
 
 
+def test_clean_refuses_a_merged_branch_whose_remote_branch_has_unseen_merges(repo: Repo, client: StackClient) -> None:
+    client.branch("feature")
+    repo.commit("a", "feature\n", "feature c1")
+    client.push()
+    repo.squash_merge_on_forge("feature", delete_branch=False)
+    # Then someone merges main into the remote branch, with a change that's in
+    # neither.
+    repo.git("switch", "--quiet", "-C", "feature", "origin/feature", cwd=repo.forge)
+    repo.merge_with_an_edit("origin/main", "d", "resolved\n", cwd=repo.forge)
+    repo.git("push", "--quiet", "origin", "feature", cwd=repo.forge)
+    repo.git("switch", "--quiet", "main")
+
+    result = repo.stack("clean", "-d", "both", expect_success=False)
+
+    assert "feature's upstream contains unseen merge commits" in result.stderr
+    assert repo.config("feature", "stackParent") == "main"
+    assert repo.git("show", "feature:d", cwd=repo.origin) == "resolved"
+
+
 def test_clean_keeps_tracking_reverted_branch(repo: Repo, client: StackClient, emitted: list[events.Event]) -> None:
     repo.make_stack()
     client.push()

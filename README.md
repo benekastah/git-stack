@@ -1231,7 +1231,9 @@ Its changes must already be in its parent (`main`, or the parent PR's branch if
 it was merged into that): either merging it into the parent would change
 nothing, or the parent has a commit with the same changes as the whole branch
 (a squash merge) or commits with the same changes as each of its commits (a
-rebase merge), even if the parent edited the same lines again afterwards. This
+rebase merge), even if the parent edited the same lines again afterwards. Each
+of its commits only counts if it has no merge commits with changes of their own
+(e.g. a resolved conflict), which no commit of the parent can match. This
 holds however it was merged: squash, rebase or merge commit, on GitHub or
 locally. In addition, either:
 
