@@ -1225,7 +1225,9 @@ With the GitHub adapter:
 
 With the [GitHub adapter](#github), a branch whose pull request GitHub says was
 merged counts as merged once the merge is in its local parent, unless the branch
-or its remote branch has commits that weren't merged. Otherwise:
+or its remote branch has commits that weren't merged, including a merge commit
+with changes of its own (e.g. a resolved conflict), whose changes the parent
+doesn't have. Otherwise:
 
 Its changes must already be in its parent (`main`, or the parent PR's branch if
 it was merged into that): either merging it into the parent would change

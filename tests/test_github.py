@@ -2,6 +2,7 @@
 
 import os
 import pathlib
+import subprocess
 
 import pytest
 
@@ -515,6 +516,74 @@ def test_sync_skips_merged_pr_with_local_commits_after_merge(
 
     assert events.MergedWithNewCommits("pr1", "main") in emitted
     assert repo.config("pr1", "stackParent") == "main"
+
+
+@pytest.mark.parametrize("where", ["local", "remote"])
+def test_sync_keeps_merged_pr_whose_branch_has_a_merge_with_changes_of_its_own(
+    repo: Repo, gh: FakeGitHub, client: StackClient, where: str
+) -> None:
+    repo.make_stack()
+    client.push()
+    head = repo.git("rev-parse", "pr1")
+    repo.squash_merge_on_forge("pr1", delete_branch=False)
+    gh.add_pr(
+        number=5,
+        state="MERGED",
+        headRefName="pr1",
+        headRefOid=head,
+        baseRefName="main",
+        mergeCommit={"oid": repo.git("rev-parse", "HEAD", cwd=repo.forge)},
+    )
+    # After the pull request merged, main is merged into pr1, with a change
+    # that's in neither: its only commits besides that merge are main's.
+    if where == "local":
+        repo.git("fetch", "--quiet")
+        repo.git("switch", "--quiet", "pr1")
+        repo.merge_with_an_edit("origin/main", "d", "resolved\n")
+    else:
+        repo.git("switch", "--quiet", "-C", "pr1", "origin/pr1", cwd=repo.forge)
+        repo.merge_with_an_edit("origin/main", "d", "resolved\n", cwd=repo.forge)
+        repo.git("push", "--quiet", "origin", "pr1", cwd=repo.forge)
+
+    result = repo.stack("sync", "-d", "both")
+
+    assert "skipping pr1: it was merged into main, but it or its remote branch has commits" in result.stderr
+    assert repo.config("pr1", "stackParent") == "main"
+    assert repo.git("branch", "--list", "pr1") != ""
+    assert repo.git("show", "pr1:d", cwd=repo.origin if where == "remote" else repo.path) == "resolved"
+
+
+def test_sync_untracks_merged_pr_whose_later_merge_added_nothing_its_parent_lacks(
+    repo: Repo, gh: FakeGitHub, client: StackClient
+) -> None:
+    repo.make_stack()
+    client.push()
+    head = repo.git("rev-parse", "pr1")
+    repo.squash_merge_on_forge("pr1", delete_branch=False)
+    gh.add_pr(
+        number=5,
+        state="MERGED",
+        headRefName="pr1",
+        headRefOid=head,
+        baseRefName="main",
+        mergeCommit={"oid": repo.git("rev-parse", "HEAD", cwd=repo.forge)},
+    )
+    repo.commit_on_forge("main", "a", "main again\n", "main again")
+    # main is merged into pr1, resolving the conflict as main did, so pr1's
+    # merge has changes of its own, but main has them all.
+    repo.git("fetch", "--quiet")
+    repo.git("switch", "--quiet", "pr1")
+    subprocess.run(["git", "merge", "--quiet", "origin/main"], cwd=repo.path, capture_output=True, check=False)
+    repo.git("checkout", "--theirs", "a")
+    repo.git("add", "a")
+    repo.git("commit", "--quiet", "--no-edit")
+    repo.git("switch", "--quiet", "pr3")
+
+    result = repo.stack("sync", "-d", "both")
+
+    assert "skipping pr1" not in result.stderr
+    assert repo.git("branch", "--list", "pr1") == ""
+    assert repo.config("pr2", "stackParent") == "main"
 
 
 def test_open_pr_on_default_branch_overrides_local_detection(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
