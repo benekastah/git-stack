@@ -1824,6 +1824,28 @@ commits), the commits you didn\(aqt take aren\(aqt counted as pulled:
 the next \f[CR]sync\f[R] offers them again, and \f[CR]push\f[R] refuses
 to drop them.
 To drop them anyway, run \f[CR]git stack push \-\-force\f[R].
+.SS Known limitation: old copies of your own commits
+When you rebase a branch, its old commits stay on its remote branch
+until you push it again.
+\f[CR]sync\f[R] and \f[CR]pull\f[R] recognize them as old copies, not
+commits someone else pushed, by the tip \f[CR]git stack push\f[R] last
+pushed, the branch\(aqs reflog, and their changes matching your new
+commits.
+If none of those apply, they look like commits someone else pushed: for
+example, if the rebase changed them (say, while resolving a conflict)
+and they were pushed from another clone, or with a plain
+\f[CR]git push\f[R] whose reflog entry has expired.
+.PP
+\f[CR]sync\f[R] and \f[CR]pull\f[R] refuse to pull them in if the remote
+branch was rewritten (it doesn\(aqt contain the tip they last saw), or
+if that tip isn\(aqt known and the two branches have diverged, until you
+rerun them with \f[CR]\-\-rewritten\-upstream\f[R].
+But if the old copies were added on top of a remote branch that still
+has that tip, nothing in git\(aqs history tells them apart from commits
+someone else pushed, so they\(aqre pulled in.
+If that happens, drop them (e.g.
+with \f[CR]git rebase \-i $(git stack base)\f[R]), then
+\f[CR]git stack push \-\-force\f[R].
 .SS Rebased on the remote
 GitHub\(aqs \(dqRebase stack\(dq button (or \f[CR]gh stack rebase\f[R]
 on another machine) rebases a stack\(aqs remote branches and
