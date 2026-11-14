@@ -19,7 +19,7 @@ PAGE = ROOT / "man" / "git-stack.1"
 
 def render(readme: pathlib.Path) -> str:
     page: str = pypandoc.convert_file(
-        str(readme), "man", format="gfm", extra_args=["--standalone", f"--lua-filter={FILTER}"]
+        str(readme), "man", format="gfm", extra_args=["--standalone", "--eol=lf", f"--lua-filter={FILTER}"]
     )
     return page
 
@@ -34,9 +34,12 @@ def main() -> int:
     )
     args = parser.parse_args()
     page = render(args.readme)
+    # As UTF-8 with \n line endings, whatever the system's defaults (e.g. on
+    # Windows).
     if not args.check:
-        PAGE.write_text(page)
-    elif PAGE.read_text() != page:
+        with open(PAGE, "w", encoding="utf-8", newline="") as f:
+            f.write(page)
+    elif PAGE.read_bytes().decode("utf-8") != page:
         print(f"{PAGE.relative_to(ROOT)} is out of date with README.md; run man/build.py", file=sys.stderr)
         return 1
     return 0

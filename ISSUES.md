@@ -59,15 +59,6 @@ the authors of the ones named, not the user's, but its
 `looking-up-pull-requests` event has no author, so it prints "looking up your
 open pull requests on GitHub".
 
-## No Windows support
-
-git-stack is written for Unix-like systems. The git-stack lock
-(`StackCore.exclusive`) uses `fcntl.flock`, which Windows doesn't have, so it
-won't even start there, and the tests rely on symlinks. Low priority until
-someone needs it: `msvcrt.locking`, or a lock file created with `O_EXCL`,
-would replace `flock`. Before a 1.0 release, either support Windows or clearly
-state in the installation requirements that it is not supported.
-
 ## GitHub's username format is checked in `stack.py`
 
 `GITHUB_LOGIN`, which `import_stacks` checks `--author` against, is GitHub's

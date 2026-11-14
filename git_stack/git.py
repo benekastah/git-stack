@@ -13,6 +13,19 @@ DEFAULT_REMOTE = "origin"
 CONFIG_LOCK_TIMEOUT = 5.0
 
 
+def decode(output: bytes) -> str:
+    """git's output as text: UTF-8, which git writes on every system (rather
+    than in the locale's encoding, which on Windows usually isn't), keeping
+    bytes that aren't (e.g. a file's in a diff) as they are, so encode gives
+    them back unchanged."""
+    return output.decode("utf-8", "surrogateescape")
+
+
+def encode(text: str) -> bytes:
+    """text, from decode, as the bytes git wrote."""
+    return text.encode("utf-8", "surrogateescape")
+
+
 class GitClient:
     """Runs git in directory, as `git -C <directory>` does."""
 
@@ -30,11 +43,17 @@ class GitClient:
         return ["git", "-C", self.directory, *args]
 
     def run(self, *args: str, check: bool = True, input: str | None = None) -> str:
-        """Run git and return stripped stdout."""
-        result = subprocess.run(self._command(*args), capture_output=True, text=True, input=input, check=False)
+        """Run git and return stripped stdout.
+
+        Input and output are bytes, decoded and encoded here (see decode), so
+        Windows doesn't turn \n into \r\n on the way in.
+        """
+        result = subprocess.run(
+            self._command(*args), capture_output=True, input=None if input is None else encode(input), check=False
+        )
         if check and result.returncode != 0:
-            raise StackError(f"git {' '.join(args)} failed:\n{result.stderr.strip()}")
-        return result.stdout.strip()
+            raise StackError(f"git {' '.join(args)} failed:\n{decode(result.stderr).strip()}")
+        return decode(result.stdout).strip()
 
     def ok(self, *args: str) -> bool:
         """Run git and report whether it succeeded."""
@@ -101,7 +120,13 @@ class GitClient:
         deadline = time.monotonic() + CONFIG_LOCK_TIMEOUT
         delay = 0.01
         while True:
-            result = subprocess.run(self._command("config", *args), capture_output=True, text=True, check=False)
+            result = subprocess.run(
+                self._command("config", *args),
+                capture_output=True,
+                encoding="utf-8",
+                errors="surrogateescape",
+                check=False,
+            )
             locked = result.returncode != 0 and "could not lock config file" in result.stderr
             if not locked or time.monotonic() >= deadline:
                 break
@@ -160,16 +185,17 @@ class GitClient:
 
     def worktree_of(self, branch: str) -> str | None:
         """The path of the worktree branch is checked out in, if any, or that a
-        rebase of branch is in progress in. The rebase detaches that worktree's
-        HEAD, so `git worktree list` doesn't show the branch."""
+        rebase of branch is in progress in, in the system's form (git gives
+        C:/... on Windows). The rebase detaches that worktree's HEAD, so
+        `git worktree list` doesn't show the branch."""
         path = None
         for line in self.run("worktree", "list", "--porcelain").splitlines():
             if line.startswith("worktree "):
                 path = line.removeprefix("worktree ")
-            elif line == f"branch refs/heads/{branch}" or (
-                line == "detached" and path is not None and self.rebasing_in(path) == branch
+            elif path is not None and (
+                line == f"branch refs/heads/{branch}" or (line == "detached" and self.rebasing_in(path) == branch)
             ):
-                return path
+                return os.path.normpath(path)
         return None
 
     def rebasing_in(self, worktree: str) -> str | None:
@@ -179,7 +205,7 @@ class GitClient:
             return None
         for name in ("rebase-merge", "rebase-apply"):
             try:
-                with open(os.path.join(git_dir, name, "head-name")) as f:
+                with open(os.path.join(git_dir, name, "head-name"), encoding="utf-8") as f:
                     head = f.read().strip()
             except OSError:
                 continue
@@ -257,7 +283,11 @@ class GitClient:
         dry run, or None if it wouldn't. The dry run skips the pre-push hook,
         which the real push runs, so it doesn't run twice."""
         result = subprocess.run(
-            self._command("push", "--dry-run", "--no-verify", *args), capture_output=True, text=True, check=False
+            self._command("push", "--dry-run", "--no-verify", *args),
+            capture_output=True,
+            encoding="utf-8",
+            errors="surrogateescape",
+            check=False,
         )
         return result.stderr.strip() if result.returncode != 0 else None
 
@@ -288,7 +318,8 @@ class GitClient:
         result = subprocess.run(
             self._command("merge-tree", "--write-tree", "--name-only", target, branch),
             capture_output=True,
-            text=True,
+            encoding="utf-8",
+            errors="surrogateescape",
             check=False,
         )
         if result.returncode not in (0, 1):
@@ -306,7 +337,11 @@ class GitClient:
     def merged_tree(self, ours: str, theirs: str) -> str | None:
         """The tree merging theirs into ours gives, or None if it conflicts."""
         result = subprocess.run(
-            self._command("merge-tree", "--write-tree", ours, theirs), capture_output=True, text=True, check=False
+            self._command("merge-tree", "--write-tree", ours, theirs),
+            capture_output=True,
+            encoding="utf-8",
+            errors="surrogateescape",
+            check=False,
         )
         if result.returncode != 0:
             return None

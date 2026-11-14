@@ -6,10 +6,9 @@ import pytest
 
 from git_stack import events
 from git_stack.stack import StackClient
-from tests.helpers import FakeGitHub, Repo
+from tests.helpers import FakeGitHub, Repo, install_command
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-FAKE_GH = pathlib.Path(__file__).resolve().parent / "fake_gh.py"
 
 
 @pytest.fixture(scope="session")
@@ -28,18 +27,13 @@ def repo(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, git_exec_path:
     """A repository with a, b and c committed to main and pushed to origin.
 
     git, git stack run as a separate process, and repo.client see an isolated
-    git config and identity for the rest of the test. git is the git in
-    git_exec_path, from tmp_path / "bin", which other fixtures can add
-    commands to.
+    git config and identity for the rest of the test. PATH has tmp_path /
+    "bin" first, which other fixtures can add commands to (see
+    install_command), then git_exec_path, so git is the git there.
     """
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    # git may find its commands and templates relative to its own path, which
-    # through a symlink is bin_dir, so point it at the real ones.
-    (bin_dir / "git").symlink_to((git_exec_path / "git").resolve())
-    monkeypatch.setenv("GIT_EXEC_PATH", str(git_exec_path))
-    monkeypatch.setenv("GIT_TEMPLATE_DIR", str(git_exec_path.parent.parent / "share" / "git-core" / "templates"))
-    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setenv("PATH", os.pathsep.join([str(bin_dir), str(git_exec_path), os.environ["PATH"]]))
     global_config = tmp_path / "gitconfig"
     global_config.write_text("[init]\n\tdefaultBranch = main\n")
     for name, value in {
@@ -73,7 +67,7 @@ def repo(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, git_exec_path:
 @pytest.fixture
 def gh(repo: Repo, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> FakeGitHub:
     """Make repo look like a GitHub repository, with tests/fake_gh.py as gh."""
-    (tmp_path / "bin" / "gh").symlink_to(FAKE_GH)
+    install_command(tmp_path / "bin", "gh", "tests.fake_gh")
     gh = FakeGitHub(tmp_path / "gh-state.json")
     gh.save({"prs": [], "calls": [], "fail": []})
     monkeypatch.setenv("FAKE_GH_STATE", str(gh.state_path))

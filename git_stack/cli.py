@@ -1,4 +1,6 @@
 import argparse
+import codecs
+import io
 import os
 import sys
 
@@ -55,6 +57,15 @@ COMMANDS = (
 )
 
 
+def use_utf8_output() -> None:
+    """Write stdout and stderr as UTF-8, which git's output (e.g. branch names)
+    and info's tree are, even where Python wouldn't, as on Windows when they're
+    piped (before Python 3.15)."""
+    for stream in (sys.stdout, sys.stderr):
+        if isinstance(stream, io.TextIOWrapper) and codecs.lookup(stream.encoding).name != "utf-8":
+            stream.reconfigure(encoding="utf-8")
+
+
 def main(argv: list[str] | None = None, stack: StackClient | None = None) -> int:
     """Run the `git stack` command in argv (default: sys.argv) with stack (default:
     a StackClient working in the directory -C names, or the current one,
@@ -73,6 +84,7 @@ def main(argv: list[str] | None = None, stack: StackClient | None = None) -> int
     for command in COMMANDS:
         command.register(subparsers)
 
+    use_utf8_output()
     args = parser.parse_args(argv)
     if stack is None:
         # os.path.join starts over at an absolute path, as git's -C does.

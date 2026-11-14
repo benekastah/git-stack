@@ -163,7 +163,7 @@ def stacks_api(path: str, state: dict[str, Any]) -> str | None:
     if path.endswith("/unstack"):
         unstack(int(path.split("/")[-2]), state)
         return None
-    return link_stack(path, json.loads(sys.stdin.read())["pull_requests"], state)
+    return link_stack(path, json.loads(read_stdin())["pull_requests"], state)
 
 
 def stacks_of(number: int, state: dict[str, Any]) -> str:
@@ -247,7 +247,7 @@ def create_pull_request(args: list[str], prs: list[dict[str, Any]]) -> str:
             "baseRefName": opt(args, "--base"),
             "mergeCommit": None,
             "title": opt(args, "--title"),
-            "body": sys.stdin.read(),
+            "body": read_stdin(),
             "isDraft": "--draft" in args,
         }
     )
@@ -268,12 +268,18 @@ def edit_pull_request(args: list[str], state: dict[str, Any]) -> None:
         )
         pr["baseRefName"] = opt(args, "--base")
     if "--body-file" in args:
-        pr["body"] = sys.stdin.read()
+        pr["body"] = read_stdin()
 
 
 def timestamp(tick: int) -> str:
     """A GitHub timestamp, tick seconds into the fake's day."""
     return f"2026-01-01T{tick // 3600:02d}:{tick // 60 % 60:02d}:{tick % 60:02d}Z"
+
+
+def read_stdin() -> str:
+    """Standard input exactly as given, UTF-8, as gh reads it: no \r\n is
+    turned into \n, so the tests see any that git-stack sends."""
+    return sys.stdin.buffer.read().decode("utf-8")
 
 
 def main() -> None:
@@ -299,7 +305,8 @@ def main() -> None:
     if error is not None:
         sys.exit(error)
     if out is not None:
-        print(out)
+        # As UTF-8, as gh writes, whatever the locale's encoding.
+        sys.stdout.buffer.write(out.encode("utf-8") + b"\n")
 
 
 if __name__ == "__main__":

@@ -1,4 +1,3 @@
-import fcntl
 import fnmatch
 import os
 from collections import Counter
@@ -9,6 +8,7 @@ from typing import TypeAlias
 from git_stack import events
 from git_stack.check_cache import CheckCache
 from git_stack.errors import BrokenStackError, StackError
+from git_stack.file_lock import file_lock
 from git_stack.git import GitClient
 
 PARENT_KEY = "stackParent"
@@ -171,8 +171,7 @@ class StackCore:
         Without it, a command could take a restack another one has just recorded
         as pending, but not started yet, for one that was aborted, and discard
         it (see settle). The lock is in the git directory every worktree
-        shares, as the metadata is. The system releases it when the process
-        ends, however it ends.
+        shares, as the metadata is.
         """
         if self._exclusive_depth:
             self._exclusive_depth += 1
@@ -181,12 +180,7 @@ class StackCore:
             finally:
                 self._exclusive_depth -= 1
             return
-        with open(os.path.join(self.git.common_dir(), LOCK_FILE), "a") as lock:
-            try:
-                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError:
-                self.emit(events.WaitingForLock())
-                fcntl.flock(lock, fcntl.LOCK_EX)
+        with file_lock(os.path.join(self.git.common_dir(), LOCK_FILE), lambda: self.emit(events.WaitingForLock())):
             self._exclusive_depth = 1
             try:
                 yield

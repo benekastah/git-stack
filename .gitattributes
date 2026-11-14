@@ -1,0 +1,3 @@
+# \n line endings in every checkout, as the tests and the man page check
+# expect, even on Windows.
+* text=auto eol=lf

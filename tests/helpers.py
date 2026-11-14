@@ -1,5 +1,6 @@
 """Test repositories and a fake GitHub, which tests/conftest.py provides as fixtures."""
 
+import importlib
 import json
 import pathlib
 import subprocess
@@ -12,6 +13,24 @@ import pytest
 from git_stack import events
 from git_stack.git import GitClient
 from git_stack.stack import BranchInfo, StackClient
+
+
+def install_command(bin_dir: pathlib.Path, name: str, module: str) -> None:
+    """Make name, run from bin_dir (on PATH), run module's main() with this
+    Python, as git-stack runs gh or ssh. module must be importable, as the
+    repo fixture's PYTHONPATH makes the tests' modules."""
+    if sys.platform == "win32":
+        # Windows only runs .exe files found on PATH, so wrap it in the
+        # launcher pip makes console scripts with.
+        scripts: Any = importlib.import_module("pip._vendor.distlib.scripts")
+        maker = scripts.ScriptMaker(None, str(bin_dir))
+        maker.executable = sys.executable
+        maker.variants = {""}
+        maker.make(f"{name} = {module}:main")
+    else:
+        command = bin_dir / name
+        command.write_text(f'#!/bin/sh\nexec "{sys.executable}" -m {module} "$@"\n', encoding="utf-8")
+        command.chmod(0o755)
 
 
 @dataclass
@@ -33,7 +52,9 @@ class Repo:
         self.client = StackClient(GitClient(self.path), on_event=self.emitted.append)
 
     def git(self, *args: str, cwd: pathlib.Path | None = None) -> str:
-        result = subprocess.run(["git", *args], cwd=cwd or self.path, capture_output=True, text=True, check=False)
+        result = subprocess.run(
+            ["git", *args], cwd=cwd or self.path, capture_output=True, encoding="utf-8", check=False
+        )
         if result.returncode != 0:
             pytest.fail(f"git {' '.join(args)} failed:\n{result.stderr}")
         return result.stdout.strip()
@@ -45,7 +66,7 @@ class Repo:
             [sys.executable, "-m", "git_stack", "-C", str(self.path), *args],
             cwd=self.tmp,
             capture_output=True,
-            text=True,
+            encoding="utf-8",
             timeout=60,
             check=False,
         )
@@ -56,7 +77,7 @@ class Repo:
         return result
 
     def write(self, name: str, content: str) -> None:
-        (self.path / name).write_text(content)
+        (self.path / name).write_text(content, encoding="utf-8", newline="")
 
     def add_hook(self, repository: pathlib.Path, name: str, script: str) -> None:
         """Make script, a shell script, repository's hook name (e.g. pre-push)."""
@@ -110,7 +131,7 @@ class Repo:
         another machine) would."""
         self.git("fetch", "--quiet", cwd=self.forge)
         self.git("switch", "--quiet", "-C", branch, f"origin/{branch}", cwd=self.forge)
-        (self.forge / name).write_text(content)
+        (self.forge / name).write_text(content, encoding="utf-8", newline="")
         self.git("add", name, cwd=self.forge)
         self.git("commit", "--quiet", f"--author={author}", "-m", message, cwd=self.forge)
         self.git("push", "--quiet", "origin", branch, cwd=self.forge)
@@ -121,7 +142,7 @@ class Repo:
         neither of its parents does, as resolving a conflict can."""
         cwd = cwd or self.path
         self.git("merge", "--quiet", "--no-ff", "--no-commit", other, cwd=cwd)
-        (cwd / name).write_text(content)
+        (cwd / name).write_text(content, encoding="utf-8", newline="")
         self.git("add", name, cwd=cwd)
         self.git("commit", "--quiet", "--no-edit", cwd=cwd)
 
@@ -145,7 +166,7 @@ class Repo:
         coworker would, and fetch it."""
         self.git("fetch", "--quiet", cwd=self.forge)
         self.git("switch", "--quiet", "-C", branch, "origin/main", cwd=self.forge)
-        (self.forge / "theirs").write_text("theirs\n")
+        (self.forge / "theirs").write_text("theirs\n", encoding="utf-8", newline="")
         self.git("add", "theirs", cwd=self.forge)
         self.git("commit", "--quiet", "-m", "theirs", cwd=self.forge)
         self.git("push", "--quiet", "origin", branch, cwd=self.forge)

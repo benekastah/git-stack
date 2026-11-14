@@ -12,9 +12,6 @@ jobs:
   check:
     name: ${{ matrix.os }}, Python ${{ matrix.python }}
     runs-on: ${{ matrix.os }}
-    # git-stack doesn't run on Windows yet (see "No Windows support" in
-    # ISSUES.md), so its jobs show how far off it is without failing the run.
-    continue-on-error: ${{ matrix.os == 'windows-latest' }}
     strategy:
       fail-fast: false
       matrix:
@@ -40,8 +37,7 @@ jobs:
 
   # The one check the ruleset on main requires, so changing the matrix doesn't
   # change what's required. It runs even if a check failed (a skipped required
-  # check would count as passing), and fails unless every check but the Windows
-  # ones (which may fail) passed.
+  # check would count as passing), and fails unless every check passed.
   passed:
     name: CI passed
     if: always()

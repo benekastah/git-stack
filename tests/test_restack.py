@@ -316,9 +316,7 @@ def test_restack_onto_rejects_cycle(repo: Repo, target: str, client: StackClient
 
 def test_restack_failure_without_conflict_is_not_reported_as_conflict(repo: Repo, client: StackClient) -> None:
     repo.make_stack()
-    hook = repo.path / ".git" / "hooks" / "pre-rebase"
-    hook.write_text("#!/bin/sh\nexit 1\n")
-    hook.chmod(0o755)
+    repo.add_hook(repo.path, "pre-rebase", "#!/bin/sh\nexit 1\n")
     repo.git("switch", "--quiet", "pr1")
     repo.commit("a", "pr1 review fix\n", "pr1 review fix")
 
