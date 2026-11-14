@@ -2,21 +2,6 @@
 
 Most severe first.
 
-## A stale remote HEAD can bypass default-branch protection
-
-The push and sync safeguards trust the local `refs/remotes/<remote>/HEAD` if
-it exists, without checking whether the server's default branch has changed.
-Git fetch does not update this symbolic ref automatically. A feature branch
-tracking the server's new default can therefore be pushed to it by `sync`
-without `--force`. The merged-branch deletion path uses the same stale marker:
-with `-d remote` it can delete the server's actual default branch if the server
-permits it and the stack root has a different name.
-
-Reproduced both outcomes in disposable repositories whose local remote HEAD
-pointed to `old` while the server's HEAD pointed to `main`. Resolve the current
-server default before pushing or deleting, and fail safely if it cannot be
-verified. The check must not treat the cached symbolic ref as authoritative.
-
 ## A merged GitHub PR can hide merge-only changes made afterward
 
 When GitHub reports a pull request merged, `GitHubAdapter.unmerged_commits`

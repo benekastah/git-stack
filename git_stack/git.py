@@ -215,6 +215,20 @@ class GitClient:
             return ref.removeprefix("refs/heads/")
         return branch
 
+    def remote_default_branch(self, remote: str) -> str | None:
+        """The branch remote's HEAD points at on the server, or None if it can't
+        be asked or its HEAD isn't a branch.
+
+        Asked every time rather than read from refs/remotes/<remote>/HEAD, which
+        fetch doesn't update when the server's default branch changes.
+        """
+        heads = self.run("ls-remote", "--symref", remote, "HEAD", check=False).splitlines()
+        for line in heads:
+            target, _, name = line.partition("\t")
+            if name == "HEAD" and target.startswith("ref: refs/heads/"):
+                return target.removeprefix("ref: refs/heads/")
+        return None
+
     def remote_branch(self, branch: str) -> tuple[str, str, str] | None:
         """Return (remote, ref, tip) for branch's upstream on a remote, or None."""
         remote = self.config_get(branch, "remote")

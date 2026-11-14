@@ -592,8 +592,10 @@ git stack sync -d both          # ...and their remote branches
   branches, their remote branches, or both. A branch is untracked by the first
   `sync` or `clean` that sees it merged, so pass `-d` on that run if you want
   it deleted. Deleting a remote branch is leased to the fetched tip, so it
-  fails rather than deleting commits pushed since. Stack roots and default
-  branches are never deleted as a branch's upstream.
+  fails rather than deleting commits pushed since. Stack roots and the
+  remote's default branch (as the remote reports it) are never deleted as a
+  branch's upstream, and nothing is deleted if the remote can't say what its
+  default branch is.
   Deleting the branch you're
   on switches to its first child, or to its parent if it has none.
 - Only branches that already have a configured remote upstream are pushed,
@@ -601,8 +603,10 @@ git stack sync -d both          # ...and their remote branches
   and no pull requests are opened: use `git stack push` and `git stack prs`
   for those. It never forces, so it fails if `push` would refuse. As with
   `push`, the branches are pushed in one atomic push. Pushing to the remote's
-  default branch requires `--force`. If its default branch can't be determined,
-  set it with `git remote set-head <remote> --auto` or use `--force`.
+  default branch, or to a stack root's remote branch, requires `--force`. The
+  default branch is asked of the remote each time (not read from
+  `<remote>/HEAD`, which fetching doesn't update); if the remote can't say,
+  `sync` fails unless `--force` is given.
 - Nothing is pushed if a restack or pull stops on a conflict; rerun `sync`
   once it's resolved.
 - A branch whose remote branch was deleted without being merged (e.g. a
@@ -687,7 +691,8 @@ git stack push --prs            # then open pull requests, as `git stack prs` do
 ```
 
 - Each branch is pushed to its configured upstream, or to a new branch of the
-  same name if it has no upstream. Pushing to a default branch requires `--force`.
+  same name if it has no upstream. Pushing to the remote's default branch (as
+  the remote reports it), or to a stack root's remote branch, requires `--force`.
 - A stack tracking multiple remotes is refused; use `--remote <name>` to select
   one remote and branches without an upstream, in one atomic push.
 - If a pull request's parent tracks another remote, git-stack refuses to
