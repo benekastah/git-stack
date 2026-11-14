@@ -863,14 +863,10 @@ class StackCore:
             self.remove_merged(branch, parents, delete_local)
             return True
         if delete in ("remote", "both"):
-            default = git.run("symbolic-ref", "--quiet", "--short", f"refs/remotes/{remote_name}/HEAD", check=False)
-            if not default:
-                heads = git.run("ls-remote", "--symref", remote_name, "HEAD", check=False).splitlines()
-                refs = [line.split("\t", 1)[0].removeprefix("ref: ") for line in heads if line.startswith("ref: ")]
-                if not refs:
-                    raise StackError(f"can't determine {remote_name}'s default branch; refusing to delete {upstream}")
-                default = f"{remote_name}/{refs[0].removeprefix('refs/heads/')}"
-            if ref == f"refs/heads/{default.removeprefix(f'{remote_name}/')}":
+            default = git.remote_default_branch(remote_name)
+            if default is None:
+                raise StackError(f"can't determine {remote_name}'s default branch; refusing to delete {upstream}")
+            if ref == f"refs/heads/{default}":
                 self.remove_merged(branch, parents, delete_local)
                 return True
             if not git.delete_remote_branch(remote_name, ref, tip):

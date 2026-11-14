@@ -47,6 +47,38 @@ def test_clean_delete_both_deletes_merged_branch(repo: Repo, client: StackClient
     assert repo.git("branch", "--show-current") == "pr2"
 
 
+def test_clean_delete_remote_keeps_the_servers_default_branch(repo: Repo, client: StackClient) -> None:
+    repo.git("switch", "--quiet", "main")
+    client.branch("trunk")
+    repo.commit("a", "trunk\n", "trunk c1")
+    client.push()
+    repo.squash_merge_on_forge("trunk", delete_branch=False)
+    # The server's default branch is now trunk, but the clone's origin/HEAD
+    # still says main, which fetch doesn't change.
+    repo.git("symbolic-ref", "HEAD", "refs/heads/trunk", cwd=repo.origin)
+    repo.git("remote", "set-head", "origin", "main")
+    repo.git("switch", "--quiet", "main")
+
+    repo.stack("clean", "-d", "remote")
+
+    repo.assert_untracked("trunk")
+    assert repo.git("branch", "--list", "trunk", cwd=repo.origin) != ""
+
+
+def test_clean_delete_remote_refuses_without_the_servers_default_branch(repo: Repo, client: StackClient) -> None:
+    repo.make_stack()
+    client.push()
+    repo.squash_merge_on_forge("pr1", delete_branch=False)
+    # A HEAD that isn't a branch says nothing about which branch is the default.
+    repo.git("update-ref", "--no-deref", "HEAD", repo.git("rev-parse", "main", cwd=repo.origin), cwd=repo.origin)
+    repo.git("switch", "--quiet", "main")
+
+    result = repo.stack("clean", "-d", "remote", expect_success=False)
+
+    assert "can't determine origin's default branch" in result.stderr
+    assert repo.git("branch", "--list", "pr1", cwd=repo.origin) != ""
+
+
 def test_clean_keeps_tracking_reverted_branch(repo: Repo, client: StackClient, emitted: list[events.Event]) -> None:
     repo.make_stack()
     client.push()

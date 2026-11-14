@@ -1111,22 +1111,20 @@ class StackClient(StackCore):
         return stack, remotes
 
     def protected_sync_destinations(self, branches: list[str], roots: set[str], remote: str) -> set[str]:
+        """Those of branches whose upstream is remote's default branch, or the
+        remote branch of one of roots, which only --force pushes to. Fails if
+        any of them tracks remote and the server can't say what its default
+        branch is."""
         git = self.git
-        default = git.run("symbolic-ref", "--quiet", "--short", f"refs/remotes/{remote}/HEAD", check=False)
-        if not default and any(git.config_get(b, "remote") == remote for b in branches):
-            heads = git.run("ls-remote", "--symref", remote, "HEAD", check=False).splitlines()
-            refs = [line.split("\t", 1)[0].removeprefix("ref: ") for line in heads if line.startswith("ref: ")]
-            default = f"{remote}/{refs[0].removeprefix('refs/heads/')}" if refs else ""
-        if not default and any(git.config_get(b, "remote") == remote for b in branches):
+        if not any(git.config_get(b, "remote") == remote for b in branches):
+            return set()
+        default = git.remote_default_branch(remote)
+        if default is None:
             raise StackError(
-                f"{remote}'s default branch isn't known; run `git remote set-head {remote} --auto`, "
-                "or use --force to allow the configured upstream"
+                f"{remote}'s default branch isn't known (couldn't ask {remote}, or its HEAD isn't a branch); "
+                "use --force to allow the configured upstream"
             )
-        protected = (
-            {default.removeprefix(f"{remote}/")}
-            if default
-            else {git.remote_branch_name(root, remote) for root in roots}
-        )
+        protected = {default} | {git.remote_branch_name(root, remote) for root in roots}
         return {
             b
             for b in branches
@@ -1141,7 +1139,7 @@ class StackClient(StackCore):
         blocked = sorted(self.protected_sync_destinations(branches, roots, remote))
         if blocked:
             raise StackError(
-                f"{', '.join(blocked)} track {remote}'s default branch; "
+                f"{', '.join(blocked)} track {remote}'s default branch, or a stack root's remote branch; "
                 f"rerun `git stack {command} --force` to allow pushing to it"
             )
 
@@ -1298,7 +1296,7 @@ class StackClient(StackCore):
         git = self.git
         if branch in state.protected:
             raise StackError(
-                f"{branch} tracks {state.remote}'s default branch; "
+                f"{branch} tracks {state.remote}'s default branch, or a stack root's remote branch; "
                 "rerun `git stack sync --force` to allow pushing to it"
             )
         if git.upstream_gone(branch):

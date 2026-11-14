@@ -829,8 +829,9 @@ that sees it merged, so pass \f[CR]\-d\f[R] on that run if you want it
 deleted.
 Deleting a remote branch is leased to the fetched tip, so it fails
 rather than deleting commits pushed since.
-Stack roots and default branches are never deleted as a branch\(aqs
-upstream.
+Stack roots and the remote\(aqs default branch (as the remote reports
+it) are never deleted as a branch\(aqs upstream, and nothing is deleted
+if the remote can\(aqt say what its default branch is.
 Deleting the branch you\(aqre on switches to its first child, or to its
 parent if it has none.
 .IP \(bu 2
@@ -841,10 +842,12 @@ opened: use \f[CR]git stack push\f[R] and \f[CR]git stack prs\f[R] for
 those.
 It never forces, so it fails if \f[CR]push\f[R] would refuse.
 As with \f[CR]push\f[R], the branches are pushed in one atomic push.
-Pushing to the remote\(aqs default branch requires \f[CR]\-\-force\f[R].
-If its default branch can\(aqt be determined, set it with
-\f[CR]git remote set\-head <remote> \-\-auto\f[R] or use
-\f[CR]\-\-force\f[R].
+Pushing to the remote\(aqs default branch, or to a stack root\(aqs
+remote branch, requires \f[CR]\-\-force\f[R].
+The default branch is asked of the remote each time (not read from
+\f[CR]<remote>/HEAD\f[R], which fetching doesn\(aqt update); if the
+remote can\(aqt say, \f[CR]sync\f[R] fails unless \f[CR]\-\-force\f[R]
+is given.
 .IP \(bu 2
 Nothing is pushed if a restack or pull stops on a conflict; rerun
 \f[CR]sync\f[R] once it\(aqs resolved.
@@ -949,7 +952,8 @@ git stack push \-\-prs            \f[I]# then open pull requests, as \(gagit sta
 .IP \(bu 2
 Each branch is pushed to its configured upstream, or to a new branch of
 the same name if it has no upstream.
-Pushing to a default branch requires \f[CR]\-\-force\f[R].
+Pushing to the remote\(aqs default branch (as the remote reports it), or
+to a stack root\(aqs remote branch, requires \f[CR]\-\-force\f[R].
 .IP \(bu 2
 A stack tracking multiple remotes is refused; use
 \f[CR]\-\-remote <name>\f[R] to select one remote and branches without
