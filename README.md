@@ -35,7 +35,7 @@ git stack sync                  # catch up: drop merged PRs, rebase what's left,
 | I want to... | Run |
 | --- | --- |
 | start a PR | `git stack branch <name>`, from `main` or from the PR it builds on |
-| see my stacks and what needs doing | `git stack info` |
+| see my stacks and what needs doing | `git stack info --all` |
 | update the PRs above one I just changed | `git stack restack`, then `git stack push` |
 | catch up after a PR merged, or `main` changed | `git stack sync` |
 | also delete merged branches | `git stack sync -d local` |
@@ -137,6 +137,8 @@ main
 
 - A group's stacks stay in it however many of their branches merge later;
   their children join it too.
+- If the automatic group name is already in use by an unrelated group, the
+  command stops; rename that group before continuing.
 - A group can span roots, e.g. if you `restack --onto release` one of its
   stacks. Commands on it then cover every root it's on: `sync` fast-forwards
   each, and `prs` gives each root's pull requests their own stack section.
@@ -158,9 +160,7 @@ one when you name them, from any branch, and `info` shows only the stacks you
 name: each argument can be a branch (its stack) or a glob of branch names,
 matched like `git branch --list` does (the stacks of the branches it matches),
 and `-g`/`--group <group>`, which can be given more than once, names a group's
-stacks. Without a name, `-g` selects the current stack and its group; put it
-after positional branches, since the following word is read as a group name.
-`untrack` takes globs too, but untracks the branches themselves, not
+stacks. `untrack` takes globs too, but untracks the branches themselves, not
 their stacks, and doesn't take `-g`. Quote a glob, so the shell doesn't
 expand it:
 
@@ -346,15 +346,17 @@ git stack rename add-api api-v2
   Delete the old remote branch yourself (`git push origin :add-api`) if you
   no longer want it.
 
-### `git stack info [<branch|glob>...] [-g [<group>]] [-c] [--json] [--offline]`
+### `git stack info [<branch|glob>...] [-g [<group>]] [-a] [--json] [--offline]`
 
-Show every tracked stack (or the ones named, see [Groups](#groups)) as a tree,
+Show the current stack (or the ones named, see [Groups](#groups)) as a tree,
 with its root (e.g. `main`) on top and the branches built on it below.
-Use `--current` (or `-c`) to show the current stack, including stacks in its
-group. It cannot be combined with branch or group selectors and requires a
-tracked current branch. It also filters `--json` output.
+Use `--all` (or `-a`) to show every tracked stack, including in JSON output.
+It cannot be combined with branch or group selectors. Without selectors,
+`info` requires the current branch to be tracked in a stack.
 `-g` without a name also selects the current stack and its group, and can be
-combined with other selectors.
+combined with other selectors. Put it after positional branches, since the
+following word is read as a group name. The read-only `ownership show` also
+accepts `-g` without a name; commands that change stacks require a group name.
 
 **When would I use it?** When you want to see your stacks and what needs doing:
 which branches depend on which, which need a restack, and which were merged.
@@ -509,7 +511,7 @@ explicit `ownership owned` or `ownership shared` choice can change the default.
 Existing stacks default to owned. Ownership is local to this clone, not a
 permission or a substitute for coordinating with contributors.
 
-### `git stack restack [<branch|glob>...] [-g <group>] [--onto <parent>] [--squash] [--latest] [--allow-shared]`
+### `git stack restack [<branch|glob>...] [-g <group>] [--onto <parent>] [--latest] [--allow-shared]`
 
 Rebase every branch in the current stack (or the ones named, see
 [Groups](#groups)) onto its parent, bottom-up, except
@@ -520,31 +522,25 @@ with the root's latest commit.
 stacked on it, e.g. to address review feedback on PR 1, so the branches above
 it include the change. It works locally, without fetching or pushing. With
 `--onto`, when a branch should be stacked somewhere else, e.g. PR 2 turns out
-not to need PR 1. With `--squash`, when a restack keeps stopping on the same
-conflict, commit after commit. With `--latest`, when you want the stack on
+not to need PR 1. With `--latest`, when you want the stack on
 the latest `main` anyway, e.g. because the repository requires pull requests
 to be up to date before they're merged.
 
 ```sh
 git stack restack
 git stack restack --onto main           # move the current branch onto main, then restack
-git stack restack --squash              # squash each branch first, then restack
 git stack restack --latest              # also move the stack onto main's latest commit
 ```
 
 - Only the branches' own commits are replayed (from their recorded base), so a
   parent that was squash-merged doesn't cause conflicts. See
   [How it works](#how-it-works).
+- A branch with merge commits must be restacked manually while preserving
+  those merges; git-stack refuses to replay it as a linear history.
 - `--onto` retargets only the current branch, onto another local branch. The
   branches stacked on it come along.
 - `--latest` moves the branches on the stack's root onto its latest commit
   even if they don't conflict with it (and the rest of the stack with them).
-- `--squash` first squashes each branch in the current stack into one commit,
-  keeping all the messages and the oldest commit's author and date, so a
-  conflict is resolved once per branch instead of once per commit. It commits
-  as `git commit` does, running your pre-commit and commit-msg hooks and
-  signing if you've set that up. If the commit fails (e.g. a hook rejects it),
-  that branch is left as it was.
 - Merged branches are skipped and their children restacked onto their parent;
   `sync` or `clean` removes them from the stack.
 - Doesn't fetch or push. Needs a clean worktree, and refuses to run outside a
@@ -553,7 +549,7 @@ git stack restack --latest              # also move the stack onto main's latest
 - A branch checked out in another worktree is skipped, with a warning; see
   [Branches checked out in other worktrees](#branches-checked-out-in-other-worktrees).
 
-### `git stack sync [<branch|glob>...] [-g <group>] [--remote origin] [-d local|remote|both] [--latest] [--no-push] [--ignore-revert <branch>] [--allow-shared] [--pull-tracked-upstream] [--rebuild-stack]`
+### `git stack sync [<branch|glob>...] [-g <group>] [--remote <name>] [-d local|remote|both] [--latest] [--force] [--ignore-revert <branch>] [--allow-shared] [--pull-tracked-upstream] [--rewritten-upstream] [--rebuild-stack]`
 
 Bring the current stack (or the ones named, see [Groups](#groups)) up to date
 with the remote:
@@ -573,7 +569,7 @@ with the remote:
 request in the stack was merged, when `main` changed in a way that conflicts
 with your stack, or when someone else pushed to one of your branches. It
 pushes at the end, so there's nothing to follow it with. To catch up locally
-without touching the remote, use `restack`, or `sync --no-push`.
+without touching the remote, use `restack` or `pull`.
 
 ```sh
 git stack sync
@@ -582,7 +578,10 @@ git stack sync -d both          # ...and their remote branches
 ```
 
 - Only the current stack is synced; to untrack merged branches in every stack,
-  use `clean`.
+  use `clean`. If its branches track multiple remotes, sync refuses before
+  changing anything; use `--remote <name>` to sync only that remote's branches.
+  It refuses to untrack a merged branch if that would reparent a child outside
+  the selected remote.
 - After tracking a branch with `--base`, `sync` refuses to pull unseen commits
   that were already on its upstream at that point: they could be old copies of
   rewritten commits. Inspect them, then use `--pull-tracked-upstream` if you
@@ -593,19 +592,19 @@ git stack sync -d both          # ...and their remote branches
   branches, their remote branches, or both. A branch is untracked by the first
   `sync` or `clean` that sees it merged, so pass `-d` on that run if you want
   it deleted. Deleting a remote branch is leased to the fetched tip, so it
-  fails rather than deleting commits pushed since. Only a same-named upstream
-  is deleted or suggested for deletion; a different upstream is left alone.
+  fails rather than deleting commits pushed since. Stack roots and default
+  branches are never deleted as a branch's upstream.
   Deleting the branch you're
   on switches to its first child, or to its parent if it has none.
-- Only branches that already have a remote branch of the same name, as
-  `git stack push` sets it, are pushed. A branch that was never pushed isn't,
+- Only branches that already have a configured remote upstream are pushed,
+  including when its name differs. A branch that was never pushed isn't,
   and no pull requests are opened: use `git stack push` and `git stack prs`
   for those. It never forces, so it fails if `push` would refuse. As with
-  `push`, the branches are pushed in one atomic push.
+  `push`, the branches are pushed in one atomic push. Pushing to the remote's
+  default branch requires `--force`. If its default branch can't be determined,
+  set it with `git remote set-head <remote> --auto` or use `--force`.
 - Nothing is pushed if a restack or pull stops on a conflict; rerun `sync`
   once it's resolved.
-- `--no-push` leaves the remote alone, and ends by listing the branches whose
-  remote branch is out of date.
 - A branch whose remote branch was deleted without being merged (e.g. a
   closed pull request) is kept, with a warning, rather than dropping its
   commits.
@@ -628,8 +627,21 @@ git stack sync -d both          # ...and their remote branches
 - Branches checked out in another worktree are left alone, with a warning;
   see [Branches checked out in other worktrees](#branches-checked-out-in-other-worktrees).
   `sync` pushes the rest, then fails, listing the branches it couldn't push
-  for that reason (unless it was run with `--no-push`).
+  for that reason.
 - Needs a clean worktree, and refuses to run outside a stack.
+
+### `git stack pull [<branch|glob>...] [-g <group>] [--remote <name>] [-d local] [--latest] [--ignore-revert <branch>] [--allow-shared] [--pull-tracked-upstream] [--rewritten-upstream]`
+
+Fetch and update the selected stacks locally. It can
+fast-forward local roots, untrack merged branches, and restack or pull into
+local branches; `-d local` also deletes merged local branches. It does not push or delete remote branches. Unseen upstream
+merge commits need manual inspection and integration before pulling.
+For stacks whose branches track different remotes, select one with `--remote`.
+When the upstream has unseen commits and its history was rewritten (or its
+previous tip is unknown), `pull` and `sync` refuse to guess whether those
+commits are new work or old copies. Inspect the histories, then pass
+`--rewritten-upstream` to replay the unseen commits, or use
+`git stack push --force` to explicitly replace the remote with local history.
 
 ### `git stack clean [--remote origin] [-d local|remote|both] [--ignore-revert <branch>] [--allow-shared]`
 
@@ -654,7 +666,7 @@ git stack clean -d local
   are fine, unless you're on a stack's root, which `clean` fast-forwards, or,
   with `-d local` or `-d both`, on a tracked branch, which it could delete.
 
-### `git stack push [<branch|glob>...] [-g <group>] [--remote origin] [--force] [--prs] [--allow-shared] [--rebuild-stack]`
+### `git stack push [<branch|glob>...] [-g <group>] [--remote <name>] [--force] [--prs] [--allow-shared] [--rebuild-stack]`
 
 Force-push (with lease) every branch in the current stack (or the ones named,
 see [Groups](#groups)), and set each one's upstream.
@@ -674,7 +686,12 @@ git stack push --force          # drop commits on the remote you didn't pull
 git stack push --prs            # then open pull requests, as `git stack prs` does
 ```
 
-- Each branch is pushed to a remote branch of the same name.
+- Each branch is pushed to its configured upstream, or to a new branch of the
+  same name if it has no upstream. Pushing to a default branch requires `--force`.
+- A stack tracking multiple remotes is refused; use `--remote <name>` to select
+  one remote and branches without an upstream, in one atomic push.
+- If a pull request's parent tracks another remote, git-stack refuses to
+  retarget it instead of guessing its base on the selected remote.
 - It ends by showing the stacks it pushed, as `info` does.
 - Refuses, even with `--force`, if that remote branch exists but isn't the
   branch's upstream, since it's probably someone else's branch that happens to
@@ -945,7 +962,7 @@ its usual output, it prints a JSON object per line
 ([JSON Lines](https://jsonlines.org)) as it goes: one for each thing that
 happens, then one with the result. git's own output, e.g. from fetching or
 rebasing, goes to stderr. (`info --json` is older, and prints a single list;
-see [`info`](#git-stack-info-branchglob--g-group--c---json---offline).)
+see [`info`](#git-stack-info-branchglob--g-group--a---json---offline).)
 
 ```sh
 git stack clean -d local --json
@@ -987,7 +1004,7 @@ What each command's result has, besides `type` and `events`:
 | `ownership` | `ownership` and the `branches` marked |
 | `next`, `prev` | the `branch` it switched to |
 | `restack` | nothing; what it did is in its events |
-| `sync` | `stacks`, and `unpushed`, the branches whose remote branch is out of date because they weren't pushed (e.g. with `--no-push`) |
+| `sync`, `pull` | `stacks`, and `unpushed`, the branches whose remote branch is out of date because they weren't pushed |
 | `clean` | `stacks`: every stack |
 | `push` | `stacks`, `pushed`, the branches it pushed, and with `--prs`, `steps`, as for `prs` (`null` without it, or if it couldn't open pull requests). `error` is why it couldn't, when it pushed but failed, or `null` |
 | `prs` | `stacks`, and `steps`, one for each branch: the `branch`, its `parent`, and the `action`: `open`, `exists` (it already has a pull request) or `no-commits` (skipped, since it has no commits of its own). `title` is an opened pull request's title, and `number` and `url` an opened or existing one's (an existing one has no `url`, and a dry run opens none); each is `null` otherwise |
@@ -1028,8 +1045,7 @@ such a branch alone, with a warning, and carries on with the rest:
   on it. A branch that's already up to date isn't a problem.
 - `sync` doesn't push a branch it skipped for this reason, and fails once it
   has pushed the rest.
-- `sync` doesn't pull new commits from its upstream into it, and
-  `restack --squash` doesn't squash it.
+- `sync` and `pull` don't pull new commits from its upstream into it.
 - `sync -d local` and `clean -d local` stop tracking it once it's merged, but
   don't delete it.
 - A stack's root (e.g. `main`) isn't fast-forwarded.
@@ -1160,10 +1176,9 @@ git config stack.adapter git
 
 With the GitHub adapter:
 
-- A branch's pull request is the one whose head is a remote branch of the same
-  name in the same repository, however it was opened, as long as that remote
-  branch is the branch's upstream (as `git stack push` sets it). A pull request
-  from someone else's branch that happens to have the same name doesn't count.
+- A branch's pull request is the one whose head is its configured upstream
+  branch in the same repository, however it was opened. A pull request from
+  someone else's fork that happens to have the same head name doesn't count.
   An open one wins; otherwise the newest merged one counts, if its head
   descends from the commit the branch is stacked on (so one merged from an
   earlier branch of the same name doesn't). Closed pull requests are ignored.
@@ -1232,13 +1247,11 @@ merged.
 
 After restacking a branch, `sync` cherry-picks onto it any commits on its
 upstream that it doesn't already have (fast-forwarding when it can). Commits
-that are older versions of your own rebased commits, merge commits (e.g.
-GitHub's "Update branch"), and changes already in the parent are skipped.
+that are older versions of your own rebased commits and changes already in the
+parent are skipped. Unseen merge commits require manual integration.
 
-Only an upstream that's the remote branch of the same name, as `git stack push`
-sets it, is pulled from. A branch made with `git switch -c <branch> origin/main`
-has `origin/main` as its upstream, and `main`'s commits aren't the branch's to
-take, so nothing is pulled into it until `git stack push` gives it its own.
+The configured remote-tracking upstream is used even when it has a different
+name. Changes already in the stack parent aren't replayed.
 
 If a pull stops on a conflict and you abort it (or skip some of the commits),
 the commits you didn't take aren't counted as pulled: the next `sync` offers
@@ -1256,6 +1269,9 @@ onto its parent (or its parent's upstream, e.g. `origin/main`), and nothing
 else. It checks the result of replaying each change in a temporary index; if
 the replay conflicts or differs, or either history contains merge commits,
 it stops for you to inspect both histories.
+Likewise, `sync`, `pull`, and a normal `push` refuse unseen upstream merge
+commits, whose merge resolutions cannot be preserved by cherry-picking only
+their non-merge commits.
 `push` does the same, rather than refusing. This only happens if the branch
 hasn't changed since you last pushed it, so no local commit is dropped; if
 it has, pull the remote branch's commits in by hand, or push over them with

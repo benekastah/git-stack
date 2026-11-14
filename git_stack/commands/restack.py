@@ -17,7 +17,6 @@ class Args(argparse.Namespace):
     branches: list[str]
     groups: list[str]
     onto: str | None
-    squash: bool
     latest: bool
     json: bool
     allow_shared: bool
@@ -32,7 +31,6 @@ def register(subparsers: Subparsers) -> None:
     )
     add_stack_arguments(p, "restack")
     p.add_argument("--onto", help="first change the current branch's parent to ONTO")
-    p.add_argument("--squash", action="store_true", help="first squash each branch in the stack into a single commit")
     add_latest_argument(p)
     add_allow_shared_argument(p)
     add_json_argument(p)
@@ -49,7 +47,6 @@ def run(stack: StackClient, args: Args) -> Restacked:
         args.branches,
         args.groups,
         onto=args.onto,
-        squash=args.squash,
         latest=args.latest,
         allow_shared=args.allow_shared,
     )

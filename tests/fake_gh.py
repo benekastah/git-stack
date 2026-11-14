@@ -215,9 +215,22 @@ def pull_requests_by_head(args: list[str], query: str, prs: list[dict[str, Any]]
             key=lambda p: p["number"],
             reverse=True,
         )
-        found[alias] = {
-            "nodes": [{"isDraft": False, "mergedAt": "", **{k: p[k] for k in PR_FIELDS if k in p}} for p in matching]
-        }
+        if "pageInfo { hasNextPage endCursor }" in query:
+            start = int(next((a.removeprefix("after=") for a in args if a.startswith("after=")), "0"))
+            end = start + 10
+            found[alias] = {
+                "nodes": [
+                    {"isDraft": False, "mergedAt": "", **{k: p[k] for k in PR_FIELDS if k in p}}
+                    for p in matching[start:end]
+                ],
+                "pageInfo": {"hasNextPage": end < len(matching), "endCursor": str(end)},
+            }
+        else:
+            found[alias] = {
+                "nodes": [
+                    {"isDraft": False, "mergedAt": "", **{k: p[k] for k in PR_FIELDS if k in p}} for p in matching
+                ]
+            }
     return json.dumps({"data": {"repository": found}})
 
 

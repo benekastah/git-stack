@@ -23,6 +23,26 @@ def test_restack_moves_whole_stack_after_parent_changes(repo: Repo, client: Stac
     assert all(branch.status is not BranchStatus.NEEDS_RESTACK for branch in client.info())
 
 
+def test_restack_refuses_to_drop_local_merge_changes(repo: Repo, client: StackClient) -> None:
+    client.branch("pr1")
+    repo.commit("a", "pr1\n", "pr1")
+    repo.git("switch", "--quiet", "-c", "side")
+    repo.commit("b", "side\n", "side")
+    repo.git("switch", "--quiet", "pr1")
+    repo.commit("c", "other\n", "other")
+    repo.git("merge", "--no-ff", "--no-edit", "side")
+    before = repo.git("rev-parse", "pr1")
+    repo.git("switch", "--quiet", "main")
+    repo.write("d", "main\n")
+    repo.git("add", "d")
+    repo.git("commit", "--quiet", "-m", "main")
+    repo.git("switch", "--quiet", "pr1")
+
+    with pytest.raises(StackError, match="contains merge commits"):
+        client.restack(latest=True)
+    assert repo.git("rev-parse", "pr1") == before
+
+
 def test_info_uses_parent_branch_when_a_tag_has_the_same_name(repo: Repo, client: StackClient) -> None:
     repo.make_stack()
     repo.git("tag", "pr1", "refs/heads/main")
@@ -83,6 +103,50 @@ def test_restack_onto_retargets_after_local_squash_merge(repo: Repo, client: Sta
 
     repo.assert_stacked("pr2", "main", ["pr2 c1"])
     repo.assert_stacked("pr3", "pr2", ["pr3 c1"])
+
+
+def test_restack_onto_does_not_rewrite_destination(repo: Repo, client: StackClient) -> None:
+    client.branch("target")
+    repo.commit("b", "target\n", "target")
+    before = repo.git("rev-parse", "target")
+    repo.git("switch", "--quiet", "main")
+    repo.commit("c", "main moved\n", "main")
+    client.branch("moving")
+    repo.commit("a", "moving\n", "moving")
+    client.restack(onto="target", latest=True)
+    assert repo.git("rev-parse", "target") == before
+    assert repo.config("moving", "stackParent") == "target"
+
+
+def test_restack_onto_requires_override_for_shared_source_group(repo: Repo, client: StackClient) -> None:
+    repo.make_stack()
+    client.set_ownership("owned")
+    repo.git("switch", "--quiet", "main")
+    client.branch("shared")
+    client.set_ownership("shared")
+    client.group_add("feature", ["pr1", "shared"])
+    repo.git("switch", "--quiet", "main")
+    client.branch("target")
+    repo.git("switch", "--quiet", "pr1")
+    before = repo.git("rev-parse", "pr1")
+    with pytest.raises(StackError, match="--allow-shared"):
+        client.restack(onto="target")
+    assert repo.git("rev-parse", "pr1") == before
+    assert repo.config("pr1", "stackParent") == "main"
+
+
+def test_restack_checks_ownership_before_skipping_merged_branches(repo: Repo, client: StackClient) -> None:
+    repo.make_stack()
+    repo.git("config", "branch.pr1.stackOwnership", "shared")
+    repo.git("switch", "--quiet", "main")
+    repo.git("merge", "--quiet", "--squash", "pr1")
+    repo.git("commit", "--quiet", "-m", "merge pr1")
+    repo.git("switch", "--quiet", "pr2")
+    before = repo.git("rev-parse", "pr2")
+
+    with pytest.raises(StackError, match="--allow-shared"):
+        client.restack()
+    assert repo.git("rev-parse", "pr2") == before
 
 
 def test_restack_skips_branch_merged_locally(repo: Repo, client: StackClient, emitted: list[events.Event]) -> None:
@@ -263,74 +327,6 @@ def test_restack_failure_without_conflict_is_not_reported_as_conflict(repo: Repo
 
     assert "conflict" not in str(failure.value)
     assert not repo.config_exists("pr2", "stackPendingParent")
-
-
-def test_restack_squash_squashes_each_branch_in_stack(repo: Repo, client: StackClient) -> None:
-    repo.make_stack()
-    repo.git("switch", "--quiet", "pr2")
-    repo.commit("b", "pr2 second\n", "pr2 c2")
-    repo.git("switch", "--quiet", "pr1")
-    repo.commit("a", "pr1 third\n", "pr1 c3")
-    repo.git("switch", "--quiet", "pr2")
-
-    client.restack(squash=True)
-
-    repo.assert_stacked("pr1", "main", ["pr1 c1"])
-    repo.assert_stacked("pr2", "pr1", ["pr2 c1"])
-    repo.assert_stacked("pr3", "pr2", ["pr3 c1"])
-    assert repo.git("log", "-1", "--format=%B", "pr1") == "pr1 c1\n\npr1 c2\n\npr1 c3"
-    assert repo.git("log", "-1", "--format=%B", "pr2") == "pr2 c1\n\npr2 c2"
-    assert [repo.git("show", f"pr3:{name}") for name in "abc"] == ["pr1 third", "pr2 second", "pr3"]
-    assert repo.git("branch", "--show-current") == "pr2"
-
-
-def test_restack_squash_runs_commit_hooks(repo: Repo, client: StackClient) -> None:
-    repo.make_stack()
-    hook = repo.path / ".git" / "hooks" / "commit-msg"
-    hook.write_text('#!/bin/sh\nprintf "\\nTicket: ABC-1\\n" >> "$1"\n')
-    hook.chmod(0o755)
-    repo.git("switch", "--quiet", "pr1")
-
-    client.restack(squash=True)
-
-    assert repo.git("log", "-1", "--format=%B", "pr1") == "pr1 c1\n\npr1 c2\n\nTicket: ABC-1"
-
-
-def test_restack_squash_leaves_branch_alone_when_commit_hook_fails(repo: Repo, client: StackClient) -> None:
-    repo.make_stack()
-    hook = repo.path / ".git" / "hooks" / "commit-msg"
-    hook.write_text("#!/bin/sh\nexit 1\n")
-    hook.chmod(0o755)
-    repo.git("switch", "--quiet", "pr1")
-    tip = repo.git("rev-parse", "pr1")
-
-    with pytest.raises(StackError, match="squashing pr1 failed"):
-        client.restack(squash=True)
-
-    assert repo.git("rev-parse", "pr1") == tip
-    assert repo.git("status", "--porcelain") == ""
-
-
-def test_restack_squash_resolves_a_line_edited_by_every_commit_once(repo: Repo, client: StackClient) -> None:
-    client.branch("pr1")
-    repo.commit("a", "function(A, B)\n", "pr1 c1")
-    client.branch("pr2")
-    repo.commit("a", "function(A, B, D)\n", "pr2 c1")
-    repo.commit("a", "function(A, B, E)\n", "pr2 c2")
-    repo.git("switch", "--quiet", "pr1")
-    repo.commit("a", "function(A, F)\n", "pr1 c2")
-    repo.git("switch", "--quiet", "pr2")
-
-    with pytest.raises(StackError, match="restacking pr2 stopped on a conflict"):
-        client.restack(squash=True)
-    repo.write("a", "function(A, F, E)\n")
-    repo.git("add", "a")
-    # The only conflict: continuing finishes the rebase.
-    repo.git("rebase", "--continue")
-    client.restack()
-
-    repo.assert_stacked("pr2", "pr1", ["pr2 c1"])
-    assert repo.git("show", "pr2:a") == "function(A, F, E)"
 
 
 def test_restack_onto_suggests_tracking_untracked_branch(repo: Repo, client: StackClient) -> None:

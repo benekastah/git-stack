@@ -12,6 +12,7 @@ import pytest
 from git_stack import events
 from git_stack.adapters.git import PullRequestLink, PullRequestState
 from git_stack.cli import main
+from git_stack.core import CURRENT_GROUP
 from git_stack.errors import StackError
 from git_stack.git import GitClient
 from git_stack.json_fields import to_json
@@ -105,33 +106,39 @@ def stack() -> Any:
         (["untrack", "pr1", "pr2"], "untrack", (["pr1", "pr2"],), {}),
         (["rename", "new"], "rename", ("new",), {"old": None}),
         (["rename", "old", "new"], "rename", ("new",), {"old": "old"}),
-        (["info"], "info", ([], []), {"offline": False}),
-        (["info", "fix-*", "-g", "search", "--offline"], "info", (["fix-*"], ["search"]), {"offline": True}),
-        (["info", "--json"], "info", ([], []), {"offline": False}),
-        (["info", "--current", "--json"], "info", (), {"current": True, "offline": False}),
-        (["info", "-c"], "info", (), {"current": True, "offline": False}),
-        (["info", "-g", "--offline"], "info", ([], [""]), {"offline": True}),
+        (["info"], "info", ([], []), {"offline": False, "current": True}),
+        (
+            ["info", "fix-*", "-g", "search", "--offline"],
+            "info",
+            (["fix-*"], ["search"]),
+            {"offline": True, "current": True},
+        ),
+        (["info", "--json"], "info", ([], []), {"offline": False, "current": True}),
+        (["info", "--all", "--json"], "info", (), {"offline": False}),
+        (["info", "-a"], "info", (), {"offline": False}),
+        (["info", "-g", "--offline"], "info", ([], [CURRENT_GROUP]), {"offline": True, "current": True}),
+        (["info", "--group=", "--offline"], "info", ([], [""]), {"offline": True, "current": True}),
+        (
+            ["pull"],
+            "sync",
+            ([], []),
+            {"remote": "origin", "delete": None, "latest": False, "push": False, "ignore_reverts": []},
+        ),
         (["next"], "next", (), {}),
         (["prev"], "prev", (), {}),
-        (["restack"], "restack", ([], []), {"onto": None, "squash": False, "latest": False}),
-        (["restack", "--allow-shared"], "restack", ([], []), {"onto": None, "squash": False, "latest": False}),
+        (["restack"], "restack", ([], []), {"onto": None, "latest": False}),
+        (["restack", "--allow-shared"], "restack", ([], []), {"onto": None, "latest": False}),
         (
-            ["restack", "--onto", "main", "--squash", "--latest"],
+            ["restack", "--onto", "main", "--latest"],
             "restack",
             ([], []),
-            {"onto": "main", "squash": True, "latest": True},
+            {"onto": "main", "latest": True},
         ),
         (
             ["sync"],
             "sync",
             ([], []),
             {"remote": "origin", "delete": None, "latest": False, "push": True, "ignore_reverts": []},
-        ),
-        (
-            ["sync", "--no-push"],
-            "sync",
-            ([], []),
-            {"remote": "origin", "delete": None, "latest": False, "push": False, "ignore_reverts": []},
         ),
         (
             ["sync", "--allow-shared"],
@@ -210,8 +217,14 @@ def test_command_calls_its_client_method(
         kwargs = {**kwargs, "allow_shared": "--allow-shared" in argv}
     if method in ("sync", "push"):
         kwargs = {**kwargs, "rebuild_stack": "--rebuild-stack" in argv}
+    if method == "push":
+        kwargs = {**kwargs, "only_remote": "--remote" in argv}
     if method == "sync":
         kwargs = {**kwargs, "pull_tracked_upstream": "--pull-tracked-upstream" in argv}
+        kwargs = {**kwargs, "rewritten_upstream": "--rewritten-upstream" in argv}
+        kwargs = {**kwargs, "only_remote": "--remote" in argv}
+        if argv[0] == "sync":
+            kwargs = {**kwargs, "force": "--force" in argv}
     getattr(stack, method).assert_called_once_with(*args, **kwargs)
 
 
@@ -496,12 +509,47 @@ def test_info_without_stacks(stack: Any, capsys: pytest.CaptureFixture[str]) -> 
 
 
 @pytest.mark.parametrize("selectors", [["pr1"], ["--group", "feature"]])
-def test_info_current_rejects_other_selectors(
-    stack: Any, capsys: pytest.CaptureFixture[str], selectors: list[str]
-) -> None:
-    assert main(["info", "--current", *selectors], stack=stack) == 1
-    assert "--current cannot be combined with branches or groups" in capsys.readouterr().err
+def test_info_all_rejects_other_selectors(stack: Any, capsys: pytest.CaptureFixture[str], selectors: list[str]) -> None:
+    assert main(["info", "--all", *selectors], stack=stack) == 1
+    assert "--all cannot be combined with branches or groups" in capsys.readouterr().err
     stack.info.assert_not_called()
+
+
+@pytest.mark.parametrize("command", [["sync"], ["push"], ["restack"], ["prs"], ["ungroup"], ["group", "remove"]])
+def test_writing_commands_require_a_group_name(stack: Any, command: list[str]) -> None:
+    with pytest.raises(SystemExit) as error:
+        main([*command, "-g"], stack=stack)
+    assert error.value.code == 2
+
+
+def test_pull_does_not_accept_remote_deletion(stack: Any) -> None:
+    with pytest.raises(SystemExit) as error:
+        main(["pull", "--delete", "remote"], stack=stack)
+    assert error.value.code == 2
+    stack.sync.assert_not_called()
+
+
+def test_sync_no_longer_accepts_no_push(stack: Any) -> None:
+    with pytest.raises(SystemExit) as error:
+        main(["sync", "--no-push"], stack=stack)
+    assert error.value.code == 2
+    stack.sync.assert_not_called()
+
+
+def test_restack_no_longer_accepts_squash(stack: Any) -> None:
+    with pytest.raises(SystemExit) as error:
+        main(["restack", "--squash"], stack=stack)
+    assert error.value.code == 2
+    stack.restack.assert_not_called()
+
+
+def test_ownership_bare_group_only_works_when_reading(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
+    stack.get_ownership.return_value = ("owned", ["pr1"])
+    assert main(["ownership", "-g"], stack=stack) == 0
+    stack.get_ownership.assert_called_once_with([], [CURRENT_GROUP])
+    assert main(["ownership", "shared", "-g"], stack=stack) == 1
+    assert "--group requires a group name" in capsys.readouterr().err
+    stack.set_ownership.assert_not_called()
 
 
 def test_sync_shows_the_stacks_then_lists_branches_left_to_push(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
@@ -630,6 +678,7 @@ def test_clean_json_ends_with_the_error_when_it_fails(stack: Any, capsys: pytest
     [
         (["ownership", "shared"], "set_ownership", ["pr1"], {"ownership": "shared", "branches": ["pr1"]}),
         (["sync"], "sync", SyncResult(["pr1"], STACK), {"stacks": to_json(STACK), "unpushed": ["pr1"]}),
+        (["pull"], "sync", SyncResult(["pr1"], STACK), {"stacks": to_json(STACK), "unpushed": ["pr1"]}),
         (
             ["push"],
             "push",

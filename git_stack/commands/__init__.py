@@ -11,6 +11,8 @@ everything the command reports.
 import argparse
 from typing import TypeAlias
 
+from git_stack.core import CURRENT_GROUP
+
 # argparse doesn't export the type of add_subparsers()'s result.
 Subparsers: TypeAlias = "argparse._SubParsersAction[argparse.ArgumentParser]"
 
@@ -36,7 +38,9 @@ def add_rebuild_stack_argument(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def add_stack_arguments(parser: argparse.ArgumentParser, verb: str, default: str = "the current stack") -> None:
+def add_stack_arguments(
+    parser: argparse.ArgumentParser, verb: str, default: str = "the current stack", optional_group: bool = False
+) -> None:
     """Add the branches and --group arguments that name stacks, as
     StackCore.named takes them."""
     parser.add_argument(
@@ -52,9 +56,10 @@ def add_stack_arguments(parser: argparse.ArgumentParser, verb: str, default: str
         dest="groups",
         action="append",
         default=[],
-        nargs="?",
-        const="",
-        help=f"{verb} the stacks in GROUP too (default: current stack's group; can be given more than once)",
+        nargs="?" if optional_group else None,
+        const=CURRENT_GROUP if optional_group else None,
+        help=f"{verb} the stacks in GROUP too (can be given more than once)"
+        + ("; omit GROUP for the current stack's group" if optional_group else ""),
     )
 
 

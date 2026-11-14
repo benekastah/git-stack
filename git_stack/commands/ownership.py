@@ -2,6 +2,8 @@ import argparse
 from dataclasses import dataclass
 
 from git_stack.commands import Subparsers, add_json_argument, add_stack_arguments
+from git_stack.core import CURRENT_GROUP
+from git_stack.errors import StackError
 from git_stack.stack import StackClient
 
 
@@ -15,7 +17,7 @@ class Args(argparse.Namespace):
 def register(subparsers: Subparsers) -> None:
     p = subparsers.add_parser("ownership", help="mark stacks as owned or shared")
     p.add_argument("ownership", nargs="?", default="show", choices=("show", "owned", "shared"))
-    add_stack_arguments(p, "mark")
+    add_stack_arguments(p, "mark", optional_group=True)
     add_json_argument(p)
     p.set_defaults(run=run, show=show)
 
@@ -30,6 +32,8 @@ def run(stack: StackClient, args: Args) -> Ownership:
     if args.ownership == "show":
         ownership, branches = stack.get_ownership(args.branches, args.groups)
         return Ownership(ownership, branches)
+    if CURRENT_GROUP in args.groups:
+        raise StackError("--group requires a group name when changing ownership")
     return Ownership(args.ownership, stack.set_ownership(args.ownership, args.branches, args.groups))
 
 

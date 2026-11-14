@@ -18,7 +18,7 @@ class Args(argparse.Namespace):
 
     branches: list[str]
     groups: list[str]
-    remote: str
+    remote: str | None
     force: bool
     prs: bool
     json: bool
@@ -33,7 +33,7 @@ def register(subparsers: Subparsers) -> None:
         "named), refusing if that would drop commits on the remote",
     )
     add_stack_arguments(p, "push")
-    p.add_argument("--remote", default=DEFAULT_REMOTE)
+    p.add_argument("--remote", help="only push branches for this remote")
     p.add_argument(
         "--force",
         action="store_true",
@@ -56,7 +56,8 @@ def run(stack: StackClient, args: Args) -> PushResult:
     return stack.push(
         args.branches,
         args.groups,
-        remote=args.remote,
+        remote=args.remote or DEFAULT_REMOTE,
+        only_remote=args.remote is not None,
         force=args.force,
         prs=args.prs,
         allow_shared=args.allow_shared,

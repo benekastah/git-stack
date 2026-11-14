@@ -122,19 +122,6 @@ def test_deleting_current_branch_skips_child_in_other_worktree(repo: Repo, clien
     assert not repo.git("branch", "--list", "pr1")
 
 
-def test_restack_squash_skips_branch_in_other_worktree(
-    repo: Repo, client: StackClient, emitted: list[events.Event]
-) -> None:
-    repo.make_stack()
-    worktree = add_worktree(repo, "pr1")
-    repo.git("switch", "--quiet", "pr2")
-
-    client.restack(squash=True)
-
-    assert events.NotSquashedInOtherWorktree("pr1", str(worktree)) in emitted
-    assert repo.own_commits("pr1", "main") == ["pr1 c2", "pr1 c1"]
-
-
 def test_restack_stopped_in_other_worktree_is_left_to_finish_there(
     repo: Repo, client: StackClient, emitted: list[events.Event]
 ) -> None:

@@ -20,14 +20,15 @@ class Args(argparse.Namespace):
 
     branches: list[str]
     groups: list[str]
-    remote: str
+    remote: str | None
     delete: str | None
     latest: bool
-    no_push: bool
     ignore_reverts: list[str]
     json: bool
     allow_shared: bool
     pull_tracked_upstream: bool
+    rewritten_upstream: bool
+    force: bool
     rebuild_stack: bool
 
 
@@ -38,7 +39,8 @@ def register(subparsers: Subparsers) -> None:
         "it, pull in commits others pushed, and push the branches that already have a remote branch",
     )
     add_stack_arguments(p, "sync")
-    p.add_argument("--remote", default=DEFAULT_REMOTE)
+    p.add_argument("--remote", help="only sync branches tracking this remote")
+    p.add_argument("--force", action="store_true", help="allow syncing a branch to the remote default branch")
     add_delete_argument(p)
     add_latest_argument(p)
     add_ignore_revert_argument(p)
@@ -50,7 +52,7 @@ def register(subparsers: Subparsers) -> None:
         help="pull unseen upstream commits that existed before a branch was re-tracked with --base",
     )
     p.add_argument(
-        "--no-push", action="store_true", help="don't push, only list the branches whose remote branch is out of date"
+        "--rewritten-upstream", action="store_true", help="pull unseen commits from rewritten upstream history"
     )
     add_json_argument(p)
     p.set_defaults(run=run, show=show)
@@ -60,13 +62,16 @@ def run(stack: StackClient, args: Args) -> SyncResult:
     return stack.sync(
         args.branches,
         args.groups,
-        remote=args.remote,
+        remote=args.remote or DEFAULT_REMOTE,
+        only_remote=args.remote is not None,
         delete=args.delete,
         latest=args.latest,
-        push=not args.no_push,
+        push=True,
         ignore_reverts=args.ignore_reverts,
         allow_shared=args.allow_shared,
         pull_tracked_upstream=args.pull_tracked_upstream,
+        rewritten_upstream=args.rewritten_upstream,
+        force=args.force,
         rebuild_stack=args.rebuild_stack,
     )
 

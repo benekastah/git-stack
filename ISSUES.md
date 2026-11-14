@@ -2,6 +2,18 @@
 
 Most severe first.
 
+## A branch can look merged when its parent made the same change
+
+When the git adapter decides (with the GitHub adapter, that's a branch without
+a pull request, or one stacked on a branch other than the default branch), a
+branch counts as merged if its parent has commits with the same patches, even
+if they came from someone else's pull request. On a busy repository that's
+plausible for small, mechanical changes, such as a dependency bump or
+regenerated file. `sync` and `clean` then untrack the branch and can delete its
+local and/or remote branch with `-d local`, `-d remote`, or `-d both`, though
+its pull request was never merged. Its changes are in the parent, but its own
+commits and messages can be lost from the branch.
+
 ## Old copies of rebased commits can be pulled back in
 
 `unpulled_commits` recognizes old copies of the branch's own rebased commits by
@@ -11,19 +23,36 @@ them if the rebase changed their patches (e.g. resolved conflicts) and they
 were pushed either from another clone or machine, or with a plain `git push`
 whose reflog entry has since expired.
 
-Re-tracking with `track --base` now guards the upstream tip seen at that time;
-this issue remains for rebases where that guard was not recorded.
+`pull` and `sync` now refuse unseen commits when the upstream diverges from
+the last known tip, or when that tip is unknown and the branches diverge,
+unless `--rewritten-upstream` is given. Re-tracking with `track --base` also
+guards the upstream tip seen then. If rewritten copies are appended to a
+history that still contains the last known tip, they can still look like new
+collaborator commits; there is no reliable distinction from Git history alone.
 
-## A branch can look merged when its parent made the same change
+## `import` fast-forwards the trunks of stacks it doesn't import
 
-When the git adapter decides (with the GitHub adapter, that's a branch without
-a pull request, or one stacked on a branch other than the default branch), a
-branch counts as merged if its parent has commits with the same patches, even
-if they came from someone else's pull request. On a busy repository that's
-plausible for small, mechanical changes, such as a dependency bump or
-regenerated file. `sync` and `clean` then untrack the branch, and delete it
-with `-d local`, though its pull request was never merged. Its changes are in
-the parent, but its own commits and messages are dropped.
+`fast_forward_import_trunks` gets every pull request it looked up, before the
+branches and `--pr` narrow them to the stack trees named, and before `-f` is
+checked. So the untracked branches the other trees merge into (e.g. a local
+`release/1.x`) are fast-forwarded too, even when nothing is imported. It's
+what `sync` would do to them anyway, but it's a change nobody asked for.
+Fast-forwarding only the trunks of the steps it creates or tracks would fix
+it.
+
+## A failed push can leave pull requests retargeted or unstacked
+
+Before pushing, the GitHub adapter retargets pull requests whose new bases
+already exist remotely. With `--rebuild-stack` it can also unstack their
+GitHub stack. A later retarget or the atomic Git push can fail, leaving those
+GitHub changes in place even though no branch was pushed. In particular, an
+unstack followed by a rejected push can leave the pull requests unstacked.
+The error reports that nothing was pushed, but does not describe the remaining
+GitHub changes or how to recover them.
+
+Preflight all possible failures, and report partial GitHub changes and recovery
+instructions if an operation still fails; restoring them automatically would
+need to account for concurrent edits on GitHub.
 
 ## A change undone some other way can look like a revert
 
@@ -36,21 +65,6 @@ reason, counts as reverting it. The branch is then left alone as
 were stacked on it are warned about. Nothing is lost, and
 `clean --ignore-revert <branch>` (or `sync`'s) says it wasn't a revert, but
 until then every command skips it.
-
-## Reusing a merged branch's name can join unrelated stacks into one group
-
-When a branch on a stack's root merges, `remove_merged` puts its children in a
-group named after it (if it wasn't in one already), without checking whether
-that group already exists. Short names like `fix` or `cleanup` get reused, so
-when a second, unrelated `fix` merges, its children join the first `fix`'s
-group. From then on `sync`, `restack`, `push` and `prs` on either stack cover
-both, e.g. `sync` restacks and pushes the other stack's branches too.
-Reproduced: after two `fix` branches merged one after the other, each with a
-branch stacked on it, `git stack show-stack` on one listed both.
-
-`git stack group remove` from one of them separates them again. A fix could
-pick a name that isn't in use yet (e.g. `fix-2`), or record something unique
-to the merge alongside the name.
 
 ## The branch config cache could miss a write
 
@@ -65,16 +79,6 @@ reproduced; on btrfs, where inode numbers aren't reused, it can't happen.
 
 Comparing the file's contents (or a hash of them) instead of its metadata
 would rule it out at little cost, since the file is small.
-
-## `import` fast-forwards the trunks of stacks it doesn't import
-
-`fast_forward_import_trunks` gets every pull request it looked up, before the
-branches and `--pr` narrow them to the stack trees named, and before `-f` is
-checked. So the untracked branches the other trees merge into (e.g. a local
-`release/1.x`) are fast-forwarded too, even when nothing is imported. It's
-what `sync` would do to them anyway, but it's a change nobody asked for.
-Fast-forwarding only the trunks of the steps it creates or tracks would fix
-it.
 
 ## `prs` says "the current stack" for named stacks
 
@@ -103,7 +107,8 @@ git-stack is written for Unix-like systems. The git-stack lock
 (`StackCore.exclusive`) uses `fcntl.flock`, which Windows doesn't have, so it
 won't even start there, and the tests rely on symlinks. Low priority until
 someone needs it: `msvcrt.locking`, or a lock file created with `O_EXCL`,
-would replace `flock`.
+would replace `flock`. Before a 1.0 release, either support Windows or clearly
+state in the installation requirements that it is not supported.
 
 ## GitHub's username format is checked in `stack.py`
 

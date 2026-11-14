@@ -166,9 +166,8 @@ class GitHubAdapter(GitAdapter):
     def pull_requests(self) -> dict[str, PullRequest]:
         """{branch: pull request} for tracked branches with a pull request.
 
-        Only branches whose upstream is the remote branch of the same name can
-        have one: a remote branch the branch doesn't track (or a pull request
-        from one) is most likely someone else's that happens to share its name.
+        Only branches whose configured upstream is on this remote can have one.
+        Pull requests are looked up by the upstream's branch name.
 
         Looked up with one API call per command. If that fails, or GitHub's
         answer isn't what we asked for, emits PullRequestLookupFailed and
@@ -199,13 +198,14 @@ class GitHubAdapter(GitAdapter):
             ) from e
 
     def look_up_pull_requests(self) -> dict[str, PullRequest]:
-        branches = [b for b in self.core.tracked_branches() if self.git.tracks_same_name(b, self.remote)]
+        branches = [b for b in self.core.tracked_branches() if self.git.config_get(b, "remote") == self.remote]
         if not branches:
             return {}
         # Branch names are passed as variables, so they needn't be escaped.
         fields = " ".join(
             f"b{i}: pullRequests(headRefName: $b{i}, first: {PRS_PER_BRANCH}, "
-            f"orderBy: {{field: CREATED_AT, direction: DESC}}) {{ nodes {{ {PR_FIELDS} }} }}"
+            f"orderBy: {{field: CREATED_AT, direction: DESC}}) "
+            f"{{ nodes {{ {PR_FIELDS} }} pageInfo {{ hasNextPage endCursor }} }}"
             for i in range(len(branches))
         )
         variables = "".join(f", $b{i}: String!" for i in range(len(branches)))
@@ -226,16 +226,56 @@ class GitHubAdapter(GitAdapter):
             f"query={query}",
         ]
         for i, branch in enumerate(branches):
-            args += ["-f", f"b{i}={branch}"]
+            args += ["-f", f"b{i}={self.git.remote_branch_name(branch, self.remote)}"]
         repository = field(field(parse_json(self.gh(*args)), "data", dict), "repository", dict)
         default_branch = optional_field(repository, "defaultBranchRef", dict)
+        default_name = field(default_branch, "name", str) if default_branch else None
         pull_requests = {}
         for i, branch in enumerate(branches):
-            nodes = field(field(repository, f"b{i}", dict), "nodes", list)
-            pr = self.pick_pull_request(branch, [PullRequest.from_json(node) for node in nodes])
+            if self.git.remote_branch_name(branch, self.remote) == default_name:
+                continue
+            page = field(repository, f"b{i}", dict)
+            prs = [PullRequest.from_json(node) for node in field(page, "nodes", list)]
+            cursors: set[str] = set()
+            while not any(pr.state == "OPEN" and not pr.cross_repository for pr in prs):
+                page_info = field(page, "pageInfo", dict)
+                if not field(page_info, "hasNextPage", bool):
+                    break
+                after = field(page_info, "endCursor", str)
+                if after in cursors:
+                    raise StackError(f"GitHub repeated a pull request page for {branch}")
+                cursors.add(after)
+                query = (
+                    "query($owner: String!, $name: String!, $b0: String!, $after: String!) "
+                    "{ repository(owner: $owner, name: $name) "
+                    f"{{ b0: pullRequests(headRefName: $b0, first: {PRS_PER_BRANCH}, after: $after, "
+                    f"orderBy: {{field: CREATED_AT, direction: DESC}}) "
+                    f"{{ nodes {{ {PR_FIELDS} }} pageInfo {{ hasNextPage endCursor }} }} }} }}"
+                )
+                response = parse_json(
+                    self.gh(
+                        "api",
+                        "graphql",
+                        "--hostname",
+                        self.host,
+                        "-f",
+                        f"owner={self.owner}",
+                        "-f",
+                        f"name={self.name}",
+                        "-f",
+                        f"b0={self.git.remote_branch_name(branch, self.remote)}",
+                        "-f",
+                        f"after={after}",
+                        "-f",
+                        f"query={query}",
+                    )
+                )
+                page = field(field(field(response, "data", dict), "repository", dict), "b0", dict)
+                prs.extend(PullRequest.from_json(node) for node in field(page, "nodes", list))
+            pr = self.pick_pull_request(branch, prs)
             if pr is not None:
                 pull_requests[branch] = pr
-        self._default_branch = field(default_branch, "name", str) if default_branch else None
+        self._default_branch = default_name
         return pull_requests
 
     def pick_pull_request(self, branch: str, prs: list[PullRequest]) -> PullRequest | None:
@@ -420,7 +460,11 @@ class GitHubAdapter(GitAdapter):
     def merge_state(self, branch: str, parent: str, ignore_revert: bool = False) -> MergeState:
         git = self.git
         pr = self.pull_requests().get(branch)
-        if pr is not None and pr.state == "OPEN" and parent == self._default_branch:
+        if (
+            pr is not None
+            and pr.state == "OPEN"
+            and self.git.remote_branch_name(parent, self.remote) == self._default_branch
+        ):
             return MergeState.NOT_MERGED
         merged = self.trusted_merge(branch, parent)
         if merged is None:
@@ -462,8 +506,25 @@ class GitHubAdapter(GitAdapter):
             self.git.run("rev-list", "--no-merges", ref, "--not", f"refs/heads/{parent}").split()
         )
 
+    def ensure_pr_parent_remote(self, branch: str, parent: str) -> None:
+        base_remote = self.git.config_get(parent, "remote")
+        if base_remote and base_remote not in (".", self.remote):
+            raise StackError(f"can't retarget {branch}'s pull request: its parent {parent} tracks {base_remote}")
+
+    def ensure_pr_parent_remotes(
+        self, branches: list[str], parents: Parents, prs: dict[str, PullRequest], opening: bool
+    ) -> None:
+        for branch in branches:
+            if (branch in prs and prs[branch].state == "OPEN") or (opening and branch not in prs):
+                self.ensure_pr_parent_remote(branch, parents[branch])
+
     def before_push(
-        self, to_push: list[str], parents: Parents, rebuild_stack: bool = False, scope: list[str] | None = None
+        self,
+        to_push: list[str],
+        parents: Parents,
+        rebuild_stack: bool = False,
+        scope: list[str] | None = None,
+        opening: bool = False,
     ) -> None:
         """Point the open pull requests of branches about to be pushed at their
         stack parents, where the parent is already on the remote.
@@ -477,6 +538,7 @@ class GitHubAdapter(GitAdapter):
         # until after the push. Check its stack now to avoid pushing first and
         # only then discovering that unstacking requires consent.
         prs = self.pull_requests()
+        self.ensure_pr_parent_remotes(to_push, parents, prs, opening)
         allowed = {
             prs[b].number for b in (scope if scope is not None else to_push) if b in prs and prs[b].state == "OPEN"
         }
@@ -485,8 +547,9 @@ class GitHubAdapter(GitAdapter):
             for b in to_push
             if b in prs
             and prs[b].state == "OPEN"
-            and prs[b].base != parents[b]
-            and self.git.rev(f"refs/remotes/{self.remote}/{parents[b]}") is None
+            and prs[b].base != self.git.remote_branch_name(parents[b], self.remote)
+            and self.git.rev(f"refs/remotes/{self.remote}/{self.git.remote_branch_name(parents[b], self.remote)}")
+            is None
         }
         if pending:
             try:
@@ -509,7 +572,10 @@ class GitHubAdapter(GitAdapter):
                     if stack is not None:
                         self.ensure_stack_scope(GitHubStack.from_json(stack), allowed)
         for b in to_push:
-            if self.git.rev(f"refs/remotes/{self.remote}/{parents[b]}") is not None:
+            if (
+                self.git.rev(f"refs/remotes/{self.remote}/{self.git.remote_branch_name(parents[b], self.remote)}")
+                is not None
+            ):
                 self.retarget(b, parents[b], rebuild_stack, allowed)
 
     def after_push(
@@ -538,7 +604,11 @@ class GitHubAdapter(GitAdapter):
         """Point branch's pull request at base, if it's open and isn't already."""
         prs = self.pull_requests()
         pr = prs.get(branch)
-        if pr is None or pr.state != "OPEN" or pr.base == base:
+        if pr is None or pr.state != "OPEN":
+            return
+        self.ensure_pr_parent_remote(branch, base)
+        base = self.git.remote_branch_name(base, self.remote)
+        if pr.base == base:
             return
         edit = ("pr", "edit", str(pr.number), "--repo", self.repo, "--base", base)
         try:
@@ -618,9 +688,9 @@ class GitHubAdapter(GitAdapter):
             self.repo,
             "--draft",
             "--base",
-            base,
+            self.git.remote_branch_name(base, self.remote),
             "--head",
-            branch,
+            self.git.remote_branch_name(branch, self.remote),
             "--title",
             title,
             "--body-file",
@@ -631,7 +701,9 @@ class GitHubAdapter(GitAdapter):
         if not match:
             raise StackError(f"couldn't tell which pull request gh opened for {branch} from {url!r}")
         number = int(match.group(1))
-        self.pull_requests()[branch] = PullRequest(number, "OPEN", True, False, self.git.tip(branch), base, None)
+        self.pull_requests()[branch] = PullRequest(
+            number, "OPEN", True, False, self.git.tip(branch), self.git.remote_branch_name(base, self.remote), None
+        )
         return number, url
 
     def pull_request_fields(self, numbers: Iterable[int], fields: str) -> dict[int, object]:
@@ -735,7 +807,11 @@ class GitHubAdapter(GitAdapter):
         chain: list[int],
     ) -> bool:
         """Report unstacking needed for retargets in a dry run, if any."""
-        affected = [n for b, n in to_update.items() if prs[b].base != parents[b] and stacks[n] is not None]
+        affected = [
+            n
+            for b, n in to_update.items()
+            if prs[b].base != self.git.remote_branch_name(parents[b], self.remote) and stacks[n] is not None
+        ]
         if not affected:
             return False
         can_link = len(chain) > 1 and self.github_stacks_enabled()

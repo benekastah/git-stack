@@ -17,7 +17,7 @@ def test_stack_through_squash_merge(repo: Repo) -> None:
     repo.stack("push")
     repo.squash_merge_on_forge("pr1")
 
-    result = repo.stack("sync", "-d", "local", "--no-push")
+    result = repo.stack("pull", "-d", "local")
 
     assert "pr1 was merged into main; deleted it" in result.stdout
     assert "restacking pr2 onto main" in result.stdout

@@ -1,7 +1,6 @@
 import fcntl
 import fnmatch
 import os
-import tempfile
 from collections import Counter
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from contextlib import contextmanager
@@ -18,6 +17,9 @@ BASE_KEY = "stackBase"
 # Commits it contains aren't new to the branch, even if the branch has since
 # rebased them and its reflog no longer has them.
 PULLED_KEY = "stackPulled"
+# Bind a recorded pulled tip to its upstream, so changing upstreams can't make
+# a previous remote's history look already integrated.
+PULLED_UPSTREAM_KEY = "stackPulledUpstream"
 # Upstream tip seen when explicitly re-tracking a branch with --base. It may
 # contain either old rewritten commits or work that still needs to be pulled.
 TRACK_UPSTREAM_KEY = "stackTrackUpstream"
@@ -32,6 +34,7 @@ PENDING_RESTACK_FROM_KEY = "stackPendingRestackFrom"
 # GitClient.identity_counts) of each commit being cherry-picked, one per line.
 PENDING_PULL_FROM_KEY = "stackPendingPullFrom"
 PENDING_PULLED_KEY = "stackPendingPulled"
+PENDING_PULL_UPSTREAM_KEY = "stackPendingPullUpstream"
 LEGACY_PULL_IDENTITIES_KEY = "stackPendingPullIdentities"
 PENDING_PULL_IDENTITIES_KEY = "stackPendingPullIdentityCounts"
 # The last answers to whether the branch conflicts with its parent, whether its
@@ -51,6 +54,8 @@ REVERTED_CHECK_KEY = "stackRevertedCheck"
 # name), so commands on one of them still cover the others, as they did before
 # it merged.
 GROUP_KEY = "stackGroup"
+# An omitted group selector, distinct from an explicitly empty group name.
+CURRENT_GROUP = "\0"
 # Ownership is stored on every tracked branch so it survives stack splits.
 OWNERSHIP_KEY = "stackOwnership"
 
@@ -259,7 +264,7 @@ class StackCore:
         named = [b for selector in branches for b in self.matching(selector, parents)]
         all_groups = self.groups(parents)
         for group in groups:
-            if not group:
+            if group == CURRENT_GROUP:
                 current = self.current_stacked_branch(parents, "select")
                 bottom = ancestry(current, parents)[-2]
                 group = all_groups.get(bottom, "")
@@ -379,6 +384,7 @@ class StackCore:
         if pending_pulled is None:
             return
         pull_from = git.config_get(branch, PENDING_PULL_FROM_KEY)
+        pending_upstream = git.config_get(branch, PENDING_PULL_UPSTREAM_KEY)
         identities = git.config_get(branch, PENDING_PULL_IDENTITIES_KEY)
         picked = Counter((identities or "").splitlines())
         # Cherry-picking keeps each commit's author, date and subject, even
@@ -389,11 +395,15 @@ class StackCore:
             and git.is_ancestor(pull_from, f"refs/heads/{branch}")
             and picked <= git.identity_counts(f"{pull_from}..refs/heads/{branch}")
         ):
-            git.config_set(branch, PULLED_KEY, pending_pulled)
+            if pending_upstream is None or pending_upstream == self.upstream_identity(branch):
+                git.config_set(branch, PULLED_KEY, pending_pulled)
+                if pending_upstream is not None:
+                    git.config_set(branch, PULLED_UPSTREAM_KEY, pending_upstream)
         elif not forget_unfinished or git.other_worktree_of(branch) is not None:
             return
         git.config_unset(branch, PENDING_PULLED_KEY, pending_pulled)
         git.config_unset(branch, PENDING_PULL_FROM_KEY, pull_from)
+        git.config_unset(branch, PENDING_PULL_UPSTREAM_KEY, pending_upstream)
         git.config_unset(branch, PENDING_PULL_IDENTITIES_KEY, identities)
         git.config_unset(branch, LEGACY_PULL_IDENTITIES_KEY)
 
@@ -410,44 +420,6 @@ class StackCore:
                 f"fix it with `git stack track {parent} --base <sha>`"
             )
         return base
-
-    def squash_branch(self, branch: str, parent: str) -> None:
-        """Squash branch's own commits into one, keeping its base.
-
-        The commit gets every squashed commit's message, oldest first, and the
-        oldest commit's author and date.
-        """
-        git = self.git
-        base = self.recorded_base(branch, parent)
-        commits = git.run("rev-list", "--reverse", f"{base}..refs/heads/{branch}").split()
-        if len(commits) < 2:
-            return
-        if (worktree := git.other_worktree_of(branch)) is not None:
-            self.emit(events.NotSquashedInOtherWorktree(branch, worktree))
-            return
-        self.emit(events.Squashing(branch, len(commits)))
-        message = "\n\n".join(git.run("show", "--no-patch", "--format=%B", c) for c in commits)
-        author, date = git.run("show", "--no-patch", "--format=%an <%ae>%x00%aI", commits[0]).split("\0")
-        tip = git.tip(branch)
-        git.switch(branch)
-        git.run("reset", "--quiet", "--soft", base)
-        # Committed like `git commit` would be, with the user's hooks, and their
-        # terminal for anything that prompts (e.g. a GPG passphrase).
-        with tempfile.TemporaryDirectory() as directory:
-            message_file = os.path.join(directory, "message")
-            with open(message_file, "w") as f:
-                f.write(message)
-            committed = git.passthrough(
-                "commit",
-                "--quiet",
-                "--cleanup=whitespace",
-                f"--author={author}",
-                f"--date={date}",
-                f"--file={message_file}",
-            )
-        if not committed:
-            git.run("reset", "--quiet", "--soft", tip)
-            raise StackError(f"squashing {branch} failed, so it was left as it was; see git's output above")
 
     def needs_restack(self, branch: str, parent: str, base: str | None, parent_tip: str, latest: bool) -> bool:
         """Whether branch, last rebased onto base, has to be rebased onto
@@ -507,6 +479,11 @@ class StackCore:
             # There's no rebase to wait for.
             self.set_parent(branch, parent)
             return True
+        if git.run("rev-list", "--merges", f"{base}..refs/heads/{branch}"):
+            raise StackError(
+                f"{branch} contains merge commits; restack it manually while preserving merges, "
+                f"then run `git stack track {parent} --base <sha>`"
+            )
         if (worktree := git.other_worktree_of(branch)) is not None:
             self.emit(events.NotRestackedInOtherWorktree(branch, worktree))
             return False
@@ -549,10 +526,15 @@ class StackCore:
         """
         git = self.git
         known = [f"refs/heads/{branch}", *git.reflog_tips(branch)]
-        for ref in (f"refs/heads/{parent}", git.config_get(branch, PULLED_KEY)):
+        for ref in (f"refs/heads/{parent}", self.pulled_tip(branch)):
             commit = git.rev(ref) if ref else None
             if commit:
                 known.append(commit)
+        if git.run("rev-list", "--merges", upstream_tip, "--not", *known):
+            raise StackError(
+                f"{branch}'s upstream contains unseen merge commits; inspect and integrate them manually "
+                "before syncing or pushing"
+            )
         unknown = set(git.run("rev-list", "--no-merges", upstream_tip, "--not", *known).split())
         if not unknown:
             return []
@@ -567,19 +549,55 @@ class StackCore:
         ).split()
         return [commit for commit in new_patches if commit in unknown]
 
+    def upstream_identity(self, branch: str) -> str | None:
+        remote = self.git.config_get(branch, "remote")
+        ref = self.git.config_get(branch, "merge")
+        return f"{remote} {ref}" if remote and ref and remote != "." else None
+
+    def pulled_tip(self, branch: str) -> str | None:
+        """The recorded tip only if it belongs to the branch's current upstream."""
+        git = self.git
+        recorded = git.config_get(branch, PULLED_UPSTREAM_KEY)
+        current = self.upstream_identity(branch)
+        if recorded is not None:
+            return git.config_get(branch, PULLED_KEY) if recorded == current else None
+        # Older versions only recorded tips for same-named upstreams.
+        remote = git.config_get(branch, "remote")
+        return git.config_get(branch, PULLED_KEY) if remote and git.tracks_same_name(branch, remote) else None
+
+    def ensure_upstream_not_rewritten(self, branch: str, parent: str, remote: str, allow: bool) -> None:
+        """Refuse ambiguous upstream changes until the user explicitly chooses to pull them."""
+        git = self.git
+        if git.remote_branch(branch) is None:
+            return
+        upstream = git.rev(f"{branch}@{{upstream}}")
+        if upstream is None or not self.unpulled_commits(branch, parent, upstream) or allow:
+            return
+        tip = git.tip(branch)
+        if git.is_ancestor(tip, upstream):
+            return
+        previous = self.pulled_tip(branch)
+        if previous and git.rev(previous) and git.is_ancestor(previous, upstream):
+            return
+        upstream_name = git.run("rev-parse", "--abbrev-ref", f"{branch}@{{upstream}}")
+        raise StackError(
+            f"{branch}'s upstream has unseen commits after its history was rewritten or its previous tip is unknown; "
+            f"inspect `git log --left-right --oneline {branch}...{upstream_name}`. "
+            "To pull them, rerun `git stack pull --rewritten-upstream` (or `git stack sync --rewritten-upstream`); "
+            "to replace the remote with local history, use `git stack push --force`"
+        )
+
     def pull_upstream(self, branch: str, parent: str, remote: str, pull_tracked_upstream: bool = False) -> bool:
         """Cherry-pick commits that others pushed to branch's upstream onto branch.
 
-        Only an upstream that's the branch of the same name on remote, as
-        `git stack push` sets it, is pulled from. Any other (e.g. origin/main,
-        for a branch made with `git switch -c <branch> origin/main`) isn't
-        branch's own remote branch, and its commits aren't branch's to take.
+        Uses the branch's configured remote-tracking upstream, which can have
+        a different name. Commits already in its stack parent are not replayed.
 
         Returns False, changing nothing, if there are commits to pull but branch
         is checked out in another worktree.
         """
         git = self.git
-        if not git.tracks_same_name(branch, remote):
+        if git.remote_branch(branch) is None:
             return True
         upstream_tip = git.rev(f"{branch}@{{upstream}}")
         if upstream_tip is None:
@@ -604,6 +622,8 @@ class StackCore:
         self.emit(events.PullingUpstream(branch, len(commits)))
         git.config_set(branch, PENDING_PULL_FROM_KEY, git.tip(branch))
         git.config_set(branch, PENDING_PULLED_KEY, upstream_tip)
+        if (identity := self.upstream_identity(branch)) is not None:
+            git.config_set(branch, PENDING_PULL_UPSTREAM_KEY, identity)
         git.config_set(
             branch,
             PENDING_PULL_IDENTITIES_KEY,
@@ -622,11 +642,12 @@ class StackCore:
             ) from stopped
         git.config_unset(branch, PENDING_PULLED_KEY)
         git.config_unset(branch, PENDING_PULL_FROM_KEY)
+        git.config_unset(branch, PENDING_PULL_UPSTREAM_KEY)
         git.config_unset(branch, PENDING_PULL_IDENTITIES_KEY)
         git.config_unset(branch, LEGACY_PULL_IDENTITIES_KEY)
         raise StackError(f"pulling upstream commits into {branch} failed; see git's output above")
 
-    def take_upstream_rebase(self, branch: str, parent: str, remote: str) -> bool:
+    def take_upstream_rebase(self, branch: str, parent: str, remote: str, allow_rewritten: bool = False) -> bool:
         """Move branch to its upstream if that's branch's own commits rebased
         onto parent somewhere else (e.g. by GitHub's "Rebase stack" button),
         so they're neither pulled in again nor pushed over. Its base becomes
@@ -663,9 +684,13 @@ class StackCore:
                 "inspect both histories before deciding how to proceed"
             )
         if not git.is_rebased_copy(base, tip, new_base, upstream_tip):
+            if allow_rewritten:
+                return False
             raise StackError(
                 f"{remote}/{branch} has commits matching {branch}'s authors, dates and subjects "
-                "but different changes; inspect both histories before deciding how to proceed"
+                "but different changes; inspect both histories. To replay the upstream changes, run "
+                "`git stack pull --rewritten-upstream`; to replace the remote history, "
+                "run `git stack push --force`"
             )
         if branch == git.current_branch():
             # Like a fast-forward, it keeps uncommitted changes, or fails
@@ -677,6 +702,8 @@ class StackCore:
             git.run("update-ref", f"refs/heads/{branch}", upstream_tip, tip)
         git.config_set(branch, BASE_KEY, new_base)
         git.config_set(branch, PULLED_KEY, upstream_tip)
+        if (identity := self.upstream_identity(branch)) is not None:
+            git.config_set(branch, PULLED_UPSTREAM_KEY, identity)
         self.emit(events.TookUpstreamRebase(branch, f"{remote}/{branch}"))
         return True
 
@@ -733,12 +760,14 @@ class StackCore:
             PARENT_KEY,
             BASE_KEY,
             PULLED_KEY,
+            PULLED_UPSTREAM_KEY,
             TRACK_UPSTREAM_KEY,
             PENDING_PARENT_KEY,
             PENDING_BASE_KEY,
             PENDING_RESTACK_FROM_KEY,
             PENDING_PULL_FROM_KEY,
             PENDING_PULLED_KEY,
+            PENDING_PULL_UPSTREAM_KEY,
             PENDING_PULL_IDENTITIES_KEY,
             LEGACY_PULL_IDENTITIES_KEY,
             GROUP_KEY,
@@ -755,6 +784,19 @@ class StackCore:
             self.git.config_unset(branch, key)
         self.checks.forget(branch)
 
+    def ensure_group_available_for_merge(self, branch: str, parents: Parents) -> None:
+        """Refuse to join unrelated stacks when creating a group after a merge."""
+        if (
+            parents[branch] not in parents
+            and branch in parents.values()
+            and self.git.config_get(branch, GROUP_KEY) is None
+            and branch in self.groups(parents).values()
+        ):
+            raise StackError(
+                f"can't group {branch}'s children: group {branch} already exists; "
+                "rename the existing group before continuing"
+            )
+
     def remove_merged(self, branch: str, parents: Parents, delete: bool) -> None:
         """Move branch's children onto its parent, and, if that's a stack's
         root, put them in branch's group (see GROUP_KEY). Then stop tracking
@@ -765,6 +807,7 @@ class StackCore:
         its parent) that isn't checked out elsewhere is checked out instead, or
         failing that, the parent's commit, detached.
         """
+        self.ensure_group_available_for_merge(branch, parents)
         git = self.git
         new_parent = parents[branch]
         group = git.config_get(branch, GROUP_KEY) or branch
@@ -797,21 +840,39 @@ class StackCore:
         git.run("branch", "--quiet", "--delete", "--force", branch)
         self.emit(events.Untracked(branch, new_parent, children, deleted_tip=tip))
 
-    def untrack_merged(self, branch: str, parents: Parents, delete: str | None) -> bool:
+    def untrack_merged(
+        self, branch: str, parents: Parents, delete: str | None, allow_different_upstream: bool = False
+    ) -> bool:
         """Stop tracking merged branch, deleting what delete ("local", "remote" or
         "both") says, and moving its children onto its parent (see remove_merged).
         Returns False, leaving branch alone, if its remote branch couldn't be
         deleted.
         """
+        self.ensure_group_available_for_merge(branch, parents)
         git = self.git
         delete_local = delete in ("local", "both")
         remote = git.remote_branch(branch)
-        if remote is None or not git.tracks_same_name(branch, remote[0]):
+        if remote is None or (not allow_different_upstream and not git.tracks_same_name(branch, remote[0])):
             self.remove_merged(branch, parents, delete_local)
             return True
         upstream = git.run("rev-parse", "--abbrev-ref", f"{branch}@{{upstream}}")
         remote_name, ref, tip = remote
+        root = stack_root(branch, parents)
+        root_ref = f"refs/heads/{git.remote_branch_name(root, remote_name)}"
+        if ref == root_ref:
+            self.remove_merged(branch, parents, delete_local)
+            return True
         if delete in ("remote", "both"):
+            default = git.run("symbolic-ref", "--quiet", "--short", f"refs/remotes/{remote_name}/HEAD", check=False)
+            if not default:
+                heads = git.run("ls-remote", "--symref", remote_name, "HEAD", check=False).splitlines()
+                refs = [line.split("\t", 1)[0].removeprefix("ref: ") for line in heads if line.startswith("ref: ")]
+                if not refs:
+                    raise StackError(f"can't determine {remote_name}'s default branch; refusing to delete {upstream}")
+                default = f"{remote_name}/{refs[0].removeprefix('refs/heads/')}"
+            if ref == f"refs/heads/{default.removeprefix(f'{remote_name}/')}":
+                self.remove_merged(branch, parents, delete_local)
+                return True
             if not git.delete_remote_branch(remote_name, ref, tip):
                 self.emit(events.RemoteBranchDeleteFailed(branch, upstream))
                 return False

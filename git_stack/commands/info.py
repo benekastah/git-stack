@@ -54,20 +54,20 @@ class Args(argparse.Namespace):
     groups: list[str]
     list_json: bool
     offline: bool
-    current: bool
+    all: bool
 
 
 def register(subparsers: Subparsers) -> None:
-    p = subparsers.add_parser("info", help="show all tracked stacks (or the named ones)")
-    add_stack_arguments(p, "show", default="every stack")
-    p.add_argument("-c", "--current", action="store_true", help="show only the current stack")
+    p = subparsers.add_parser("info", help="show the current stack (or the named ones)")
+    add_stack_arguments(p, "show", optional_group=True)
+    p.add_argument("-a", "--all", action="store_true", help="show every tracked stack")
     # Older than every other command's --json (see git_stack.commands), so it
     # keeps printing a single list.
     p.add_argument(
         "--json",
         dest="list_json",
         action="store_true",
-        help="print a JSON list of every branch, each stack's root first, parent before child",
+        help="print a JSON list of selected branches, each stack's root first, parent before child",
     )
     p.add_argument(
         "--offline",
@@ -136,11 +136,11 @@ class Info:
 
 
 def run(stack: StackClient, args: Args) -> Info:
-    if args.current:
+    if args.all:
         if args.branches or args.groups:
-            raise StackError("--current cannot be combined with branches or groups")
-        return Info(stack.info(current=True, offline=args.offline))
-    return Info(stack.info(args.branches, args.groups, offline=args.offline))
+            raise StackError("--all cannot be combined with branches or groups")
+        return Info(stack.info(offline=args.offline))
+    return Info(stack.info(args.branches, args.groups, offline=args.offline, current=True))
 
 
 def show(stack: StackClient, args: Args, result: Info) -> None:

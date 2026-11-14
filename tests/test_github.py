@@ -39,6 +39,110 @@ def without_prs(emitted: list[events.Event]) -> list[str]:
     return [b for e in emitted if isinstance(e, events.NoPullRequests) for b in e.branches]
 
 
+def test_lookup_finds_open_pr_after_newer_closed_and_fork_prs(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+    client.branch("pr1")
+    repo.commit("a", "pr1\n", "pr1")
+    client.push()
+    head = repo.git("rev-parse", "pr1")
+    gh.add_pr(number=1, state="OPEN", headRefName="pr1", headRefOid=head, baseRefName="main", mergeCommit=None)
+    for number in range(2, 23):
+        gh.add_pr(
+            number=number,
+            state="OPEN" if number % 2 else "CLOSED",
+            isCrossRepository=True,
+            headRefName="pr1",
+            headRefOid=head,
+            baseRefName="main",
+            mergeCommit=None,
+        )
+
+    info = client.info(["pr1"])
+
+    assert info[1].pull_request is not None
+    assert info[1].pull_request.number == 1
+
+
+def test_sync_respects_a_pull_request_with_a_differently_named_upstream(
+    repo: Repo, gh: FakeGitHub, client: StackClient
+) -> None:
+    client.branch("local-feature")
+    repo.commit("a", "first\n", "first")
+    repo.git("push", "--quiet", "--set-upstream", "origin", "local-feature:remote-feature")
+    gh.add_pr(
+        number=1,
+        state="OPEN",
+        headRefName="remote-feature",
+        headRefOid=repo.git("rev-parse", "local-feature"),
+        baseRefName="main",
+        mergeCommit=None,
+    )
+    repo.commit("a", "second\n", "second")
+
+    client.sync()
+
+    assert repo.git("show", "remote-feature:a", cwd=repo.origin) == "second"
+    assert client.info(["local-feature"])[1].pull_request is not None
+    assert not gh.calls("pr", "edit")
+
+
+def test_sync_keeps_a_pr_based_on_its_parents_upstream_name(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+    client.branch("local-parent")
+    repo.commit("a", "parent\n", "parent")
+    repo.git("push", "--quiet", "--set-upstream", "origin", "local-parent:remote-parent")
+    client.branch("local-child")
+    repo.commit("b", "child\n", "child")
+    repo.git("push", "--quiet", "--set-upstream", "origin", "local-child:remote-child")
+    gh.add_pr(
+        number=1,
+        state="OPEN",
+        headRefName="remote-child",
+        headRefOid=repo.git("rev-parse", "local-child"),
+        baseRefName="remote-parent",
+        mergeCommit=None,
+    )
+    repo.commit("b", "child updated\n", "child updated")
+
+    client.sync()
+
+    assert repo.git("show", "remote-child:b", cwd=repo.origin) == "child updated"
+    assert not gh.calls("pr", "edit")
+
+
+def test_prs_opens_for_the_configured_upstream_name(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+    client.branch("local-feature")
+    repo.commit("a", "feature\n", "feature")
+    repo.git("push", "--quiet", "--set-upstream", "origin", "local-feature:remote-feature")
+
+    result = client.prs()
+
+    assert result.steps[0].number is not None
+    assert gh.load()["prs"][0]["headRefName"] == "remote-feature"
+
+
+def test_sync_wont_guess_a_pr_base_from_another_remote(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+    repo.make_stack()
+    client.push()
+    repo.git("remote", "add", "other", str(repo.origin))
+    repo.git("fetch", "--quiet", "other")
+    repo.git("branch", "--set-upstream-to=other/pr1", "pr1")
+    gh.add_pr(
+        number=1,
+        state="OPEN",
+        headRefName="pr2",
+        headRefOid=repo.git("rev-parse", "pr2"),
+        baseRefName="pr1",
+        mergeCommit=None,
+    )
+    repo.git("switch", "--quiet", "pr2")
+    repo.commit("b", "updated\n", "updated")
+    before = repo.git("rev-parse", "pr2", cwd=repo.origin)
+
+    with pytest.raises(StackError, match="parent pr1 tracks other"):
+        client.sync(remote="origin", only_remote=True)
+    assert repo.git("rev-parse", "pr2", cwd=repo.origin) == before
+    assert not gh.calls("pr", "edit")
+
+
 def test_push_says_which_branches_have_no_pr(
     repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event]
 ) -> None:

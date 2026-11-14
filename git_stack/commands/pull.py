@@ -1,0 +1,58 @@
+import argparse
+
+from git_stack.commands import (
+    Subparsers,
+    add_allow_shared_argument,
+    add_ignore_revert_argument,
+    add_json_argument,
+    add_latest_argument,
+    add_stack_arguments,
+)
+from git_stack.commands.sync import show
+from git_stack.git import DEFAULT_REMOTE
+from git_stack.stack import StackClient, SyncResult
+
+
+class Args(argparse.Namespace):
+    branches: list[str]
+    groups: list[str]
+    remote: str | None
+    delete: str | None
+    latest: bool
+    ignore_reverts: list[str]
+    allow_shared: bool
+    pull_tracked_upstream: bool
+    rewritten_upstream: bool
+
+
+def register(subparsers: Subparsers) -> None:
+    p = subparsers.add_parser("pull", help="fetch and sync stacks locally without pushing")
+    add_stack_arguments(p, "pull")
+    p.add_argument("--remote", help="only pull branches tracking this remote")
+    p.add_argument("-d", "--delete", choices=("local",), help="also delete merged local branches")
+    add_latest_argument(p)
+    add_ignore_revert_argument(p)
+    add_allow_shared_argument(p)
+    p.add_argument("--pull-tracked-upstream", action="store_true", help="pull unseen commits from before re-tracking")
+    p.add_argument(
+        "--rewritten-upstream", action="store_true", help="pull unseen commits from rewritten upstream history"
+    )
+    add_json_argument(p)
+    p.set_defaults(run=run, show=show)
+
+
+def run(stack: StackClient, args: Args) -> SyncResult:
+    return stack.sync(
+        args.branches,
+        args.groups,
+        remote=args.remote or DEFAULT_REMOTE,
+        only_remote=args.remote is not None,
+        delete=args.delete,
+        latest=args.latest,
+        push=False,
+        ignore_reverts=args.ignore_reverts,
+        allow_shared=args.allow_shared,
+        pull_tracked_upstream=args.pull_tracked_upstream,
+        rewritten_upstream=args.rewritten_upstream,
+        rebuild_stack=False,
+    )

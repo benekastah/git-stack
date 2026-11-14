@@ -1,7 +1,10 @@
 """git stack info."""
 
+import json
+
 import pytest
 
+from git_stack.core import CURRENT_GROUP
 from git_stack.errors import StackError
 from git_stack.stack import BranchInfo, BranchStatus, StackClient
 from tests.helpers import Repo
@@ -36,7 +39,26 @@ def test_info_current_selects_only_the_current_stack(repo: Repo, client: StackCl
     repo.git("switch", "--quiet", "pr2")
 
     assert [branch.name for branch in client.info(current=True, offline=True)] == ["main", "pr1", "pr2", "pr3"]
-    assert [branch.name for branch in client.info(groups=[""], offline=True)] == ["main", "pr1", "pr2", "pr3"]
+    assert [branch.name for branch in client.info(groups=[CURRENT_GROUP], offline=True)] == [
+        "main",
+        "pr1",
+        "pr2",
+        "pr3",
+    ]
+    with pytest.raises(StackError, match="there's no group"):
+        client.info(groups=[""], offline=True)
+
+
+def test_info_defaults_to_current_and_all_shows_other_stacks(repo: Repo, client: StackClient) -> None:
+    repo.make_stack()
+    repo.git("switch", "--quiet", "main")
+    client.branch("other")
+    repo.git("switch", "--quiet", "pr2")
+
+    current = json.loads(repo.stack("info", "--offline", "--json").stdout)
+    all_stacks = json.loads(repo.stack("info", "--all", "--offline", "--json").stdout)
+    assert {b["name"] for b in current} == {"main", "pr1", "pr2", "pr3"}
+    assert {b["name"] for b in all_stacks} == {"main", "pr1", "pr2", "pr3", "other"}
 
 
 def test_info_current_requires_a_tracked_branch(repo: Repo, client: StackClient) -> None:
@@ -51,8 +73,13 @@ def test_bare_group_selects_all_current_group_stacks(repo: Repo, client: StackCl
     client.group_add("feature", ["pr1", "other"])
     repo.git("switch", "--quiet", "pr2")
 
-    assert set(client.selected_bottoms([], [""], client.tracked_branches(), "show")) == {"pr1", "other"}
-    assert {b.name for b in client.info(groups=[""], offline=True)} == {"main", "pr1", "pr2", "pr3", "other"}
+    assert set(client.selected_bottoms([], [CURRENT_GROUP], client.tracked_branches(), "show")) == {"pr1", "other"}
+    assert {b.name for b in client.info(groups=[CURRENT_GROUP], offline=True)} == {"main", "pr1", "pr2", "pr3", "other"}
+
+    with pytest.raises(StackError, match="there's no group"):
+        client.group_remove(groups=[""])
+    assert repo.config("pr1", "stackGroup") == "feature"
+    assert repo.config("other", "stackGroup") == "feature"
 
 
 def test_info_remembers_whether_a_branch_on_main_conflicts_with_it(repo: Repo, client: StackClient) -> None:

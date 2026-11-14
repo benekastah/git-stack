@@ -208,6 +208,13 @@ class GitClient:
             self.config_get(branch, "remote") == remote and self.config_get(branch, "merge") == f"refs/heads/{branch}"
         )
 
+    def remote_branch_name(self, branch: str, remote: str) -> str:
+        """The configured branch name on remote, or branch if it has no such upstream."""
+        ref = self.config_get(branch, "merge")
+        if self.config_get(branch, "remote") == remote and ref and ref.startswith("refs/heads/"):
+            return ref.removeprefix("refs/heads/")
+        return branch
+
     def remote_branch(self, branch: str) -> tuple[str, str, str] | None:
         """Return (remote, ref, tip) for branch's upstream on a remote, or None."""
         remote = self.config_get(branch, "remote")

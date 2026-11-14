@@ -16,6 +16,7 @@ from git_stack.core import (
     GROUP_KEY,
     OWNERSHIP_KEY,
     PULLED_KEY,
+    PULLED_UPSTREAM_KEY,
     TRACK_UPSTREAM_KEY,
     Parents,
     StackCore,
@@ -280,6 +281,9 @@ class SyncState:
     push: bool
     ignore_reverts: frozenset[str] = frozenset()
     pull_tracked_upstream: bool = False
+    rewritten_upstream: bool = False
+    scope: frozenset[str] = frozenset()
+    protected: frozenset[str] = frozenset()
     skipped: set[str] = field(default_factory=set)
     blocked: list[str] = field(default_factory=list)
     pushable: list[str] = field(default_factory=list)
@@ -1056,7 +1060,6 @@ class StackClient(StackCore):
         branches: Sequence[str] = (),
         groups: Sequence[str] = (),
         onto: str | None = None,
-        squash: bool = False,
         latest: bool = False,
         allow_shared: bool = False,
     ) -> None:
@@ -1065,7 +1068,7 @@ class StackClient(StackCore):
         that branches and groups name (see named).
 
         onto first retargets the current branch, so it can't be combined with
-        branches or groups; squash first squashes each branch into one commit; latest
+        branches or groups; latest
         moves branches on a stack's root onto its tip even if they don't
         conflict with it.
         """
@@ -1080,16 +1083,67 @@ class StackClient(StackCore):
             branch = self.current_stacked_branch(parents, "restack", hint="use `git stack track` first")
             self.ensure_local_branch_parent(onto)
             ensure_no_cycle(branch, onto, parents)
+            self.ensure_owned(self.stack(branch, parents), allow_shared, "restack")
+            if onto in parents:
+                self.ensure_owned(self.stack(onto, parents), allow_shared, "restack")
+            selected = [branch, *descendants(branch, children_map(parents))]
             parents[branch] = onto
+        else:
+            selected = self.selected_stacks(branches, groups, parents, "restack")
+            self.ensure_owned(selected, allow_shared, "restack")
         adapter = make_adapter(self, DEFAULT_REMOTE, fetch=False)
-        to_restack = self.skip_merged(self.selected_stacks(branches, groups, parents, "restack"), parents, adapter)
-        self.ensure_owned(to_restack, allow_shared, "restack")
-        if squash:
-            for b in to_restack:
-                self.squash_branch(b, parents[b])
-            self.restore_checkout(original)
+        to_restack = self.skip_merged(selected, parents, adapter)
         self.restack_all(to_restack, parents, latest)
         self.restore_checkout(original)
+
+    def sync_selection(
+        self, branches: Sequence[str], groups: Sequence[str], parents: Parents, remote: str, only_remote: bool
+    ) -> tuple[list[str], set[str]]:
+        """Select one remote's stack branches before changing repository state."""
+        stack = self.selected_stacks(branches, groups, parents, "sync")
+        if only_remote:
+            stack = [b for b in stack if self.git.config_get(b, "remote") == remote]
+            if not stack:
+                raise StackError(f"none of the selected branches track {remote}")
+        remotes = {name for b in stack if (name := self.git.config_get(b, "remote")) and name != "."}
+        if len(remotes) > 1:
+            raise StackError("can't sync branches on multiple remotes atomically; select one with --remote")
+        return stack, remotes
+
+    def protected_sync_destinations(self, branches: list[str], roots: set[str], remote: str) -> set[str]:
+        git = self.git
+        default = git.run("symbolic-ref", "--quiet", "--short", f"refs/remotes/{remote}/HEAD", check=False)
+        if not default and any(git.config_get(b, "remote") == remote for b in branches):
+            heads = git.run("ls-remote", "--symref", remote, "HEAD", check=False).splitlines()
+            refs = [line.split("\t", 1)[0].removeprefix("ref: ") for line in heads if line.startswith("ref: ")]
+            default = f"{remote}/{refs[0].removeprefix('refs/heads/')}" if refs else ""
+        if not default and any(git.config_get(b, "remote") == remote for b in branches):
+            raise StackError(
+                f"{remote}'s default branch isn't known; run `git remote set-head {remote} --auto`, "
+                "or use --force to allow the configured upstream"
+            )
+        protected = (
+            {default.removeprefix(f"{remote}/")}
+            if default
+            else {git.remote_branch_name(root, remote) for root in roots}
+        )
+        return {
+            b
+            for b in branches
+            if git.config_get(b, "remote") == remote and git.remote_branch_name(b, remote) in protected
+        }
+
+    def ensure_sync_destination(
+        self, branches: list[str], roots: set[str], remote: str, force: bool, command: str = "sync"
+    ) -> None:
+        if force:
+            return
+        blocked = sorted(self.protected_sync_destinations(branches, roots, remote))
+        if blocked:
+            raise StackError(
+                f"{', '.join(blocked)} track {remote}'s default branch; "
+                f"rerun `git stack {command} --force` to allow pushing to it"
+            )
 
     @exclusive
     def sync(
@@ -1103,6 +1157,9 @@ class StackClient(StackCore):
         ignore_reverts: Sequence[str] = (),
         allow_shared: bool = False,
         pull_tracked_upstream: bool = False,
+        rewritten_upstream: bool = False,
+        force: bool = False,
+        only_remote: bool = False,
         rebuild_stack: bool = False,
     ) -> SyncResult:
         """Fetch, untrack the merged branches in the current stack, or in the
@@ -1124,19 +1181,46 @@ class StackClient(StackCore):
         """
         self.ensure_no_operation_in_progress()
         self.ensure_clean_worktree()
-        self.settle_all()
+        initial_parents = self.tracked_branches()
+        initial_stack, _ = self.sync_selection(branches, groups, initial_parents, remote, only_remote)
+        if only_remote:
+            for branch in initial_stack:
+                if self.git.config_get(branch, "remote") == remote:
+                    self.settle(branch)
+        else:
+            self.settle_all()
         parents = self.tracked_branches()
-        stack = self.selected_stacks(branches, groups, parents, "sync")
-        self.ensure_owned(stack, allow_shared, "sync")
+        self.ensure_owned(self.selected_stacks(branches, groups, parents, "sync"), allow_shared, "sync")
+        stack, upstream_remotes = self.sync_selection(branches, groups, parents, remote, only_remote)
         self.ensure_ignorable_reverts(ignore_reverts, stack, "the stacks being synced")
+        push_remote = next(iter(upstream_remotes)) if upstream_remotes else remote
+        roots = {stack_root(b, parents) for b in stack}
+        protected = self.protected_sync_destinations(stack, roots, push_remote) if push and not force else set()
         original = self.current_checkout()
-        adapter = self.checked_adapter(remote)
-        self.fetch(remote)
+        adapter = self.checked_adapter(push_remote)
+        roots_to_update = {root for root in roots if not only_remote or self.git.config_get(root, "remote") == remote}
+        remotes = (
+            {remote, push_remote}
+            | upstream_remotes
+            | {name for b in roots_to_update if (name := self.git.config_get(b, "remote")) and name != "."}
+        )
+        for name in sorted(remotes, key=lambda name: (name != remote, name)):
+            self.fetch(name)
         # A group's stacks can be on different roots.
-        self.fast_forward_trunks(sorted({stack_root(b, parents) for b in stack}))
+        self.fast_forward_trunks(sorted(roots_to_update))
 
         state = SyncState(
-            original, parents, remote, delete, latest, push, frozenset(ignore_reverts), pull_tracked_upstream
+            original,
+            parents,
+            push_remote,
+            delete,
+            latest,
+            push,
+            frozenset(ignore_reverts),
+            pull_tracked_upstream,
+            rewritten_upstream,
+            frozenset(stack),
+            frozenset(protected),
         )
         # Parent-before-child, so by the time we reach a branch its parent is
         # final: merged branches have been removed (and their children reparented
@@ -1145,13 +1229,20 @@ class StackClient(StackCore):
             self.sync_branch(branch, adapter, state)
 
         self.restore_checkout(state.original)
-        self.push_branches(state.pushable, parents, adapter, remote, rebuild_stack=rebuild_stack, scope=stack)
+        self.push_branches(
+            state.pushable, parents, adapter, push_remote, rebuild_stack=rebuild_stack, scope=stack, use_upstreams=True
+        )
         if push and state.blocked:
             raise StackError(
                 f"didn't push {', '.join(state.blocked)}: checked out in another worktree, or stacked on a branch "
                 f"that is"
             )
-        return SyncResult(state.unpushed, self.stack_infos(stack, adapter))
+        shown = (
+            self.branch_infos({b: parents[b] for b in stack if b in parents}, adapter)
+            if only_remote
+            else self.stack_infos(stack, adapter)
+        )
+        return SyncResult(state.unpushed, shown)
 
     def sync_branch(self, branch: str, adapter: GitAdapter, state: SyncState) -> None:
         """Untrack branch if it was merged, and otherwise bring it up to date (see
@@ -1165,7 +1256,12 @@ class StackClient(StackCore):
             return
         merge_state = adapter.merge_state(branch, parent, ignore_revert=branch in state.ignore_reverts)
         if merge_state is MergeState.MERGED:
-            if not self.untrack_merged(branch, state.parents, state.delete):
+            outside = [b for b, parent_name in state.parents.items() if parent_name == branch and b not in state.scope]
+            if outside:
+                raise StackError(
+                    f"can't untrack {branch}: it has children outside the selected remote: {', '.join(outside)}"
+                )
+            if not self.untrack_merged(branch, state.parents, state.delete, allow_different_upstream=True):
                 state.skipped.add(branch)
             elif branch == state.original:
                 state.original = self.current_checkout()
@@ -1200,9 +1296,15 @@ class StackClient(StackCore):
         restack branch, which isn't merged, onto parent and pull in commits
         others pushed to it, then note whether it needs pushing."""
         git = self.git
+        if branch in state.protected:
+            raise StackError(
+                f"{branch} tracks {state.remote}'s default branch; "
+                "rerun `git stack sync --force` to allow pushing to it"
+            )
         if git.upstream_gone(branch):
             self.emit(events.UpstreamGone(branch, parent))
-        self.take_upstream_rebase(branch, parent, state.remote)
+        self.take_upstream_rebase(branch, parent, state.remote, allow_rewritten=state.rewritten_upstream)
+        self.ensure_upstream_not_rewritten(branch, parent, state.remote, state.rewritten_upstream)
         try:
             restacked = self.restack_branch(branch, parent, state.latest)
         except BrokenStackError as e:
@@ -1219,7 +1321,7 @@ class StackClient(StackCore):
             return
         upstream_tip = git.rev(f"{branch}@{{upstream}}")
         if upstream_tip and upstream_tip != git.rev(f"refs/heads/{branch}"):
-            if state.push and git.tracks_same_name(branch, state.remote):
+            if state.push and git.remote_branch(branch) is not None:
                 state.pushable.append(branch)
             else:
                 state.unpushed.append(branch)
@@ -1285,6 +1387,7 @@ class StackClient(StackCore):
         prs: bool = False,
         allow_shared: bool = False,
         rebuild_stack: bool = False,
+        only_remote: bool = False,
     ) -> PushResult:
         """Force-push (with lease) every unmerged branch in the current stack, or
         in the stacks of the branches that branches and groups name (see named), then let
@@ -1300,28 +1403,83 @@ class StackClient(StackCore):
         since it was last fetched.
         """
         self.ensure_no_operation_in_progress()
-        self.settle_all()
         parents = self.tracked_branches()
-        stack = self.selected_stacks(branches, groups, parents, "push")
-        self.ensure_owned(stack, allow_shared, "push")
-        adapter = self.checked_adapter(remote)
+        selected = self.selected_stacks(branches, groups, parents, "push")
+        self.ensure_owned(selected, allow_shared, "push")
+        stack = [b for b in selected if not only_remote or self.git.config_get(b, "remote") in (None, remote)]
+        if not stack:
+            raise StackError(f"none of the selected branches can be pushed to {remote}")
+        remotes = {name for b in stack if (name := self.git.config_get(b, "remote")) and name != "."}
+        if len(remotes) > 1:
+            raise StackError("can't push branches on multiple remotes atomically; select one with --remote")
+        push_remote = next(iter(remotes)) if remotes else remote
+        self.ensure_sync_destination(stack, {stack_root(b, parents) for b in stack}, push_remote, force, "push")
+        if only_remote:
+            for branch in stack:
+                self.settle(branch)
+        else:
+            self.settle_all()
+        parents = self.tracked_branches()
+        selected = self.selected_stacks(branches, groups, parents, "push")
+        self.ensure_owned(selected, allow_shared, "push")
+        stack = [b for b in selected if not only_remote or self.git.config_get(b, "remote") in (None, remote)]
+        remotes = {name for b in stack if (name := self.git.config_get(b, "remote")) and name != "."}
+        if not stack or len(remotes) > 1 or (remotes and push_remote not in remotes):
+            raise StackError("the selected upstreams changed while settling; retry the push")
+        adapter = self.checked_adapter(push_remote)
         github = adapter if prs and isinstance(adapter, GitHubAdapter) else None
         branches = self.skip_merged(stack, parents, adapter)
         if not force:
             for b in branches:
-                self.take_upstream_rebase(b, parents[b], remote)
+                self.take_upstream_rebase(b, parents[b], push_remote)
         pushed = self.push_branches(
-            branches, parents, adapter, remote, force, opening=github is not None, rebuild_stack=rebuild_stack
+            branches,
+            parents,
+            adapter,
+            push_remote,
+            force,
+            opening=github is not None,
+            rebuild_stack=rebuild_stack,
+            use_upstreams=True,
         )
         steps = (
-            self.open_pull_requests(pushed, parents, github, remote, rebuild_stack=rebuild_stack)
+            self.open_pull_requests(pushed, parents, github, push_remote, rebuild_stack=rebuild_stack)
             if github and pushed
             else None
         )
         error = None
         if prs and github is None and pushed:
-            error = f"pushed, but didn't open or update any pull requests: {not_github(remote)}"
-        return PushResult(pushed, self.stack_infos(stack, adapter), steps, error)
+            error = f"pushed, but didn't open or update any pull requests: {not_github(push_remote)}"
+        shown = (
+            self.branch_infos({b: parents[b] for b in stack if b in parents}, adapter)
+            if only_remote
+            else self.stack_infos(stack, adapter)
+        )
+        return PushResult(pushed, shown, steps, error)
+
+    def push_refspecs(
+        self, branches: list[str], parents: Parents, remote: str, force: bool, use_upstreams: bool
+    ) -> tuple[list[str], list[str]]:
+        """Validate destinations and pin leases to the remote tips we checked."""
+        git = self.git
+        leases, refspecs = [], []
+        destinations: set[str] = set()
+        for b in branches:
+            target = git.remote_branch_name(b, remote) if use_upstreams else b
+            if target in destinations:
+                raise StackError(f"multiple local branches track {remote}/{target}; refusing to push")
+            destinations.add(target)
+            remote_tip = git.rev(f"refs/remotes/{remote}/{target}")
+            if use_upstreams and git.config_get(b, "remote") == remote and remote_tip is None:
+                raise StackError(f"{b}'s upstream {remote}/{target} is unavailable; refusing to push")
+            if remote_tip and not force and self.unpulled_commits(b, parents[b], remote_tip):
+                raise StackError(
+                    f"{remote}/{target} has commits that {b} doesn't; run `git stack sync` "
+                    f"to pull them in first, or push with --force to drop them"
+                )
+            leases.append(f"--force-with-lease=refs/heads/{target}:{remote_tip or ''}")
+            refspecs.append(f"refs/heads/{b}:refs/heads/{target}" if use_upstreams else b)
+        return leases, refspecs
 
     def push_branches(
         self,
@@ -1333,6 +1491,7 @@ class StackClient(StackCore):
         opening: bool = False,
         rebuild_stack: bool = False,
         scope: list[str] | None = None,
+        use_upstreams: bool = False,
     ) -> list[str]:
         """Force-push (with lease) branches, which must be unmerged, in one atomic
         push, then let the adapter update their pull requests (see
@@ -1349,17 +1508,9 @@ class StackClient(StackCore):
         # Refuse if we know of commits we haven't pulled (unless told to drop
         # them), and pin each lease to the remote-tracking ref we checked, so a
         # push that raced with someone else's fails instead of overwriting it.
-        leases = []
-        for b in branches:
-            remote_tip = git.rev(f"refs/remotes/{remote}/{b}")
-            if remote_tip and not force and self.unpulled_commits(b, parents[b], remote_tip):
-                raise StackError(
-                    f"{remote}/{b} has commits that {b} doesn't; run `git stack sync` "
-                    f"to pull them in first, or push with --force to drop them"
-                )
-            leases.append(f"--force-with-lease={b}:{remote_tip or ''}")
+        leases, refspecs = self.push_refspecs(branches, parents, remote, force, use_upstreams)
         try:
-            adapter.before_push(branches, parents, rebuild_stack, scope)
+            adapter.before_push(branches, parents, rebuild_stack, scope, opening)
         except StackError as e:
             raise StackError(
                 f"updating pull requests failed, so nothing was pushed (set {ADAPTER_SETTING} "
@@ -1367,12 +1518,14 @@ class StackClient(StackCore):
             ) from e
         # Atomic, so a branch that can't be pushed doesn't leave the rest of the
         # stack pushed without it, and its pull requests not retargeted.
-        if not git.passthrough("push", "--atomic", *leases, "--set-upstream", remote, *branches):
+        if not git.passthrough("push", "--atomic", *leases, "--set-upstream", remote, *refspecs):
             raise StackError(
                 "push failed, so nothing was pushed; if the remote has new commits, run `git stack sync` and try again"
             )
         for b in branches:
             git.config_set(b, PULLED_KEY, git.tip(b))
+            if (identity := self.upstream_identity(b)) is not None:
+                git.config_set(b, PULLED_UPSTREAM_KEY, identity)
         try:
             adapter.after_push(branches, parents, opening, rebuild_stack, scope)
         except StackError as e:
@@ -1396,7 +1549,11 @@ class StackClient(StackCore):
                 )
             # Someone else's branch of the same name. Overwriting it isn't what
             # --force is for, so it doesn't override this.
-            if git.rev(f"refs/remotes/{remote}/{b}") is not None and not git.tracks_same_name(b, remote):
+            configured = git.config_get(b, "remote")
+            if configured and configured != remote:
+                raise StackError(f"{b} tracks {configured}, not {remote}; select its upstream remote")
+            target = git.remote_branch_name(b, remote)
+            if git.rev(f"refs/remotes/{remote}/{target}") is not None and configured != remote:
                 raise StackError(
                     f"{remote}/{b} exists but isn't {b}'s upstream, so it's probably someone "
                     f"else's branch; rename yours with `git stack rename {b} <new>`. If "
@@ -1512,7 +1669,8 @@ class StackClient(StackCore):
         unpushed = [
             b
             for b in branches
-            if not git.tracks_same_name(b, remote) or git.rev(f"refs/remotes/{remote}/{b}") != git.tip(b)
+            if git.config_get(b, "remote") != remote
+            or git.rev(f"refs/remotes/{remote}/{git.remote_branch_name(b, remote)}") != git.tip(b)
         ]
         if unpushed:
             raise StackError(
@@ -1520,7 +1678,7 @@ class StackClient(StackCore):
                 f"{', '.join(unpushed)}; run `git stack push` first"
             )
         for root in roots:
-            if git.rev(f"refs/remotes/{remote}/{root}") is None:
+            if git.rev(f"refs/remotes/{remote}/{git.remote_branch_name(root, remote)}") is None:
                 raise StackError(f"{root} isn't on {remote}, so pull requests can't merge into it")
 
 

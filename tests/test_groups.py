@@ -7,7 +7,7 @@ from git_stack.stack import StackClient
 from tests.helpers import Repo
 
 
-def make_siblings(repo: Repo, client: StackClient) -> None:
+def make_siblings(repo: Repo, client: StackClient, delete_branch: bool = True) -> None:
     """main <- a <- (b, c), pushed, then a squash-merged."""
     client.branch("a")
     repo.commit("a", "a\n", "a c1")
@@ -19,7 +19,7 @@ def make_siblings(repo: Repo, client: StackClient) -> None:
     client.push()
     repo.git("switch", "--quiet", "b")
     client.push()
-    repo.squash_merge_on_forge("a")
+    repo.squash_merge_on_forge("a", delete_branch=delete_branch)
 
 
 def test_sync_puts_children_of_a_merged_branch_on_main_in_its_group(repo: Repo, client: StackClient) -> None:
@@ -33,6 +33,21 @@ def test_sync_puts_children_of_a_merged_branch_on_main_in_its_group(repo: Repo, 
     assert client.show_stack("b") == ["b", "c"]
     assert client.show_stack("c") == ["c", "b"]
     assert repo.branch_info("b").group == "a"
+
+
+def test_sync_refuses_to_reuse_an_unrelated_group_name(repo: Repo, client: StackClient) -> None:
+    make_siblings(repo, client, delete_branch=False)
+    repo.git("switch", "--quiet", "main")
+    client.branch("other")
+    client.group_add("a", ["other"])
+    repo.git("switch", "--quiet", "b")
+
+    with pytest.raises(StackError, match="group a already exists"):
+        client.sync(delete="both")
+    assert repo.config("b", "stackParent") == "a"
+    assert repo.git("rev-parse", "--verify", "refs/heads/a")
+    assert repo.git("rev-parse", "--verify", "refs/heads/a", cwd=repo.origin)
+    assert repo.config("other", "stackGroup") == "a"
 
 
 def test_rerun_after_a_conflict_still_syncs_every_stack_in_the_group(repo: Repo, client: StackClient) -> None:

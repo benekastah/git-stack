@@ -212,7 +212,12 @@ class GitAdapter:
         rather than falling back to the repository alone."""
 
     def before_push(
-        self, to_push: list[str], parents: Parents, rebuild_stack: bool = False, scope: list[str] | None = None
+        self,
+        to_push: list[str],
+        parents: Parents,
+        rebuild_stack: bool = False,
+        scope: list[str] | None = None,
+        opening: bool = False,
     ) -> None:
         """Called before to_push, a stack's unmerged branches, are pushed."""
 

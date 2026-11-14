@@ -8,6 +8,21 @@ from git_stack.stack import StackClient
 from tests.helpers import Repo
 
 
+def test_push_force_targets_the_configured_upstream_name(repo: Repo, client: StackClient) -> None:
+    client.branch("local-feature")
+    repo.commit("a", "local\n", "local")
+    repo.git("push", "--quiet", "--set-upstream", "origin", "local-feature:remote-feature")
+    repo.commit_on_forge("remote-feature", "b", "remote\n", "remote")
+    repo.git("fetch", "--quiet")
+
+    client.push(force=True)
+
+    assert repo.git("show", "remote-feature:a", cwd=repo.origin) == "local"
+    assert repo.git("rev-parse", "remote-feature", cwd=repo.origin) == repo.git("rev-parse", "local-feature")
+    assert not repo.git("branch", "--list", "local-feature", cwd=repo.origin)
+    assert repo.git("rev-parse", "--abbrev-ref", "local-feature@{upstream}") == "origin/remote-feature"
+
+
 def test_push_refuses_to_drop_unpulled_commits(repo: Repo, client: StackClient) -> None:
     repo.make_stack()
     client.push()

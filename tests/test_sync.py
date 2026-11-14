@@ -9,6 +9,257 @@ from git_stack.stack import BranchStatus, StackClient
 from tests.helpers import Repo
 
 
+def test_sync_refuses_unseen_upstream_merge_commits(repo: Repo, client: StackClient) -> None:
+    client.branch("pr1")
+    repo.commit("a", "local\n", "local")
+    client.push()
+    repo.git("fetch", "--quiet", cwd=repo.forge)
+    repo.git("switch", "--quiet", "-C", "pr1", "origin/pr1", cwd=repo.forge)
+    repo.git("switch", "--quiet", "-c", "side", cwd=repo.forge)
+    (repo.forge / "b").write_text("side\n")
+    repo.git("commit", "--quiet", "-am", "side", cwd=repo.forge)
+    repo.git("switch", "--quiet", "pr1", cwd=repo.forge)
+    (repo.forge / "c").write_text("other\n")
+    repo.git("commit", "--quiet", "-am", "other", cwd=repo.forge)
+    repo.git("merge", "--no-ff", "--no-commit", "side", cwd=repo.forge)
+    (repo.forge / "a").write_text("merge resolution\n")
+    repo.git("add", "a", cwd=repo.forge)
+    repo.git("commit", "--quiet", "-m", "merge", cwd=repo.forge)
+    repo.git("push", "--quiet", "origin", "pr1", cwd=repo.forge)
+    upstream = repo.git("rev-parse", "pr1", cwd=repo.origin)
+
+    with pytest.raises(StackError, match="unseen merge commits"):
+        client.sync()
+    assert repo.git("rev-parse", "pr1", cwd=repo.origin) == upstream
+    assert repo.git("show", "pr1:a", cwd=repo.origin) == "merge resolution"
+
+
+def test_pull_updates_local_branch_without_pushing(repo: Repo, client: StackClient) -> None:
+    client.branch("pr1")
+    repo.commit("a", "initial\n", "initial")
+    client.push()
+    repo.commit("b", "local\n", "local")
+    repo.commit_on_forge("pr1", "c", "remote\n", "remote")
+    remote = repo.git("rev-parse", "pr1", cwd=repo.origin)
+
+    repo.stack("pull")
+
+    assert repo.git("show", "pr1:c") == "remote"
+    assert repo.git("show", "pr1:b") == "local"
+    assert repo.git("rev-parse", "pr1", cwd=repo.origin) == remote
+
+
+def test_sync_latest_preserves_remote_changes_and_updates_root(repo: Repo, client: StackClient) -> None:
+    client.branch("pr1")
+    repo.commit("a", "initial\n", "initial")
+    client.push()
+    repo.commit("b", "local\n", "local")
+    repo.commit_on_forge("pr1", "c", "remote\n", "remote")
+    repo.commit_on_forge("main", "d", "root\n", "root")
+
+    client.sync(latest=True)
+
+    assert repo.git("show", "pr1:b", cwd=repo.origin) == "local"
+    assert repo.git("show", "pr1:c", cwd=repo.origin) == "remote"
+    assert repo.git("show", "pr1:d", cwd=repo.origin) == "root"
+    assert repo.git("rev-parse", "main") == repo.git("rev-parse", "origin/main")
+
+
+def test_pull_accepts_a_fast_forward_without_a_recorded_upstream_tip(repo: Repo, client: StackClient) -> None:
+    client.branch("pr1")
+    repo.commit("a", "initial\n", "initial")
+    client.push()
+    repo.git("config", "--unset", "branch.pr1.stackPulled")
+    repo.commit_on_forge("pr1", "b", "remote\n", "remote")
+
+    repo.stack("pull")
+
+    assert repo.git("show", "pr1:b") == "remote"
+
+
+def test_pull_respects_a_differently_named_upstream(repo: Repo, client: StackClient) -> None:
+    client.branch("local-feature")
+    repo.commit("a", "local\n", "local")
+    repo.git("switch", "--quiet", "-c", "remote-feature", "origin/main", cwd=repo.forge)
+    (repo.forge / "b").write_text("remote\n")
+    repo.git("commit", "--quiet", "-am", "remote", cwd=repo.forge)
+    repo.git("push", "--quiet", "origin", "remote-feature", cwd=repo.forge)
+    repo.git("fetch", "--quiet")
+    repo.git("branch", "--set-upstream-to=origin/remote-feature", "local-feature")
+    remote = repo.git("rev-parse", "remote-feature", cwd=repo.origin)
+
+    repo.stack("pull", "--rewritten-upstream")
+
+    assert repo.git("show", "local-feature:a") == "local"
+    assert repo.git("show", "local-feature:b") == "remote"
+    assert repo.git("rev-parse", "remote-feature", cwd=repo.origin) == remote
+
+
+def test_changing_upstream_does_not_reuse_the_previous_upstream_tip(repo: Repo, client: StackClient) -> None:
+    client.branch("local-feature")
+    repo.commit("a", "local\n", "local")
+    client.push()
+    repo.git("switch", "--quiet", "-c", "remote-feature", "origin/main", cwd=repo.forge)
+    (repo.forge / "b").write_text("remote\n")
+    repo.git("commit", "--quiet", "-am", "remote", cwd=repo.forge)
+    repo.git("push", "--quiet", "origin", "remote-feature", cwd=repo.forge)
+    repo.git("fetch", "--quiet")
+    repo.git("branch", "--set-upstream-to=origin/remote-feature", "local-feature")
+    before = repo.git("rev-parse", "local-feature")
+
+    refused = repo.stack("pull", expect_success=False)
+
+    assert "--rewritten-upstream" in refused.stderr
+    assert repo.git("rev-parse", "local-feature") == before
+    repo.stack("pull", "--rewritten-upstream")
+    assert repo.git("show", "local-feature:b") == "remote"
+
+
+def test_sync_pushes_to_a_differently_named_upstream(repo: Repo, client: StackClient) -> None:
+    client.branch("local-feature")
+    repo.commit("a", "local\n", "local")
+    repo.git("switch", "--quiet", "-c", "remote-feature", "origin/main", cwd=repo.forge)
+    (repo.forge / "b").write_text("remote\n")
+    repo.git("commit", "--quiet", "-am", "remote", cwd=repo.forge)
+    repo.git("push", "--quiet", "origin", "remote-feature", cwd=repo.forge)
+    repo.git("fetch", "--quiet")
+    repo.git("branch", "--set-upstream-to=origin/remote-feature", "local-feature")
+    main = repo.git("rev-parse", "main", cwd=repo.origin)
+
+    client.sync(rewritten_upstream=True)
+
+    assert repo.git("show", "remote-feature:a", cwd=repo.origin) == "local"
+    assert repo.git("show", "remote-feature:b", cwd=repo.origin) == "remote"
+    assert repo.git("rev-parse", "main", cwd=repo.origin) == main
+    assert repo.git("rev-parse", "--abbrev-ref", "local-feature@{upstream}") == "origin/remote-feature"
+
+
+def test_sync_requires_force_to_push_to_default_branch(repo: Repo, client: StackClient) -> None:
+    client.branch("feature")
+    repo.commit("a", "feature\n", "feature")
+    repo.git("branch", "--set-upstream-to=origin/main", "feature")
+    before = repo.git("rev-parse", "main", cwd=repo.origin)
+
+    with pytest.raises(StackError, match="sync --force"):
+        client.sync()
+    assert repo.git("rev-parse", "main", cwd=repo.origin) == before
+
+    client.sync(force=True)
+    assert repo.git("show", "main:a", cwd=repo.origin) == "feature"
+
+
+def test_sync_refuses_when_remote_default_branch_cannot_be_determined(repo: Repo, client: StackClient) -> None:
+    client.branch("feature")
+    repo.commit("a", "feature\n", "feature")
+    other = repo.tmp / "other.git"
+    repo.git("init", "--quiet", "--bare", str(other))
+    repo.git("remote", "add", "other", str(other))
+    repo.git("push", "--quiet", "--set-upstream", "other", "feature")
+    repo.commit("a", "later\n", "later")
+    before = repo.git("rev-parse", "feature", cwd=other)
+
+    with pytest.raises(StackError, match="default branch isn't known"):
+        client.sync()
+    assert repo.git("rev-parse", "feature", cwd=other) == before
+
+
+def test_sync_refuses_multiple_upstream_remotes_before_changing_branches(repo: Repo, client: StackClient) -> None:
+    repo.make_stack()
+    client.push()
+    repo.git("remote", "add", "other", str(repo.origin))
+    repo.git("fetch", "--quiet", "other")
+    repo.git("branch", "--set-upstream-to=other/pr2", "pr2")
+    local = {b: repo.git("rev-parse", b) for b in ("pr1", "pr2", "pr3")}
+    upstream = {b: repo.git("rev-parse", b, cwd=repo.origin) for b in local}
+
+    with pytest.raises(StackError, match="multiple remotes atomically"):
+        client.sync()
+    assert {b: repo.git("rev-parse", b) for b in local} == local
+    assert {b: repo.git("rev-parse", b, cwd=repo.origin) for b in local} == upstream
+
+
+def test_sync_remote_only_changes_branches_tracking_that_remote(repo: Repo, client: StackClient) -> None:
+    client.branch("first")
+    repo.commit("a", "first\n", "first")
+    client.push()
+    repo.git("switch", "--quiet", "main")
+    client.branch("second")
+    repo.commit("b", "second\n", "second")
+    other = repo.tmp / "other.git"
+    repo.git("init", "--quiet", "--bare", str(other))
+    repo.git("remote", "add", "other", str(other))
+    repo.git("push", "--quiet", "--set-upstream", "other", "second")
+    client.group_add("feature", ["first", "second"])
+    repo.commit("b", "second later\n", "second later")
+    repo.git("switch", "--quiet", "first")
+    repo.commit("a", "first later\n", "first later")
+    before = repo.git("rev-parse", "second")
+    other_tip = repo.git("rev-parse", "second", cwd=other)
+
+    result = repo.stack("sync", "--remote", "origin")
+
+    assert repo.git("rev-parse", "second") == before
+    assert repo.git("rev-parse", "second", cwd=other) == other_tip
+    assert repo.git("rev-parse", "first", cwd=repo.origin) == repo.git("rev-parse", "first")
+    assert "second" not in result.stdout
+
+    repo.commit("a", "first again\n", "first again")
+    result = repo.stack("push", "--remote", "origin")
+    assert repo.git("rev-parse", "second", cwd=other) == other_tip
+    assert repo.git("rev-parse", "first", cwd=repo.origin) == repo.git("rev-parse", "first")
+    assert "second" not in result.stdout
+
+
+def test_sync_remote_wont_reparent_a_child_on_another_remote(repo: Repo, client: StackClient) -> None:
+    repo.make_stack()
+    client.push()
+    repo.git("remote", "add", "other", str(repo.origin))
+    repo.git("fetch", "--quiet", "other")
+    repo.git("branch", "--set-upstream-to=other/pr2", "pr2")
+    repo.git("switch", "--quiet", "main")
+    repo.git("merge", "--quiet", "--squash", "pr1")
+    repo.git("commit", "--quiet", "-m", "merged pr1")
+    repo.git("switch", "--quiet", "pr1")
+
+    with pytest.raises(StackError, match="children outside the selected remote"):
+        client.sync(remote="origin", only_remote=True)
+    assert repo.config("pr2", "stackParent") == "pr1"
+
+
+@pytest.mark.parametrize("command", ["pull", "sync"])
+@pytest.mark.parametrize("known_tip", [True, False])
+def test_rewritten_upstream_requires_explicit_choice(
+    repo: Repo, client: StackClient, command: str, known_tip: bool
+) -> None:
+    client.branch("pr1")
+    repo.commit("a", "local\n", "local")
+    client.push()
+    before = repo.git("rev-parse", "pr1")
+    if not known_tip:
+        repo.git("config", "--unset", "branch.pr1.stackPulled")
+    repo.git("fetch", "--quiet", cwd=repo.forge)
+    repo.git("switch", "--quiet", "-C", "pr1", "origin/main", cwd=repo.forge)
+    (repo.forge / "c").write_text("remote\n")
+    repo.git("commit", "--quiet", "-am", "remote", cwd=repo.forge)
+    repo.git("push", "--quiet", "--force", "origin", "pr1", cwd=repo.forge)
+    upstream = repo.git("rev-parse", "pr1", cwd=repo.origin)
+
+    refused = repo.stack(command, expect_success=False)
+    assert "--rewritten-upstream" in refused.stderr
+    assert repo.git("rev-parse", "pr1") == before
+    assert repo.git("rev-parse", "pr1", cwd=repo.origin) == upstream
+    if command == "sync":
+        forced = repo.stack("sync", "--force", expect_success=False)
+        assert "--rewritten-upstream" in forced.stderr
+        assert repo.git("rev-parse", "pr1", cwd=repo.origin) == upstream
+
+    repo.stack(command, "--rewritten-upstream")
+    assert repo.git("show", "pr1:a") == "local"
+    assert repo.git("show", "pr1:c") == "remote"
+    if command == "pull":
+        assert repo.git("rev-parse", "pr1", cwd=repo.origin) == upstream
+
+
 def test_sync_after_parent_squash_merged(repo: Repo, client: StackClient) -> None:
     repo.make_stack()
     client.push()
@@ -348,16 +599,17 @@ def test_sync_takes_a_rebase_of_the_stack_from_the_remote(repo: Repo, client: St
     repo.assert_stacked("pr3", "pr2", ["pr3 c1"])
 
 
-def test_sync_doesnt_pull_from_upstream_of_another_name(repo: Repo, client: StackClient) -> None:
+def test_sync_latest_includes_root_upstream_of_another_name(repo: Repo, client: StackClient) -> None:
     # As `git switch -c pr2 origin/main` would set it.
     repo.make_stack()
     repo.commit_on_forge("main", "d", "main\n", "main c1")
     repo.git("fetch", "--quiet")
     repo.git("branch", "--quiet", "--set-upstream-to=origin/main", "pr2")
 
-    client.sync()
+    client.sync(push=False, latest=True)
 
     repo.assert_stacked("pr2", "pr1", ["pr2 c1"])
+    assert repo.git("show", "pr2:d") == "main"
 
 
 def test_sync_requires_a_choice_before_pulling_commits_seen_when_retracked(repo: Repo, client: StackClient) -> None:
