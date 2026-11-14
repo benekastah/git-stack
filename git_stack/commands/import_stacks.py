@@ -2,7 +2,6 @@ import argparse
 
 from git_stack.commands import Subparsers, add_json_argument
 from git_stack.commands.info import print_tree
-from git_stack.git import DEFAULT_REMOTE
 from git_stack.stack import ImportAction, ImportResult, ImportStep, ImportStepWithoutPr, StackClient
 
 
@@ -12,7 +11,7 @@ class Args(argparse.Namespace):
     branches: list[str]
     prs: list[str]
     author: str | None
-    remote: str
+    remote: str | None
     dry_run: bool
     force: bool
     json: bool
@@ -40,7 +39,7 @@ def register(subparsers: Subparsers) -> None:
         help="a pull request, by number or URL, whose stack tree to import, whoever's it is (repeatable)",
     )
     p.add_argument("--author", metavar="login", help="the GitHub user whose pull requests to import (default: you)")
-    p.add_argument("--remote", default=DEFAULT_REMOTE)
+    p.add_argument("--remote")
     mode = p.add_mutually_exclusive_group()
     mode.add_argument(
         "-n",
@@ -117,10 +116,10 @@ def show(stack: StackClient, args: Args, result: ImportResult) -> None:
     if args.dry_run:
         for without_pr in result.without_prs:
             if without_pr.action in (ImportAction.CREATE, ImportAction.CREATE_ROOT):
-                print(describe_without_pr(without_pr, args.remote))
+                print(describe_without_pr(without_pr, result.remote))
     for step in result.steps:
         if args.dry_run or step.action in (ImportAction.PARENT_DIFFERS, ImportAction.SKIP):
-            print(describe(step, args.remote, args.dry_run))
+            print(describe(step, result.remote, args.dry_run))
     if result.branches:
         tracked = {s.branch for s in result.steps if s.action in (ImportAction.CREATE, ImportAction.TRACK)}
         new_links = {b.name: b.pull_request.url for b in result.branches if b.name in tracked and b.pull_request}

@@ -2,7 +2,6 @@ import argparse
 
 from git_stack.commands import Subparsers, add_json_argument, add_rebuild_stack_argument, add_stack_arguments
 from git_stack.commands.info import print_tree
-from git_stack.git import DEFAULT_REMOTE
 from git_stack.stack import BranchInfo, PrsResult, PullRequestAction, PullRequestStep, StackClient
 
 
@@ -11,7 +10,7 @@ class Args(argparse.Namespace):
 
     branches: list[str]
     groups: list[str]
-    remote: str
+    remote: str | None
     dry_run: bool
     rebuild_stack: bool
     json: bool
@@ -25,7 +24,7 @@ def register(subparsers: Subparsers) -> None:
         "stack (or the named ones) that has none, into its stack parent",
     )
     add_stack_arguments(p, "open pull requests for")
-    p.add_argument("--remote", default=DEFAULT_REMOTE)
+    p.add_argument("--remote")
     add_rebuild_stack_argument(p)
     p.add_argument(
         "-n", "--dry-run", action="store_true", help="print the pull requests it would open, without opening them"

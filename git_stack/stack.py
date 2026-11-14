@@ -230,11 +230,12 @@ class ImportResult:
     stacks of the branches it tracked or found tracked, as info() lists them
     (none in a dry run, which tracks nothing). without_prs has what it did for
     the branches without a pull request that pull requests are built on,
-    parents before children."""
+    parents before children. remote is the remote it imported from."""
 
     steps: list[ImportStep]
     branches: list[BranchInfo] = field(metadata=json_name("stacks"))
     without_prs: list[ImportStepWithoutPr] = field(default_factory=list)
+    remote: str = DEFAULT_REMOTE
 
 
 @dataclass(frozen=True)
@@ -452,7 +453,7 @@ class StackClient(StackCore):
     @exclusive
     def import_stacks(
         self,
-        remote: str = DEFAULT_REMOTE,
+        remote: str | None = None,
         dry_run: bool = False,
         force: bool = False,
         author: str | None = None,
@@ -482,6 +483,7 @@ class StackClient(StackCore):
             raise StackError(f"{author} isn't a GitHub username")
         self.ensure_no_operation_in_progress()
         self.settle_all()
+        remote = remote or self.fallback_remote()
         adapter = make_adapter(self, remote, fetch=True)
         if not isinstance(adapter, GitHubAdapter):
             raise StackError(
@@ -503,12 +505,12 @@ class StackClient(StackCore):
         if branches or numbers:
             plan, without_prs = planner.select(branches, numbers, plan, without_prs)
         if dry_run:
-            return ImportResult(plan, [], without_prs)
+            return ImportResult(plan, [], without_prs, remote)
         previous_ownership = {b: self.git.config_get(b, OWNERSHIP_KEY) for b in self.tracked_branches()}
         self.apply_import(plan, without_prs, remote)
         self.classify_imported_stacks(plan, without_prs, open_prs, adapter.viewer, previous_ownership)
         shown = [s.branch for s in plan] + [s.branch for s in without_prs]
-        return ImportResult(plan, self.stack_infos(shown, adapter), without_prs)
+        return ImportResult(plan, self.stack_infos(shown, adapter), without_prs, remote)
 
     def classify_imported_stacks(
         self,
@@ -772,7 +774,7 @@ class StackClient(StackCore):
         reverts: Sequence[str],
         from_branch: str | None = None,
         stack: Sequence[str] = (),
-        remote: str = DEFAULT_REMOTE,
+        remote: str | None = None,
         allow_shared: bool = False,
     ) -> Unreverted:
         """Create name on from_branch (default: the root of stack's first
@@ -799,6 +801,7 @@ class StackClient(StackCore):
         for branch in stack:
             if branch not in parents:
                 raise StackError(f"{branch} isn't in a stack")
+        remote = remote or self.default_remote(stack, parents)
         parent = from_branch or (stack_root(stack[0], parents) if stack else self.default_branch(remote))
         affected = (
             b for branch in (*stack, parent) if stack and branch in parents for b in self.stack(branch, parents)
@@ -946,7 +949,9 @@ class StackClient(StackCore):
         parents = self.settled_branches()
         if current or branches or groups:
             parents = {b: parents[b] for b in self.selected_stacks(branches, groups, parents, "show")}
-        adapter = GitAdapter(self) if offline else make_adapter(self, DEFAULT_REMOTE, fetch=False)
+        adapter = (
+            GitAdapter(self) if offline else make_adapter(self, self.default_remote(parents, parents), fetch=False)
+        )
         return self.branch_infos(parents, adapter)
 
     def branch_infos(self, parents: Parents, adapter: GitAdapter) -> list[BranchInfo]:
@@ -1091,7 +1096,7 @@ class StackClient(StackCore):
         else:
             selected = self.selected_stacks(branches, groups, parents, "restack")
             self.ensure_owned(selected, allow_shared, "restack")
-        adapter = make_adapter(self, DEFAULT_REMOTE, fetch=False)
+        adapter = make_adapter(self, self.default_remote(selected, parents), fetch=False)
         to_restack = self.skip_merged(selected, parents, adapter)
         self.restack_all(to_restack, parents, latest)
         self.restore_checkout(original)
@@ -1105,10 +1110,38 @@ class StackClient(StackCore):
             stack = [b for b in stack if self.git.config_get(b, "remote") == remote]
             if not stack:
                 raise StackError(f"none of the selected branches track {remote}")
-        remotes = {name for b in stack if (name := self.git.config_get(b, "remote")) and name != "."}
+        remotes = self.upstream_remotes(stack)
         if len(remotes) > 1:
             raise StackError("can't sync branches on multiple remotes atomically; select one with --remote")
         return stack, remotes
+
+    def upstream_remotes(self, branches: Iterable[str]) -> set[str]:
+        """The remotes branches' upstreams are on."""
+        return {name for b in branches if (name := self.git.config_get(b, "remote")) and name != "."}
+
+    def stack_remote(self, upstream_remotes: set[str], root_remotes: set[str]) -> str:
+        """The remote for stacks without --remote: the one their branches'
+        upstreams are on (upstream_remotes), if there's one, or else the one
+        their roots' are on (root_remotes), if there's one, or else
+        fallback_remote. So a clone without origin works."""
+        for remotes in (upstream_remotes, root_remotes):
+            if len(remotes) == 1:
+                return next(iter(remotes))
+        return self.fallback_remote()
+
+    def fallback_remote(self) -> str:
+        """The remote for a command without --remote, when nothing it works on
+        says which: origin, or the repository's only remote if it has no
+        origin."""
+        remotes = self.git.remotes()
+        return remotes[0] if len(remotes) == 1 else DEFAULT_REMOTE
+
+    def default_remote(self, branches: Iterable[str], parents: Parents) -> str:
+        """stack_remote for branches, tracked branches of parents."""
+        branches = list(branches)
+        return self.stack_remote(
+            self.upstream_remotes(branches), self.upstream_remotes({stack_root(b, parents) for b in branches})
+        )
 
     def protected_sync_destinations(self, branches: list[str], roots: set[str], remote: str) -> set[str]:
         """Those of branches whose upstream is remote's default branch, or the
@@ -1191,17 +1224,14 @@ class StackClient(StackCore):
         self.ensure_owned(self.selected_stacks(branches, groups, parents, "sync"), allow_shared, "sync")
         stack, upstream_remotes = self.sync_selection(branches, groups, parents, remote, only_remote)
         self.ensure_ignorable_reverts(ignore_reverts, stack, "the stacks being synced")
-        push_remote = next(iter(upstream_remotes)) if upstream_remotes else remote
         roots = {stack_root(b, parents) for b in stack}
+        roots_to_update = {root for root in roots if not only_remote or self.git.config_get(root, "remote") == remote}
+        root_remotes = self.upstream_remotes(roots_to_update)
+        push_remote = remote if only_remote else self.stack_remote(upstream_remotes, root_remotes)
         protected = self.protected_sync_destinations(stack, roots, push_remote) if push and not force else set()
         original = self.current_checkout()
         adapter = self.checked_adapter(push_remote)
-        roots_to_update = {root for root in roots if not only_remote or self.git.config_get(root, "remote") == remote}
-        remotes = (
-            {remote, push_remote}
-            | upstream_remotes
-            | {name for b in roots_to_update if (name := self.git.config_get(b, "remote")) and name != "."}
-        )
+        remotes = {push_remote} | upstream_remotes | root_remotes | ({remote} if only_remote else set())
         for name in sorted(remotes, key=lambda name: (name != remote, name)):
             self.fetch(name)
         # A group's stacks can be on different roots.
@@ -1330,7 +1360,7 @@ class StackClient(StackCore):
     @exclusive
     def clean(
         self,
-        remote: str = DEFAULT_REMOTE,
+        remote: str | None = None,
         delete: str | None = None,
         ignore_reverts: Sequence[str] = (),
         allow_shared: bool = False,
@@ -1342,6 +1372,7 @@ class StackClient(StackCore):
         self.ensure_no_operation_in_progress()
         self.settle_all()
         parents = self.tracked_branches()
+        remote = remote or self.default_remote(parents, parents)
         if delete is not None:
             self.ensure_owned(parents, allow_shared, "clean")
         roots = sorted({stack_root(b, parents) for b in parents})
@@ -1411,11 +1442,12 @@ class StackClient(StackCore):
         stack = [b for b in selected if not only_remote or self.git.config_get(b, "remote") in (None, remote)]
         if not stack:
             raise StackError(f"none of the selected branches can be pushed to {remote}")
-        remotes = {name for b in stack if (name := self.git.config_get(b, "remote")) and name != "."}
+        remotes = self.upstream_remotes(stack)
         if len(remotes) > 1:
             raise StackError("can't push branches on multiple remotes atomically; select one with --remote")
-        push_remote = next(iter(remotes)) if remotes else remote
-        self.ensure_sync_destination(stack, {stack_root(b, parents) for b in stack}, push_remote, force, "push")
+        roots = {stack_root(b, parents) for b in stack}
+        push_remote = remote if only_remote else self.stack_remote(remotes, self.upstream_remotes(roots))
+        self.ensure_sync_destination(stack, roots, push_remote, force, "push")
         if only_remote:
             for branch in stack:
                 self.settle(branch)
@@ -1425,7 +1457,7 @@ class StackClient(StackCore):
         selected = self.selected_stacks(branches, groups, parents, "push")
         self.ensure_owned(selected, allow_shared, "push")
         stack = [b for b in selected if not only_remote or self.git.config_get(b, "remote") in (None, remote)]
-        remotes = {name for b in stack if (name := self.git.config_get(b, "remote")) and name != "."}
+        remotes = self.upstream_remotes(stack)
         if not stack or len(remotes) > 1 or (remotes and push_remote not in remotes):
             raise StackError("the selected upstreams changed while settling; retry the push")
         adapter = self.checked_adapter(push_remote)
@@ -1576,7 +1608,7 @@ class StackClient(StackCore):
         self,
         branches: Sequence[str] = (),
         groups: Sequence[str] = (),
-        remote: str = DEFAULT_REMOTE,
+        remote: str | None = None,
         dry_run: bool = False,
         rebuild_stack: bool = False,
     ) -> PrsResult:
@@ -1599,6 +1631,7 @@ class StackClient(StackCore):
         self.settle_all()
         parents = self.tracked_branches()
         stack = self.selected_stacks(branches, groups, parents, "open pull requests for")
+        remote = remote or self.default_remote(stack, parents)
         adapter = ensure_github(make_adapter(self, remote, fetch=True), remote)
         adapter.ensure_available()
         branches = self.skip_merged(stack, parents, adapter)

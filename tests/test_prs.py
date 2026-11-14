@@ -70,6 +70,16 @@ def test_prs_opens_drafts_for_the_whole_stack_into_stack_parents(
     assert "- #1 👈" in body(gh, 1) and "- #3 👈" in body(gh, 3)
 
 
+def test_prs_works_without_an_origin_remote(repo: Repo, gh: FakeGitHub) -> None:
+    repo.git("remote", "rename", "origin", "upstream")
+    repo.make_stack()
+
+    repo.stack("push")
+    repo.stack("prs")
+
+    assert [pr[:2] for pr in opened(gh)] == [("pr1", "main"), ("pr2", "pr1"), ("pr3", "pr2")]
+
+
 def test_prs_skips_branches_with_a_pull_request(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
     repo.make_stack()
     client.push()

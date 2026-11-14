@@ -28,16 +28,6 @@ what `sync` would do to them anyway, but it's a change nobody asked for.
 Fast-forwarding only the trunks of the steps it creates or tracks would fix
 it.
 
-## `sync` and `pull` still fetch `origin` when the stack uses another remote
-
-When no `--remote` is given, `sync` infers the stack's configured upstream
-remote, but its fetch set still includes the default argument `origin`. In a
-clone created with a different remote name (for example, `upstream`) and no
-`origin`, both `sync` and `pull` fail trying to fetch the nonexistent remote,
-even when the stack and its root track `upstream`. Reproduced with a
-single-remote clone. Fetch only the remotes actually needed by the selected
-stack and roots when no remote was explicitly named.
-
 ## A failed push can leave pull requests retargeted or unstacked
 
 Before pushing, the GitHub adapter retargets pull requests whose new bases

@@ -214,6 +214,14 @@ main
     │   └── pr3
     └── pr2b *
 .EE
+.PP
+Commands that take \f[CR]\-\-remote\f[R] work with the remote it names.
+Without it, they use the remote the branches they act on track, if
+there\(aqs one, or else the one their stacks\(aq roots (e.g.
+\f[CR]main\f[R]) track, if there\(aqs one, or else \f[CR]origin\f[R], or
+the repository\(aqs only remote if it has no \f[CR]origin\f[R].
+So a clone whose remote has another name (e.g.
+\f[CR]upstream\f[R]) needs no \f[CR]\-\-remote\f[R].
 .SS Groups
 When a branch on \f[CR]main\f[R] merges, the branches stacked on it each
 become the bottom of a stack of their own.
@@ -364,7 +372,7 @@ that.
 .IP \(bu 2
 Nothing is written unless every branch can be tracked, so a bad argument
 doesn\(aqt leave the stack half\-tracked.
-.SS \f[CR]git stack import [<branch>...] [\-\-pr <number|url>]... [\-\-author <login>] [\-\-remote origin] [\-n | \-f]\f[R]
+.SS \f[CR]git stack import [<branch>...] [\-\-pr <number|url>]... [\-\-author <login>] [\-\-remote <name>] [\-n | \-f]\f[R]
 Track open pull requests on GitHub, drafts included, as stacks: each
 pull request\(aqs branch on the branch it merges into.
 They\(aqre your own, or with \f[CR]\-\-author\f[R], another GitHub
@@ -809,6 +817,8 @@ stack, use \f[CR]clean\f[R].
 If its branches track multiple remotes, sync refuses before changing
 anything; use \f[CR]\-\-remote <name>\f[R] to sync only that remote\(aqs
 branches.
+Without \f[CR]\-\-remote\f[R], it fetches only the remotes its branches
+and their roots track.
 It refuses to untrack a merged branch if that would reparent a child
 outside the selected remote.
 .IP \(bu 2
@@ -905,7 +915,7 @@ to guess whether those commits are new work or old copies.
 Inspect the histories, then pass \f[CR]\-\-rewritten\-upstream\f[R] to
 replay the unseen commits, or use \f[CR]git stack push \-\-force\f[R] to
 explicitly replace the remote with local history.
-.SS \f[CR]git stack clean [\-\-remote origin] [\-d local|remote|both] [\-\-ignore\-revert <branch>] [\-\-allow\-shared]\f[R]
+.SS \f[CR]git stack clean [\-\-remote <name>] [\-d local|remote|both] [\-\-ignore\-revert <branch>] [\-\-allow\-shared]\f[R]
 Fetch with \f[CR]\-\-prune\f[R], fast\-forward every stack\(aqs root,
 and stop tracking merged branches in every stack, moving their children
 onto their parent.
@@ -966,6 +976,9 @@ than pushed to the remote branch of the same name.
 A stack tracking multiple remotes is refused; use
 \f[CR]\-\-remote <name>\f[R] to select one remote and branches without
 an upstream, in one atomic push.
+Without \f[CR]\-\-remote\f[R], branches without an upstream go to the
+remote the stack\(aqs other branches track, or else the one its root
+tracks, or else \f[CR]origin\f[R].
 .IP \(bu 2
 If a pull request\(aqs parent tracks another remote, git\-stack refuses
 to retarget it instead of guessing its base on the selected remote.
@@ -1057,7 +1070,7 @@ To merge them, run
 \f[CR]git stack group add \-\-move <name> \-g <other group>\f[R].
 .IP \(bu 2
 \f[CR]info\f[R] shows a group once it has two or more stacks.
-.SS \f[CR]git stack prs [<branch|glob>...] [\-g <group>] [\-\-remote origin] [\-n] [\-\-rebuild\-stack]\f[R]
+.SS \f[CR]git stack prs [<branch|glob>...] [\-g <group>] [\-\-remote <name>] [\-n] [\-\-rebuild\-stack]\f[R]
 Open a draft pull request on GitHub for each branch in the current stack
 (or the ones named, see Groups) that has none, into its stack parent,
 bottom\-up.
@@ -1186,7 +1199,7 @@ Needs the GitHub adapter.
 \f[CR]\-n\f[R]/\f[CR]\-\-dry\-run\f[R] shows the stacks with the pull
 requests it would open, with their titles, in place of their links,
 without opening them.
-.SS \f[CR]git stack unrevert <name> <revert>... [\-\-from <branch>] [\-\-stack <branch>...] [\-\-remote origin] [\-\-allow\-shared]\f[R]
+.SS \f[CR]git stack unrevert <name> <revert>... [\-\-from <branch>] [\-\-stack <branch>...] [\-\-remote <name>] [\-\-allow\-shared]\f[R]
 Create \f[CR]<name>\f[R] on \f[CR]\-\-from\f[R], with commits that
 revert the given reverts, to bring back the changes of a merged branch
 they reverted, and move the branches given with \f[CR]\-\-stack\f[R]
@@ -1394,7 +1407,8 @@ or \f[CR]tracked_parent\f[R], and \f[CR]create\f[R],
 \f[CR]create\-root\f[R] or \f[CR]skip\f[R]; their
 \f[CR]other_authors\f[R] are email addresses, and \f[CR]parent\f[R] is
 \f[CR]null\f[R] for a root or if it couldn\(aqt tell which branch one is
-built on
+built on.
+\f[CR]remote\f[R] is the remote it imported from
 T}
 T{
 \f[CR]untrack\f[R]
