@@ -693,6 +693,9 @@ git stack push --prs            # then open pull requests, as `git stack prs` do
 - Each branch is pushed to its configured upstream, or to a new branch of the
   same name if it has no upstream. Pushing to the remote's default branch (as
   the remote reports it), or to a stack root's remote branch, requires `--force`.
+  A branch whose upstream config names the remote but no branch on it (which
+  git ignores) is refused, even with `--force`, rather than pushed to the
+  remote branch of the same name.
 - A stack tracking multiple remotes is refused; use `--remote <name>` to select
   one remote and branches without an upstream, in one atomic push.
 - If a pull request's parent tracks another remote, git-stack refuses to

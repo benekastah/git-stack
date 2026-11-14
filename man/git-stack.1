@@ -954,6 +954,9 @@ Each branch is pushed to its configured upstream, or to a new branch of
 the same name if it has no upstream.
 Pushing to the remote\(aqs default branch (as the remote reports it), or
 to a stack root\(aqs remote branch, requires \f[CR]\-\-force\f[R].
+A branch whose upstream config names the remote but no branch on it
+(which git ignores) is refused, even with \f[CR]\-\-force\f[R], rather
+than pushed to the remote branch of the same name.
 .IP \(bu 2
 A stack tracking multiple remotes is refused; use
 \f[CR]\-\-remote <name>\f[R] to select one remote and branches without

@@ -1550,6 +1550,14 @@ class StackClient(StackCore):
             configured = git.config_get(b, "remote")
             if configured and configured != remote:
                 raise StackError(f"{b} tracks {configured}, not {remote}; select its upstream remote")
+            # Otherwise the push would go to a remote branch named after b,
+            # which nothing says is b's.
+            if configured == remote and not git.has_branch_upstream(b, remote):
+                raise StackError(
+                    f"{b}'s upstream on {remote} isn't a branch (branch.{b}.merge is "
+                    f"{git.config_get(b, 'merge')!r}); fix it with `git branch --set-upstream-to "
+                    f"{remote}/<branch> {b}`, or `git branch --unset-upstream {b}`"
+                )
             target = git.remote_branch_name(b, remote)
             if git.rev(f"refs/remotes/{remote}/{target}") is not None and configured != remote:
                 raise StackError(

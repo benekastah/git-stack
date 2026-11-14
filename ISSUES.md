@@ -28,20 +28,6 @@ Reproduced through `sync` with a merge-only edit that remained absent from
 the parent. Check the complete branch changes, including merge commits,
 before treating matching non-merge patches as evidence that it has landed.
 
-## Invalid upstream metadata can let `push --force` overwrite another branch
-
-`remote_branch_name` falls back to the local branch name when its configured
-merge ref is not under `refs/heads/`. The ownership check treats the mere
-presence of a matching `branch.<name>.remote` as proof that this fallback is
-the branch's upstream, even if Git resolves no upstream. Consequently,
-`push --force` can overwrite an unrelated remote branch with the same name.
-
-Reproduced with `branch.feature.remote=origin` and
-`branch.feature.merge=refs/tags/unrelated`: Git reported no upstream, but
-`push --force` replaced `origin/feature`. Require a valid, resolved remote
-branch ref before considering an existing destination to be the configured
-upstream; `--force` must not override the unrelated-branch check.
-
 ## A branch can look merged when its parent made the same change
 
 When the git adapter decides (with the GitHub adapter, that's a branch without
