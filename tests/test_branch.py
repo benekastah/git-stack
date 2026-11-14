@@ -34,3 +34,13 @@ def test_branch_refuses_name_taken_on_remote(repo: Repo, client: StackClient) ->
 
     assert repo.git("branch", "--show-current") == "main"
     assert repo.git("branch", "--list", "fix") == ""
+
+
+def test_branch_refuses_a_branch_without_commits(repo: Repo, client: StackClient) -> None:
+    repo.git("switch", "--quiet", "--orphan", "empty")
+
+    with pytest.raises(StackError, match="empty has no commits yet"):
+        client.branch("feature")
+
+    assert repo.git("branch", "--show-current") == "empty"
+    assert not [key for branch, key in client.git.branch_config() if branch == "feature"]

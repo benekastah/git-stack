@@ -201,6 +201,8 @@ git stack branch search-ui --group search   # a new stack, in group search
   since that's most likely someone else's branch, and pushing yours would
   overwrite it. In a shared repository, prefixing branch names with your
   username (e.g. `jane/add-api`) avoids picking a name that's taken.
+- Refuses on a branch with no commits yet (e.g. in a new repository), since
+  there's nothing to build on; commit to it first.
 - The new branch has no upstream until you `git stack push` it, even if
   `branch.autoSetupMerge` would normally give it its parent's.
 - Whatever untracked branch is at the bottom of a stack (usually `main`) is its
