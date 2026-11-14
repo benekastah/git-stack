@@ -110,7 +110,12 @@ class GitAdapter:
         if git.patch_ids("diff", base, f"refs/heads/{branch}") & landed:
             return True
         own = git.patch_ids("log", "-p", "--no-merges", f"{base}..refs/heads/{branch}")
-        return bool(own) and own <= landed
+        # A merge's own changes aren't in any of the commits compared.
+        return (
+            bool(own)
+            and own <= landed
+            and not git.merges_with_own_changes(f"refs/heads/{branch}", "--not", base, parent)
+        )
 
     def reverted(self, branch: str, parent: str) -> bool:
         """Whether parent, which has branch's changes, has since reverted some of

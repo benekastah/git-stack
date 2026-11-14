@@ -292,13 +292,32 @@ class GitClient:
         This is true after a squash merge even though none of branch's commits are
         in target's history.
         """
+        return self.merged_tree(target, branch) == self.run("rev-parse", f"{target}^{{tree}}")
+
+    def merged_tree(self, ours: str, theirs: str) -> str | None:
+        """The tree merging theirs into ours gives, or None if it conflicts."""
         result = subprocess.run(
-            self._command("merge-tree", "--write-tree", target, branch), capture_output=True, text=True, check=False
+            self._command("merge-tree", "--write-tree", ours, theirs), capture_output=True, text=True, check=False
         )
         if result.returncode != 0:
-            return False
-        merged_tree = result.stdout.splitlines()[0]
-        return merged_tree == self.run("rev-parse", f"{target}^{{tree}}")
+            return None
+        return result.stdout.splitlines()[0]
+
+    def merges_with_own_changes(self, *args: str) -> list[str]:
+        """The merge commits `git rev-list <args>` lists that change something
+        merging their parents wouldn't: their tree isn't what a clean merge of
+        their parents gives, as for a resolved conflict or an edit made while
+        merging. Merges of more than two parents always count.
+
+        Their own changes are in neither parent, so commits alone don't
+        account for them.
+        """
+        merges = []
+        for line in self.run("rev-list", "--merges", "--parents", *args).splitlines():
+            commit, *parents = line.split()
+            if len(parents) != 2 or self.merged_tree(*parents) != self.run("rev-parse", f"{commit}^{{tree}}"):
+                merges.append(commit)
+        return merges
 
     def patch_ids(self, *args: str) -> set[str]:
         """The patch-ids of the commits or diff that `git <args>` prints."""

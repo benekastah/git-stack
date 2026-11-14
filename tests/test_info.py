@@ -104,7 +104,7 @@ def test_info_remembers_whether_a_branch_landed_in_its_parent(repo: Repo, client
     client.branch("pr1")
     repo.commit("a", "pr1\n", "pr1 c1")
     assert repo.branch_info("pr1").status is BranchStatus.UP_TO_DATE
-    cached = repo.cached_check("pr1", "stackLandedCheck")
+    cached = repo.cached_check("pr1", "stackLandedCheck2")
     assert cached is not None
     assert cached == " ".join(
         [
@@ -115,7 +115,7 @@ def test_info_remembers_whether_a_branch_landed_in_its_parent(repo: Repo, client
         ]
     )
 
-    client.checks.set("pr1", "stackLandedCheck", cached.replace("false", "true"), tracked=["pr1"])
+    client.checks.set("pr1", "stackLandedCheck2", cached.replace("false", "true"), tracked=["pr1"])
     assert repo.branch_info("pr1").status is BranchStatus.MERGED
 
 

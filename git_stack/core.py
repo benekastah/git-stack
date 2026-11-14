@@ -46,7 +46,9 @@ CHECK_CACHE_FILE = "git-stack-cache.json"
 # two never interleave their writes.
 LOCK_FILE = "git-stack.lock"
 CONFLICT_CHECK_KEY = "stackConflictCheck"
-LANDED_CHECK_KEY = "stackLandedCheck"
+# Renamed whenever what the check counts as landed changes, so answers worked
+# out the old way aren't used.
+LANDED_CHECK_KEY = "stackLandedCheck2"
 REVERTED_CHECK_KEY = "stackRevertedCheck"
 # The group of stacks the branch's stack is in. When a branch stacked on a
 # stack's root (e.g. main) merges, the branches stacked on it become the
@@ -774,7 +776,7 @@ class StackCore:
             OWNERSHIP_KEY,
             # Versions before the check cache kept these in git config too.
             CONFLICT_CHECK_KEY,
-            LANDED_CHECK_KEY,
+            "stackLandedCheck",
             REVERTED_CHECK_KEY,
             # Older versions recorded the branch each branch was stacked on until
             # it merged, to notice a later revert of it.
