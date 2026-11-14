@@ -42,15 +42,6 @@ Preflight all possible failures, and report partial GitHub changes and recovery
 instructions if an operation still fails; restoring them automatically would
 need to account for concurrent edits on GitHub.
 
-## `pull` recovery messages can direct users to a pushing command
-
-`pull` runs the local portion of `sync`, but shared-stack refusals and some
-interrupted cherry-pick instructions still tell the user to rerun `git stack
-sync`. The re-track guard likewise recommends `sync --pull-tracked-upstream`.
-Following those instructions can push branches, although the user chose `pull`
-to keep the remote unchanged. Preserve the original command in recovery and
-refusal messages, and suggest the corresponding `pull` invocation.
-
 ## A change undone some other way can look like a revert
 
 Revert detection compares patch-ids without context lines, so a revert still

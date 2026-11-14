@@ -271,7 +271,8 @@ class SyncState:
     into because of another worktree (or are stacked on one), which a push
     can't include. pushable are the branches to push, and unpushed those that
     differ from their remote branch but won't be pushed. ignore_reverts are
-    the branches whose reverts to ignore (see StackClient.sync).
+    the branches whose reverts to ignore (see StackClient.sync). command is
+    sync or pull, for messages saying what to rerun.
     """
 
     original: str
@@ -285,6 +286,7 @@ class SyncState:
     rewritten_upstream: bool = False
     scope: frozenset[str] = frozenset()
     protected: frozenset[str] = frozenset()
+    command: str = "sync"
     skipped: set[str] = field(default_factory=set)
     blocked: list[str] = field(default_factory=list)
     pushable: list[str] = field(default_factory=list)
@@ -1102,17 +1104,24 @@ class StackClient(StackCore):
         self.restore_checkout(original)
 
     def sync_selection(
-        self, branches: Sequence[str], groups: Sequence[str], parents: Parents, remote: str, only_remote: bool
+        self,
+        branches: Sequence[str],
+        groups: Sequence[str],
+        parents: Parents,
+        remote: str,
+        only_remote: bool,
+        command: str,
     ) -> tuple[list[str], set[str]]:
-        """Select one remote's stack branches before changing repository state."""
-        stack = self.selected_stacks(branches, groups, parents, "sync")
+        """Select one remote's stack branches before changing repository state,
+        for command (sync or pull)."""
+        stack = self.selected_stacks(branches, groups, parents, command)
         if only_remote:
             stack = [b for b in stack if self.git.config_get(b, "remote") == remote]
             if not stack:
                 raise StackError(f"none of the selected branches track {remote}")
         remotes = self.upstream_remotes(stack)
         if len(remotes) > 1:
-            raise StackError("can't sync branches on multiple remotes atomically; select one with --remote")
+            raise StackError(f"can't {command} branches on multiple remotes atomically; select one with --remote")
         return stack, remotes
 
     def upstream_remotes(self, branches: Iterable[str]) -> set[str]:
@@ -1210,10 +1219,13 @@ class StackClient(StackCore):
         couldn't be restacked or pulled into because it's checked out in
         another worktree, or is stacked on one that couldn't.
         """
+        # Without push, it's `git stack pull`, which its messages must suggest
+        # rerunning rather than sync, which would push.
+        command = "sync" if push else "pull"
         self.ensure_no_operation_in_progress()
         self.ensure_clean_worktree()
         initial_parents = self.tracked_branches()
-        initial_stack, _ = self.sync_selection(branches, groups, initial_parents, remote, only_remote)
+        initial_stack, _ = self.sync_selection(branches, groups, initial_parents, remote, only_remote, command)
         if only_remote:
             for branch in initial_stack:
                 if self.git.config_get(branch, "remote") == remote:
@@ -1221,8 +1233,8 @@ class StackClient(StackCore):
         else:
             self.settle_all()
         parents = self.tracked_branches()
-        self.ensure_owned(self.selected_stacks(branches, groups, parents, "sync"), allow_shared, "sync")
-        stack, upstream_remotes = self.sync_selection(branches, groups, parents, remote, only_remote)
+        self.ensure_owned(self.selected_stacks(branches, groups, parents, command), allow_shared, command)
+        stack, upstream_remotes = self.sync_selection(branches, groups, parents, remote, only_remote, command)
         self.ensure_ignorable_reverts(ignore_reverts, stack, "the stacks being synced")
         roots = {stack_root(b, parents) for b in stack}
         roots_to_update = {root for root in roots if not only_remote or self.git.config_get(root, "remote") == remote}
@@ -1249,6 +1261,7 @@ class StackClient(StackCore):
             rewritten_upstream,
             frozenset(stack),
             frozenset(protected),
+            command,
         )
         # Parent-before-child, so by the time we reach a branch its parent is
         # final: merged branches have been removed (and their children reparented
@@ -1335,7 +1348,7 @@ class StackClient(StackCore):
         if git.upstream_gone(branch):
             self.emit(events.UpstreamGone(branch, parent))
         self.take_upstream_rebase(branch, parent, state.remote, allow_rewritten=state.rewritten_upstream)
-        self.ensure_upstream_not_rewritten(branch, parent, state.remote, state.rewritten_upstream)
+        self.ensure_upstream_not_rewritten(branch, parent, state.remote, state.rewritten_upstream, state.command)
         try:
             restacked = self.restack_branch(branch, parent, state.latest)
         except BrokenStackError as e:
@@ -1347,7 +1360,7 @@ class StackClient(StackCore):
             if git.other_worktree_of(branch) is not None:
                 state.blocked.append(branch)
             return
-        if not self.pull_upstream(branch, parent, state.remote, state.pull_tracked_upstream):
+        if not self.pull_upstream(branch, parent, state.remote, state.pull_tracked_upstream, state.command):
             state.blocked.append(branch)
             return
         upstream_tip = git.rev(f"{branch}@{{upstream}}")
