@@ -1259,7 +1259,10 @@ class StackClient(StackCore):
                 raise StackError(
                     f"can't untrack {branch}: it has children outside the selected remote: {', '.join(outside)}"
                 )
-            if not self.untrack_merged(branch, state.parents, state.delete, allow_different_upstream=True):
+            confirmed = adapter.merge_confirmed(branch, parent)
+            if not self.untrack_merged(
+                branch, state.parents, state.delete, allow_different_upstream=True, confirmed=confirmed
+            ):
                 state.skipped.add(branch)
             elif branch == state.original:
                 state.original = self.current_checkout()
@@ -1366,7 +1369,8 @@ class StackClient(StackCore):
                 continue
             state = adapter.merge_state(branch, parent, ignore_revert=branch in ignore_reverts)
             if state is MergeState.MERGED:
-                if self.untrack_merged(branch, parents, delete) and branch == original:
+                confirmed = adapter.merge_confirmed(branch, parent)
+                if self.untrack_merged(branch, parents, delete, confirmed=confirmed) and branch == original:
                     original = self.current_checkout()
             elif state is MergeState.MERGED_WITH_NEW_COMMITS:
                 self.emit(events.MergedWithNewCommits(branch, parent))

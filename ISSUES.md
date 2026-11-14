@@ -2,18 +2,6 @@
 
 Most severe first.
 
-## A branch can look merged when its parent made the same change
-
-When the git adapter decides (with the GitHub adapter, that's a branch without
-a pull request, or one stacked on a branch other than the default branch), a
-branch counts as merged if its parent has commits with the same patches, even
-if they came from someone else's pull request. On a busy repository that's
-plausible for small, mechanical changes, such as a dependency bump or
-regenerated file. `sync` and `clean` then untrack the branch and can delete its
-local and/or remote branch with `-d local`, `-d remote`, or `-d both`, though
-its pull request was never merged. Its changes are in the parent, but its own
-commits and messages can be lost from the branch.
-
 ## Old copies of rebased commits can be pulled back in
 
 `unpulled_commits` recognizes old copies of the branch's own rebased commits by

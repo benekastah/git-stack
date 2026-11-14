@@ -586,6 +586,26 @@ def test_sync_untracks_merged_pr_whose_later_merge_added_nothing_its_parent_lack
     assert repo.config("pr2", "stackParent") == "main"
 
 
+def test_sync_deletes_a_squash_merged_pr_whose_branch_was_kept(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+    repo.make_stack()
+    client.push()
+    head = repo.git("rev-parse", "pr1")
+    repo.squash_merge_on_forge("pr1", delete_branch=False)
+    gh.add_pr(
+        number=5,
+        state="MERGED",
+        headRefName="pr1",
+        headRefOid=head,
+        baseRefName="main",
+        mergeCommit={"oid": repo.git("rev-parse", "HEAD", cwd=repo.forge)},
+    )
+
+    repo.stack("sync", "-d", "both")
+
+    assert repo.git("branch", "--list", "pr1") == ""
+    assert repo.git("branch", "--list", "pr1", cwd=repo.origin) == ""
+
+
 def test_open_pr_on_default_branch_overrides_local_detection(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
     repo.make_stack()
     client.push()

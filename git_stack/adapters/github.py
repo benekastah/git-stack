@@ -499,6 +499,9 @@ class GitHubAdapter(GitAdapter):
             return None
         return pr
 
+    def merge_confirmed(self, branch: str, parent: str) -> bool:
+        return self.trusted_merge(branch, parent) is not None or super().merge_confirmed(branch, parent)
+
     def landing_merges(self, branch: str, parent: str) -> tuple[str, ...]:
         pr = self.trusted_merge(branch, parent)
         return (pr.merge_oid,) if pr is not None and pr.merge_oid else ()

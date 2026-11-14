@@ -17,6 +17,7 @@ WARNINGS = (
     events.NotDeletedInOtherWorktree,
     events.SkippedMerged,
     events.RemoteBranchDeleteFailed,
+    events.NotDeletedUnconfirmedMerge,
     events.ParentSkipped,
     events.MergedWithNewCommits,
     events.Reverted,
@@ -92,6 +93,12 @@ def message(event: events.Event) -> str:  # noqa: C901
             return (
                 f"note: {event.upstream} still exists; delete it with "
                 f"`git push {event.remote} --delete {event.name}`, or pass `--delete remote`"
+            )
+        case events.NotDeletedUnconfirmedMerge():
+            return (
+                f"didn't delete {event.branch}: {event.parent} has its changes, but they could be someone "
+                f"else's, since its commits aren't in {event.parent}, its remote branch wasn't deleted, and "
+                f"no merged pull request says so. If it was merged, delete it by hand"
             )
         case events.ParentSkipped():
             return f"skipping {event.branch} because its parent {event.parent} was skipped"
