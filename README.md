@@ -595,7 +595,11 @@ git stack sync -d both          # ...and their remote branches
   fails rather than deleting commits pushed since. Stack roots and the
   remote's default branch (as the remote reports it) are never deleted as a
   branch's upstream, and nothing is deleted if the remote can't say what its
-  default branch is.
+  default branch is. A branch is only deleted if something besides its parent
+  having the same changes (which could be someone else's) shows it was
+  merged: its commits are in the parent, its remote branch was deleted, or
+  (with the GitHub adapter) its pull request was merged. Otherwise it's
+  untracked and left for you to delete.
   Deleting the branch you're
   on switches to its first child, or to its parent if it has none.
 - Only branches that already have a configured remote upstream are pushed,

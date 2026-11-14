@@ -64,6 +64,15 @@ class GitAdapter:
             return MergeState.MERGED_WITH_NEW_COMMITS
         return MergeState.MERGED
 
+    def merge_confirmed(self, branch: str, parent: str) -> bool:
+        """Whether branch, which merge_state says is MERGED into parent, was
+        merged as more than changes parent has too, which could be someone
+        else's (e.g. the same dependency bump): its commits are in parent's
+        history, or its remote branch was deleted (as when GitHub deletes a
+        merged pull request's branch). Only then is it safe to delete."""
+        git = self.git
+        return git.upstream_gone(branch) or git.is_ancestor(f"refs/heads/{branch}", f"refs/heads/{parent}")
+
     def landed(self, branch: str, parent: str) -> bool:
         """Whether parent has branch's changes, as a merge or as patches."""
         git = self.git

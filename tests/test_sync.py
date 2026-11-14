@@ -379,33 +379,52 @@ def test_sync_delete_local_lands_on_parent_of_childless_branch(repo: Repo, clien
     assert repo.git("branch", "--show-current") == "main"
 
 
-def test_sync_after_parent_squash_merged_with_remote_branch_kept(
-    repo: Repo, client: StackClient, emitted: list[events.Event]
+@pytest.mark.parametrize("command", ["sync", "clean"])
+@pytest.mark.parametrize("delete", [None, "local", "remote", "both"])
+def test_a_branch_only_matched_by_changes_in_its_parent_is_untracked_but_not_deleted(
+    repo: Repo, client: StackClient, command: str, delete: str | None
 ) -> None:
+    # Squash-merging keeps none of pr1's commits, and with the remote branch
+    # kept, nothing but main having the same changes says pr1 was merged:
+    # they could be someone else's.
     repo.make_stack()
     client.push()
     repo.squash_merge_on_forge("pr1", delete_branch=False)
+    pr1 = repo.git("rev-parse", "pr1")
 
-    client.sync()
+    result = repo.stack(command, *(["-d", delete] if delete else []))
 
-    assert events.RemoteBranchKept("origin/pr1", "origin", "pr1") in emitted
     repo.assert_untracked("pr1")
+    assert repo.git("rev-parse", "pr1") == pr1
     assert repo.remote_subject("pr1") == "pr1 c2"
-    repo.assert_stacked("pr2", "main", ["pr2 c1"])
-    repo.assert_stacked("pr3", "pr2", ["pr3 c1"])
+    assert ("didn't delete pr1" in result.stderr) == (delete is not None)
+    assert "--delete remote" not in result.stdout + result.stderr
+    assert repo.config("pr2", "stackParent") == "main"
+
+
+@pytest.mark.parametrize("command", ["sync", "clean"])
+def test_a_branch_whose_commits_are_in_its_parent_is_deleted(repo: Repo, client: StackClient, command: str) -> None:
+    repo.make_stack()
+    client.push()
+    repo.merge_on_forge("pr1", delete_branch=False)
+
+    repo.stack(command, "-d", "both")
+
+    assert repo.git("branch", "--list", "pr1") == ""
+    assert repo.git("branch", "--list", "pr1", cwd=repo.origin) == ""
 
 
 def test_sync_delete_remote_deletes_only_remote_branch(repo: Repo, client: StackClient) -> None:
     repo.make_stack()
     client.push()
-    repo.squash_merge_on_forge("pr1", delete_branch=False)
+    repo.merge_on_forge("pr1", delete_branch=False)
 
     client.sync(delete="remote")
 
     repo.assert_untracked("pr1")
     assert repo.git("branch", "--list", "pr1", cwd=repo.origin) == ""
     assert repo.git("branch", "--remotes", "--list", "origin/pr1") == ""
-    repo.assert_stacked("pr2", "main", ["pr2 c1"])
+    assert repo.config("pr2", "stackParent") == "main"
 
 
 @pytest.mark.parametrize("delete", [None, "remote", "both"])
@@ -429,13 +448,13 @@ def test_sync_never_deletes_or_suggests_deleting_a_different_upstream(
 def test_sync_delete_both_deletes_local_and_remote_branches(repo: Repo, client: StackClient) -> None:
     repo.make_stack()
     client.push()
-    repo.squash_merge_on_forge("pr1", delete_branch=False)
+    repo.merge_on_forge("pr1", delete_branch=False)
 
     client.sync(delete="both")
 
     assert repo.git("branch", "--list", "pr1") == ""
     assert repo.git("branch", "--list", "pr1", cwd=repo.origin) == ""
-    repo.assert_stacked("pr2", "main", ["pr2 c1"])
+    assert repo.config("pr2", "stackParent") == "main"
 
 
 def test_sync_after_local_squash_merge_pushed(repo: Repo, client: StackClient) -> None:

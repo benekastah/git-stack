@@ -200,6 +200,18 @@ class RemoteBranchKept:
 
 
 @dataclass(frozen=True)
+class NotDeletedUnconfirmedMerge:
+    """branch was untracked, since parent has its changes, but neither it nor
+    its remote branch was deleted, since nothing else shows that it was merged:
+    the changes could be someone else's."""
+
+    event_type: ClassVar[str] = "not-deleted-unconfirmed-merge"
+
+    branch: str
+    parent: str
+
+
+@dataclass(frozen=True)
 class ParentSkipped:
     event_type: ClassVar[str] = "parent-skipped"
 
@@ -359,6 +371,7 @@ Event: TypeAlias = (
     | RemoteBranchDeleted
     | RemoteBranchDeleteFailed
     | RemoteBranchKept
+    | NotDeletedUnconfirmedMerge
     | ParentSkipped
     | MergedWithNewCommits
     | Reverted

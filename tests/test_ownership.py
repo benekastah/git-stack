@@ -63,7 +63,7 @@ def test_clean_requires_override_to_delete_shared_branches(repo: Repo, client: S
     repo.make_stack()
     client.set_ownership("shared")
     client.push(allow_shared=True)
-    repo.squash_merge_on_forge("pr1", delete_branch=False)
+    repo.merge_on_forge("pr1", delete_branch=False)
 
     with pytest.raises(StackError, match="clean --allow-shared"):
         client.clean(delete="both")

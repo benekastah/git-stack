@@ -843,15 +843,29 @@ class StackCore:
         self.emit(events.Untracked(branch, new_parent, children, deleted_tip=tip))
 
     def untrack_merged(
-        self, branch: str, parents: Parents, delete: str | None, allow_different_upstream: bool = False
+        self,
+        branch: str,
+        parents: Parents,
+        delete: str | None,
+        allow_different_upstream: bool = False,
+        confirmed: bool = True,
     ) -> bool:
         """Stop tracking merged branch, deleting what delete ("local", "remote" or
         "both") says, and moving its children onto its parent (see remove_merged).
         Returns False, leaving branch alone, if its remote branch couldn't be
         deleted.
+
+        Unless confirmed (see GitAdapter.merge_confirmed), nothing is deleted,
+        since the changes in parent may not be branch's.
         """
         self.ensure_group_available_for_merge(branch, parents)
         git = self.git
+        if not confirmed:
+            parent = parents[branch]
+            self.remove_merged(branch, parents, delete=False)
+            if delete is not None:
+                self.emit(events.NotDeletedUnconfirmedMerge(branch, parent))
+            return True
         delete_local = delete in ("local", "both")
         remote = git.remote_branch(branch)
         if remote is None or (not allow_different_upstream and not git.tracks_same_name(branch, remote[0])):
