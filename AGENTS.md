@@ -11,6 +11,11 @@ most severe first.
   the work. `git_stack/git.py` (`GitClient`) runs git; the adapters in
   `git_stack/adapters/` say which branches were merged, locally or by asking
   GitHub.
+- `git_stack/stacks.py` (`Stacks`) holds the tracked branches as trees, with
+  the rules for groups and ownership, without touching the repository.
+  `StackCore.stacks()` reads it, a command changes it in memory, and
+  `StackCore.save()` writes only what changed. Walk and change the tree through
+  it rather than with a `{branch: parent}` map of your own.
 - Each command is a module in `git_stack/commands/` with `register`, `run` and
   `show`: `run` does the command and returns a dataclass result, and `show`
   prints it as text. With `--json`, the CLI prints the result as JSON instead

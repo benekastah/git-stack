@@ -3,13 +3,13 @@ import os
 from collections import Counter
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from contextlib import contextmanager
-from typing import TypeAlias
 
 from git_stack import events
 from git_stack.check_cache import CheckCache
 from git_stack.errors import BrokenStackError, StackError
 from git_stack.file_lock import file_lock
 from git_stack.git import GitClient
+from git_stack.stacks import StackNode, Stacks
 
 PARENT_KEY = "stackParent"
 BASE_KEY = "stackBase"
@@ -61,91 +61,11 @@ CURRENT_GROUP = "\0"
 # Ownership is stored on every tracked branch so it survives stack splits.
 OWNERSHIP_KEY = "stackOwnership"
 
-# {branch: the branch it is stacked on}
-Parents: TypeAlias = dict[str, str]
-# {branch: its group}, for branches that have one
-Groups: TypeAlias = dict[str, str]
-
-
-# The functions below work on a {branch: parent} map like the one
-# StackCore.tracked_branches returns, without touching the repository.
-
-
-def children_map(parents: Parents) -> dict[str, list[str]]:
-    children: dict[str, list[str]] = {}
-    for branch, parent in sorted(parents.items()):
-        children.setdefault(parent, []).append(branch)
-    return children
-
-
-def descendants(root: str, children: dict[str, list[str]]) -> list[str]:
-    """Return root's descendants in parent-before-child order (root excluded)."""
-    order = []
-    for child in children.get(root, []):
-        order.append(child)
-        order.extend(descendants(child, children))
-    return order
-
-
-def ancestry(branch: str, parents: Parents) -> list[str]:
-    """Return [branch, its parent, ..., the first untracked ancestor]."""
-    chain = [branch]
-    while chain[-1] in parents:
-        parent = parents[chain[-1]]
-        if parent in chain:
-            raise StackError(f"cycle in stack metadata involving {parent}")
-        chain.append(parent)
-    return chain
-
-
-def stack_root(branch: str, parents: Parents) -> str:
-    """Walk up from branch to the first untracked ancestor (usually main)."""
-    return ancestry(branch, parents)[-1]
-
-
-def ensure_no_cycle(branch: str, new_parent: str, parents: Parents) -> None:
-    if branch in ancestry(new_parent, parents):
-        raise StackError(f"{new_parent} is stacked on {branch}; that would create a cycle")
-
-
-def stack_of(branch: str, parents: Parents, groups: Groups | None = None) -> list[str]:
-    """Tracked branches in the stack containing tracked branch, parent-before-child:
-    everything stacked on its bottom-most tracked ancestor, and that ancestor.
-    With groups, also the stacks of the other bottom branches in that
-    ancestor's group (see group_bottoms), which may be on other roots.
-    """
-    chain = ancestry(branch, parents)
-    bottoms = group_bottoms(chain[-2], parents, groups or {})
-    children = children_map(parents)
-    return [b for bottom in bottoms for b in (bottom, *descendants(bottom, children))]
-
-
-def group_bottoms(bottom: str, parents: Parents, groups: Groups) -> list[str]:
-    """bottom, a branch on a stack's root, followed by the other branches on a
-    stack's root in its group, if it has one."""
-    group = groups.get(bottom)
-    if group is None:
-        return [bottom]
-    others = (b for b, g in groups.items() if g == group and b != bottom and b in parents and parents[b] not in parents)
-    return [bottom, *sorted(others)]
-
 
 def is_glob(name: str) -> bool:
     """Whether name is a glob rather than a branch or group name, which can't
     have these characters in them."""
     return any(c in name for c in "*?[")
-
-
-def drop_from_stack(branch: str, parents: Parents) -> list[str]:
-    """Move branch's children onto its parent in parents and remove branch.
-
-    Returns the moved children. Only parents is changed, not the config.
-    """
-    new_parent = parents.pop(branch)
-    children = [child for child, parent in parents.items() if parent == branch]
-    for child in children:
-        parents[child] = new_parent
-    return children
 
 
 class StackCore:
@@ -198,108 +118,105 @@ class StackCore:
         if self.on_event is not None:
             self.on_event(event)
 
-    def tracked_branches(self) -> Parents:
-        """Return {branch: parent} for every tracked branch that still exists."""
+    def stacks(self) -> Stacks:
+        """Every tracked branch that still exists, read from git config."""
         existing = self.git.local_branches()
-        return {
-            branch: parent
-            for (branch, key), parent in self.git.branch_config().items()
+        config = self.git.branch_config()
+        return Stacks(
+            StackNode(
+                branch,
+                parent,
+                config.get((branch, GROUP_KEY.lower())) or None,
+                config.get((branch, OWNERSHIP_KEY.lower())) or None,
+            )
+            for (branch, key), parent in config.items()
             if key == PARENT_KEY.lower() and branch in existing
-        }
+        )
+
+    def save(self, stacks: Stacks) -> None:
+        """Write what changed in stacks since it was read (or last saved) to
+        git config: the settings that changed, and for a branch no longer
+        tracked, none at all (see forget)."""
+        git = self.git
+        for branch, old, new in stacks.changes():
+            if new is None:
+                self.forget(branch)
+                continue
+            for key, before, after in (
+                (OWNERSHIP_KEY, old and old.ownership, new.ownership),
+                (GROUP_KEY, old and old.group, new.group),
+                (PARENT_KEY, old and old.parent, new.parent),
+            ):
+                if after == before:
+                    continue
+                if after is None:
+                    git.config_unset(branch, key)
+                else:
+                    git.config_set(branch, key, after)
+        stacks.mark_saved()
 
     def set_parent(self, branch: str, parent: str) -> None:
-        """Record parent as branch's parent. If parent is tracked, branch is no
-        longer at the bottom of a stack, so it leaves its group (see GROUP_KEY),
-        rather than rejoining it if it's ever at the bottom again. If parent is
-        a stack's root and branch was higher up a stack (e.g. restack --onto
-        main), branch joins that stack's group, so the two stay together."""
-        git = self.git
-        old_parent = git.config_get(branch, PARENT_KEY)
-        if old_parent != parent:
-            parents = self.tracked_branches()
-            connected = set()
-            for member in (branch, parent):
-                if member in parents:
-                    connected.update(stack_of(member, parents))
-            if git.config_get(branch, OWNERSHIP_KEY) == "shared" or any(
-                git.config_get(member, OWNERSHIP_KEY) == "shared" for member in connected
-            ):
-                for member in (branch, *descendants(branch, children_map(parents))):
-                    git.config_set(member, OWNERSHIP_KEY, "shared")
-        if git.config_get(parent, PARENT_KEY) is not None:
-            git.config_unset(branch, GROUP_KEY)
-        elif old_parent is not None and git.config_get(old_parent, PARENT_KEY) is not None:
-            bottom = ancestry(old_parent, self.tracked_branches())[-2]
-            if (group := git.config_get(bottom, GROUP_KEY)) is not None:
-                git.config_set(branch, GROUP_KEY, group)
-        git.config_set(branch, PARENT_KEY, parent)
+        """Record parent as branch's parent (see Stacks.reparent)."""
+        stacks = self.stacks()
+        stacks.reparent(branch, parent)
+        self.save(stacks)
 
-    def groups(self, parents: Parents) -> Groups:
-        """The group of each branch in parents that has one (see GROUP_KEY)."""
-        return {b: group for b in parents if (group := self.git.config_get(b, GROUP_KEY))}
-
-    def stack(self, branch: str, parents: Parents) -> list[str]:
-        """stack_of, with the branches' groups."""
-        return stack_of(branch, parents, self.groups(parents))
-
-    def matching(self, selector: str, parents: Parents) -> list[str]:
+    def matching(self, selector: str, stacks: Stacks) -> list[str]:
         """The tracked branches selector names, as a branch or a glob (as
         `git branch --list` would match it). Fails if it names none."""
         if not is_glob(selector):
-            if selector not in parents:
+            if selector not in stacks:
                 raise StackError(f"{selector} isn't in a stack")
             return [selector]
-        matches = [b for b in parents if fnmatch.fnmatchcase(b, selector)]
+        matches = [b for b in stacks if fnmatch.fnmatchcase(b, selector)]
         if not matches:
             raise StackError(f"{selector} matches no tracked branch")
         return matches
 
-    def named(self, branches: Sequence[str], groups: Sequence[str], parents: Parents) -> list[str]:
+    def named(self, branches: Sequence[str], groups: Sequence[str], stacks: Stacks) -> list[str]:
         """The tracked branches that branches name (see matching), and the
         bottom branches of groups. Fails if any of them names none."""
-        named = [b for selector in branches for b in self.matching(selector, parents)]
-        all_groups = self.groups(parents)
+        named = [b for selector in branches for b in self.matching(selector, stacks)]
         for group in groups:
             if group == CURRENT_GROUP:
-                current = self.current_stacked_branch(parents, "select")
-                bottom = ancestry(current, parents)[-2]
-                group = all_groups.get(bottom, "")
+                current = self.current_stacked_branch(stacks, "select")
+                group = stacks.group(stacks.bottom(current)) or ""
                 if not group:
                     named.append(current)
                     continue
-            bottoms = [b for b, g in all_groups.items() if g == group and parents[b] not in parents]
+            bottoms = stacks.bottoms_in(group)
             if not bottoms:
                 raise StackError(f"there's no group {group}")
             named += bottoms
         return list(dict.fromkeys(named))
 
     def selected_stacks(
-        self, branches: Sequence[str], groups: Sequence[str], parents: Parents, command: str
+        self, branches: Sequence[str], groups: Sequence[str], stacks: Stacks, command: str
     ) -> list[str]:
-        """The branches in the stacks (see stack) of the branches that branches
-        and groups name (see named), or with neither, in the current stack.
-        Each stack is parent-before-child."""
+        """The branches in the stacks (see Stacks.stack_of) of the branches
+        that branches and groups name (see named), or with neither, in the
+        current stack. Each stack is parent-before-child."""
         if not branches and not groups:
-            return self.stack(self.current_stacked_branch(parents, command), parents)
+            return stacks.stack_of(self.current_stacked_branch(stacks, command))
         result: list[str] = []
-        for branch in self.named(branches, groups, parents):
+        for branch in self.named(branches, groups, stacks):
             # Stacks never overlap, so one with branch in it is already all there.
             if branch not in result:
-                result.extend(self.stack(branch, parents))
+                result.extend(stacks.stack_of(branch))
         return result
 
     def selected_bottoms(
-        self, branches: Sequence[str], groups: Sequence[str], parents: Parents, command: str
+        self, branches: Sequence[str], groups: Sequence[str], stacks: Stacks, command: str
     ) -> list[str]:
         """The bottom branches (on a stack's root) of the branches that branches
         and groups name (see named), or with neither, of the current branch.
         Unlike selected_stacks, a branch's group doesn't add the group's other
         stacks."""
         if not branches and not groups:
-            branches = [self.current_stacked_branch(parents, command)]
-        return list(dict.fromkeys(ancestry(b, parents)[-2] for b in self.named(branches, groups, parents)))
+            branches = [self.current_stacked_branch(stacks, command)]
+        return list(dict.fromkeys(stacks.bottom(b) for b in self.named(branches, groups, stacks)))
 
-    def current_stacked_branch(self, parents: Parents, command: str, hint: str | None = None) -> str:
+    def current_stacked_branch(self, stacks: Stacks, command: str, hint: str | None = None) -> str:
         """Return the current branch, refusing unless it's in a stack.
 
         hint, if given, replaces the suggestion to switch to a stacked branch.
@@ -307,7 +224,7 @@ class StackCore:
         branch = self.git.current_branch()
         if branch is None:
             raise StackError("not on a branch")
-        if branch not in parents:
+        if branch not in stacks:
             hint = hint or f"switch to a stacked branch to {command} its stack"
             raise StackError(f"{branch} isn't in a stack; {hint}")
         return branch
@@ -404,7 +321,7 @@ class StackCore:
         git.config_unset(branch, LEGACY_PULL_IDENTITIES_KEY)
 
     def settle_all(self, forget_unfinished: bool = True) -> None:
-        for branch in self.tracked_branches():
+        for branch in self.stacks():
             self.settle(branch, forget_unfinished)
 
     def recorded_base(self, branch: str, parent: str) -> str:
@@ -497,13 +414,13 @@ class StackCore:
         git.config_unset(branch, PENDING_RESTACK_FROM_KEY)
         raise StackError(f"restacking {branch} onto {parent} failed; see git's output above")
 
-    def restack_all(self, branches: Iterable[str], parents: Parents, latest: bool = False) -> None:
+    def restack_all(self, branches: Iterable[str], stacks: Stacks, latest: bool = False) -> None:
         """Restack branches, parent-before-child, skipping those stacked on a
         branch that couldn't be restacked."""
         original = self.git.current_branch()
         skipped = set()
         for branch in branches:
-            parent = parents[branch]
+            parent = stacks.parent(branch)
             if parent in skipped:
                 self.emit(events.ParentSkipped(branch, parent))
                 skipped.add(branch)
@@ -755,6 +672,7 @@ class StackCore:
 
     def forget(self, branch: str) -> None:
         """Remove all of branch's stack metadata."""
+        config = self.git.branch_config()
         for key in (
             PARENT_KEY,
             BASE_KEY,
@@ -780,46 +698,27 @@ class StackCore:
             "stackMergedParent",
             "stackMergedParentRevertedCheck",
         ):
-            self.git.config_unset(branch, key)
+            if (branch, key.lower()) in config:
+                self.git.config_unset(branch, key)
         self.checks.forget(branch)
 
-    def ensure_group_available_for_merge(self, branch: str, parents: Parents) -> None:
-        """Refuse to join unrelated stacks when creating a group after a merge."""
-        if (
-            parents[branch] not in parents
-            and branch in parents.values()
-            and self.git.config_get(branch, GROUP_KEY) is None
-            and branch in self.groups(parents).values()
-        ):
-            raise StackError(
-                f"can't group {branch}'s children: group {branch} already exists; "
-                "rename the existing group before continuing"
-            )
-
-    def remove_merged(self, branch: str, parents: Parents, delete: bool) -> None:
-        """Move branch's children onto its parent, and, if that's a stack's
-        root, put them in branch's group (see GROUP_KEY). Then stop tracking
-        branch.
+    def remove_merged(self, branch: str, stacks: Stacks, delete: bool) -> None:
+        """Stop tracking merged branch, moving its children onto its parent
+        (see Stacks.remove_merged), in stacks and in git config.
 
         If delete is set, the branch itself is deleted too, unless it's checked
         out in another worktree. If it was checked out here, its first child (or
         its parent) that isn't checked out elsewhere is checked out instead, or
         failing that, the parent's commit, detached.
         """
-        self.ensure_group_available_for_merge(branch, parents)
         git = self.git
-        new_parent = parents[branch]
-        group = git.config_get(branch, GROUP_KEY) or branch
-        children = tuple(drop_from_stack(branch, parents))
-        for child in children:
-            self.set_parent(child, new_parent)
-            if new_parent not in parents:
-                git.config_set(child, GROUP_KEY, group)
+        new_parent = stacks.parent(branch)
+        children = tuple(stacks.remove_merged(branch))
+        self.save(stacks)
         if delete and (worktree := git.other_worktree_of(branch)) is not None:
             self.emit(events.NotDeletedInOtherWorktree(branch, worktree))
             delete = False
         if not delete:
-            self.forget(branch)
             self.emit(events.Untracked(branch, new_parent, children, deleted_tip=None))
             return
         if git.current_branch() == branch:
@@ -842,7 +741,7 @@ class StackCore:
     def untrack_merged(
         self,
         branch: str,
-        parents: Parents,
+        stacks: Stacks,
         delete: str | None,
         allow_different_upstream: bool = False,
         confirmed: bool = True,
@@ -855,40 +754,40 @@ class StackCore:
         Unless confirmed (see GitAdapter.merge_confirmed), nothing is deleted,
         since the changes in parent may not be branch's.
         """
-        self.ensure_group_available_for_merge(branch, parents)
+        stacks.ensure_group_available_for_merge(branch)
         git = self.git
         if not confirmed:
-            parent = parents[branch]
-            self.remove_merged(branch, parents, delete=False)
+            parent = stacks.parent(branch)
+            self.remove_merged(branch, stacks, delete=False)
             if delete is not None:
                 self.emit(events.NotDeletedUnconfirmedMerge(branch, parent))
             return True
         delete_local = delete in ("local", "both")
         remote = git.remote_branch(branch)
         if remote is None or (not allow_different_upstream and not git.tracks_same_name(branch, remote[0])):
-            self.remove_merged(branch, parents, delete_local)
+            self.remove_merged(branch, stacks, delete_local)
             return True
         upstream = git.run("rev-parse", "--abbrev-ref", f"{branch}@{{upstream}}")
         remote_name, ref, tip = remote
-        root = stack_root(branch, parents)
+        root = stacks.root(branch)
         root_ref = f"refs/heads/{git.remote_branch_name(root, remote_name)}"
         if ref == root_ref:
-            self.remove_merged(branch, parents, delete_local)
+            self.remove_merged(branch, stacks, delete_local)
             return True
         if delete in ("remote", "both"):
             default = git.remote_default_branch(remote_name)
             if default is None:
                 raise StackError(f"can't determine {remote_name}'s default branch; refusing to delete {upstream}")
             if ref == f"refs/heads/{default}":
-                self.remove_merged(branch, parents, delete_local)
+                self.remove_merged(branch, stacks, delete_local)
                 return True
             if not git.delete_remote_branch(remote_name, ref, tip):
                 self.emit(events.RemoteBranchDeleteFailed(branch, upstream))
                 return False
             self.emit(events.RemoteBranchDeleted(upstream))
-            self.remove_merged(branch, parents, delete_local)
+            self.remove_merged(branch, stacks, delete_local)
         else:
-            self.remove_merged(branch, parents, delete_local)
+            self.remove_merged(branch, stacks, delete_local)
             self.emit(events.RemoteBranchKept(upstream, remote_name, ref.removeprefix("refs/heads/")))
         return True
 
