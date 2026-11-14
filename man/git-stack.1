@@ -1744,7 +1744,9 @@ To run a command with the \f[CR]git\f[R] adapter just this once, use
 .PP
 With the GitHub adapter, a branch whose pull request GitHub says was
 merged counts as merged once the merge is in its local parent, unless
-the branch or its remote branch has commits that weren\(aqt merged.
+the branch or its remote branch has commits that weren\(aqt merged,
+including a merge commit with changes of its own (e.g.
+a resolved conflict), whose changes the parent doesn\(aqt have.
 Otherwise:
 .PP
 Its changes must already be in its parent (\f[CR]main\f[R], or the

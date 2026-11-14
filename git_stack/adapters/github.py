@@ -473,9 +473,13 @@ class GitHubAdapter(GitAdapter):
             return MergeState.REVERTED
         head = merged.head_oid
         upstream_tip = git.rev(f"{branch}@{{upstream}}")
-        if self.unmerged_commits(f"refs/heads/{branch}", head, parent) or (
-            upstream_tip and self.unmerged_commits(upstream_tip, head, parent)
-        ):
+
+        def has_new_work(ref: str) -> bool:
+            # Commits made since that the parent has the changes of anyway
+            # (e.g. a merge of it) leave nothing behind.
+            return bool(self.unmerged_commits(ref, head, parent)) and not git.contained_in(ref, f"refs/heads/{parent}")
+
+        if has_new_work(f"refs/heads/{branch}") or (upstream_tip and has_new_work(upstream_tip)):
             return MergeState.MERGED_WITH_NEW_COMMITS
         return MergeState.MERGED
 
@@ -500,11 +504,15 @@ class GitHubAdapter(GitAdapter):
         return (pr.merge_oid,) if pr is not None and pr.merge_oid else ()
 
     def unmerged_commits(self, ref: str, merged_head: str, parent: str) -> set[str]:
-        """Non-merge commits on ref that aren't in parent and don't match a commit on merged_head."""
-        unmatched = self.git.run("rev-list", "--cherry-pick", "--right-only", "--no-merges", f"{merged_head}...{ref}")
-        return set(unmatched.split()) & set(
-            self.git.run("rev-list", "--no-merges", ref, "--not", f"refs/heads/{parent}").split()
+        """Non-merge commits on ref that aren't in parent and don't match a commit
+        on merged_head, and merges on ref, in neither, with changes of their own
+        (see GitClient.merges_with_own_changes)."""
+        git = self.git
+        unmatched = git.run("rev-list", "--cherry-pick", "--right-only", "--no-merges", f"{merged_head}...{ref}")
+        commits = set(unmatched.split()) & set(
+            git.run("rev-list", "--no-merges", ref, "--not", f"refs/heads/{parent}").split()
         )
+        return commits | set(git.merges_with_own_changes(ref, "--not", merged_head, f"refs/heads/{parent}"))
 
     def ensure_pr_parent_remote(self, branch: str, parent: str) -> None:
         base_remote = self.git.config_get(parent, "remote")

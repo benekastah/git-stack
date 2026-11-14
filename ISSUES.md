@@ -2,20 +2,6 @@
 
 Most severe first.
 
-## A merged GitHub PR can hide merge-only changes made afterward
-
-When GitHub reports a pull request merged, `GitHubAdapter.unmerged_commits`
-checks for later work with `--no-merges`. A subsequent merge commit can contain
-changes absent from both its parents, such as conflict resolutions. If its
-other commits are already in the merged PR or parent, git-stack reports the
-branch merged despite those changes. `sync -d both` or `clean -d both` can
-then delete both local and remote copies of the branch.
-
-Reproduced through `sync` and `clean` with both local-only and remote-only
-merge-resolution changes. Check for unaccounted merge commits or their full
-tree changes before treating a GitHub-merged branch as safe to untrack or
-delete; the upstream pull guard alone doesn't cover this merge-detection path.
-
 ## A branch can look merged when its parent made the same change
 
 When the git adapter decides (with the GitHub adapter, that's a branch without
