@@ -34,6 +34,10 @@ class GitAdapter:
     def __init__(self, core: StackCore) -> None:
         self.core = core
         self.git = core.git
+        # What the adapter has changed outside the repository (e.g. a pull
+        # request's base on GitHub), each saying how to undo it, so a push
+        # that then fails can say what it left changed.
+        self.changes: list[str] = []
 
     def merge_state(self, branch: str, parent: str, ignore_revert: bool = False) -> MergeState:
         """Whether branch has landed in parent, so dropping it loses nothing.

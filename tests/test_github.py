@@ -349,6 +349,95 @@ def test_push_retargets_pr_before_pushing_when_parent_was_merged(
     assert gh.load()["prs"][0]["baseRefName"] == "main"
 
 
+def stack_whose_pull_requests_push_retargets_first(repo: Repo, gh: FakeGitHub) -> None:
+    """pr1 <- pr2 <- pr3, pushed, with pull requests #1 for pr2 (on pr1) and #2
+    for pr3 (on main, as if retargeted by hand). pr1 is then merged and
+    pulled, which doesn't push, so push retargets #1 onto main and #2 onto pr2
+    before it pushes."""
+    repo.make_stack()
+    repo.client.push()
+    for number, branch, base in ((1, "pr2", "pr1"), (2, "pr3", "main")):
+        gh.add_pr(
+            number=number,
+            state="OPEN",
+            headRefName=branch,
+            headRefOid=repo.git("rev-parse", branch),
+            baseRefName=base,
+            mergeCommit=None,
+        )
+    repo.squash_merge_on_forge("pr1")
+    repo.stack("pull")
+    repo.git("switch", "--quiet", "pr3")
+    repo.commit("c", "pr3 again\n", "pr3 c2")
+
+
+def bases(gh: FakeGitHub) -> dict[int, str]:
+    return {pr["number"]: pr["baseRefName"] for pr in gh.load()["prs"]}
+
+
+def test_push_reports_retargets_it_left_when_the_push_fails(repo: Repo, gh: FakeGitHub) -> None:
+    stack_whose_pull_requests_push_retargets_first(repo, gh)
+    # Refused by the remote itself, as a protected branch would be, which
+    # only the real push finds out.
+    repo.add_hook(repo.origin, "pre-receive", "#!/bin/sh\nexit 1\n")
+
+    result = repo.stack("push", expect_success=False)
+
+    assert "push failed, so nothing was pushed" in result.stderr
+    assert bases(gh) == {1: "main", 2: "pr2"}
+    assert "#1's base was changed from pr1 to main" in result.stderr
+    assert "gh pr edit 2 --repo github.com/acme/widgets --base main" in result.stderr
+
+
+def test_push_reports_retargets_it_left_when_a_later_one_fails(repo: Repo, gh: FakeGitHub) -> None:
+    stack_whose_pull_requests_push_retargets_first(repo, gh)
+    gh.fail_editing(2)
+    pr3 = repo.git("rev-parse", "pr3", cwd=repo.origin)
+
+    result = repo.stack("push", expect_success=False)
+
+    assert "updating pull requests failed, so nothing was pushed" in result.stderr
+    assert bases(gh) == {1: "main", 2: "main"}
+    assert "#1's base was changed from pr1 to main" in result.stderr
+    assert "#2's base" not in result.stderr
+    assert repo.git("rev-parse", "pr3", cwd=repo.origin) == pr3
+
+
+def test_push_reports_github_stacks_it_left_unstacked_when_the_push_fails(repo: Repo, gh: FakeGitHub) -> None:
+    stack_whose_pull_requests_push_retargets_first(repo, gh)
+    # Their bases can only change once they're out of their GitHub stack.
+    gh.enable_stacks([1, 2])
+    repo.add_hook(repo.origin, "pre-receive", "#!/bin/sh\nexit 1\n")
+
+    result = repo.stack("push", "--rebuild-stack", expect_success=False)
+
+    assert gh.stacks() == []
+    assert "GitHub stack 1000 was unstacked (`git stack prs` links its pull requests" in result.stderr
+
+
+def test_push_runs_the_pre_push_hook_once(repo: Repo, gh: FakeGitHub) -> None:
+    stack_whose_pull_requests_push_retargets_first(repo, gh)
+    runs = repo.tmp / "pre-push-runs"
+    repo.add_hook(repo.path, "pre-push", f'#!/bin/sh\necho run >> "{runs.as_posix()}"\n')
+
+    repo.stack("push")
+
+    assert runs.read_text().splitlines() == ["run"]
+
+
+def test_push_changes_no_pull_request_when_the_push_would_fail(repo: Repo, gh: FakeGitHub) -> None:
+    stack_whose_pull_requests_push_retargets_first(repo, gh)
+    # Someone pushes to pr3 after we last fetched.
+    repo.commit_on_forge("pr3", "d", "theirs\n", "theirs")
+
+    result = repo.stack("push", expect_success=False)
+
+    assert "push would fail, so nothing was pushed or changed" in result.stderr
+    assert "pr3 -> pr3 (stale info)" in result.stderr
+    assert bases(gh) == {1: "pr1", 2: "main"}
+    assert gh.calls("pr", "edit") == []
+
+
 @pytest.mark.parametrize("no_stack_field", [False, True])
 def test_push_retargets_pr_after_pushing_new_parent(
     repo: Repo, gh: FakeGitHub, client: StackClient, monkeypatch: pytest.MonkeyPatch, no_stack_field: bool

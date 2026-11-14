@@ -2,8 +2,9 @@
 """Stands in for the gh CLI in tests.
 
 Keeps pull requests and the calls it got in the JSON file at $FAKE_GH_STATE,
-and fails for commands whose first argument is listed in its "fail" key, and
-for opening pull requests of the branches in its "fail_heads" key. A pull
+and fails for commands whose first argument is listed in its "fail" key, for
+opening pull requests of the branches in its "fail_heads" key, and for editing
+the pull requests numbered in its "fail_edits" key. A pull
 request's "author" is "me", the gh user, unless it says otherwise.
 
 GitHub's stacks of pull requests are in its "stacks" key, each a "number" and
@@ -281,8 +282,10 @@ def main() -> None:
         state = json.load(f)
     args = sys.argv[1:]
     state["calls"].append(args)
-    failing = args[0] in state["fail"] or (
-        args[:2] == ["pr", "create"] and args[args.index("--head") + 1] in state.get("fail_heads", [])
+    failing = (
+        args[0] in state["fail"]
+        or (args[:2] == ["pr", "create"] and args[args.index("--head") + 1] in state.get("fail_heads", []))
+        or (args[:2] == ["pr", "edit"] and int(args[2]) in state.get("fail_edits", []))
     )
     error = "fake gh: failing as asked" if failing else None
     out = None

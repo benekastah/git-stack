@@ -736,7 +736,13 @@ git stack push --prs            # then open pull requests, as `git stack prs` do
   `git branch --unset-upstream <branch>` to push it again.
 - With the [GitHub adapter](#github), points each open pull request at its
   stack parent (e.g. at `main` once the parent PR was merged), and lists the
-  branches that have none, which `git stack prs` opens.
+  branches that have none, which `git stack prs` opens. Where the parent is
+  already on the remote, that's done before pushing, so the pull request
+  never shows the new parent's commits as its own. A dry-run push (which
+  doesn't run your pre-push hook; the real push does) comes first, so a push
+  that would fail (e.g. because a remote branch moved) changes nothing on
+  GitHub. If the push still fails (e.g. the remote refuses
+  it), the error lists what was changed on GitHub and how to undo it.
 - `--prs` (or `--pr`) then does what
   [`git stack prs`](#git-stack-prs-branchglob--g-group---remote-name--n---rebuild-stack) does
   for the stacks it pushed, so it's `git stack push` and `git stack prs` in

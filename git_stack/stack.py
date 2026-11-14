@@ -1556,18 +1556,29 @@ class StackClient(StackCore):
         # them), and pin each lease to the remote-tracking ref we checked, so a
         # push that raced with someone else's fails instead of overwriting it.
         leases, refspecs = self.push_refspecs(branches, parents, remote, force, use_upstreams)
+        # Before the adapter changes anything (e.g. retargets pull requests),
+        # so a push that's bound to fail, e.g. because a remote branch moved
+        # since it was fetched, leaves nothing changed. The remote can still
+        # refuse the real push (e.g. a protected branch), which a dry run
+        # doesn't ask it about.
+        if (why := git.push_would_fail("--atomic", *leases, remote, *refspecs)) is not None:
+            raise StackError(
+                f"push would fail, so nothing was pushed or changed; if the remote has new commits, run "
+                f"`git stack sync` and try again:\n{why}"
+            )
         try:
             adapter.before_push(branches, parents, rebuild_stack, scope, opening)
         except StackError as e:
             raise StackError(
                 f"updating pull requests failed, so nothing was pushed (set {ADAPTER_SETTING} "
-                f"to git to stop using GitHub): {e}"
+                f"to git to stop using GitHub): {e}{self.changes_left(adapter)}"
             ) from e
         # Atomic, so a branch that can't be pushed doesn't leave the rest of the
         # stack pushed without it, and its pull requests not retargeted.
         if not git.passthrough("push", "--atomic", *leases, "--set-upstream", remote, *refspecs):
             raise StackError(
-                "push failed, so nothing was pushed; if the remote has new commits, run `git stack sync` and try again"
+                "push failed, so nothing was pushed; if the remote has new commits, run `git stack sync` and try "
+                f"again{self.changes_left(adapter)}"
             )
         for b in branches:
             git.config_set(b, PULLED_KEY, git.tip(b))
@@ -1580,6 +1591,16 @@ class StackClient(StackCore):
                 f"pushed, but updating pull requests failed (set {ADAPTER_SETTING} to git to stop using GitHub): {e}"
             ) from e
         return branches
+
+    def changes_left(self, adapter: GitAdapter) -> str:
+        """What adapter changed before a push failed, for its error, or ""."""
+        if not adapter.changes:
+            return ""
+        changes = "".join(f"\n  {change}" for change in adapter.changes)
+        return (
+            f"\nBefore that, these were changed on GitHub, and were left as they are:{changes}\n"
+            "They're what the push needs, so push again once it can succeed, or undo them as shown."
+        )
 
     def ensure_remote_branches_ours(self, branches: list[str], remote: str) -> None:
         """Refuse to push a branch whose remote branch was deleted, or is someone

@@ -28,20 +28,6 @@ what `sync` would do to them anyway, but it's a change nobody asked for.
 Fast-forwarding only the trunks of the steps it creates or tracks would fix
 it.
 
-## A failed push can leave pull requests retargeted or unstacked
-
-Before pushing, the GitHub adapter retargets pull requests whose new bases
-already exist remotely. With `--rebuild-stack` it can also unstack their
-GitHub stack. A later retarget or the atomic Git push can fail, leaving those
-GitHub changes in place even though no branch was pushed. In particular, an
-unstack followed by a rejected push can leave the pull requests unstacked.
-The error reports that nothing was pushed, but does not describe the remaining
-GitHub changes or how to recover them.
-
-Preflight all possible failures, and report partial GitHub changes and recovery
-instructions if an operation still fails; restoring them automatically would
-need to account for concurrent edits on GitHub.
-
 ## A change undone some other way can look like a revert
 
 Revert detection compares patch-ids without context lines, so a revert still
