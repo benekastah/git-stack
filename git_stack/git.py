@@ -1,8 +1,11 @@
 import os
 import subprocess
 import tempfile
+import threading
 import time
 from collections import Counter
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import TextIO
 
 from git_stack.errors import StackError
@@ -11,6 +14,58 @@ DEFAULT_REMOTE = "origin"
 # How long to keep retrying a git config write that finds the config file locked
 # by another process, which usually only holds it for a moment.
 CONFIG_LOCK_TIMEOUT = 5.0
+# The git commands git-stack runs that never move a ref or change a branch's
+# upstream, so the ref snapshot (see GitClient.snapshot) outlives them. See
+# changes_refs for a few more.
+READ_ONLY_COMMANDS = frozenset(
+    {
+        "cat-file",
+        "diff",
+        "for-each-ref",
+        "log",
+        "ls-remote",
+        "merge-base",
+        "merge-tree",
+        "patch-id",
+        "rev-list",
+        "rev-parse",
+        "show",
+        "show-ref",
+        "status",
+        "symbolic-ref",
+        "var",
+    }
+)
+# Characters a branch name can't have, but a revision (e.g. main~1) can.
+REVISION_SYNTAX = frozenset("~^:?*[\\ ")
+
+
+def changes_refs(args: tuple[str, ...]) -> bool:
+    """Whether `git <args>` may move a ref or change a branch's upstream,
+    which the ref snapshot holds. Only commands known to be read-only don't."""
+    # The command is the first argument that isn't an option to git itself
+    # (e.g. --literal-pathspecs).
+    start = next((i for i, a in enumerate(args) if not a.startswith("-")), len(args))
+    command, rest = (args[start], list(args[start + 1 :])) if start < len(args) else ("", [])
+    if command in READ_ONLY_COMMANDS:
+        return False
+    if command == "branch":
+        return rest != ["--show-current"]
+    if command == "switch":
+        return any(a in ("-c", "-C", "--create", "--force-create", "--orphan") for a in rest)
+    if command == "worktree":
+        return rest[:1] != ["list"]
+    if command == "remote":
+        return bool(rest)
+    if command == "config":
+        return not any(a.startswith("--get") for a in rest)
+    return True
+
+
+def is_branch_name(name: str) -> bool:
+    """Whether name could be a branch's (or ref's) name, rather than a revision
+    such as main~1 or main@{upstream}."""
+    return bool(name) and "@{" not in name and REVISION_SYNTAX.isdisjoint(name)
 
 
 def decode(output: bytes) -> str:
@@ -35,12 +90,24 @@ class GitClient:
         # See branch_config.
         self._config_stat: tuple[int, int, int] | None = None
         self._branch_config: dict[tuple[str, str], str] = {}
+        # See snapshot: how many snapshot blocks we're in, and the refs, as
+        # {refname: (commit, the full refname of its upstream, or "")}, once
+        # read. The lock is for commands that read refs in several threads.
+        self._snapshot_depth = 0
+        self._refs: dict[str, tuple[str, str]] | None = None
+        self._refs_lock = threading.Lock()
         # Where passthrough sends git's stdout (default: ours), e.g. stderr when
         # our stdout is for --json output.
         self.passthrough_stdout: TextIO | None = None
 
     def _command(self, *args: str) -> list[str]:
         return ["git", "-C", self.directory, *args]
+
+    def _ran(self, args: tuple[str, ...]) -> None:
+        """Forget the ref snapshot if `git <args>`, which just ran, may have
+        changed it, whether or not it succeeded."""
+        if changes_refs(args):
+            self._refs = None
 
     def run(self, *args: str, check: bool = True, input: str | None = None) -> str:
         """Run git and return stripped stdout.
@@ -51,18 +118,62 @@ class GitClient:
         result = subprocess.run(
             self._command(*args), capture_output=True, input=None if input is None else encode(input), check=False
         )
+        self._ran(args)
         if check and result.returncode != 0:
             raise StackError(f"git {' '.join(args)} failed:\n{decode(result.stderr).strip()}")
         return decode(result.stdout).strip()
 
     def ok(self, *args: str) -> bool:
         """Run git and report whether it succeeded."""
-        return subprocess.run(self._command(*args), capture_output=True, check=False).returncode == 0
+        result = subprocess.run(self._command(*args), capture_output=True, check=False)
+        self._ran(args)
+        return result.returncode == 0
 
     def passthrough(self, *args: str) -> bool:
         """Run git with output going straight to the terminal (stdout to
         passthrough_stdout)."""
-        return subprocess.run(self._command(*args), stdout=self.passthrough_stdout, check=False).returncode == 0
+        result = subprocess.run(self._command(*args), stdout=self.passthrough_stdout, check=False)
+        self._ran(args)
+        return result.returncode == 0
+
+    @contextmanager
+    def snapshot(self) -> Iterator[None]:
+        """Within this, read every local and remote-tracking branch's commit,
+        and each local branch's upstream, with one git call, and read them
+        again only after a git call that may have changed them (see
+        changes_refs). A command asks about the same few refs over and over,
+        and each git call is slow enough to add up.
+
+        Changes made meanwhile by anything else, such as another process, or
+        a test running git, aren't seen, so a snapshot is only for the length
+        of one command, which holds the lock (see StackCore.exclusive) if it
+        changes anything. Blocks can nest; the snapshot is forgotten when the
+        outermost one ends.
+        """
+        self._snapshot_depth += 1
+        try:
+            yield
+        finally:
+            self._snapshot_depth -= 1
+            if not self._snapshot_depth:
+                self._refs = None
+
+    def _snapshot_refs(self) -> dict[str, tuple[str, str]] | None:
+        """The refs (see snapshot), reading them if they haven't been, or None
+        outside a snapshot block."""
+        if not self._snapshot_depth:
+            return None
+        with self._refs_lock:
+            if self._refs is None:
+                refs = {}
+                listing = self.run(
+                    "for-each-ref", "--format=%(refname)%00%(objectname)%00%(upstream)", "refs/heads", "refs/remotes"
+                )
+                for line in listing.splitlines():
+                    name, commit, upstream = line.split("\0")
+                    refs[name] = (commit, upstream)
+                self._refs = refs
+            return self._refs
 
     def common_dir(self) -> str:
         """The absolute path of the git directory every worktree shares."""
@@ -116,7 +227,14 @@ class GitClient:
 
         git config doesn't wait for the lock itself, and fails at once instead.
         A write either happens or doesn't, so retrying it is safe.
+
+        Writing anything but git-stack's own settings (see core.PARENT_KEY and
+        the rest, which all start with "stack") forgets the ref snapshot, since
+        it may change a branch's upstream.
         """
+        key = next((a for a in args if not a.startswith("-")), "")
+        if not key.rpartition(".")[2].lower().startswith("stack"):
+            self._refs = None
         deadline = time.monotonic() + CONFIG_LOCK_TIMEOUT
         delay = 0.01
         while True:
@@ -136,10 +254,21 @@ class GitClient:
             raise StackError(f"git config {' '.join(args)} failed:\n{result.stderr.strip()}")
 
     def rev(self, ref: str) -> str | None:
+        """The commit ref names, or None if it names none. A local or
+        remote-tracking branch's full refname, or a local branch's
+        <name>@{upstream}, is looked up in the snapshot, if there is one."""
+        if (refs := self._snapshot_refs()) is not None:
+            if ref.startswith(("refs/heads/", "refs/remotes/")) and is_branch_name(ref):
+                return refs[ref][0] if ref in refs else None
+            branch = ref.removesuffix("@{upstream}")
+            if branch != ref and is_branch_name(branch) and (local := refs.get(f"refs/heads/{branch}")):
+                return refs[local[1]][0] if local[1] in refs else None
         return self.run("rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}", check=False) or None
 
     def tip(self, branch: str) -> str:
         """The commit local branch points at. Fails if branch doesn't exist."""
+        if (refs := self._snapshot_refs()) is not None and (entry := refs.get(f"refs/heads/{branch}")):
+            return entry[0]
         return self.run("rev-parse", "--verify", f"refs/heads/{branch}")
 
     def is_ancestor(self, ancestor: str, descendant: str) -> bool:
@@ -157,9 +286,13 @@ class GitClient:
         return self.run("branch", "--show-current") or None
 
     def local_branch_exists(self, name: str) -> bool:
+        if (refs := self._snapshot_refs()) is not None:
+            return f"refs/heads/{name}" in refs
         return self.ok("show-ref", "--verify", "--quiet", f"refs/heads/{name}")
 
     def local_branches(self) -> set[str]:
+        if (refs := self._snapshot_refs()) is not None:
+            return {ref.removeprefix("refs/heads/") for ref in refs if ref.startswith("refs/heads/")}
         return set(self.run("for-each-ref", "--format=%(refname:lstrip=2)", "refs/heads").splitlines())
 
     def switch(self, branch: str) -> None:
@@ -222,6 +355,11 @@ class GitClient:
         return path
 
     def upstream_gone(self, branch: str) -> bool:
+        """Whether branch has an upstream that no longer exists, e.g. after
+        `git fetch --prune` saw it deleted."""
+        if (refs := self._snapshot_refs()) is not None:
+            upstream = refs.get(f"refs/heads/{branch}", ("", ""))[1]
+            return bool(upstream) and upstream not in refs
         return self.run("for-each-ref", "--format=%(upstream:track)", f"refs/heads/{branch}") == "[gone]"
 
     def remotes(self) -> list[str]:

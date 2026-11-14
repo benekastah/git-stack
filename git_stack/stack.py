@@ -42,14 +42,30 @@ def exclusive(
     method: Callable[Concatenate[Client, Params], Result],
 ) -> Callable[Concatenate[Client, Params], Result]:
     """Run method holding the repository's git-stack lock (see
-    StackCore.exclusive), as every command that changes stack metadata does."""
+    StackCore.exclusive), as every command that changes stack metadata does,
+    and with a snapshot of its refs (see GitClient.snapshot), taken once it
+    has the lock."""
 
     @functools.wraps(method)
     def locked(client: Client, /, *args: Params.args, **kwargs: Params.kwargs) -> Result:
-        with client.exclusive():
+        with client.exclusive(), client.git.snapshot():
             return method(client, *args, **kwargs)
 
     return locked
+
+
+def snapshot(
+    method: Callable[Concatenate[Client, Params], Result],
+) -> Callable[Concatenate[Client, Params], Result]:
+    """Run method, a command that only reads, with a snapshot of the
+    repository's refs (see GitClient.snapshot)."""
+
+    @functools.wraps(method)
+    def snapshotted(client: Client, /, *args: Params.args, **kwargs: Params.kwargs) -> Result:
+        with client.git.snapshot():
+            return method(client, *args, **kwargs)
+
+    return snapshotted
 
 
 class BranchStatus(enum.Enum):
@@ -300,6 +316,7 @@ class StackClient(StackCore):
     and warnings through on_event, and raise StackError when they fail.
     """
 
+    @snapshot
     def get_ownership(self, branches: Sequence[str] = (), groups: Sequence[str] = ()) -> tuple[str, list[str]]:
         """Return the selected branches and whether any belongs to a shared stack."""
         parents = self.tracked_branches()
@@ -895,23 +912,27 @@ class StackClient(StackCore):
             raise StackError(f"{branch} isn't in a stack")
         return branch
 
+    @snapshot
     def parent(self, branch: str | None = None) -> str:
         """The branch that branch (default: the current branch) is stacked on."""
         parents = self.settled_branches()
         return parents[self.stacked_branch(branch, parents)]
 
+    @snapshot
     def base(self, branch: str | None = None) -> str:
         """The commit branch (default: the current branch) was last rebased onto."""
         parents = self.settled_branches()
         branch = self.stacked_branch(branch, parents)
         return self.recorded_base(branch, parents[branch])
 
+    @snapshot
     def show_stack(self, branch: str | None = None) -> list[str]:
         """The branches in branch's (default: the current branch's) stack,
         parent-before-child."""
         parents = self.settled_branches()
         return self.stack(self.stacked_branch(branch, parents), parents)
 
+    @snapshot
     def next(self) -> str:
         """Switch to the branch stacked on the current one, and return it."""
         current = self.git.current_branch()
@@ -927,6 +948,7 @@ class StackClient(StackCore):
         self.switch_to(children[0])
         return children[0]
 
+    @snapshot
     def prev(self) -> str:
         """Switch to the current branch's parent, and return it."""
         parents = self.settled_branches()
@@ -941,6 +963,7 @@ class StackClient(StackCore):
         if not self.git.passthrough("switch", "--quiet", branch):
             raise StackError(f"switching to {branch} failed; see git's output above")
 
+    @snapshot
     def info(
         self, branches: Sequence[str] = (), groups: Sequence[str] = (), offline: bool = False, current: bool = False
     ) -> list[BranchInfo]:
