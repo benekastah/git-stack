@@ -1289,6 +1289,24 @@ the commits you didn't take aren't counted as pulled: the next `sync` offers
 them again, and `push` refuses to drop them. To drop them anyway, run
 `git stack push --force`.
 
+### Known limitation: old copies of your own commits
+
+When you rebase a branch, its old commits stay on its remote branch until you
+push it again. `sync` and `pull` recognize them as old copies, not commits
+someone else pushed, by the tip `git stack push` last pushed, the branch's
+reflog, and their changes matching your new commits. If none of those apply,
+they look like commits someone else pushed: for example, if the rebase changed
+them (say, while resolving a conflict) and they were pushed from another clone,
+or with a plain `git push` whose reflog entry has expired.
+
+`sync` and `pull` refuse to pull them in if the remote branch was rewritten
+(it doesn't contain the tip they last saw), or if that tip isn't known and the
+two branches have diverged, until you rerun them with `--rewritten-upstream`.
+But if the old copies were added on top of a remote branch that still has
+that tip, nothing in git's history tells them apart from commits someone else
+pushed, so they're pulled in. If that happens, drop them (e.g. with
+`git rebase -i $(git stack base)`), then `git stack push --force`.
+
 ### Rebased on the remote
 
 GitHub's "Rebase stack" button (or `gh stack rebase` on another machine)

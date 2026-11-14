@@ -2,22 +2,6 @@
 
 Most severe first.
 
-## Old copies of rebased commits can be pulled back in
-
-`unpulled_commits` recognizes old copies of the branch's own rebased commits by
-the tip `git stack push` last pushed, the branch's reflog, and patch-id
-equivalence. Old copies get cherry-picked back in as if a collaborator pushed
-them if the rebase changed their patches (e.g. resolved conflicts) and they
-were pushed either from another clone or machine, or with a plain `git push`
-whose reflog entry has since expired.
-
-`pull` and `sync` now refuse unseen commits when the upstream diverges from
-the last known tip, or when that tip is unknown and the branches diverge,
-unless `--rewritten-upstream` is given. Re-tracking with `track --base` also
-guards the upstream tip seen then. If rewritten copies are appended to a
-history that still contains the last known tip, they can still look like new
-collaborator commits; there is no reliable distinction from Git history alone.
-
 ## `import` fast-forwards the trunks of stacks it doesn't import
 
 `fast_forward_import_trunks` gets every pull request it looked up, before the
