@@ -1,4 +1,5 @@
 import argparse
+import enum
 import json
 import os
 import sys
@@ -19,11 +20,18 @@ NOTES: dict[BranchStatus, str | None] = {
     BranchStatus.MERGED_WITH_NEW_COMMITS: "(merged, with new commits)",
     BranchStatus.REVERTED: "(merged, then reverted)",
 }
-# Which way up info draws each stack. A root on top reads like a file tree;
-# a root at the bottom like a stack of commits, as in `git log --graph`.
 ORIENTATION_SETTING = "stack.orientation"
-ROOT_AT_TOP = "root-at-top"
-ROOT_AT_BOTTOM = "root-at-bottom"
+
+
+class Orientation(enum.Enum):
+    """Which way up info draws each stack, as ORIENTATION_SETTING says. A
+    root on top reads like a file tree; a root at the bottom like a stack of
+    commits, as in `git log --graph`. Values are the setting's."""
+
+    ROOT_AT_TOP = "root-at-top"
+    ROOT_AT_BOTTOM = "root-at-bottom"
+
+
 # ANSI SGR codes for each part of a line, when color is on.
 TREE = "2"  # dim
 ROOT = "1"  # bold
@@ -86,13 +94,17 @@ def use_color(stack: StackClient) -> bool:
     return stack.git.run("config", "--get-colorbool", "color.stack", tty, check=False) == "true"
 
 
-def root_at_bottom(stack: StackClient) -> bool:
-    """Whether to draw each stack with its root at the bottom, as
-    ORIENTATION_SETTING says (default: ROOT_AT_TOP)."""
-    setting = stack.git.run("config", "--get", ORIENTATION_SETTING, check=False) or ROOT_AT_TOP
-    if setting not in (ROOT_AT_TOP, ROOT_AT_BOTTOM):
-        raise StackError(f"{ORIENTATION_SETTING} must be {ROOT_AT_TOP} or {ROOT_AT_BOTTOM}, not {setting}")
-    return setting == ROOT_AT_BOTTOM
+def orientation(stack: StackClient) -> Orientation:
+    """Which way up to draw each stack, as ORIENTATION_SETTING says (default:
+    root at the top)."""
+    setting = stack.git.run("config", "--get", ORIENTATION_SETTING, check=False)
+    if not setting:
+        return Orientation.ROOT_AT_TOP
+    try:
+        return Orientation(setting)
+    except ValueError:
+        choices = " or ".join(o.value for o in Orientation)
+        raise StackError(f"{ORIENTATION_SETTING} must be {choices}, not {setting}") from None
 
 
 def painter(color: bool) -> Paint:
@@ -181,7 +193,7 @@ def print_tree(
     requests that were just opened, or would be."""
     color = use_color(stack)
     paint = painter(color)
-    flip = root_at_bottom(stack)
+    flip = orientation(stack) is Orientation.ROOT_AT_BOTTOM
     children = tree_children(branches)
 
     # (the tree drawn before branch, branch), in the order they're printed.

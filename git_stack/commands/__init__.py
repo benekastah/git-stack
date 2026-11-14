@@ -11,7 +11,7 @@ everything the command reports.
 import argparse
 from typing import TypeAlias
 
-from git_stack.core import CURRENT_GROUP
+from git_stack.core import CURRENT_GROUP, Delete
 
 # argparse doesn't export the type of add_subparsers()'s result.
 Subparsers: TypeAlias = "argparse._SubParsersAction[argparse.ArgumentParser]"
@@ -75,7 +75,7 @@ def add_ignore_revert_argument(parser: argparse.ArgumentParser) -> None:
 
 
 def add_delete_argument(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("-d", "--delete", choices=("local", "remote", "both"), help=DELETE_HELP)
+    parser.add_argument("-d", "--delete", choices=[d.value for d in Delete], help=DELETE_HELP)
 
 
 # parser can be a mutually exclusive group, whose type argparse doesn't export either.

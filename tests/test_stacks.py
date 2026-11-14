@@ -5,7 +5,7 @@ import pytest
 
 from git_stack.errors import StackError
 from git_stack.stack import StackClient
-from git_stack.stacks import StackNode, Stacks
+from git_stack.stacks import Ownership, StackNode, Stacks
 from tests.helpers import Repo
 
 
@@ -91,7 +91,11 @@ def test_reparent_onto_the_root_joins_the_group_it_was_in() -> None:
 
 def test_reparent_shares_the_branch_and_its_children_with_a_shared_stack() -> None:
     stacks = Stacks(
-        [StackNode("a", "main", ownership="shared"), StackNode("x", "main"), StackNode("y", "x", ownership="owned")]
+        [
+            StackNode("a", "main", ownership=Ownership.SHARED),
+            StackNode("x", "main"),
+            StackNode("y", "x", ownership=Ownership.OWNED),
+        ]
     )
 
     stacks.reparent("x", "a")
@@ -145,7 +149,7 @@ def test_remove_merged_refuses_to_join_an_existing_group_of_its_name() -> None:
 
 
 def test_untrack_leaves_the_children_on_the_branch_and_shares_them_if_their_stack_was() -> None:
-    stacks = Stacks([StackNode("a", "main", ownership="shared"), StackNode("b", "a"), StackNode("c", "b")])
+    stacks = Stacks([StackNode("a", "main", ownership=Ownership.SHARED), StackNode("b", "a"), StackNode("c", "b")])
 
     stacks.untrack(["b"])
 
@@ -175,7 +179,7 @@ def test_save_writes_what_changed(repo: Repo, client: StackClient) -> None:
     stacks = client.stacks()
 
     stacks.set_group("pr1", "g")
-    stacks.set_ownership("pr2", "shared")
+    stacks.set_ownership("pr2", Ownership.SHARED)
     stacks.untrack(["pr3"])
     client.save(stacks)
 

@@ -6,6 +6,7 @@ from git_stack import events
 from git_stack.errors import StackError
 from git_stack.git import GitClient
 from git_stack.stack import BranchInfo, BranchStatus, StackClient
+from git_stack.stacks import Ownership
 from tests.helpers import Repo
 
 
@@ -120,10 +121,10 @@ def test_restack_onto_does_not_rewrite_destination(repo: Repo, client: StackClie
 
 def test_restack_onto_requires_override_for_shared_source_group(repo: Repo, client: StackClient) -> None:
     repo.make_stack()
-    client.set_ownership("owned")
+    client.set_ownership(Ownership.OWNED)
     repo.git("switch", "--quiet", "main")
     client.branch("shared")
-    client.set_ownership("shared")
+    client.set_ownership(Ownership.SHARED)
     client.group_add("feature", ["pr1", "shared"])
     repo.git("switch", "--quiet", "main")
     client.branch("target")

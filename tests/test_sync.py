@@ -6,9 +6,11 @@ from typing import Any
 import pytest
 
 from git_stack import events
+from git_stack.core import Delete
 from git_stack.errors import StackError
 from git_stack.git import GitClient
 from git_stack.stack import BranchStatus, StackClient
+from git_stack.stacks import Ownership
 from tests.helpers import Repo
 
 
@@ -404,7 +406,7 @@ def test_sync_delete_local_deletes_merged_branch(repo: Repo, client: StackClient
     repo.squash_merge_on_forge("pr1")
     repo.git("switch", "--quiet", "pr1")
 
-    client.sync(delete="local")
+    client.sync(delete=Delete.LOCAL)
 
     assert repo.git("branch", "--list", "pr1") == ""
     repo.assert_stacked("pr2", "main", ["pr2 c1"])
@@ -418,7 +420,7 @@ def test_sync_delete_local_lands_on_parent_of_childless_branch(repo: Repo, clien
     client.push()
     repo.squash_merge_on_forge("pr1")
 
-    client.sync(delete="local")
+    client.sync(delete=Delete.LOCAL)
 
     assert repo.git("branch", "--list", "pr1") == ""
     assert repo.git("branch", "--show-current") == "main"
@@ -464,7 +466,7 @@ def test_sync_delete_remote_deletes_only_remote_branch(repo: Repo, client: Stack
     client.push()
     repo.merge_on_forge("pr1", delete_branch=False)
 
-    client.sync(delete="remote")
+    client.sync(delete=Delete.REMOTE)
 
     repo.assert_untracked("pr1")
     assert repo.git("branch", "--list", "pr1", cwd=repo.origin) == ""
@@ -472,9 +474,9 @@ def test_sync_delete_remote_deletes_only_remote_branch(repo: Repo, client: Stack
     assert repo.config("pr2", "stackParent") == "main"
 
 
-@pytest.mark.parametrize("delete", [None, "remote", "both"])
+@pytest.mark.parametrize("delete", [None, Delete.REMOTE, Delete.BOTH])
 def test_sync_never_deletes_or_suggests_deleting_a_different_upstream(
-    repo: Repo, client: StackClient, emitted: list[events.Event], delete: str | None
+    repo: Repo, client: StackClient, emitted: list[events.Event], delete: Delete | None
 ) -> None:
     client.branch("feature")
     repo.commit("a", "feature\n", "feature")
@@ -495,7 +497,7 @@ def test_sync_delete_both_deletes_local_and_remote_branches(repo: Repo, client: 
     client.push()
     repo.merge_on_forge("pr1", delete_branch=False)
 
-    client.sync(delete="both")
+    client.sync(delete=Delete.BOTH)
 
     assert repo.git("branch", "--list", "pr1") == ""
     assert repo.git("branch", "--list", "pr1", cwd=repo.origin) == ""
@@ -747,7 +749,7 @@ def make_shared_stack(repo: Repo, client: StackClient) -> None:
     client.branch("pr1")
     repo.commit("a", "local\n", "local")
     client.push()
-    client.set_ownership("shared")
+    client.set_ownership(Ownership.SHARED)
 
 
 def make_retracked_branch_with_unseen_commits(repo: Repo, client: StackClient) -> None:

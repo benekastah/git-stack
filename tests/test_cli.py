@@ -12,7 +12,7 @@ import pytest
 from git_stack import events
 from git_stack.adapters.git import PullRequestLink, PullRequestState
 from git_stack.cli import main
-from git_stack.core import CURRENT_GROUP
+from git_stack.core import CURRENT_GROUP, Delete
 from git_stack.errors import StackError
 from git_stack.git import GitClient
 from git_stack.json_fields import to_json
@@ -34,6 +34,7 @@ from git_stack.stack import (
     Unreverted,
     Untracked,
 )
+from git_stack.stacks import Ownership
 
 # A stack, and how print_tree draws it without color.
 STACK = [
@@ -156,14 +157,14 @@ def stack() -> Any:
             ["sync", "b", "-g", "one", "--group", "two", "--remote", "upstream", "-d", "local", "--latest"],
             "sync",
             (["b"], ["one", "two"]),
-            {"remote": "upstream", "delete": "local", "latest": True, "push": True, "ignore_reverts": []},
+            {"remote": "upstream", "delete": Delete.LOCAL, "latest": True, "push": True, "ignore_reverts": []},
         ),
         (["clean"], "clean", (), {"remote": None, "delete": None, "ignore_reverts": []}),
         (
             ["clean", "--delete", "both", "--ignore-revert", "a", "--ignore-revert", "b"],
             "clean",
             (),
-            {"remote": None, "delete": "both", "ignore_reverts": ["a", "b"]},
+            {"remote": None, "delete": Delete.BOTH, "ignore_reverts": ["a", "b"]},
         ),
         (["push"], "push", ([], []), {"remote": "origin", "force": False, "prs": False}),
         (
@@ -183,7 +184,7 @@ def stack() -> Any:
         (["ungroup", "pr1", "-g", "feat"], "group_remove", (["pr1"], ["feat"]), {}),
         (["group", "rename", "new"], "group_rename", ("new",), {"old": None}),
         (["group", "rename", "old", "new"], "group_rename", ("new",), {"old": "old"}),
-        (["ownership", "shared"], "set_ownership", ("shared", [], []), {}),
+        (["ownership", "shared"], "set_ownership", (Ownership.SHARED, [], []), {}),
         (["prs"], "prs", ([], []), {"remote": None, "dry_run": False, "rebuild_stack": False}),
         (["pr", "--rebuild-stack"], "prs", ([], []), {"remote": None, "dry_run": False, "rebuild_stack": True}),
         (
@@ -544,7 +545,7 @@ def test_restack_no_longer_accepts_squash(stack: Any) -> None:
 
 
 def test_ownership_bare_group_only_works_when_reading(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
-    stack.get_ownership.return_value = ("owned", ["pr1"])
+    stack.get_ownership.return_value = (Ownership.OWNED, ["pr1"])
     assert main(["ownership", "-g"], stack=stack) == 0
     stack.get_ownership.assert_called_once_with([], [CURRENT_GROUP])
     assert main(["ownership", "shared", "-g"], stack=stack) == 1

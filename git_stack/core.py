@@ -1,3 +1,4 @@
+import enum
 import fnmatch
 import os
 from collections import Counter
@@ -9,7 +10,7 @@ from git_stack.check_cache import CheckCache
 from git_stack.errors import BrokenStackError, StackError
 from git_stack.file_lock import file_lock
 from git_stack.git import GitClient
-from git_stack.stacks import StackNode, Stacks
+from git_stack.stacks import Ownership, StackNode, Stacks
 
 PARENT_KEY = "stackParent"
 BASE_KEY = "stackBase"
@@ -60,6 +61,47 @@ GROUP_KEY = "stackGroup"
 CURRENT_GROUP = "\0"
 # Ownership is stored on every tracked branch so it survives stack splits.
 OWNERSHIP_KEY = "stackOwnership"
+
+
+class Delete(enum.Enum):
+    """What sync and clean delete of a merged branch besides untracking it,
+    as -d says. Values are what -d takes."""
+
+    LOCAL = "local"
+    REMOTE = "remote"
+    BOTH = "both"
+
+    @property
+    def deletes_local(self) -> bool:
+        return self in (Delete.LOCAL, Delete.BOTH)
+
+    @property
+    def deletes_remote(self) -> bool:
+        return self in (Delete.REMOTE, Delete.BOTH)
+
+
+class SyncCommand(enum.Enum):
+    """Which command a sync is: sync, or pull, which syncs without pushing.
+    Its messages say to rerun that one, since sync would push. Values are the
+    commands' names."""
+
+    SYNC = "sync"
+    PULL = "pull"
+
+
+def read_ownership(branch: str, value: str | None) -> Ownership | None:
+    """branch's OWNERSHIP_KEY setting, value, as an Ownership, or None if it
+    has none."""
+    if not value:
+        return None
+    try:
+        return Ownership(value)
+    except ValueError:
+        choices = " or ".join(o.value for o in Ownership)
+        raise StackError(
+            f"branch.{branch}.{OWNERSHIP_KEY} must be {choices}, not {value}; fix it with "
+            f"`git config branch.{branch}.{OWNERSHIP_KEY} {Ownership.SHARED.value}` (or {Ownership.OWNED.value})"
+        ) from None
 
 
 def is_glob(name: str) -> bool:
@@ -127,7 +169,7 @@ class StackCore:
                 branch,
                 parent,
                 config.get((branch, GROUP_KEY.lower())) or None,
-                config.get((branch, OWNERSHIP_KEY.lower())) or None,
+                read_ownership(branch, config.get((branch, OWNERSHIP_KEY.lower()))),
             )
             for (branch, key), parent in config.items()
             if key == PARENT_KEY.lower() and branch in existing
@@ -143,7 +185,7 @@ class StackCore:
                 self.forget(branch)
                 continue
             for key, before, after in (
-                (OWNERSHIP_KEY, old and old.ownership, new.ownership),
+                (OWNERSHIP_KEY, old and old.ownership and old.ownership.value, new.ownership and new.ownership.value),
                 (GROUP_KEY, old and old.group, new.group),
                 (PARENT_KEY, old and old.parent, new.parent),
             ):
@@ -478,7 +520,9 @@ class StackCore:
         remote = git.config_get(branch, "remote")
         return git.config_get(branch, PULLED_KEY) if remote and git.tracks_same_name(branch, remote) else None
 
-    def ensure_upstream_not_rewritten(self, branch: str, parent: str, remote: str, allow: bool, command: str) -> None:
+    def ensure_upstream_not_rewritten(
+        self, branch: str, parent: str, remote: str, allow: bool, command: SyncCommand
+    ) -> None:
         """Refuse ambiguous upstream changes until the user explicitly chooses to pull them."""
         git = self.git
         if git.remote_branch(branch) is None:
@@ -496,13 +540,15 @@ class StackCore:
         raise StackError(
             f"{branch}'s upstream has unseen commits after its history was rewritten or its previous tip is unknown; "
             f"inspect `git log --left-right --oneline {branch}...{upstream_name}`. "
-            f"To pull them, rerun `git stack {command} --rewritten-upstream`; "
+            f"To pull them, rerun `git stack {command.value} --rewritten-upstream`; "
             "to replace the remote with local history, use `git stack push --force`"
         )
 
-    def pull_upstream(self, branch: str, parent: str, remote: str, pull_tracked_upstream: bool, command: str) -> bool:
+    def pull_upstream(
+        self, branch: str, parent: str, remote: str, pull_tracked_upstream: bool, command: SyncCommand
+    ) -> bool:
         """Cherry-pick commits that others pushed to branch's upstream onto branch,
-        for command (sync or pull), which its messages say to rerun.
+        for command, which its messages say to rerun.
 
         Uses the branch's configured remote-tracking upstream, which can have
         a different name. Commits already in its stack parent are not replayed.
@@ -527,7 +573,7 @@ class StackCore:
         ):
             raise StackError(
                 f"{branch}'s upstream has unseen commits from before it was re-tracked; "
-                f"inspect them before proceeding. If they are wanted, rerun `git stack {command} --pull-tracked-upstream`; "
+                f"inspect them before proceeding. If they are wanted, rerun `git stack {command.value} --pull-tracked-upstream`; "
                 "if they are obsolete copies of your own work, use `git stack push --force` to replace them"
             )
         if (worktree := git.other_worktree_of(branch)) is not None:
@@ -550,7 +596,7 @@ class StackCore:
             return True
         if git.operation_in_progress():
             stopped = self.stopped(
-                f"pulling upstream commits into {branch}", "cherry-pick", f"rerun `git stack {command}`"
+                f"pulling upstream commits into {branch}", "cherry-pick", f"rerun `git stack {command.value}`"
             )
             raise StackError(
                 f"{stopped}\nIf these are old copies of your own rewritten commits, "
@@ -724,12 +770,11 @@ class StackCore:
         self,
         branch: str,
         stacks: Stacks,
-        delete: str | None,
+        delete: Delete | None,
         allow_different_upstream: bool = False,
         confirmed: bool = True,
     ) -> bool:
-        """Stop tracking merged branch, deleting what delete ("local", "remote" or
-        "both") says, and moving its children onto its parent (see remove_merged).
+        """Stop tracking merged branch, deleting what delete says, and moving its children onto its parent (see remove_merged).
         Returns False, leaving branch alone, if its remote branch couldn't be
         deleted.
 
@@ -744,7 +789,7 @@ class StackCore:
             if delete is not None:
                 self.emit(events.NotDeletedUnconfirmedMerge(branch, parent))
             return True
-        delete_local = delete in ("local", "both")
+        delete_local = delete is not None and delete.deletes_local
         remote = git.remote_branch(branch)
         if remote is None or (not allow_different_upstream and not git.tracks_same_name(branch, remote[0])):
             self.remove_merged(branch, stacks, delete_local)
@@ -756,7 +801,7 @@ class StackCore:
         if ref == root_ref:
             self.remove_merged(branch, stacks, delete_local)
             return True
-        if delete in ("remote", "both"):
+        if delete is not None and delete.deletes_remote:
             default = git.remote_default_branch(remote_name)
             if default is None:
                 raise StackError(f"can't determine {remote_name}'s default branch; refusing to delete {upstream}")

@@ -6,6 +6,7 @@ import pathlib
 import pytest
 
 from git_stack import events
+from git_stack.core import Delete
 from git_stack.errors import StackError
 from git_stack.git import GitClient
 from git_stack.stack import StackClient
@@ -101,7 +102,7 @@ def test_sync_delete_untracks_but_keeps_merged_branch_in_other_worktree(
     worktree = add_worktree(repo, "pr1")
     repo.squash_merge_on_forge("pr1")
 
-    client.sync(delete="local")
+    client.sync(delete=Delete.LOCAL)
 
     assert events.NotDeletedInOtherWorktree("pr1", str(worktree)) in emitted
     repo.assert_untracked("pr1")
@@ -116,7 +117,7 @@ def test_deleting_current_branch_skips_child_in_other_worktree(repo: Repo, clien
     repo.git("switch", "--quiet", "pr1")
     repo.squash_merge_on_forge("pr1")
 
-    client.sync(delete="local", push=False)
+    client.sync(delete=Delete.LOCAL, push=False)
 
     assert repo.git("branch", "--show-current") == "main"
     assert not repo.git("branch", "--list", "pr1")

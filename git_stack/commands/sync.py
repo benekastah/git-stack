@@ -11,6 +11,7 @@ from git_stack.commands import (
     add_stack_arguments,
 )
 from git_stack.commands.info import print_tree
+from git_stack.core import Delete
 from git_stack.git import DEFAULT_REMOTE
 from git_stack.stack import StackClient, SyncResult
 
@@ -64,7 +65,7 @@ def run(stack: StackClient, args: Args) -> SyncResult:
         args.groups,
         remote=args.remote or DEFAULT_REMOTE,
         only_remote=args.remote is not None,
-        delete=args.delete,
+        delete=Delete(args.delete) if args.delete else None,
         latest=args.latest,
         push=True,
         ignore_reverts=args.ignore_reverts,

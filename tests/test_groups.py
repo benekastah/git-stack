@@ -2,6 +2,7 @@
 
 import pytest
 
+from git_stack.core import Delete
 from git_stack.errors import StackError
 from git_stack.stack import StackClient
 from tests.helpers import Repo
@@ -43,7 +44,7 @@ def test_sync_refuses_to_reuse_an_unrelated_group_name(repo: Repo, client: Stack
     repo.git("switch", "--quiet", "b")
 
     with pytest.raises(StackError, match="group a already exists"):
-        client.sync(delete="both")
+        client.sync(delete=Delete.BOTH)
     assert repo.config("b", "stackParent") == "a"
     assert repo.git("rev-parse", "--verify", "refs/heads/a")
     assert repo.git("rev-parse", "--verify", "refs/heads/a", cwd=repo.origin)

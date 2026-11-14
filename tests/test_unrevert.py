@@ -5,6 +5,7 @@ import pytest
 from git_stack import events
 from git_stack.errors import StackError
 from git_stack.stack import StackClient
+from git_stack.stacks import Ownership
 from tests.helpers import Repo
 
 
@@ -42,7 +43,7 @@ def test_unrevert_brings_back_a_branch_and_moves_the_stack_onto_it(
 
 def test_unrevert_requires_override_for_a_shared_stack(repo: Repo, client: StackClient) -> None:
     revert = merge_and_revert_pr1(repo, client)
-    client.set_ownership("shared")
+    client.set_ownership(Ownership.SHARED)
     before = repo.git("rev-parse", "refs/heads/pr2")
 
     with pytest.raises(StackError, match="unrevert --allow-shared"):
@@ -56,13 +57,13 @@ def test_unrevert_requires_override_for_a_shared_stack(repo: Repo, client: Stack
 
 def test_unrevert_requires_override_when_destination_is_shared(repo: Repo, client: StackClient) -> None:
     repo.make_stack()
-    client.set_ownership("owned")
+    client.set_ownership(Ownership.OWNED)
     repo.git("switch", "--quiet", "main")
     client.branch("shared")
     repo.write("d", "shared\n")
     repo.git("add", "d")
     repo.git("commit", "--quiet", "-m", "shared")
-    client.set_ownership("shared")
+    client.set_ownership(Ownership.SHARED)
     before = repo.git("rev-parse", "pr1")
 
     with pytest.raises(StackError, match="unrevert --allow-shared"):
