@@ -1,5 +1,7 @@
 """git stack sync."""
 
+from collections.abc import Callable
+
 import pytest
 
 from git_stack import events
@@ -335,7 +337,9 @@ def test_rewritten_upstream_requires_explicit_choice(
     upstream = repo.git("rev-parse", "pr1", cwd=repo.origin)
 
     refused = repo.stack(command, expect_success=False)
-    assert "--rewritten-upstream" in refused.stderr
+    assert f"rerun `git stack {command} --rewritten-upstream`" in refused.stderr
+    if command == "pull":
+        assert "git stack sync" not in refused.stderr
     assert repo.git("rev-parse", "pr1") == before
     assert repo.git("rev-parse", "pr1", cwd=repo.origin) == upstream
     if command == "sync":
@@ -736,6 +740,52 @@ def test_sync_requires_a_choice_before_pulling_commits_seen_when_retracked(repo:
     assert repo.git("rev-parse", "refs/heads/pr1") == before
     client.sync(pull_tracked_upstream=True)
     assert "remote" in repo.own_commits("pr1", "main")
+
+
+def make_shared_stack(repo: Repo, client: StackClient) -> None:
+    client.branch("pr1")
+    repo.commit("a", "local\n", "local")
+    client.push()
+    client.set_ownership("shared")
+
+
+def make_retracked_branch_with_unseen_commits(repo: Repo, client: StackClient) -> None:
+    client.branch("pr1")
+    repo.commit("a", "local\n", "local")
+    client.push()
+    repo.commit_on_forge("pr1", "b", "remote\n", "remote")
+    repo.git("fetch", "--quiet")
+    client.track("main", base=repo.git("rev-parse", "refs/heads/main"))
+
+
+def make_conflicting_upstream_commit(repo: Repo, client: StackClient) -> None:
+    client.branch("pr1")
+    repo.commit("a", "local\n", "local")
+    client.push()
+    repo.commit_on_forge("pr1", "a", "collab\n", "collab")
+    repo.commit("a", "local again\n", "local again")
+
+
+@pytest.mark.parametrize("command", ["pull", "sync"])
+@pytest.mark.parametrize(
+    ("setup", "suggestion"),
+    [
+        (make_shared_stack, "rerun `git stack {command} --allow-shared`"),
+        (make_retracked_branch_with_unseen_commits, "rerun `git stack {command} --pull-tracked-upstream`"),
+        (make_conflicting_upstream_commit, "then rerun `git stack {command}`"),
+    ],
+)
+def test_pull_and_sync_suggest_rerunning_themselves(
+    repo: Repo, client: StackClient, command: str, setup: Callable[[Repo, StackClient], None], suggestion: str
+) -> None:
+    # Suggesting sync after pull would push, which pull was chosen not to do.
+    setup(repo, client)
+
+    result = repo.stack(command, expect_success=False)
+
+    assert suggestion.format(command=command) in result.stderr
+    if command == "pull":
+        assert "git stack sync" not in result.stderr
 
 
 @pytest.mark.parametrize("command", ["sync", "push"])

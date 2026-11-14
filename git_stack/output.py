@@ -67,7 +67,7 @@ def message(event: events.Event) -> str:  # noqa: C901
         case events.NotPulledInOtherWorktree():
             return (
                 f"not pulling new commits from {event.branch}'s upstream: it's checked out in "
-                f"{event.path}. Run `git stack sync` there, or switch that worktree to another "
+                f"{event.path}. Rerun this command there, or switch that worktree to another "
                 f"branch and rerun it here"
             )
         case events.NotDeletedInOtherWorktree():

@@ -567,7 +567,7 @@ class StackCore:
         remote = git.config_get(branch, "remote")
         return git.config_get(branch, PULLED_KEY) if remote and git.tracks_same_name(branch, remote) else None
 
-    def ensure_upstream_not_rewritten(self, branch: str, parent: str, remote: str, allow: bool) -> None:
+    def ensure_upstream_not_rewritten(self, branch: str, parent: str, remote: str, allow: bool, command: str) -> None:
         """Refuse ambiguous upstream changes until the user explicitly chooses to pull them."""
         git = self.git
         if git.remote_branch(branch) is None:
@@ -585,12 +585,13 @@ class StackCore:
         raise StackError(
             f"{branch}'s upstream has unseen commits after its history was rewritten or its previous tip is unknown; "
             f"inspect `git log --left-right --oneline {branch}...{upstream_name}`. "
-            "To pull them, rerun `git stack pull --rewritten-upstream` (or `git stack sync --rewritten-upstream`); "
+            f"To pull them, rerun `git stack {command} --rewritten-upstream`; "
             "to replace the remote with local history, use `git stack push --force`"
         )
 
-    def pull_upstream(self, branch: str, parent: str, remote: str, pull_tracked_upstream: bool = False) -> bool:
-        """Cherry-pick commits that others pushed to branch's upstream onto branch.
+    def pull_upstream(self, branch: str, parent: str, remote: str, pull_tracked_upstream: bool, command: str) -> bool:
+        """Cherry-pick commits that others pushed to branch's upstream onto branch,
+        for command (sync or pull), which its messages say to rerun.
 
         Uses the branch's configured remote-tracking upstream, which can have
         a different name. Commits already in its stack parent are not replayed.
@@ -615,7 +616,7 @@ class StackCore:
         ):
             raise StackError(
                 f"{branch}'s upstream has unseen commits from before it was re-tracked; "
-                "inspect them before proceeding. If they are wanted, rerun `git stack sync --pull-tracked-upstream`; "
+                f"inspect them before proceeding. If they are wanted, rerun `git stack {command} --pull-tracked-upstream`; "
                 "if they are obsolete copies of your own work, use `git stack push --force` to replace them"
             )
         if (worktree := git.other_worktree_of(branch)) is not None:
@@ -637,7 +638,9 @@ class StackCore:
             git.config_unset(branch, TRACK_UPSTREAM_KEY)
             return True
         if git.operation_in_progress():
-            stopped = self.stopped(f"pulling upstream commits into {branch}", "cherry-pick", "rerun `git stack sync`")
+            stopped = self.stopped(
+                f"pulling upstream commits into {branch}", "cherry-pick", f"rerun `git stack {command}`"
+            )
             raise StackError(
                 f"{stopped}\nIf these are old copies of your own rewritten commits, "
                 "run `git cherry-pick --abort` and inspect the remote history before using `git stack push --force`."
