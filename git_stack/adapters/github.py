@@ -637,6 +637,10 @@ class GitHubAdapter(GitAdapter):
                 ) from e
             self.unstack(pr.number, allowed or set())
             self.gh(*edit)
+        self.changes.append(
+            f"#{pr.number}'s base was changed from {pr.base} to {base} "
+            f"(undo with `gh pr edit {pr.number} --repo {self.repo} --base {pr.base}`)"
+        )
         prs[branch] = replace(pr, base=base)
         self.core.emit(events.PullRequestRetargeted(branch, pr.number, base))
 
@@ -668,6 +672,10 @@ class GitHubAdapter(GitAdapter):
         if current != {n for n, _ in github_stack.entries}:
             raise StackError(f"GitHub stack {stack} changed while checking it; retry the command")
         self.gh("api", "--hostname", self.host, "-X", "POST", f"{self.stacks_path()}/{stack}/unstack")
+        self.changes.append(
+            f"GitHub stack {stack} was unstacked (`git stack prs` links its pull requests into one again, "
+            "once they're pushed)"
+        )
         self.core.emit(events.GitHubStackUnstacked(stack, number))
 
     def stacks_path(self) -> str:

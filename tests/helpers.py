@@ -58,6 +58,13 @@ class Repo:
     def write(self, name: str, content: str) -> None:
         (self.path / name).write_text(content)
 
+    def add_hook(self, repository: pathlib.Path, name: str, script: str) -> None:
+        """Make script, a shell script, repository's hook name (e.g. pre-push)."""
+        hook = repository / ("hooks" if repository == self.origin else ".git/hooks") / name
+        # With \n line endings, which sh needs, even on Windows.
+        hook.write_text(script, encoding="utf-8", newline="\n")
+        hook.chmod(0o755)
+
     def commit(self, name: str, content: str, message: str) -> None:
         self.write(name, content)
         self.git("commit", "--quiet", "-am", message)
@@ -230,6 +237,12 @@ class FakeGitHub:
     def stacks(self) -> list[list[int]]:
         """The pull requests of each stack on GitHub, bottom first."""
         return [stack["prs"] for stack in self.load().get("stacks", [])]
+
+    def fail_editing(self, *numbers: int) -> None:
+        """Make gh fail to edit the pull requests numbers."""
+        state = self.load()
+        state["fail_edits"] = list(numbers)
+        self.save(state)
 
     def fail_opening(self, *heads: str) -> None:
         """Make gh fail to open pull requests of the branches heads."""

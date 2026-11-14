@@ -252,6 +252,15 @@ class GitClient:
         """Delete ref on remote, failing if it no longer points at tip."""
         return self.passthrough("push", f"--force-with-lease={ref}:{tip}", remote, f":{ref}")
 
+    def push_would_fail(self, *args: str) -> str | None:
+        """Why `git push <args>` would fail (git's error output), found with a
+        dry run, or None if it wouldn't. The dry run skips the pre-push hook,
+        which the real push runs, so it doesn't run twice."""
+        result = subprocess.run(
+            self._command("push", "--dry-run", "--no-verify", *args), capture_output=True, text=True, check=False
+        )
+        return result.stderr.strip() if result.returncode != 0 else None
+
     def fetch(self, remote: str) -> None:
         if not self.passthrough("fetch", "--prune", remote):
             raise StackError(f"fetching {remote} failed")
