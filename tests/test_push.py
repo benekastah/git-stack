@@ -183,6 +183,22 @@ def test_push_refuses_to_overwrite_someone_elses_branch_of_the_same_name(
     assert repo.remote_subject("fix") == "theirs"
 
 
+@pytest.mark.parametrize("force", [False, True])
+def test_push_refuses_an_upstream_that_isnt_a_branch(repo: Repo, client: StackClient, force: bool) -> None:
+    client.branch("feature")
+    repo.commit("a", "mine\n", "mine")
+    repo.push_someone_elses_branch("feature")
+    # Names origin, but git resolves no upstream from a merge ref that isn't a
+    # branch, so origin/feature isn't feature's.
+    repo.git("config", "branch.feature.remote", "origin")
+    repo.git("config", "branch.feature.merge", "refs/tags/unrelated")
+
+    result = repo.stack("push", *(["--force"] if force else []), expect_success=False)
+
+    assert "feature's upstream on origin isn't a branch" in result.stderr
+    assert repo.remote_subject("feature") == "theirs"
+
+
 def test_push_refuses_outside_a_stack(repo: Repo, client: StackClient) -> None:
     repo.make_stack()
     repo.git("switch", "--quiet", "main")

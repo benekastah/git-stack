@@ -208,6 +208,16 @@ class GitClient:
             self.config_get(branch, "remote") == remote and self.config_get(branch, "merge") == f"refs/heads/{branch}"
         )
 
+    def has_branch_upstream(self, branch: str, remote: str) -> bool:
+        """Whether branch's upstream is a branch on remote that git resolves to
+        its remote-tracking branch, rather than config that only names remote
+        (e.g. with a merge ref that isn't a branch, which git ignores)."""
+        ref = self.config_get(branch, "merge")
+        if self.config_get(branch, "remote") != remote or ref is None or not ref.startswith("refs/heads/"):
+            return False
+        upstream = self.run("rev-parse", "--symbolic-full-name", f"{branch}@{{upstream}}", check=False)
+        return upstream == f"refs/remotes/{remote}/{ref.removeprefix('refs/heads/')}"
+
     def remote_branch_name(self, branch: str, remote: str) -> str:
         """The configured branch name on remote, or branch if it has no such upstream."""
         ref = self.config_get(branch, "merge")
