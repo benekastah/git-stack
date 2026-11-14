@@ -119,6 +119,12 @@ main
     └── pr2b *
 ```
 
+Commands that take `--remote` work with the remote it names. Without it, they
+use the remote the branches they act on track, if there's one, or else the one
+their stacks' roots (e.g. `main`) track, if there's one, or else `origin`, or
+the repository's only remote if it has no `origin`. So a clone whose remote
+has another name (e.g. `upstream`) needs no `--remote`.
+
 ### Groups
 
 When a branch on `main` merges, the branches stacked on it each become the
@@ -236,7 +242,7 @@ entry, it's their merge-base.
 - Nothing is written unless every branch can be tracked, so a bad argument
   doesn't leave the stack half-tracked.
 
-### `git stack import [<branch>...] [--pr <number|url>]... [--author <login>] [--remote origin] [-n | -f]`
+### `git stack import [<branch>...] [--pr <number|url>]... [--author <login>] [--remote <name>] [-n | -f]`
 
 Track open pull requests on GitHub, drafts included, as stacks: each pull
 request's branch on the branch it merges into. They're your own, or with
@@ -580,8 +586,9 @@ git stack sync -d both          # ...and their remote branches
 - Only the current stack is synced; to untrack merged branches in every stack,
   use `clean`. If its branches track multiple remotes, sync refuses before
   changing anything; use `--remote <name>` to sync only that remote's branches.
-  It refuses to untrack a merged branch if that would reparent a child outside
-  the selected remote.
+  Without `--remote`, it fetches only the remotes its branches and their roots
+  track. It refuses to untrack a merged branch if that would reparent a child
+  outside the selected remote.
 - After tracking a branch with `--base`, `sync` refuses to pull unseen commits
   that were already on its upstream at that point: they could be old copies of
   rewritten commits. Inspect them, then use `--pull-tracked-upstream` if you
@@ -651,7 +658,7 @@ commits are new work or old copies. Inspect the histories, then pass
 `--rewritten-upstream` to replay the unseen commits, or use
 `git stack push --force` to explicitly replace the remote with local history.
 
-### `git stack clean [--remote origin] [-d local|remote|both] [--ignore-revert <branch>] [--allow-shared]`
+### `git stack clean [--remote <name>] [-d local|remote|both] [--ignore-revert <branch>] [--allow-shared]`
 
 Fetch with `--prune`, fast-forward every stack's root, and stop tracking merged
 branches in every stack, moving their children onto their parent.
@@ -701,7 +708,9 @@ git stack push --prs            # then open pull requests, as `git stack prs` do
   git ignores) is refused, even with `--force`, rather than pushed to the
   remote branch of the same name.
 - A stack tracking multiple remotes is refused; use `--remote <name>` to select
-  one remote and branches without an upstream, in one atomic push.
+  one remote and branches without an upstream, in one atomic push. Without
+  `--remote`, branches without an upstream go to the remote the stack's other
+  branches track, or else the one its root tracks, or else `origin`.
 - If a pull request's parent tracks another remote, git-stack refuses to
   retarget it instead of guessing its base on the selected remote.
 - It ends by showing the stacks it pushed, as `info` does.
@@ -729,7 +738,7 @@ git stack push --prs            # then open pull requests, as `git stack prs` do
   stack parent (e.g. at `main` once the parent PR was merged), and lists the
   branches that have none, which `git stack prs` opens.
 - `--prs` (or `--pr`) then does what
-  [`git stack prs`](#git-stack-prs-branchglob--g-group---remote-origin--n) does
+  [`git stack prs`](#git-stack-prs-branchglob--g-group---remote-name--n---rebuild-stack) does
   for the stacks it pushed, so it's `git stack push` and `git stack prs` in
   one. Without the GitHub adapter, it still pushes and shows the stacks, but
   then fails, saying it didn't open or update any pull requests.
@@ -765,7 +774,7 @@ git stack ungroup search-ui             # take search-ui's stack back out
   mistake. To merge them, run `git stack group add --move <name> -g <other group>`.
 - `info` shows a group once it has two or more stacks.
 
-### `git stack prs [<branch|glob>...] [-g <group>] [--remote origin] [-n] [--rebuild-stack]`
+### `git stack prs [<branch|glob>...] [-g <group>] [--remote <name>] [-n] [--rebuild-stack]`
 
 Open a draft pull request on GitHub for each branch in the current stack (or
 the ones named, see [Groups](#groups)) that has none, into its stack parent,
@@ -863,7 +872,7 @@ git stack prs
 - `-n`/`--dry-run` shows the stacks with the pull requests it would open, with
   their titles, in place of their links, without opening them.
 
-### `git stack unrevert <name> <revert>... [--from <branch>] [--stack <branch>...] [--remote origin] [--allow-shared]`
+### `git stack unrevert <name> <revert>... [--from <branch>] [--stack <branch>...] [--remote <name>] [--allow-shared]`
 
 Create `<name>` on `--from`, with commits that revert the given reverts, to
 bring back the changes of a merged branch they reverted, and move the
@@ -1007,7 +1016,7 @@ What each command's result has, besides `type` and `events`:
 | --- | --- |
 | `branch` | `branch`, the `parent` it was created on, and its `group` (or `null`) |
 | `track` | `tracked`: each branch's `branch`, `parent` and `base` |
-| `import` | `stacks`, and `steps`, one for each pull request: its `branch`, the `parent` it merges into, its `number`, and the `action`: `create`, `track`, `already-tracked`, `parent-differs` or `skip`. `base` is the commit a branch it creates or tracks is built on, `tracked_parent` the parent a `parent-differs` branch is tracked on instead, and `reason` why it skipped one; each is `null` otherwise. `other_authors` has the pull request's author if it isn't you (so it needs `-f`), and is empty otherwise. `without_prs` has the same for the branches without a pull request that the pull requests are built on, without `number` or `tracked_parent`, and `create`, `create-root` or `skip`; their `other_authors` are email addresses, and `parent` is `null` for a root or if it couldn't tell which branch one is built on |
+| `import` | `stacks`, and `steps`, one for each pull request: its `branch`, the `parent` it merges into, its `number`, and the `action`: `create`, `track`, `already-tracked`, `parent-differs` or `skip`. `base` is the commit a branch it creates or tracks is built on, `tracked_parent` the parent a `parent-differs` branch is tracked on instead, and `reason` why it skipped one; each is `null` otherwise. `other_authors` has the pull request's author if it isn't you (so it needs `-f`), and is empty otherwise. `without_prs` has the same for the branches without a pull request that the pull requests are built on, without `number` or `tracked_parent`, and `create`, `create-root` or `skip`; their `other_authors` are email addresses, and `parent` is `null` for a root or if it couldn't tell which branch one is built on. `remote` is the remote it imported from |
 | `untrack` | `untracked`: each `branch`, and the `children` still stacked on it |
 | `rename` | `old`, `new`, the `children` moved onto it, and the `upstream` it no longer tracks (or `null`) |
 | `group add` | the `group`, and the `bottoms` of the stacks put in it |
@@ -1088,7 +1097,7 @@ without committing anything, and git-stack's rebases pick it up automatically.
 If `pr1` is merged and then reverted on `main` (all of it, or some of its
 commits), `info` shows it as `(merged, then reverted)`, and `sync`, `clean`,
 `restack`, `push` and `prs` leave it, and the branches stacked on it, alone.
-Their warning gives the [`unrevert`](#git-stack-unrevert-name-revert---from-branch---stack-branch---remote-origin)
+Their warning gives the [`unrevert`](#git-stack-unrevert-name-revert---from-branch---stack-branch---remote-name---allow-shared)
 command that brings it back as a new branch, with `pr2` moved onto it:
 
 ```sh

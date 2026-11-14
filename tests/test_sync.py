@@ -213,6 +213,46 @@ def test_sync_keeps_a_branch_whose_merge_changed_more_than_its_commits(repo: Rep
     assert repo.git("show", "feature:d") == "resolved"
 
 
+def test_push_works_without_an_origin_remote(repo: Repo, client: StackClient) -> None:
+    repo.git("remote", "rename", "origin", "upstream")
+    client.branch("feature")
+    repo.commit("a", "feature\n", "feature")
+
+    # The first push goes to the remote main tracks, there being no other.
+    repo.stack("push")
+
+    assert repo.git("rev-parse", "feature", cwd=repo.origin) == repo.git("rev-parse", "feature")
+    assert repo.git("rev-parse", "--abbrev-ref", "feature@{upstream}") == "upstream/feature"
+
+
+def test_clean_works_without_an_origin_remote(repo: Repo, client: StackClient) -> None:
+    repo.git("remote", "rename", "origin", "upstream")
+    client.branch("feature")
+    repo.commit("a", "feature\n", "feature")
+    repo.git("push", "--quiet", "--set-upstream", "upstream", "feature")
+    repo.merge_on_forge("feature")
+    repo.git("switch", "--quiet", "main")
+
+    repo.stack("clean", "-d", "local")
+
+    assert repo.git("branch", "--list", "feature") == ""
+
+
+def test_pull_and_sync_work_without_an_origin_remote(repo: Repo, client: StackClient) -> None:
+    repo.git("remote", "rename", "origin", "upstream")
+    client.branch("feature")
+    repo.commit("a", "feature\n", "feature")
+    repo.git("push", "--quiet", "--set-upstream", "upstream", "feature")
+    repo.commit_on_forge("feature", "b", "collaborator\n", "collaborator")
+
+    repo.stack("pull")
+    assert repo.git("show", "feature:b") == "collaborator"
+
+    repo.commit("a", "later\n", "later")
+    repo.stack("sync")
+    assert repo.git("rev-parse", "feature", cwd=repo.origin) == repo.git("rev-parse", "feature")
+
+
 def test_sync_refuses_multiple_upstream_remotes_before_changing_branches(repo: Repo, client: StackClient) -> None:
     repo.make_stack()
     client.push()

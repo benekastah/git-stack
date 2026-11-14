@@ -9,14 +9,13 @@ from git_stack.commands import (
     add_json_argument,
 )
 from git_stack.commands.info import print_tree
-from git_stack.git import DEFAULT_REMOTE
 from git_stack.stack import BranchInfo, StackClient
 
 
 class Args(argparse.Namespace):
     """The arguments register's parser produces."""
 
-    remote: str
+    remote: str | None
     delete: str | None
     ignore_reverts: list[str]
     json: bool
@@ -25,7 +24,7 @@ class Args(argparse.Namespace):
 
 def register(subparsers: Subparsers) -> None:
     p = subparsers.add_parser("clean", help="fetch and untrack merged branches in every stack, without restacking")
-    p.add_argument("--remote", default=DEFAULT_REMOTE)
+    p.add_argument("--remote")
     add_delete_argument(p)
     add_ignore_revert_argument(p)
     add_json_argument(p)
