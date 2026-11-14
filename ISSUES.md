@@ -2,6 +2,61 @@
 
 Most severe first.
 
+## A stale remote HEAD can bypass default-branch protection
+
+The push and sync safeguards trust the local `refs/remotes/<remote>/HEAD` if
+it exists, without checking whether the server's default branch has changed.
+Git fetch does not update this symbolic ref automatically. A feature branch
+tracking the server's new default can therefore be pushed to it by `sync`
+without `--force`. The merged-branch deletion path uses the same stale marker:
+with `-d remote` it can delete the server's actual default branch if the server
+permits it and the stack root has a different name.
+
+Reproduced both outcomes in disposable repositories whose local remote HEAD
+pointed to `old` while the server's HEAD pointed to `main`. Resolve the current
+server default before pushing or deleting, and fail safely if it cannot be
+verified. The check must not treat the cached symbolic ref as authoritative.
+
+## A merged GitHub PR can hide merge-only changes made afterward
+
+When GitHub reports a pull request merged, `GitHubAdapter.unmerged_commits`
+checks for later work with `--no-merges`. A subsequent merge commit can contain
+changes absent from both its parents, such as conflict resolutions. If its
+other commits are already in the merged PR or parent, git-stack reports the
+branch merged despite those changes. `sync -d both` or `clean -d both` can
+then delete both local and remote copies of the branch.
+
+Reproduced through `sync` and `clean` with both local-only and remote-only
+merge-resolution changes. Check for unaccounted merge commits or their full
+tree changes before treating a GitHub-merged branch as safe to untrack or
+delete; the upstream pull guard alone doesn't cover this merge-detection path.
+
+## Patch-based merge detection can discard merge-only local changes
+
+The git adapter's patch-based landing check compares the parent's commits with
+the branch's non-merge commits. If the parent independently acquired all those
+patches, it can classify the branch as merged even though a merge commit on
+the branch made an additional change that is absent from the parent.
+`sync -d local` can then delete the only branch containing that change.
+
+Reproduced through `sync` with a merge-only edit that remained absent from
+the parent. Check the complete branch changes, including merge commits,
+before treating matching non-merge patches as evidence that it has landed.
+
+## Invalid upstream metadata can let `push --force` overwrite another branch
+
+`remote_branch_name` falls back to the local branch name when its configured
+merge ref is not under `refs/heads/`. The ownership check treats the mere
+presence of a matching `branch.<name>.remote` as proof that this fallback is
+the branch's upstream, even if Git resolves no upstream. Consequently,
+`push --force` can overwrite an unrelated remote branch with the same name.
+
+Reproduced with `branch.feature.remote=origin` and
+`branch.feature.merge=refs/tags/unrelated`: Git reported no upstream, but
+`push --force` replaced `origin/feature`. Require a valid, resolved remote
+branch ref before considering an existing destination to be the configured
+upstream; `--force` must not override the unrelated-branch check.
+
 ## A branch can look merged when its parent made the same change
 
 When the git adapter decides (with the GitHub adapter, that's a branch without
@@ -40,6 +95,16 @@ what `sync` would do to them anyway, but it's a change nobody asked for.
 Fast-forwarding only the trunks of the steps it creates or tracks would fix
 it.
 
+## `sync` and `pull` still fetch `origin` when the stack uses another remote
+
+When no `--remote` is given, `sync` infers the stack's configured upstream
+remote, but its fetch set still includes the default argument `origin`. In a
+clone created with a different remote name (for example, `upstream`) and no
+`origin`, both `sync` and `pull` fail trying to fetch the nonexistent remote,
+even when the stack and its root track `upstream`. Reproduced with a
+single-remote clone. Fetch only the remotes actually needed by the selected
+stack and roots when no remote was explicitly named.
+
 ## A failed push can leave pull requests retargeted or unstacked
 
 Before pushing, the GitHub adapter retargets pull requests whose new bases
@@ -53,6 +118,15 @@ GitHub changes or how to recover them.
 Preflight all possible failures, and report partial GitHub changes and recovery
 instructions if an operation still fails; restoring them automatically would
 need to account for concurrent edits on GitHub.
+
+## `pull` recovery messages can direct users to a pushing command
+
+`pull` runs the local portion of `sync`, but shared-stack refusals and some
+interrupted cherry-pick instructions still tell the user to rerun `git stack
+sync`. The re-track guard likewise recommends `sync --pull-tracked-upstream`.
+Following those instructions can push branches, although the user chose `pull`
+to keep the remote unchanged. Preserve the original command in recovery and
+refusal messages, and suggest the corresponding `pull` invocation.
 
 ## A change undone some other way can look like a revert
 
