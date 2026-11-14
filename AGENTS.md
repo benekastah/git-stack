@@ -82,7 +82,9 @@ Text meant for people (messages, `info`'s tree) can change.
 git-stack runs on Linux, macOS and Windows, and CI runs the tests on all
 three. Keep it that way:
 
-- Use `os.path` or `pathlib` for paths, not strings joined with `/`.
+- Use `pathlib.Path` and its `/` operator for paths, not `os.path` or strings
+  joined with `/`, and compare paths as `Path`s (resolved, if they may be
+  spelled differently), not as strings: git writes Windows paths with `/`.
 - Run git through `GitClient`, with arguments as a list, never through a shell,
   and don't call other Unix tools (`sed`, `grep`, ...) from Python.
 - Don't use Unix-only modules or calls (`fcntl`, `os.fork`, `signal`, ...). If

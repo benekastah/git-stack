@@ -1,7 +1,5 @@
 """git stack untrack."""
 
-import os
-
 import pytest
 
 from git_stack.errors import StackError
@@ -63,7 +61,7 @@ def test_untrack_removes_settings_the_config_cache_missed(repo: Repo, client: St
     repo.git("config", "branch.pr2.stackPulled", "abc")
     # As if the write left the config file looking unchanged, so the cache
     # missed it.
-    st = os.stat(os.path.join(client.git.common_dir(), "config"))
+    st = (client.git.common_dir() / "config").stat()
     client.git._config_stat = (st.st_ino, st.st_mtime_ns, st.st_size)
 
     client.untrack(["pr2"])
