@@ -12,6 +12,12 @@ jobs:
   check:
     name: ${{ matrix.os }}, Python ${{ matrix.python }}
     runs-on: ${{ matrix.os }}
+    env:
+      # pytest -n auto's workers, which would be one per CPU (3 or 4 on these
+      # runners). The tests spend most of their time waiting for the git
+      # processes they start, and the files they write, so more keep the CPUs
+      # busy.
+      PYTEST_XDIST_AUTO_NUM_WORKERS: 8
     strategy:
       fail-fast: false
       matrix:
