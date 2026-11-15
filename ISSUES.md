@@ -44,15 +44,6 @@ branch can't leave its settings behind, but every other read still trusts it.
 Comparing the file's contents (or a hash of them) instead of its metadata
 would rule out the missed write at little cost, since the file is small.
 
-## The check cache can leave temporary files behind
-
-`CheckCache._write` writes to a `mkstemp` file and renames it over
-`git-stack-cache.json`, but if the write or the rename fails (e.g. on Windows,
-while another process has the cache open), it ignores the error without
-removing the temporary file. Each failed write leaves another
-`.git-stack-cache-*` file in the git directory. Removing it in the `except`
-would fix it.
-
 ## Some git calls are repeated where they could be cached
 
 Each git call costs a process, and a few are made over and over in one
