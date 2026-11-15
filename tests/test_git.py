@@ -4,8 +4,6 @@ import json
 import os
 import pathlib
 import subprocess
-from collections.abc import Callable
-from typing import Any
 
 import pytest
 
@@ -35,22 +33,6 @@ def test_tests_ignore_a_hooks_repository(repo: Repo) -> None:
     assert not set(GIT_REPOSITORY_VARIABLES) & os.environ.keys()
     # As paths, since git writes Windows paths with forward slashes.
     assert pathlib.Path(repo.git("rev-parse", "--absolute-git-dir")).resolve() == (repo.path / ".git").resolve()
-
-
-@pytest.fixture
-def git_calls(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
-    """The git commands GitClient runs from now on, each without `git -C <dir>`
-    (which the tests' own git commands don't have)."""
-    calls: list[list[str]] = []
-    real: Callable[..., Any] = subprocess.run
-
-    def run(args: list[str], *rest: Any, **kwargs: Any) -> Any:
-        if args[:2] == ["git", "-C"]:
-            calls.append(args[3:])
-        return real(args, *rest, **kwargs)
-
-    monkeypatch.setattr(subprocess, "run", run)
-    return calls
 
 
 def test_snapshot_reads_refs_once(repo: Repo, git_calls: list[list[str]]) -> None:
