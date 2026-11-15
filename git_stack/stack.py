@@ -781,11 +781,11 @@ class StackClient(StackCore):
             raise StackError(f"{old} isn't a local branch")
         self.ensure_name_free_on_remotes(new)
         upstream = git.run("rev-parse", "--abbrev-ref", f"{old}@{{upstream}}", check=False) or None
-        before = self.stacks()
-        children = tuple(child for child in before if before.parent(child) == old)
         git.run("branch", "--move", old, new)
-        # The move took old's settings, and so its place in its stack, with it.
+        # The move took old's settings, and so its place in its stack, with
+        # it, but the branches stacked on it still name old.
         stacks = self.stacks()
+        children = tuple(stacks.children(old))
         for child in children:
             stacks.reparent(child, new)
         self.save(stacks)

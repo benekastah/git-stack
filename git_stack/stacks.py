@@ -230,7 +230,7 @@ class Stacks:
         merged) without changing anything: saving it would untrack branch.
         """
         new_parent = self._nodes[branch].parent
-        children = [name for name, node in self._nodes.items() if node.parent == branch]
+        children = self.children(branch)
         for child in children:
             self._set(replace(self._nodes[child], parent=new_parent))
         self._remove(branch)
@@ -248,7 +248,7 @@ class Stacks:
         self.ensure_group_available_for_merge(branch)
         new_parent = self._nodes[branch].parent
         group = self._nodes[branch].group or branch
-        children = [name for name, node in self._nodes.items() if node.parent == branch]
+        children = self.children(branch)
         for child in children:
             self.reparent(child, new_parent)
             if new_parent not in self._nodes:

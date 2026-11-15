@@ -671,34 +671,12 @@ class StackCore:
             self.emit(events.FastForwarded(root, upstream))
 
     def forget(self, branch: str) -> None:
-        """Remove all of branch's stack metadata."""
-        config = self.git.branch_config()
-        for key in (
-            PARENT_KEY,
-            BASE_KEY,
-            PULLED_KEY,
-            PULLED_UPSTREAM_KEY,
-            TRACK_UPSTREAM_KEY,
-            PENDING_PARENT_KEY,
-            PENDING_BASE_KEY,
-            PENDING_RESTACK_FROM_KEY,
-            PENDING_PULL_FROM_KEY,
-            PENDING_PULLED_KEY,
-            PENDING_PULL_UPSTREAM_KEY,
-            PENDING_PULL_IDENTITIES_KEY,
-            LEGACY_PULL_IDENTITIES_KEY,
-            GROUP_KEY,
-            OWNERSHIP_KEY,
-            # Versions before the check cache kept these in git config too.
-            CONFLICT_CHECK_KEY,
-            "stackLandedCheck",
-            REVERTED_CHECK_KEY,
-            # Older versions recorded the branch each branch was stacked on until
-            # it merged, to notice a later revert of it.
-            "stackMergedParent",
-            "stackMergedParentRevertedCheck",
-        ):
-            if (branch, key.lower()) in config:
+        """Remove all of branch's stack metadata: each of its settings that
+        starts with "stack", as all of git-stack's do (and older versions'
+        did). Read afresh rather than from the cache (see
+        GitClient.branch_config), so none is left behind."""
+        for name, key in list(self.git.branch_config(fresh=True)):
+            if name == branch and key.startswith("stack"):
                 self.git.config_unset(branch, key)
         self.checks.forget(branch)
 
@@ -714,13 +692,16 @@ class StackCore:
         git = self.git
         new_parent = stacks.parent(branch)
         children = tuple(stacks.remove_merged(branch))
-        self.save(stacks)
         if delete and (worktree := git.other_worktree_of(branch)) is not None:
             self.emit(events.NotDeletedInOtherWorktree(branch, worktree))
             delete = False
         if not delete:
+            self.save(stacks)
             self.emit(events.Untracked(branch, new_parent, children, deleted_tip=None))
             return
+        # Saved only once it's deleted, so if switching away from it or
+        # deleting it fails, it's still tracked, and the next sync or clean
+        # finds it merged again.
         if git.current_branch() == branch:
             target = next(
                 (
@@ -736,6 +717,7 @@ class StackCore:
                 git.run("switch", "--quiet", "--detach", f"refs/heads/{new_parent}")
         tip = git.tip(branch)
         git.run("branch", "--quiet", "--delete", "--force", branch)
+        self.save(stacks)
         self.emit(events.Untracked(branch, new_parent, children, deleted_tip=tip))
 
     def untrack_merged(
