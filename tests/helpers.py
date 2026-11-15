@@ -1,18 +1,57 @@
 """Test repositories and a fake GitHub, which tests/conftest.py provides as fixtures."""
 
 import importlib
+import io
 import json
+import os
 import pathlib
 import subprocess
 import sys
+import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any
 
 import pytest
 
-from git_stack import events
+from git_stack import cli, events
 from git_stack.git import GitClient
 from git_stack.stack import BranchInfo, StackClient
+
+
+@contextmanager
+def captured_output() -> Iterator[list[str]]:
+    """Capture what this process, and the processes it starts, write to stdout
+    and stderr, as [stdout, stderr], filled in on leaving. Their file
+    descriptors are pointed at files for the duration, and sys.stdout and
+    sys.stderr write to them as UTF-8, as git_stack.cli.main makes them."""
+    sys.stdout.flush()
+    sys.stderr.flush()
+    saved_streams = sys.stdout, sys.stderr
+    saved_fds = os.dup(1), os.dup(2)
+    output: list[str] = []
+    with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
+        try:
+            os.dup2(out.fileno(), 1)
+            os.dup2(err.fileno(), 2)
+            with (
+                open(1, "w", encoding="utf-8", closefd=False) as stdout,
+                open(2, "w", encoding="utf-8", closefd=False) as stderr,
+            ):
+                sys.stdout, sys.stderr = stdout, stderr
+                try:
+                    yield output
+                finally:
+                    sys.stdout, sys.stderr = saved_streams
+        finally:
+            for fd, saved in zip((1, 2), saved_fds, strict=True):
+                os.dup2(saved, fd)
+                os.close(saved)
+        for f in (out, err):
+            f.seek(0)
+            # Text mode, as subprocess.run's, so Windows' \r\n reads as \n.
+            output.append(io.TextIOWrapper(f, encoding="utf-8").read())
 
 
 def install_command(bin_dir: pathlib.Path, name: str, module: str) -> None:
@@ -60,8 +99,21 @@ class Repo:
         return result.stdout.strip()
 
     def stack(self, *args: str, expect_success: bool = True) -> subprocess.CompletedProcess[str]:
-        """Run `git stack <args>` as a separate process, failing the test unless it
-        succeeds (or, with expect_success=False, fails)."""
+        """Run `git stack <args>` as the git-stack command does, through
+        git_stack.cli.main, but in this process, which is much quicker than
+        starting another, failing the test unless it succeeds (or, with
+        expect_success=False, fails). What it, and the git commands it runs,
+        print is captured as a separate process's would be."""
+        argv = ["-C", str(self.path), *args]
+        with captured_output() as output:
+            try:
+                status = cli.main(argv)
+            except SystemExit as e:  # argparse's, for arguments it doesn't understand
+                status = e.code if isinstance(e.code, int) else 1
+        return self._check_result(args, subprocess.CompletedProcess(argv, status, *output), expect_success)
+
+    def stack_process(self, *args: str, expect_success: bool = True) -> subprocess.CompletedProcess[str]:
+        """stack, but as a separate process, the way users run it."""
         result = subprocess.run(
             [sys.executable, "-m", "git_stack", "-C", str(self.path), *args],
             cwd=self.tmp,
@@ -70,6 +122,11 @@ class Repo:
             timeout=60,
             check=False,
         )
+        return self._check_result(args, result, expect_success)
+
+    def _check_result(
+        self, args: tuple[str, ...], result: subprocess.CompletedProcess[str], expect_success: bool
+    ) -> subprocess.CompletedProcess[str]:
         if expect_success and result.returncode != 0:
             pytest.fail(f"git stack {' '.join(args)} failed:\n{result.stdout}{result.stderr}")
         if not expect_success and result.returncode == 0:

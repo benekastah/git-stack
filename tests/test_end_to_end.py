@@ -10,50 +10,50 @@ from tests.helpers import FakeGitHub, Repo
 
 
 def test_stack_through_squash_merge(repo: Repo) -> None:
-    repo.stack("branch", "pr1")
+    repo.stack_process("branch", "pr1")
     repo.commit("a", "pr1\n", "pr1 c1")
-    repo.stack("branch", "pr2")
+    repo.stack_process("branch", "pr2")
     repo.commit("b", "pr2\n", "pr2 c1")
-    repo.stack("push")
+    repo.stack_process("push")
     repo.squash_merge_on_forge("pr1")
 
-    result = repo.stack("pull", "-d", "local")
+    result = repo.stack_process("pull", "-d", "local")
 
     assert "pr1 was merged into main; deleted it" in result.stdout
     assert "restacking pr2 onto main" in result.stdout
     assert result.stdout.endswith("pull requests of:\n  pr2\n")
-    assert repo.stack("info").stdout == "main\n└── pr2 *\n"
+    assert repo.stack_process("info").stdout == "main\n└── pr2 *\n"
 
 
 def test_non_ascii_branch_names_and_messages(repo: Repo) -> None:
     # Decoded and printed as UTF-8 whatever the locale, e.g. on Windows, where
     # it's usually not.
-    repo.stack("branch", "née")
+    repo.stack_process("branch", "née")
     repo.commit("a", "née\n", "café ☕")
-    repo.stack("push")
+    repo.stack_process("push")
     repo.commit_on_forge("née", "b", "naïve\n", "naïve fix ✓")
-    repo.stack("branch", "über")
+    repo.stack_process("branch", "über")
 
     repo.git("switch", "--quiet", "née")
-    repo.stack("pull")
+    repo.stack_process("pull")
     repo.git("switch", "--quiet", "über")
 
     assert repo.git("log", "--format=%s", "-2", "née").splitlines() == ["naïve fix ✓", "café ☕"]
-    assert repo.stack("info").stdout == "main\n└── née\n    └── über *\n"
-    assert repo.stack("parent").stdout == "née\n"
+    assert repo.stack_process("info").stdout == "main\n└── née\n    └── über *\n"
+    assert repo.stack_process("parent").stdout == "née\n"
 
 
 def test_files_that_arent_utf_8(repo: Repo) -> None:
     # Checking for a squash merge compares the branch's diff, which has the
     # file's Latin-1 bytes in it, with main's.
-    repo.stack("branch", "pr1")
+    repo.stack_process("branch", "pr1")
     (repo.path / "a").write_bytes(b"caf\xe9\n")
     repo.git("commit", "--quiet", "-am", "Latin-1")
-    repo.stack("push")
+    repo.stack_process("push")
     repo.squash_merge_on_forge("pr1", delete_branch=False)
     repo.git("switch", "--quiet", "main")
 
-    repo.stack("clean")
+    repo.stack_process("clean")
 
     repo.assert_untracked("pr1")
 
@@ -65,24 +65,24 @@ def test_warnings_go_to_stderr(repo: Repo) -> None:
     repo.git("commit", "--quiet", "-m", "pr1 (squashed)")
     repo.git("switch", "--quiet", "pr2")
 
-    result = repo.stack("restack")
+    result = repo.stack_process("restack")
 
     assert "warning: pr1 looks merged into main" in result.stderr
     assert "looks merged" not in result.stdout
 
 
 def test_failure_exits_nonzero_with_message(repo: Repo) -> None:
-    result = repo.stack("restack", expect_success=False)
+    result = repo.stack_process("restack", expect_success=False)
 
     assert result.returncode == 1
     assert result.stderr == "git stack: main isn't in a stack; switch to a stacked branch to restack its stack\n"
 
 
 def test_push_says_to_open_pull_requests_with_prs(repo: Repo, gh: FakeGitHub) -> None:
-    repo.stack("branch", "pr1")
+    repo.stack_process("branch", "pr1")
     repo.commit("a", "pr1\n", "pr1 c1")
 
-    result = repo.stack("push")
+    result = repo.stack_process("push")
 
     assert "pr1 has no pull request; open drafts with `git stack prs`" in result.stdout
 
@@ -106,19 +106,19 @@ def test_each_directory_is_relative_to_the_one_before(repo: Repo) -> None:
 def test_show_stack_quiet_answers_with_exit_status(repo: Repo) -> None:
     repo.make_stack()
 
-    assert repo.stack("show-stack", "--quiet").stdout == ""
+    assert repo.stack_process("show-stack", "--quiet").stdout == ""
     repo.git("switch", "--quiet", "main")
-    result = repo.stack("show-stack", "--quiet", expect_success=False)
+    result = repo.stack_process("show-stack", "--quiet", expect_success=False)
     assert (result.returncode, result.stdout, result.stderr) == (1, "", "")
 
 
 def test_clean_json_prints_only_json_on_stdout(repo: Repo) -> None:
     repo.make_stack()
-    repo.stack("push")
+    repo.stack_process("push")
     repo.squash_merge_on_forge("pr1")
     repo.git("switch", "--quiet", "main")
 
-    result = repo.stack("clean", "-d", "local", "--json")
+    result = repo.stack_process("clean", "-d", "local", "--json")
 
     *events, last = [json.loads(line) for line in result.stdout.splitlines()]
     untracked = [e for e in events if e["type"] == "untracked"]
@@ -131,7 +131,7 @@ def test_clean_json_reports_what_stopped_it(repo: Repo) -> None:
     repo.make_stack()
     (repo.path / "a").write_text("uncommitted\n")
 
-    result = repo.stack("clean", "-d", "local", "--json", expect_success=False)
+    result = repo.stack_process("clean", "-d", "local", "--json", expect_success=False)
 
     assert result.returncode == 1
     assert json.loads(result.stdout) == {
@@ -144,10 +144,10 @@ def test_clean_json_reports_what_stopped_it(repo: Repo) -> None:
 
 def test_sync_json_prints_only_json_on_stdout(repo: Repo) -> None:
     repo.make_stack()
-    repo.stack("push")
+    repo.stack_process("push")
     repo.squash_merge_on_forge("pr1")
 
-    result = repo.stack("sync", "-d", "local", "--json")
+    result = repo.stack_process("sync", "-d", "local", "--json")
 
     *events, last = [json.loads(line) for line in result.stdout.splitlines()]
     types = [e["type"] for e in events]
