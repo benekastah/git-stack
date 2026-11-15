@@ -70,7 +70,10 @@ Text meant for people (messages, `info`'s tree) can change.
   code happens to do: don't add a test that pins down a bug.
 - `tests/test_cli.py` checks how each command maps its arguments and prints its
   result, with a mock `StackClient`; the other tests run git-stack against real
-  repositories (see `tests/helpers.py`). A new command or `--json` result needs
+  repositories (see `tests/helpers.py`). `Repo.stack` runs the command line in
+  the test process, which is much quicker than starting one; only
+  `tests/test_end_to_end.py` runs it as a separate process (`Repo.stack_process`),
+  for what only that checks, like the entry point. A new command or `--json` result needs
   a case in `test_json_prints_the_result_on_stdout`.
 - Run `./check.sh` (formatting, Ruff, mypy in strict mode, shellcheck, the
   tests) before committing. The pre-push hook runs it too.
