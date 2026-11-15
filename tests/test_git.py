@@ -283,3 +283,42 @@ def test_switching_forgets_the_worktrees(repo: Repo) -> None:
         git.switch("other")
         assert git.worktree_of("main") is None
         assert git.worktree_of("other") is not None
+
+
+def test_snapshot_reads_the_current_branch_with_the_refs(repo: Repo, git_calls: list[list[str]]) -> None:
+    git = GitClient(repo.path)
+    # As a command has, to know which upstreams to read.
+    git.branch_config()
+    git_calls.clear()
+    with git.snapshot():
+        assert [git.current_branch() for _ in range(3)] == ["main"] * 3
+
+    assert [call[0] for call in git_calls] == ["for-each-ref"]
+
+
+def test_snapshot_sees_the_current_branch_change(repo: Repo) -> None:
+    repo.git("branch", "other")
+    git = GitClient(repo.path)
+    with git.snapshot():
+        assert git.current_branch() == "main"
+        git.switch("other")
+        assert git.current_branch() == "other"
+        git.run("switch", "--quiet", "--detach")
+        assert git.current_branch() is None
+
+
+def test_snapshot_reads_the_current_branch_of_its_own_worktree(repo: Repo) -> None:
+    repo.git("worktree", "add", "--quiet", "-b", "elsewhere", str(repo.tmp / "elsewhere"))
+
+    for directory, branch in ((repo.path, "main"), (repo.tmp / "elsewhere", "elsewhere")):
+        git = GitClient(directory)
+        with git.snapshot():
+            assert git.current_branch() == branch
+
+
+def test_snapshot_reads_an_unborn_current_branch(repo: Repo) -> None:
+    """It has no commit yet, so it isn't a ref."""
+    repo.git("switch", "--quiet", "--orphan", "new")
+    git = GitClient(repo.path)
+    with git.snapshot():
+        assert git.current_branch() == "new"
