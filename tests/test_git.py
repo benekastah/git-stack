@@ -62,12 +62,32 @@ def test_snapshot_reads_refs_once(repo: Repo, git_calls: list[list[str]]) -> Non
         assert git.rev("main@{upstream}") == main
         assert git.rev("refs/remotes/origin/main") == main
         assert git.local_branch_exists("main")
-        assert not git.local_branch_exists("nope")
-        assert git.rev("refs/heads/nope") is None
         assert git.local_branches() == {"main"}
         assert not git.upstream_gone("main")
 
     assert [call[0] for call in git_calls] == ["for-each-ref"]
+
+
+def test_snapshot_asks_git_about_refs_it_doesnt_have(repo: Repo, git_calls: list[list[str]]) -> None:
+    """On a case-insensitive filesystem, git can find a ref under a name that
+    differs in case, which the snapshot can't."""
+    repo.git("branch", "feature")
+    git = GitClient(repo.path)
+    outside = (git.local_branch_exists("Feature"), git.rev("refs/heads/Feature"))
+
+    with git.snapshot():
+        assert not git.local_branch_exists("nope")
+        assert git.rev("refs/heads/nope") is None
+        assert (git.local_branch_exists("Feature"), git.rev("refs/heads/Feature")) == outside
+
+
+def test_snapshot_isnt_read_for_refs_it_cant_answer(repo: Repo, git_calls: list[list[str]]) -> None:
+    git = GitClient(repo.path)
+    with git.snapshot():
+        git.rev("HEAD")
+        git.rev("main~0")
+
+    assert [call[0] for call in git_calls] == ["rev-parse", "rev-parse"]
 
 
 def test_snapshot_reads_refs_again_after_git_changes_them(repo: Repo) -> None:
@@ -104,14 +124,18 @@ def test_snapshot_outlives_stack_metadata_writes_but_not_upstream_changes(
 
 def test_snapshot_ends_with_the_outermost_block(repo: Repo) -> None:
     """Changes made by other processes are seen once the snapshot ends."""
+    main = repo.git("rev-parse", "main")
+    repo.commit("a", "more\n", "more")
+    moved = repo.git("rev-parse", "main")
+    repo.git("update-ref", "refs/heads/main", main)
     git = GitClient(repo.path)
     with git.snapshot():
         with git.snapshot():
-            assert not git.local_branch_exists("new")
-        repo.git("branch", "new")
-        assert not git.local_branch_exists("new")
+            assert git.tip("main") == main
+        repo.git("update-ref", "refs/heads/main", moved)
+        assert git.tip("main") == main
 
-    assert git.local_branch_exists("new")
+    assert git.tip("main") == moved
 
 
 def test_snapshot_leaves_revisions_to_git(repo: Repo) -> None:
@@ -142,12 +166,19 @@ def test_snapshot_sees_a_deleted_upstream(repo: Repo) -> None:
         (("--literal-pathspecs", "log", "main"), False),
         (("branch", "--show-current"), False),
         (("branch", "new"), True),
-        (("switch", "--quiet", "main"), False),
+        # git switch creates a branch from a remote one of its name.
+        (("switch", "--quiet", "main"), True),
         (("switch", "--quiet", "--create", "new"), True),
         (("worktree", "list", "--porcelain"), False),
         (("worktree", "add", "x"), True),
         (("remote",), False),
         (("remote", "set-head", "origin", "--auto"), True),
+        (("remote", "get-url", "origin"), False),
+        (("ls-tree", "HEAD"), False),
+        (("symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"), False),
+        (("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"), True),
+        (("-c", "core.quotepath=off", "log"), False),
+        (("-c", "log.x=y", "push", "origin"), True),
         (("config", "--get", "remote.origin.url"), False),
         (("config", "remote.origin.url", "x"), True),
         (("rebase", "main"), True),

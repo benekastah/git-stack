@@ -24,6 +24,7 @@ READ_ONLY_COMMANDS = frozenset(
         "for-each-ref",
         "log",
         "ls-remote",
+        "ls-tree",
         "merge-base",
         "merge-tree",
         "patch-id",
@@ -32,10 +33,11 @@ READ_ONLY_COMMANDS = frozenset(
         "show",
         "show-ref",
         "status",
-        "symbolic-ref",
         "var",
     }
 )
+# Options to git itself that take a value as the next argument.
+GIT_OPTIONS_WITH_VALUES = frozenset({"-c", "-C", "--git-dir", "--work-tree", "--namespace"})
 # Characters a branch name can't have, but a revision (e.g. main~1) can.
 REVISION_SYNTAX = frozenset("~^:?*[\\ ")
 
@@ -44,21 +46,26 @@ def changes_refs(args: tuple[str, ...]) -> bool:
     """Whether `git <args>` may move a ref or change a branch's upstream,
     which the ref snapshot holds. Only commands known to be read-only don't."""
     # The command is the first argument that isn't an option to git itself
-    # (e.g. --literal-pathspecs).
-    start = next((i for i, a in enumerate(args) if not a.startswith("-")), len(args))
+    # (e.g. --literal-pathspecs), or the value of one (e.g. -c's).
+    start = 0
+    while start < len(args) and args[start].startswith("-"):
+        start += 2 if args[start] in GIT_OPTIONS_WITH_VALUES else 1
     command, rest = (args[start], list(args[start + 1 :])) if start < len(args) else ("", [])
     if command in READ_ONLY_COMMANDS:
         return False
     if command == "branch":
         return rest != ["--show-current"]
-    if command == "switch":
-        return any(a in ("-c", "-C", "--create", "--force-create", "--orphan") for a in rest)
     if command == "worktree":
         return rest[:1] != ["list"]
     if command == "remote":
-        return bool(rest)
+        return rest[:1] not in ([], ["get-url"])
     if command == "config":
         return not any(a.startswith("--get") for a in rest)
+    if command == "symbolic-ref":
+        # Given a ref to point it at, it changes it.
+        return len([a for a in rest if not a.startswith("-")]) != 1
+    # Including switch, which creates a branch from a remote one of its name
+    # (--guess) when there's no local one.
     return True
 
 
@@ -107,6 +114,12 @@ class GitClient:
         """Forget the ref snapshot if `git <args>`, which just ran, may have
         changed it, whether or not it succeeded."""
         if changes_refs(args):
+            self._forget_refs()
+
+    def _forget_refs(self) -> None:
+        """Forget the ref snapshot, waiting for a thread reading it to finish,
+        so it can't then keep what it read from before the change."""
+        with self._refs_lock:
             self._refs = None
 
     def run(self, *args: str, check: bool = True, input: str | None = None) -> str:
@@ -149,6 +162,10 @@ class GitClient:
         of one command, which holds the lock (see StackCore.exclusive) if it
         changes anything. Blocks can nest; the snapshot is forgotten when the
         outermost one ends.
+
+        A ref the snapshot doesn't have is still asked of git, which on a
+        case-insensitive filesystem (as macOS's and Windows' usually are) can
+        find it under a name that differs in case.
         """
         self._snapshot_depth += 1
         try:
@@ -232,9 +249,6 @@ class GitClient:
         the rest, which all start with "stack") forgets the ref snapshot, since
         it may change a branch's upstream.
         """
-        key = next((a for a in args if not a.startswith("-")), "")
-        if not key.rpartition(".")[2].lower().startswith("stack"):
-            self._refs = None
         deadline = time.monotonic() + CONFIG_LOCK_TIMEOUT
         delay = 0.01
         while True:
@@ -250,19 +264,29 @@ class GitClient:
                 break
             time.sleep(delay)
             delay = min(delay * 2, 0.5)
+        key = next((a for a in args if not a.startswith("-")), "")
+        if not key.rpartition(".")[2].lower().startswith("stack"):
+            self._forget_refs()
         if check and result.returncode != 0:
             raise StackError(f"git config {' '.join(args)} failed:\n{result.stderr.strip()}")
 
     def rev(self, ref: str) -> str | None:
         """The commit ref names, or None if it names none. A local or
         remote-tracking branch's full refname, or a local branch's
-        <name>@{upstream}, is looked up in the snapshot, if there is one."""
-        if (refs := self._snapshot_refs()) is not None:
-            if ref.startswith(("refs/heads/", "refs/remotes/")) and is_branch_name(ref):
-                return refs[ref][0] if ref in refs else None
-            branch = ref.removesuffix("@{upstream}")
-            if branch != ref and is_branch_name(branch) and (local := refs.get(f"refs/heads/{branch}")):
-                return refs[local[1]][0] if local[1] in refs else None
+        <name>@{upstream}, is looked up in the snapshot, if there is one and
+        has it (see snapshot)."""
+        branch = ref.removesuffix("@{upstream}")
+        # Only read the snapshot if it could answer, e.g. not for HEAD.
+        cacheable = is_branch_name(branch) and (branch != ref or ref.startswith(("refs/heads/", "refs/remotes/")))
+        refs = self._snapshot_refs() if cacheable else None
+        if refs is not None and ref in refs:
+            return refs[ref][0]
+        if refs is not None and branch != ref and (local := refs.get(f"refs/heads/{branch}")):
+            upstream = local[1]
+            if not upstream:
+                return None
+            if upstream in refs:
+                return refs[upstream][0]
         return self.run("rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}", check=False) or None
 
     def tip(self, branch: str) -> str:
@@ -286,8 +310,8 @@ class GitClient:
         return self.run("branch", "--show-current") or None
 
     def local_branch_exists(self, name: str) -> bool:
-        if (refs := self._snapshot_refs()) is not None:
-            return f"refs/heads/{name}" in refs
+        if (refs := self._snapshot_refs()) is not None and f"refs/heads/{name}" in refs:
+            return True
         return self.ok("show-ref", "--verify", "--quiet", f"refs/heads/{name}")
 
     def local_branches(self) -> set[str]:
