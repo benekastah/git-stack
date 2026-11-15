@@ -121,6 +121,8 @@ class StackCore:
         self.git = git
         self.on_event = on_event
         self._checks: CheckCache | None = None
+        # See unpulled_commits.
+        self._unpulled: dict[tuple[str, ...], tuple[str, ...]] = {}
         # How many exclusive blocks this client is in, so they can nest.
         self._exclusive_depth = 0
 
@@ -479,29 +481,43 @@ class StackCore:
         have since rebased don't count).
         """
         git = self.git
-        known = [f"refs/heads/{branch}", *git.reflog_tips(branch)]
+        tip = git.tip(branch)
+        known = [tip, *git.reflog_tips(branch)]
         for ref in (f"refs/heads/{parent}", self.pulled_tip(branch)):
             commit = git.rev(ref) if ref else None
             if commit:
                 known.append(commit)
-        if git.run("rev-list", "--merges", upstream_tip, "--not", *known):
+        # Commits don't change, so neither does the answer for the same ones,
+        # which a command can ask for several times (e.g. before pulling, and
+        # again before pushing).
+        key = (upstream_tip, *known)
+        if (cached := self._unpulled.get(key)) is not None:
+            return list(cached)
+        unseen = {
+            commit: parents
+            for commit, *parents in (
+                line.split() for line in git.run("rev-list", "--parents", upstream_tip, "--not", *known).splitlines()
+            )
+        }
+        if any(len(parents) > 1 for parents in unseen.values()):
             raise StackError(
                 f"{branch}'s upstream contains unseen merge commits; inspect and integrate them manually "
                 "before syncing or pushing"
             )
-        unknown = set(git.run("rev-list", "--no-merges", upstream_tip, "--not", *known).split())
-        if not unknown:
-            return []
-        new_patches = git.run(
-            "rev-list",
-            "--reverse",
-            "--topo-order",
-            "--no-merges",
-            "--cherry-pick",
-            "--right-only",
-            f"refs/heads/{branch}...{upstream_tip}",
-        ).split()
-        return [commit for commit in new_patches if commit in unknown]
+        commits: list[str] = []
+        if unseen:
+            new_patches = git.run(
+                "rev-list",
+                "--reverse",
+                "--topo-order",
+                "--no-merges",
+                "--cherry-pick",
+                "--right-only",
+                f"{tip}...{upstream_tip}",
+            ).split()
+            commits = [commit for commit in new_patches if commit in unseen]
+        self._unpulled[key] = tuple(commits)
+        return commits
 
     def upstream_identity(self, branch: str) -> str | None:
         remote = self.git.config_get(branch, "remote")

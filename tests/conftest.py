@@ -2,6 +2,8 @@ import os
 import pathlib
 import shutil
 import subprocess
+from collections.abc import Callable
+from typing import Any
 
 import pytest
 
@@ -111,6 +113,22 @@ def repo(
     # touching the repository the tests were started in.
     monkeypatch.chdir(tmp_path)
     return repo
+
+
+@pytest.fixture
+def git_calls(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
+    """The git commands GitClient runs from now on, each without `git -C <dir>`
+    (which the tests' own git commands don't have)."""
+    calls: list[list[str]] = []
+    real: Callable[..., Any] = subprocess.run
+
+    def run(args: list[str], *rest: Any, **kwargs: Any) -> Any:
+        if args[:2] == ["git", "-C"]:
+            calls.append(args[3:])
+        return real(args, *rest, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", run)
+    return calls
 
 
 @pytest.fixture
