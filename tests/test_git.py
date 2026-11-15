@@ -1,5 +1,6 @@
 """GitClient's reading of branch config and refs, which it caches."""
 
+import json
 import os
 import pathlib
 import subprocess
@@ -187,3 +188,17 @@ def test_snapshot_sees_a_deleted_upstream(repo: Repo) -> None:
 )
 def test_changes_refs(args: tuple[str, ...], changes: bool) -> None:
     assert changes_refs(args) is changes
+
+
+def test_a_repository_without_a_config_file_works(repo: Repo) -> None:
+    """git works without one, as if it were empty."""
+    repo.make_stack()
+    (repo.path / ".git" / "config").unlink()
+
+    result = repo.stack("info", "--all", "--json")
+
+    assert json.loads(result.stdout.splitlines()[-1]) == []
+    git = GitClient(repo.path)
+    assert git.branch_config() == {}
+    git.config_set("main", "stackParent", "trunk")
+    assert git.config_get("main", "stackParent") == "trunk"

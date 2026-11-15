@@ -110,7 +110,9 @@ class GitClient:
     def __init__(self, directory: str | os.PathLike[str] = ".") -> None:
         self.directory = pathlib.Path(directory)
         self._common_dir: pathlib.Path | None = None
-        # See branch_config.
+        # See branch_config: whether it has read the config file, and the
+        # file's stat when it did (None if there was no file).
+        self._config_read = False
         self._config_stat: tuple[int, int, int] | None = None
         self._branch_config: dict[tuple[str, str], str] = {}
         # See snapshot: how many snapshot blocks we're in, and the refs, as
@@ -226,9 +228,14 @@ class GitClient:
         matter.
         """
         # Before reading, so a write that lands in between is read again next time.
-        st = (self.common_dir() / "config").stat()
-        stat = (st.st_ino, st.st_mtime_ns, st.st_size)
-        if fresh or stat != self._config_stat:
+        stat: tuple[int, int, int] | None
+        try:
+            st = (self.common_dir() / "config").stat()
+            stat = (st.st_ino, st.st_mtime_ns, st.st_size)
+        except FileNotFoundError:
+            # git works without one, as if it were empty.
+            stat = None
+        if fresh or not self._config_read or stat != self._config_stat:
             config = {}
             for entry in filter(
                 None, self.run("config", "--null", "--get-regexp", r"^branch\.", check=False).split("\0")
@@ -237,7 +244,7 @@ class GitClient:
                 # Branch names can contain dots, but keys can't.
                 branch, _, name = key.removeprefix("branch.").rpartition(".")
                 config[branch, name] = value
-            self._branch_config, self._config_stat = config, stat
+            self._branch_config, self._config_stat, self._config_read = config, stat, True
         return self._branch_config
 
     def config_get(self, branch: str, key: str) -> str | None:
