@@ -39,6 +39,11 @@ READ_ONLY_COMMANDS = frozenset(
 )
 # Options to git itself that take a value as the next argument.
 GIT_OPTIONS_WITH_VALUES = frozenset({"-c", "-C", "--git-dir", "--work-tree", "--namespace"})
+# `git switch --quiet`, for switching to a branch, which has to be named by
+# its bare name. git switch only takes branches, so a tag with the same name
+# can't be what's meant, but git still warns that the name is ambiguous, which
+# this turns off. Everywhere else, branches are named as refs/heads/<name>.
+SWITCH = ("-c", "core.warnAmbiguousRefs=false", "switch", "--quiet")
 # Characters a branch name can't have, but a revision (e.g. main~1) can.
 REVISION_SYNTAX = frozenset("~^:?*[\\ ")
 
@@ -323,7 +328,7 @@ class GitClient:
         return set(self.run("for-each-ref", "--format=%(refname:lstrip=2)", "refs/heads").splitlines())
 
     def switch(self, branch: str) -> None:
-        self.run("switch", "--quiet", branch)
+        self.run(*SWITCH, branch)
 
     def operation_in_progress(self) -> bool:
         """Whether a rebase, cherry-pick, revert or merge has stopped and is

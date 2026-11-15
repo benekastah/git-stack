@@ -21,7 +21,7 @@ from git_stack.core import (
     SyncCommand,
 )
 from git_stack.errors import BrokenStackError, StackError
-from git_stack.git import DEFAULT_REMOTE
+from git_stack.git import DEFAULT_REMOTE, SWITCH
 from git_stack.json_fields import json_name
 from git_stack.stacks import Ownership, Stacks
 
@@ -373,7 +373,7 @@ class StackClient(StackCore):
                     )
         # Without --no-track, branch.autoSetupMerge=inherit (or always) would give
         # name its parent's upstream, which sync and push take as its own.
-        git.run("switch", "--quiet", "--no-track", "--create", name)
+        git.run(*SWITCH, "--no-track", "--create", name)
         stacks.reparent(name, parent)
         if group is not None:
             stacks.set_group(bottom or name, group)
@@ -975,7 +975,7 @@ class StackClient(StackCore):
 
     def switch_to(self, branch: str) -> None:
         """Switch to branch, showing git's output (e.g. why it couldn't)."""
-        if not self.git.passthrough("switch", "--quiet", branch):
+        if not self.git.passthrough(*SWITCH, branch):
             raise StackError(f"switching to {branch} failed; see git's output above")
 
     @snapshot

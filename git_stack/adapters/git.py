@@ -102,23 +102,24 @@ class GitAdapter:
             return False
         return not self.git.ok("diff", "--quiet", base, f"refs/heads/{branch}")
 
-    def landed_as_patches(self, branch: str, parent: str) -> bool:
-        """Whether parent has branch's changes as one squashed commit, or as
-        commits with the same changes as each of branch's.
+    def landed_as_patches(self, branch: str, parent_tip: str) -> bool:
+        """Whether parent_tip, the commit branch's parent is at, has branch's
+        changes as one squashed commit, or as commits with the same changes as
+        each of branch's.
 
-        Unlike GitClient.contained_in, this still holds after parent edits the
+        Unlike GitClient.contained_in, this still holds after the parent edits the
         same lines again.
         """
         git = self.git
         base = git.config_get(branch, BASE_KEY)
-        if base is None or not git.is_ancestor(base, f"refs/heads/{branch}") or git.rev(parent) is None:
+        if base is None or not git.is_ancestor(base, f"refs/heads/{branch}") or git.rev(parent_tip) is None:
             return False
         files = self.changed_files(base, f"refs/heads/{branch}")
         if not files:
             return False
-        # Only parent's commits that touch the same files can match.
+        # Only the parent's commits that touch the same files can match.
         landed = git.patch_ids(
-            "log", "-p", "--no-merges", "--full-diff", parent, "--not", f"refs/heads/{branch}", "--", *files
+            "log", "-p", "--no-merges", "--full-diff", parent_tip, "--not", f"refs/heads/{branch}", "--", *files
         )
         if git.patch_ids("diff", base, f"refs/heads/{branch}") & landed:
             return True
@@ -127,7 +128,7 @@ class GitAdapter:
         return (
             bool(own)
             and own <= landed
-            and not git.merges_with_own_changes(f"refs/heads/{branch}", "--not", base, parent)
+            and not git.merges_with_own_changes(f"refs/heads/{branch}", "--not", base, parent_tip)
         )
 
     def reverted(self, branch: str, parent: str) -> bool:
