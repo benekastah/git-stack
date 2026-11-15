@@ -3,6 +3,7 @@
 import pytest
 
 from git_stack import events
+from git_stack.core import Delete
 from git_stack.errors import StackError
 from git_stack.stack import StackClient
 from tests.helpers import Repo
@@ -40,7 +41,7 @@ def test_clean_delete_both_deletes_merged_branch(repo: Repo, client: StackClient
     repo.merge_on_forge("pr1", delete_branch=False)
     repo.git("switch", "--quiet", "pr1")
 
-    client.clean(delete="both")
+    client.clean(delete=Delete.BOTH)
 
     assert repo.git("branch", "--list", "pr1") == ""
     assert repo.git("branch", "--list", "pr1", cwd=repo.origin) == ""
@@ -134,12 +135,12 @@ def test_clean_ignore_revert_refuses_branch_with_no_revert_to_ignore(repo: Repo,
     ("checkout", "delete"),
     [
         ("main", None),  # a root, which clean fast-forwards
-        ("pr3", "local"),  # a tracked branch, which clean could delete
-        ("pr3", "both"),
+        ("pr3", Delete.LOCAL),  # a tracked branch, which clean could delete
+        ("pr3", Delete.BOTH),
     ],
 )
 def test_clean_refuses_uncommitted_changes_it_could_get_in_the_way_of(
-    repo: Repo, client: StackClient, checkout: str, delete: str | None
+    repo: Repo, client: StackClient, checkout: str, delete: Delete | None
 ) -> None:
     repo.make_stack()
     client.push()
@@ -157,11 +158,11 @@ def test_clean_refuses_uncommitted_changes_it_could_get_in_the_way_of(
     ("checkout", "delete"),
     [
         ("pr3", None),  # tracked, but not deleted
-        ("feature", "local"),  # neither a root nor tracked
+        ("feature", Delete.LOCAL),  # neither a root nor tracked
     ],
 )
 def test_clean_runs_with_uncommitted_changes_it_doesnt_touch(
-    repo: Repo, client: StackClient, checkout: str, delete: str | None
+    repo: Repo, client: StackClient, checkout: str, delete: Delete | None
 ) -> None:
     repo.make_stack()
     client.push()

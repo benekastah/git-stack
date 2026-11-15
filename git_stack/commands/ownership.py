@@ -5,6 +5,7 @@ from git_stack.commands import Subparsers, add_json_argument, add_stack_argument
 from git_stack.core import CURRENT_GROUP
 from git_stack.errors import StackError
 from git_stack.stack import StackClient
+from git_stack.stacks import Ownership
 
 
 class Args(argparse.Namespace):
@@ -16,29 +17,30 @@ class Args(argparse.Namespace):
 
 def register(subparsers: Subparsers) -> None:
     p = subparsers.add_parser("ownership", help="mark stacks as owned or shared")
-    p.add_argument("ownership", nargs="?", default="show", choices=("show", "owned", "shared"))
+    p.add_argument("ownership", nargs="?", default="show", choices=("show", *(o.value for o in Ownership)))
     add_stack_arguments(p, "mark", optional_group=True)
     add_json_argument(p)
     p.set_defaults(run=run, show=show)
 
 
 @dataclass(frozen=True)
-class Ownership:
-    ownership: str
+class Result:
+    ownership: Ownership
     branches: list[str]
 
 
-def run(stack: StackClient, args: Args) -> Ownership:
+def run(stack: StackClient, args: Args) -> Result:
     if args.ownership == "show":
         ownership, branches = stack.get_ownership(args.branches, args.groups)
-        return Ownership(ownership, branches)
+        return Result(ownership, branches)
     if CURRENT_GROUP in args.groups:
         raise StackError("--group requires a group name when changing ownership")
-    return Ownership(args.ownership, stack.set_ownership(args.ownership, args.branches, args.groups))
+    ownership = Ownership(args.ownership)
+    return Result(ownership, stack.set_ownership(ownership, args.branches, args.groups))
 
 
-def show(stack: StackClient, args: Args, result: Ownership) -> None:
+def show(stack: StackClient, args: Args, result: Result) -> None:
     if args.ownership == "show":
-        print(f"{result.ownership}: {', '.join(result.branches)}")
+        print(f"{result.ownership.value}: {', '.join(result.branches)}")
     else:
-        print(f"marked {', '.join(result.branches)} as {result.ownership}")
+        print(f"marked {', '.join(result.branches)} as {result.ownership.value}")

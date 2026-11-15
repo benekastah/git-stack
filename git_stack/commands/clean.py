@@ -9,6 +9,7 @@ from git_stack.commands import (
     add_json_argument,
 )
 from git_stack.commands.info import print_tree
+from git_stack.core import Delete
 from git_stack.stack import BranchInfo, StackClient
 
 
@@ -42,7 +43,10 @@ class Cleaned:
 def run(stack: StackClient, args: Args) -> Cleaned:
     return Cleaned(
         stack.clean(
-            remote=args.remote, delete=args.delete, ignore_reverts=args.ignore_reverts, allow_shared=args.allow_shared
+            remote=args.remote,
+            delete=Delete(args.delete) if args.delete else None,
+            ignore_reverts=args.ignore_reverts,
+            allow_shared=args.allow_shared,
         )
     )
 

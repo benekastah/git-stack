@@ -30,6 +30,11 @@ most severe first.
 - Progress and warnings are events (`git_stack/events.py`), passed to the
   client's `on_event`. `git_stack/output.py` turns them into text, or into JSON
   lines.
+- A value from a fixed set (an option's, a setting's, GitHub's) is an enum,
+  converted where it's read (e.g. `Delete`, `Ownership`, `GitHubState`), so
+  the code compares members rather than strings, and adding a value happens in
+  one place. Give it the values the outside world uses, so JSON output, which
+  prints an enum as its value, doesn't change.
 - git-stack has no runtime dependencies. Keep it that way: use the standard
   library, and add dev dependencies to `pyproject.toml`'s `dev` group.
 

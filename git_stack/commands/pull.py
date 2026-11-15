@@ -9,6 +9,7 @@ from git_stack.commands import (
     add_stack_arguments,
 )
 from git_stack.commands.sync import show
+from git_stack.core import Delete
 from git_stack.git import DEFAULT_REMOTE
 from git_stack.stack import StackClient, SyncResult
 
@@ -29,7 +30,7 @@ def register(subparsers: Subparsers) -> None:
     p = subparsers.add_parser("pull", help="fetch and sync stacks locally without pushing")
     add_stack_arguments(p, "pull")
     p.add_argument("--remote", help="only pull branches tracking this remote")
-    p.add_argument("-d", "--delete", choices=("local",), help="also delete merged local branches")
+    p.add_argument("-d", "--delete", choices=(Delete.LOCAL.value,), help="also delete merged local branches")
     add_latest_argument(p)
     add_ignore_revert_argument(p)
     add_allow_shared_argument(p)
@@ -47,7 +48,7 @@ def run(stack: StackClient, args: Args) -> SyncResult:
         args.groups,
         remote=args.remote or DEFAULT_REMOTE,
         only_remote=args.remote is not None,
-        delete=args.delete,
+        delete=Delete(args.delete) if args.delete else None,
         latest=args.latest,
         push=False,
         ignore_reverts=args.ignore_reverts,

@@ -5,6 +5,7 @@ import pytest
 from git_stack import events
 from git_stack.errors import StackError
 from git_stack.stack import BranchStatus, ImportAction, ImportStep, StackClient
+from git_stack.stacks import Ownership
 from tests.helpers import FakeGitHub, Repo
 
 SOMEONE = "Someone <someone@example.com>"
@@ -112,18 +113,18 @@ def test_import_classifies_an_already_tracked_stack(repo: Repo, gh: FakeGitHub, 
 
     client.import_stacks(author="alice", force=True)
 
-    assert client.get_ownership(["pr1"])[0] == "shared"
+    assert client.get_ownership(["pr1"])[0] is Ownership.SHARED
 
 
 def test_import_preserves_shared_ownership_in_a_mixed_stack(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
     repo.make_stack()
-    client.set_ownership("owned")
+    client.set_ownership(Ownership.OWNED)
     repo.git("switch", "--quiet", "main")
     client.branch("shared")
     repo.write("d", "shared\n")
     repo.git("add", "d")
     repo.git("commit", "--quiet", "-m", "shared")
-    client.set_ownership("shared")
+    client.set_ownership(Ownership.SHARED)
     client.track("pr1", ["shared"])
     client.push(allow_shared=True)
     open_pr(repo, gh, 99, "new", "shared")
@@ -133,7 +134,7 @@ def test_import_preserves_shared_ownership_in_a_mixed_stack(repo: Repo, gh: Fake
     assert repo.config("new", "stackOwnership") == "shared"
     repo.git("switch", "--quiet", "main")
     repo.git("branch", "--delete", "--force", "shared")
-    assert client.get_ownership(["new"])[0] == "shared"
+    assert client.get_ownership(["new"])[0] is Ownership.SHARED
 
 
 def test_import_keeps_a_branch_targeted_by_merged_prs_as_a_root(

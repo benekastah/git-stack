@@ -5,23 +5,33 @@ what changed, so a command can work out what to change in memory, with the
 rules for groups and ownership below, then write only that.
 """
 
+import enum
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, replace
 
 from git_stack.errors import StackError
 
 
+class Ownership(enum.Enum):
+    """Whether a stack is the user's own, or shared with others, which
+    commands that rewrite or delete its branches only change with
+    --allow-shared. Values are what core.OWNERSHIP_KEY holds, and what
+    `git stack ownership --json` prints."""
+
+    OWNED = "owned"
+    SHARED = "shared"
+
+
 @dataclass(frozen=True)
 class StackNode:
     """A tracked branch: the branch it's stacked on, the group of stacks its
-    stack is in, if it's at the bottom of one (see core.GROUP_KEY), and
-    whether its stack is "owned" or "shared" (see core.OWNERSHIP_KEY), if
-    that's been recorded."""
+    stack is in, if it's at the bottom of one (see core.GROUP_KEY), and its
+    stack's ownership (see core.OWNERSHIP_KEY), if that's been recorded."""
 
     name: str
     parent: str
     group: str | None = None
-    ownership: str | None = None
+    ownership: Ownership | None = None
 
 
 class Stacks:
@@ -65,7 +75,7 @@ class Stacks:
         return self._nodes[branch].group
 
     def is_shared(self, branch: str) -> bool:
-        return self._nodes[branch].ownership == "shared"
+        return self._nodes[branch].ownership is Ownership.SHARED
 
     def groups(self) -> dict[str, str]:
         """{branch: its group}, for the branches that have one."""
@@ -192,8 +202,8 @@ class Stacks:
         node = old or StackNode(branch, parent)
         if old is None or old.parent != parent:
             connected = {m for member in (branch, parent) if member in self for m in self.stack_of(member, False)}
-            if node.ownership == "shared" or any(self.is_shared(m) for m in connected):
-                node = replace(node, ownership="shared")
+            if node.ownership is Ownership.SHARED or any(self.is_shared(m) for m in connected):
+                node = replace(node, ownership=Ownership.SHARED)
                 self.share_descendants(branch)
         if parent in self._nodes:
             node = replace(node, group=None)
@@ -207,18 +217,18 @@ class Stacks:
 
     def share(self, branch: str) -> None:
         """Mark tracked branch, and the branches stacked on it, shared."""
-        self.set_ownership(branch, "shared")
+        self.set_ownership(branch, Ownership.SHARED)
         self.share_descendants(branch)
 
     def share_descendants(self, branch: str) -> None:
         """Mark the branches stacked on branch, and on those, shared."""
         for member in self.descendants(branch):
-            self.set_ownership(member, "shared")
+            self.set_ownership(member, Ownership.SHARED)
 
     def set_group(self, branch: str, group: str | None) -> None:
         self._set(replace(self._nodes[branch], group=group))
 
-    def set_ownership(self, branch: str, ownership: str | None) -> None:
+    def set_ownership(self, branch: str, ownership: Ownership | None) -> None:
         self._set(replace(self._nodes[branch], ownership=ownership))
 
     def drop(self, branch: str) -> list[str]:

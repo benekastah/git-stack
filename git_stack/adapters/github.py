@@ -1,3 +1,4 @@
+import enum
 import json
 import re
 import subprocess
@@ -75,12 +76,30 @@ def optional_field(data: object, key: str, kind: type[T]) -> T | None:
     return field(data, key, kind)
 
 
+class GitHubState(enum.Enum):
+    """A pull request's state, as GitHub's API gives it. (PullRequestState is
+    what info shows, which tells drafts apart.)"""
+
+    OPEN = "OPEN"
+    CLOSED = "CLOSED"
+    MERGED = "MERGED"
+
+
+def github_state(data: object) -> GitHubState:
+    """The "state" field of data, a pull request from GitHub's API."""
+    value = field(data, "state", str)
+    try:
+        return GitHubState(value)
+    except ValueError:
+        raise StackError(f"GitHub gave a pull request state git-stack doesn't know: {value}") from None
+
+
 @dataclass(frozen=True)
 class PullRequest:
     """A pull request, with the fields in PR_FIELDS."""
 
     number: int
-    state: str
+    state: GitHubState
     draft: bool
     cross_repository: bool
     head_oid: str
@@ -92,7 +111,7 @@ class PullRequest:
         merge_commit = optional_field(data, "mergeCommit", dict)
         return cls(
             number=field(data, "number", int),
-            state=field(data, "state", str),
+            state=github_state(data),
             draft=field(data, "isDraft", bool),
             cross_repository=field(data, "isCrossRepository", bool),
             head_oid=field(data, "headRefOid", str),
@@ -107,13 +126,16 @@ class GitHubStack:
 
     number: int
     # (number, state) of each of its pull requests, bottom first.
-    entries: tuple[tuple[int, str], ...]
+    entries: tuple[tuple[int, GitHubState], ...]
 
     @classmethod
     def from_json(cls, data: object) -> Self:
         nodes = sorted(field(field(data, "entries", dict), "nodes", list), key=lambda n: field(n, "position", int))
         prs = [field(node, "pullRequest", dict) for node in nodes]
-        return cls(field(data, "number", int), tuple((field(pr, "number", int), field(pr, "state", str)) for pr in prs))
+        return cls(
+            field(data, "number", int),
+            tuple((field(pr, "number", int), github_state(pr)) for pr in prs),
+        )
 
 
 @dataclass(frozen=True)
@@ -240,7 +262,7 @@ class GitHubAdapter(GitAdapter):
             page = field(repository, f"b{i}", dict)
             prs = [PullRequest.from_json(node) for node in field(page, "nodes", list)]
             cursors: set[str] = set()
-            while not any(pr.state == "OPEN" and not pr.cross_repository for pr in prs):
+            while not any(pr.state is GitHubState.OPEN and not pr.cross_repository for pr in prs):
                 page_info = field(page, "pageInfo", dict)
                 if not field(page_info, "hasNextPage", bool):
                     break
@@ -291,13 +313,13 @@ class GitHubAdapter(GitAdapter):
         the same name.
         """
         prs = [pr for pr in prs if not pr.cross_repository]
-        open_pr = next((pr for pr in prs if pr.state == "OPEN"), None)
+        open_pr = next((pr for pr in prs if pr.state is GitHubState.OPEN), None)
         if open_pr is not None:
             return open_pr
         base = self.git.config_get(branch, BASE_KEY)
         if base is None:
             return None
-        merged = [pr for pr in prs if pr.state == "MERGED"]
+        merged = [pr for pr in prs if pr.state is GitHubState.MERGED]
         self.fetch_missing_heads(merged)
         return next(
             (pr for pr in merged if self.git.rev(pr.head_oid) and self.git.is_ancestor(base, pr.head_oid)), None
@@ -440,7 +462,7 @@ class GitHubAdapter(GitAdapter):
             raise
         repository = field(field(parse_json(output), "data", dict), "repository", dict)
         pr = optional_field(repository, "pullRequest", dict)
-        if pr is None or field(pr, "state", str) != "OPEN":
+        if pr is None or github_state(pr) is not GitHubState.OPEN:
             return None
         return login_of(optional_field(pr, "author", dict))
 
@@ -453,7 +475,7 @@ class GitHubAdapter(GitAdapter):
             return None
         state = (
             PullRequestState.MERGED
-            if pr.state == "MERGED"
+            if pr.state is GitHubState.MERGED
             else PullRequestState.DRAFT
             if pr.draft
             else PullRequestState.OPEN
@@ -465,7 +487,7 @@ class GitHubAdapter(GitAdapter):
         pr = self.pull_requests().get(branch)
         if (
             pr is not None
-            and pr.state == "OPEN"
+            and pr.state is GitHubState.OPEN
             and self.git.remote_branch_name(parent, self.remote) == self._default_branch
         ):
             return MergeState.NOT_MERGED
@@ -495,7 +517,7 @@ class GitHubAdapter(GitAdapter):
         """
         git = self.git
         pr = self.pull_requests().get(branch)
-        if pr is None or pr.state != "MERGED":
+        if pr is None or pr.state is not GitHubState.MERGED:
             return None
         merge = pr.merge_oid
         if not (merge and git.rev(merge) and git.is_ancestor(merge, f"refs/heads/{parent}") and git.rev(pr.head_oid)):
@@ -529,7 +551,7 @@ class GitHubAdapter(GitAdapter):
         self, branches: list[str], stacks: Stacks, prs: dict[str, PullRequest], opening: bool
     ) -> None:
         for branch in branches:
-            if (branch in prs and prs[branch].state == "OPEN") or (opening and branch not in prs):
+            if (branch in prs and prs[branch].state is GitHubState.OPEN) or (opening and branch not in prs):
                 self.ensure_pr_parent_remote(branch, stacks.parent(branch))
 
     def before_push(
@@ -554,13 +576,15 @@ class GitHubAdapter(GitAdapter):
         prs = self.pull_requests()
         self.ensure_pr_parent_remotes(to_push, stacks, prs, opening)
         allowed = {
-            prs[b].number for b in (scope if scope is not None else to_push) if b in prs and prs[b].state == "OPEN"
+            prs[b].number
+            for b in (scope if scope is not None else to_push)
+            if b in prs and prs[b].state is GitHubState.OPEN
         }
         pending = {
             prs[b].number
             for b in to_push
             if b in prs
-            and prs[b].state == "OPEN"
+            and prs[b].state is GitHubState.OPEN
             and prs[b].base != self.git.remote_branch_name(stacks.parent(b), self.remote)
             and self.git.rev(f"refs/remotes/{self.remote}/{self.git.remote_branch_name(stacks.parent(b), self.remote)}")
             is None
@@ -605,7 +629,9 @@ class GitHubAdapter(GitAdapter):
         say which pushed branches have none, unless they're opened next."""
         prs = self.pull_requests()
         allowed = {
-            prs[b].number for b in (scope if scope is not None else pushed) if b in prs and prs[b].state == "OPEN"
+            prs[b].number
+            for b in (scope if scope is not None else pushed)
+            if b in prs and prs[b].state is GitHubState.OPEN
         }
         for b in pushed:
             if b in prs:
@@ -618,7 +644,7 @@ class GitHubAdapter(GitAdapter):
         """Point branch's pull request at base, if it's open and isn't already."""
         prs = self.pull_requests()
         pr = prs.get(branch)
-        if pr is None or pr.state != "OPEN":
+        if pr is None or pr.state is not GitHubState.OPEN:
             return
         self.ensure_pr_parent_remote(branch, base)
         base = self.git.remote_branch_name(base, self.remote)
@@ -649,7 +675,7 @@ class GitHubAdapter(GitAdapter):
 
     def ensure_stack_scope(self, stack: GitHubStack, allowed: set[int]) -> None:
         """Refuse to unstack PRs outside the selected local stack."""
-        unrelated = sorted(n for n, state in stack.entries if state != "MERGED" and n not in allowed)
+        unrelated = sorted(n for n, state in stack.entries if state is not GitHubState.MERGED and n not in allowed)
         if unrelated:
             raise StackError(
                 "can't rebuild GitHub stacks containing other unmerged pull requests: "
@@ -724,7 +750,13 @@ class GitHubAdapter(GitAdapter):
             raise StackError(f"couldn't tell which pull request gh opened for {branch} from {url!r}")
         number = int(match.group(1))
         self.pull_requests()[branch] = PullRequest(
-            number, "OPEN", True, False, self.git.tip(branch), self.git.remote_branch_name(base, self.remote), None
+            number,
+            GitHubState.OPEN,
+            True,
+            False,
+            self.git.tip(branch),
+            self.git.remote_branch_name(base, self.remote),
+            None,
         )
         return number, url
 
@@ -785,7 +817,7 @@ class GitHubAdapter(GitAdapter):
             return prs[branch].number if branch in prs else branch
 
         current = {node(b): node(stacks.parent(b)) if stacks.parent(b) in branches else root for b in branches}
-        to_update = {b: prs[b].number for b in branches if b in prs and prs[b].state == "OPEN"}
+        to_update = {b: prs[b].number for b in branches if b in prs and prs[b].state is GitHubState.OPEN}
         try:
             fields = self.pull_request_fields(to_update.values(), f"body {BASE_CHANGES} {STACK_FIELDS}")
         except StackError:
@@ -872,7 +904,7 @@ class GitHubAdapter(GitAdapter):
             ]
             for n, pr in prs.items()
         }
-        open_heads = {b for b, pr in self.pull_requests().items() if pr.state == "OPEN"}
+        open_heads = {b for b, pr in self.pull_requests().items() if pr.state is GitHubState.OPEN}
         heads = {head for c in changes.values() for head, _ in c} - {root} - open_heads
         merges = self.merged_pull_requests(sorted(heads))
         found = {}
@@ -935,7 +967,7 @@ class GitHubAdapter(GitAdapter):
         """
         found = {stack.number: stack for stack in stacks.values() if stack is not None}
         (stack,) = found.values() if len(found) == 1 else (None,)
-        bottom = [n for n, state in stack.entries if state == "OPEN"] if stack is not None else []
+        bottom = [n for n, state in stack.entries if state is GitHubState.OPEN] if stack is not None else []
         if bottom == chain:
             return True
         if not self.github_stacks_enabled():
@@ -948,7 +980,7 @@ class GitHubAdapter(GitAdapter):
                 n
                 for existing in found.values()
                 for n, state in existing.entries
-                if state != "MERGED" and n not in chain
+                if state is not GitHubState.MERGED and n not in chain
             )
             if unrelated:
                 raise StackError(
@@ -959,13 +991,13 @@ class GitHubAdapter(GitAdapter):
                 self.core.emit(events.GitHubStackRebuildPlanned(tuple(sorted(found)), tuple(chain)))
                 return False
             for existing in found.values():
-                representative = next(n for n, state in existing.entries if state == "OPEN" and n in chain)
+                representative = next(n for n, state in existing.entries if state is GitHubState.OPEN and n in chain)
                 self.unstack(representative, set(chain))
             return self.stacks_api("", chain)
         if (
             len(found) > 1
             or bottom != chain[: len(bottom)]
-            or (stack is not None and stack.entries and stack.entries[-1][1] != "OPEN")
+            or (stack is not None and stack.entries and stack.entries[-1][1] is not GitHubState.OPEN)
         ):
             self.core.emit(events.GitHubStackMismatch(tuple(chain), tuple(sorted(found))))
             return False

@@ -9,19 +9,21 @@ from typing import Concatenate, ParamSpec, TypeVar
 from git_stack import events
 from git_stack.adapters import ADAPTER_SETTING, make_adapter
 from git_stack.adapters.git import GitAdapter, PullRequestLink
-from git_stack.adapters.github import GitHubAdapter, OpenPullRequest
+from git_stack.adapters.github import GitHubAdapter, GitHubState, OpenPullRequest
 from git_stack.adapters.merge_state import MergeState
 from git_stack.core import (
     BASE_KEY,
     PULLED_KEY,
     PULLED_UPSTREAM_KEY,
     TRACK_UPSTREAM_KEY,
+    Delete,
     StackCore,
+    SyncCommand,
 )
 from git_stack.errors import BrokenStackError, StackError
 from git_stack.git import DEFAULT_REMOTE
 from git_stack.json_fields import json_name
-from git_stack.stacks import Stacks
+from git_stack.stacks import Ownership, Stacks
 
 Client = TypeVar("Client", bound=StackCore)
 Params = ParamSpec("Params")
@@ -284,7 +286,7 @@ class SyncState:
     original: str
     stacks: Stacks
     remote: str
-    delete: str | None
+    delete: Delete | None
     latest: bool
     push: bool
     ignore_reverts: frozenset[str] = frozenset()
@@ -292,7 +294,7 @@ class SyncState:
     rewritten_upstream: bool = False
     scope: frozenset[str] = frozenset()
     protected: frozenset[str] = frozenset()
-    command: str = "sync"
+    command: SyncCommand = SyncCommand.SYNC
     skipped: set[str] = field(default_factory=set)
     blocked: list[str] = field(default_factory=list)
     pushable: list[str] = field(default_factory=list)
@@ -307,18 +309,19 @@ class StackClient(StackCore):
     """
 
     @snapshot
-    def get_ownership(self, branches: Sequence[str] = (), groups: Sequence[str] = ()) -> tuple[str, list[str]]:
-        """Return the selected branches and whether any belongs to a shared stack."""
+    def get_ownership(self, branches: Sequence[str] = (), groups: Sequence[str] = ()) -> tuple[Ownership, list[str]]:
+        """Return the selected branches' ownership, shared if any belongs to a
+        shared stack, and the selected branches."""
         stacks = self.stacks()
         selected = self.selected_stacks(branches, groups, stacks, "inspect")
-        ownership = "shared" if any(stacks.is_shared(b) for b in selected) else "owned"
+        ownership = Ownership.SHARED if any(stacks.is_shared(b) for b in selected) else Ownership.OWNED
         return ownership, selected
 
     @exclusive
-    def set_ownership(self, ownership: str, branches: Sequence[str] = (), groups: Sequence[str] = ()) -> list[str]:
+    def set_ownership(
+        self, ownership: Ownership, branches: Sequence[str] = (), groups: Sequence[str] = ()
+    ) -> list[str]:
         """Mark the selected stacks as owned or shared."""
-        if ownership not in ("owned", "shared"):
-            raise StackError(f"unknown stack ownership: {ownership}")
         self.ensure_no_operation_in_progress()
         stacks = self.stacks()
         selected = self.selected_stacks(branches, groups, stacks, "mark")
@@ -531,7 +534,7 @@ class StackClient(StackCore):
         without_prs: list[ImportStepWithoutPr],
         prs: list[OpenPullRequest],
         viewer: str | None,
-        previous_ownership: dict[str, str | None],
+        previous_ownership: dict[str, Ownership | None],
         stacks: Stacks,
     ) -> None:
         """Mark newly imported stacks shared when their contributors aren't solely the user."""
@@ -550,11 +553,11 @@ class StackClient(StackCore):
         for step in candidates:
             members = stacks.stack_of(step.branch, groups=False)
             imported.update(members)
-            if any(previous_ownership.get(b) == "shared" for b in members):
+            if any(previous_ownership.get(b) is Ownership.SHARED for b in members):
                 shared.update(members)
                 continue
             # An explicit choice takes precedence over automatic classification.
-            if any(previous_ownership.get(b) == "owned" for b in members):
+            if any(previous_ownership.get(b) is Ownership.OWNED for b in members):
                 continue
             base = step.base or git.config_get(step.branch, BASE_KEY)
             commit_authors = (
@@ -567,7 +570,7 @@ class StackClient(StackCore):
                 shared.update(members)
         for branch in imported:
             if branch in shared:
-                stacks.set_ownership(branch, "shared")
+                stacks.set_ownership(branch, Ownership.SHARED)
             else:
                 stacks.set_ownership(branch, previous_ownership.get(branch))
         self.save(stacks)
@@ -628,7 +631,7 @@ class StackClient(StackCore):
                     stacks.share(step.branch)
             elif step.action is not ImportAction.SKIP and stacks[step.branch].ownership is None:
                 # Already tracked: its stack is left as it is.
-                stacks.set_ownership(step.branch, "shared")
+                stacks.set_ownership(step.branch, Ownership.SHARED)
             self.save(stacks)
             if step.base is not None:
                 git.config_set(step.branch, BASE_KEY, step.base)
@@ -1138,18 +1141,18 @@ class StackClient(StackCore):
         stacks: Stacks,
         remote: str,
         only_remote: bool,
-        command: str,
+        command: SyncCommand,
     ) -> tuple[list[str], set[str]]:
         """Select one remote's stack branches before changing repository state,
-        for command (sync or pull)."""
-        stack = self.selected_stacks(branches, groups, stacks, command)
+        for command."""
+        stack = self.selected_stacks(branches, groups, stacks, command.value)
         if only_remote:
             stack = [b for b in stack if self.git.config_get(b, "remote") == remote]
             if not stack:
                 raise StackError(f"none of the selected branches track {remote}")
         remotes = self.upstream_remotes(stack)
         if len(remotes) > 1:
-            raise StackError(f"can't {command} branches on multiple remotes atomically; select one with --remote")
+            raise StackError(f"can't {command.value} branches on multiple remotes atomically; select one with --remote")
         return stack, remotes
 
     def upstream_remotes(self, branches: Iterable[str]) -> set[str]:
@@ -1219,7 +1222,7 @@ class StackClient(StackCore):
         branches: Sequence[str] = (),
         groups: Sequence[str] = (),
         remote: str = DEFAULT_REMOTE,
-        delete: str | None = None,
+        delete: Delete | None = None,
         latest: bool = False,
         push: bool = True,
         ignore_reverts: Sequence[str] = (),
@@ -1232,7 +1235,7 @@ class StackClient(StackCore):
     ) -> SyncResult:
         """Fetch, untrack the merged branches in the current stack, or in the
         stacks of the branches that branches and groups name (see named), deleting what
-        delete, "local", "remote" or "both", says, restack them (see restack
+        delete says, restack them (see restack
         for latest), and pull in commits others pushed. Then, if push is set, push
         the branches that differ from the upstream they already have on remote.
         Branches with no such upstream are never pushed.
@@ -1249,7 +1252,7 @@ class StackClient(StackCore):
         """
         # Without push, it's `git stack pull`, which its messages must suggest
         # rerunning rather than sync, which would push.
-        command = "sync" if push else "pull"
+        command = SyncCommand.SYNC if push else SyncCommand.PULL
         self.ensure_no_operation_in_progress()
         self.ensure_clean_worktree()
         initial_stack, _ = self.sync_selection(branches, groups, self.stacks(), remote, only_remote, command)
@@ -1260,7 +1263,9 @@ class StackClient(StackCore):
         else:
             self.settle_all()
         stacks = self.stacks()
-        self.ensure_owned(self.selected_stacks(branches, groups, stacks, command), stacks, allow_shared, command)
+        self.ensure_owned(
+            self.selected_stacks(branches, groups, stacks, command.value), stacks, allow_shared, command.value
+        )
         stack, upstream_remotes = self.sync_selection(branches, groups, stacks, remote, only_remote, command)
         self.ensure_ignorable_reverts(ignore_reverts, stack, "the stacks being synced")
         roots = {stacks.root(b) for b in stack}
@@ -1399,7 +1404,7 @@ class StackClient(StackCore):
     def clean(
         self,
         remote: str | None = None,
-        delete: str | None = None,
+        delete: Delete | None = None,
         ignore_reverts: Sequence[str] = (),
         allow_shared: bool = False,
     ) -> list[BranchInfo]:
@@ -1418,7 +1423,7 @@ class StackClient(StackCore):
         # switching away), touches the worktree, and either could fail partway
         # with uncommitted changes in the way.
         current = git.current_branch()
-        if current in roots or (delete in ("local", "both") and current in stacks):
+        if current in roots or (delete is not None and delete.deletes_local and current in stacks):
             self.ensure_clean_worktree()
         self.ensure_ignorable_reverts(ignore_reverts, list(stacks), "any stack")
         # Where to leave the user afterwards: their branch (or the commit they had
@@ -1709,7 +1714,7 @@ class StackClient(StackCore):
         git = self.git
         self.ensure_on_remote(branches, sorted({stacks.root(b) for b in branches}), remote)
         prs = adapter.pull_requests()
-        allowed = {prs[b].number for b in branches if b in prs and prs[b].state == "OPEN"}
+        allowed = {prs[b].number for b in branches if b in prs and prs[b].state is GitHubState.OPEN}
         template = adapter.pull_request_template() or ""
         steps: list[PullRequestStep] = []
         for b in branches:
