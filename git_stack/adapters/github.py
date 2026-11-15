@@ -85,6 +85,15 @@ class GitHubState(enum.Enum):
     MERGED = "MERGED"
 
 
+def github_state(data: object) -> GitHubState:
+    """The "state" field of data, a pull request from GitHub's API."""
+    value = field(data, "state", str)
+    try:
+        return GitHubState(value)
+    except ValueError:
+        raise StackError(f"GitHub gave a pull request state git-stack doesn't know: {value}") from None
+
+
 @dataclass(frozen=True)
 class PullRequest:
     """A pull request, with the fields in PR_FIELDS."""
@@ -102,7 +111,7 @@ class PullRequest:
         merge_commit = optional_field(data, "mergeCommit", dict)
         return cls(
             number=field(data, "number", int),
-            state=GitHubState(field(data, "state", str)),
+            state=github_state(data),
             draft=field(data, "isDraft", bool),
             cross_repository=field(data, "isCrossRepository", bool),
             head_oid=field(data, "headRefOid", str),
@@ -125,7 +134,7 @@ class GitHubStack:
         prs = [field(node, "pullRequest", dict) for node in nodes]
         return cls(
             field(data, "number", int),
-            tuple((field(pr, "number", int), GitHubState(field(pr, "state", str))) for pr in prs),
+            tuple((field(pr, "number", int), github_state(pr)) for pr in prs),
         )
 
 
@@ -453,7 +462,7 @@ class GitHubAdapter(GitAdapter):
             raise
         repository = field(field(parse_json(output), "data", dict), "repository", dict)
         pr = optional_field(repository, "pullRequest", dict)
-        if pr is None or GitHubState(field(pr, "state", str)) is not GitHubState.OPEN:
+        if pr is None or github_state(pr) is not GitHubState.OPEN:
             return None
         return login_of(optional_field(pr, "author", dict))
 

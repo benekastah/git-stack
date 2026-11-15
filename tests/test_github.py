@@ -7,7 +7,7 @@ import pytest
 
 from git_stack import events
 from git_stack.adapters.git import PullRequestLink, PullRequestState
-from git_stack.adapters.github import github_repo
+from git_stack.adapters.github import PullRequest, github_repo
 from git_stack.errors import StackError
 from git_stack.git import GitClient
 from git_stack.stack import BranchStatus, StackClient
@@ -820,3 +820,18 @@ def test_sync_leaves_reverted_pr_alone_when_its_merge_was_tweaked(
 
     assert events.Reverted("pr1", "main", (repo.git("rev-parse", "main"),), ("pr2",)) in emitted
     assert repo.config("pr1", "stackParent") == "main"
+
+
+def test_an_unknown_pull_request_state_is_an_error() -> None:
+    data = {
+        "number": 5,
+        "state": "ARCHIVED",
+        "isDraft": False,
+        "isCrossRepository": False,
+        "headRefOid": "abc",
+        "baseRefName": "main",
+        "mergeCommit": None,
+    }
+
+    with pytest.raises(StackError, match="pull request state git-stack doesn't know: ARCHIVED"):
+        PullRequest.from_json(data)
