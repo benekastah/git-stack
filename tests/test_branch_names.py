@@ -10,7 +10,7 @@ import pytest
 
 from git_stack.core import Delete
 from git_stack.stack import BranchStatus, StackClient
-from tests.helpers import FakeGitHub, Repo
+from tests.helpers import FakeGitHub, GitCommand, Repo, mark_git_commands
 
 
 @pytest.fixture
@@ -20,10 +20,11 @@ def no_ambiguous_names(monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFix
     terminal (e.g. a rebase's)."""
     warnings: list[str] = []
     real: Callable[..., Any] = subprocess.run
+    mark_git_commands(monkeypatch)
 
     def run(args: list[str], *rest: Any, **kwargs: Any) -> Any:
         result = real(args, *rest, **kwargs)
-        if args[:2] == ["git", "-C"]:
+        if isinstance(args, GitCommand):
             stderr = result.stderr or ""
             text = stderr.decode("utf-8", "replace") if isinstance(stderr, bytes) else stderr
             # What it let through to the terminal, e.g. a rebase's.

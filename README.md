@@ -1328,6 +1328,20 @@ hasn't changed since you last pushed it, so no local commit is dropped; if
 it has, pull the remote branch's commits in by hand, or push over them with
 `git stack push --force`.
 
+## Which git it runs
+
+git-stack runs the `git` on your `PATH`, including a wrapper there (such as
+git-ai). To run another git, set `GIT_STACK_GIT` to its path. For example, to
+run git itself, skipping wrappers, which starts it noticeably quicker on macOS
+and Windows:
+
+```sh
+export GIT_STACK_GIT="$(git --exec-path)/git"
+```
+
+A wrapper that needs to see what git-stack does (e.g. the commits a restack
+rewrites) then won't.
+
 ## Install
 
 Runs on Linux, macOS and Windows. Requires Python 3.11+ and git 2.38+. The

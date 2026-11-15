@@ -1,5 +1,7 @@
+import functools
 import os
 import pathlib
+import shutil
 import subprocess
 import tempfile
 import threading
@@ -52,6 +54,20 @@ MAX_UPSTREAM_PATTERNS_LENGTH = 16384
 END_MARKER_DIFF = "diff --git a/end b/end\n--- a/end\n+++ b/end\n@@ -0,0 +1 @@\n+end\n"
 # Characters a branch name can't have, but a revision (e.g. main~1) can.
 REVISION_SYNTAX = frozenset("~^:?*[\\ ")
+# Whether git's processes close the file descriptors they'd otherwise inherit.
+# Python opens files non-inheritable, so on Linux and macOS there's nothing to
+# close, and not closing anything lets Python start git with posix_spawn, which
+# on macOS is much quicker than forking. On Windows, closing them keeps a git
+# process from inheriting the pipes another thread is starting a process with.
+CLOSE_FDS = os.name == "nt"
+
+
+@functools.cache
+def git_program() -> str:
+    """The git that git-stack runs: $GIT_STACK_GIT if set, otherwise the git on
+    PATH (a wrapper such as git-ai included), as an absolute path, which Python
+    needs to use posix_spawn (see CLOSE_FDS)."""
+    return os.environ.get("GIT_STACK_GIT") or shutil.which("git") or "git"
 
 
 def split_command(args: tuple[str, ...]) -> tuple[str, list[str]]:
@@ -174,7 +190,7 @@ class GitClient:
         self.passthrough_stdout: TextIO | None = None
 
     def _command(self, *args: str) -> list[str]:
-        return ["git", "-C", str(self.directory), *args]
+        return [git_program(), "-C", str(self.directory), *args]
 
     def _ran(self, args: tuple[str, ...]) -> None:
         """Forget the ref snapshot if `git <args>`, which just ran, may have
@@ -200,7 +216,11 @@ class GitClient:
         Windows doesn't turn \n into \r\n on the way in.
         """
         result = subprocess.run(
-            self._command(*args), capture_output=True, input=None if input is None else encode(input), check=False
+            self._command(*args),
+            capture_output=True,
+            input=None if input is None else encode(input),
+            close_fds=CLOSE_FDS,
+            check=False,
         )
         self._ran(args)
         if check and result.returncode != 0:
@@ -209,14 +229,14 @@ class GitClient:
 
     def ok(self, *args: str) -> bool:
         """Run git and report whether it succeeded."""
-        result = subprocess.run(self._command(*args), capture_output=True, check=False)
+        result = subprocess.run(self._command(*args), capture_output=True, close_fds=CLOSE_FDS, check=False)
         self._ran(args)
         return result.returncode == 0
 
     def passthrough(self, *args: str) -> bool:
         """Run git with output going straight to the terminal (stdout to
         passthrough_stdout)."""
-        result = subprocess.run(self._command(*args), stdout=self.passthrough_stdout, check=False)
+        result = subprocess.run(self._command(*args), stdout=self.passthrough_stdout, close_fds=CLOSE_FDS, check=False)
         self._ran(args)
         return result.returncode == 0
 
@@ -375,6 +395,7 @@ class GitClient:
                 capture_output=True,
                 encoding="utf-8",
                 errors="surrogateescape",
+                close_fds=CLOSE_FDS,
                 check=False,
             )
             locked = result.returncode != 0 and "could not lock config file" in result.stderr
@@ -450,6 +471,7 @@ class GitClient:
                         self._command("cat-file", "--batch-check=%(objectname)"),
                         stdin=subprocess.PIPE,
                         stdout=subprocess.PIPE,
+                        close_fds=CLOSE_FDS,
                     )
                 assert self._cat_file.stdin is not None and self._cat_file.stdout is not None
                 self._cat_file.stdin.write(encode(query) + b"\n")
@@ -663,6 +685,7 @@ class GitClient:
             capture_output=True,
             encoding="utf-8",
             errors="surrogateescape",
+            close_fds=CLOSE_FDS,
             check=False,
         )
         return result.stderr.strip() if result.returncode != 0 else None
@@ -703,6 +726,7 @@ class GitClient:
             capture_output=True,
             encoding="utf-8",
             errors="surrogateescape",
+            close_fds=CLOSE_FDS,
             check=False,
         )
         if result.returncode not in (0, 1):
@@ -737,6 +761,7 @@ class GitClient:
             capture_output=True,
             encoding="utf-8",
             errors="surrogateescape",
+            close_fds=CLOSE_FDS,
             check=False,
         )
         return result.stdout.splitlines()[0] if result.returncode == 0 else None
@@ -811,7 +836,9 @@ class GitClient:
             env = {**os.environ, "GIT_INDEX_FILE": str(pathlib.Path(directory) / "index")}
 
             def run(*args: str, input: bytes | None = None) -> subprocess.CompletedProcess[bytes]:
-                return subprocess.run(self._command(*args), input=input, env=env, capture_output=True, check=False)
+                return subprocess.run(
+                    self._command(*args), input=input, env=env, capture_output=True, close_fds=CLOSE_FDS, check=False
+                )
 
             if run("read-tree", new_base).returncode:
                 raise StackError("couldn't prepare an index to check the upstream rebase")
