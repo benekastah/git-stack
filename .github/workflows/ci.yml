@@ -36,11 +36,11 @@ jobs:
           # The venv's Python (setup-python's), named so uv can't choose another.
           python-version: "3.11"
           enable-cache: true
-          cache-dependency-glob: pyproject.toml
+          cache-dependency-glob: uv.lock
           # Makes .venv, where lint.sh looks for the tools.
           activate-environment: true
       - name: Install the dev dependencies
-        run: uv pip install --group dev
+        run: uv sync --locked
       - name: Lint
         run: ./lint.sh
 
@@ -92,10 +92,10 @@ jobs:
           version: "0.13.8"
           python-version: ${{ matrix.python }}
           enable-cache: true
-          cache-dependency-glob: pyproject.toml
+          cache-dependency-glob: uv.lock
           activate-environment: true
       - name: Install the dev dependencies
-        run: uv pip install --group dev
+        run: uv sync --locked
       - name: Run the tests
         run: python -m pytest
 
