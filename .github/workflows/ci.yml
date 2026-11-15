@@ -23,6 +23,12 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: ${{ matrix.python }}
+      # Defender scans each of the many small files the tests' git
+      # repositories are made of as they're written, slowing every git call.
+      - name: Stop Windows Defender scanning files as they're written
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Set-MpPreference -DisableRealtimeMonitoring $true
       - name: Run every check
         if: runner.os != 'Windows'
         run: ./check.sh
