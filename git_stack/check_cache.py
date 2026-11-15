@@ -2,6 +2,7 @@
 
 import json
 import os
+import pathlib
 import tempfile
 import threading
 from collections.abc import Collection
@@ -18,7 +19,7 @@ class CheckCache:
     again. Safe to use from several threads, as info does.
     """
 
-    def __init__(self, path: str) -> None:
+    def __init__(self, path: pathlib.Path) -> None:
         self.path = path
         self._lock = threading.Lock()
         self._entries: dict[str, dict[str, str]] | None = None
@@ -53,8 +54,7 @@ class CheckCache:
 
     def _read(self) -> dict[str, dict[str, str]]:
         try:
-            with open(self.path, encoding="utf-8") as f:
-                entries = json.load(f)
+            entries = json.loads(self.path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return {}
         if not isinstance(entries, dict):
@@ -69,9 +69,9 @@ class CheckCache:
         """Replace the file with entries. Failing to only means checking again."""
         self._entries = entries
         try:
-            fd, temp = tempfile.mkstemp(dir=os.path.dirname(self.path), prefix=".git-stack-cache-")
+            fd, temp = tempfile.mkstemp(dir=self.path.parent, prefix=".git-stack-cache-")
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump(entries, f)
-            os.replace(temp, self.path)
+            pathlib.Path(temp).replace(self.path)
         except OSError:
             pass

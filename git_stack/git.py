@@ -1,4 +1,5 @@
 import os
+import pathlib
 import subprocess
 import tempfile
 import threading
@@ -92,8 +93,8 @@ class GitClient:
     """Runs git in directory, as `git -C <directory>` does."""
 
     def __init__(self, directory: str | os.PathLike[str] = ".") -> None:
-        self.directory = os.fspath(directory)
-        self._common_dir: str | None = None
+        self.directory = pathlib.Path(directory)
+        self._common_dir: pathlib.Path | None = None
         # See branch_config.
         self._config_stat: tuple[int, int, int] | None = None
         self._branch_config: dict[tuple[str, str], str] = {}
@@ -108,7 +109,7 @@ class GitClient:
         self.passthrough_stdout: TextIO | None = None
 
     def _command(self, *args: str) -> list[str]:
-        return ["git", "-C", self.directory, *args]
+        return ["git", "-C", str(self.directory), *args]
 
     def _ran(self, args: tuple[str, ...]) -> None:
         """Forget the ref snapshot if `git <args>`, which just ran, may have
@@ -192,10 +193,10 @@ class GitClient:
                 self._refs = refs
             return self._refs
 
-    def common_dir(self) -> str:
+    def common_dir(self) -> pathlib.Path:
         """The absolute path of the git directory every worktree shares."""
         if self._common_dir is None:
-            self._common_dir = self.run("rev-parse", "--path-format=absolute", "--git-common-dir")
+            self._common_dir = pathlib.Path(self.run("rev-parse", "--path-format=absolute", "--git-common-dir"))
         return self._common_dir
 
     def branch_config(self, fresh: bool = False) -> dict[tuple[str, str], str]:
@@ -210,7 +211,7 @@ class GitClient:
         matter.
         """
         # Before reading, so a write that lands in between is read again next time.
-        st = os.stat(os.path.join(self.common_dir(), "config"))
+        st = (self.common_dir() / "config").stat()
         stat = (st.st_ino, st.st_mtime_ns, st.st_size)
         if fresh or stat != self._config_stat:
             config = {}
@@ -336,7 +337,7 @@ class GitClient:
         paths = self.run(
             "rev-parse", "--path-format=absolute", *(arg for name in names for arg in ("--git-path", name))
         ).splitlines()
-        return any(os.path.exists(path) for path in paths)
+        return any(pathlib.Path(path).exists() for path in paths)
 
     def has_conflicts(self) -> bool:
         """Whether the index has unmerged paths, i.e. a merge stopped on a conflict."""
@@ -354,7 +355,7 @@ class GitClient:
             elif path is not None and (
                 line == f"branch refs/heads/{branch}" or (line == "detached" and self.rebasing_in(path) == branch)
             ):
-                return os.path.normpath(path)
+                return str(pathlib.Path(path))
         return None
 
     def rebasing_in(self, worktree: str) -> str | None:
@@ -364,8 +365,7 @@ class GitClient:
             return None
         for name in ("rebase-merge", "rebase-apply"):
             try:
-                with open(os.path.join(git_dir, name, "head-name"), encoding="utf-8") as f:
-                    head = f.read().strip()
+                head = (pathlib.Path(git_dir) / name / "head-name").read_text(encoding="utf-8").strip()
             except OSError:
                 continue
             return head.removeprefix("refs/heads/") if head.startswith("refs/heads/") else None
@@ -376,7 +376,10 @@ class GitClient:
         if that isn't this one. git won't check out, rebase or delete a branch
         that's checked out or being rebased elsewhere."""
         path = self.worktree_of(branch)
-        if path is None or os.path.realpath(path) == os.path.realpath(self.run("rev-parse", "--show-toplevel")):
+        if (
+            path is None
+            or pathlib.Path(path).resolve() == pathlib.Path(self.run("rev-parse", "--show-toplevel")).resolve()
+        ):
             return None
         return path
 
@@ -554,7 +557,7 @@ class GitClient:
         if len(ours) != len(theirs) or [i for _, i in ours] != [i for _, i in theirs]:
             return False
         with tempfile.TemporaryDirectory(prefix="git-stack-index-") as directory:
-            env = {**os.environ, "GIT_INDEX_FILE": os.path.join(directory, "index")}
+            env = {**os.environ, "GIT_INDEX_FILE": str(pathlib.Path(directory) / "index")}
 
             def run(*args: str, input: bytes | None = None) -> subprocess.CompletedProcess[bytes]:
                 return subprocess.run(self._command(*args), input=input, env=env, capture_output=True, check=False)

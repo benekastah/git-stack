@@ -1,6 +1,5 @@
 import enum
 import fnmatch
-import os
 from collections import Counter
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from contextlib import contextmanager
@@ -142,7 +141,7 @@ class StackCore:
             finally:
                 self._exclusive_depth -= 1
             return
-        with file_lock(os.path.join(self.git.common_dir(), LOCK_FILE), lambda: self.emit(events.WaitingForLock())):
+        with file_lock(self.git.common_dir() / LOCK_FILE, lambda: self.emit(events.WaitingForLock())):
             self._exclusive_depth = 1
             try:
                 yield
@@ -153,7 +152,7 @@ class StackCore:
     def checks(self) -> CheckCache:
         """Where remembered keeps its answers."""
         if self._checks is None:
-            self._checks = CheckCache(os.path.join(self.git.common_dir(), CHECK_CACHE_FILE))
+            self._checks = CheckCache(self.git.common_dir() / CHECK_CACHE_FILE)
         return self._checks
 
     def emit(self, event: events.Event) -> None:

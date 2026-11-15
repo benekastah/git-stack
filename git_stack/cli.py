@@ -1,7 +1,7 @@
 import argparse
 import codecs
 import io
-import os
+import pathlib
 import sys
 
 import git_stack
@@ -87,8 +87,8 @@ def main(argv: list[str] | None = None, stack: StackClient | None = None) -> int
     use_utf8_output()
     args = parser.parse_args(argv)
     if stack is None:
-        # os.path.join starts over at an absolute path, as git's -C does.
-        stack = StackClient(GitClient(os.path.join(".", *args.directories)))
+        # Joining starts over at an absolute path, as git's -C does.
+        stack = StackClient(GitClient(pathlib.Path(".", *args.directories)))
     # With --json, stdout is for the JSON, so git's output goes to stderr.
     stream = JsonStream() if args.json else None
     stack.on_event = stream.event if stream else print_event
