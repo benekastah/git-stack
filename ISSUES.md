@@ -24,18 +24,6 @@ were stacked on it are warned about. Nothing is lost, and
 `clean --ignore-revert <branch>` (or `sync`'s) says it wasn't a revert, but
 until then every command skips it.
 
-## The current worktree can look like another one on a case-insensitive filesystem
-
-`GitClient.other_worktree_of` tells whether a branch is checked out in another
-worktree by comparing resolved paths: the one `git worktree list` gives and
-`git rev-parse --show-toplevel`. `Path.resolve()` doesn't fix a path's case,
-so on macOS or Windows, if the two spell the same directory in different cases
-(e.g. the worktree was added as `~/Code/wt` and is now reached as
-`~/code/wt`), the current worktree counts as another. `restack`, `sync` and
-`pull` then skip its branch, and `-d` doesn't delete it, each saying it's
-checked out elsewhere. Not reproduced. Comparing with `os.path.samefile` (or
-device and inode) would fix it.
-
 ## The branch config cache could miss a write
 
 `GitClient.branch_config` rereads `.git/config` only when its inode, mtime or

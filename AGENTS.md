@@ -83,8 +83,9 @@ git-stack runs on Linux, macOS and Windows, and CI runs the tests on all
 three. Keep it that way:
 
 - Use `pathlib.Path` and its `/` operator for paths, not `os.path` or strings
-  joined with `/`, and compare paths as `Path`s (resolved, if they may be
-  spelled differently), not as strings: git writes Windows paths with `/`.
+  joined with `/`, and compare paths as `Path`s, not as strings: git writes
+  Windows paths with `/`. To tell whether two paths name the same file, use
+  `git.same_file`, since resolving a path doesn't fix its case.
 - Name a branch to git as `refs/heads/<name>` (or `refs/remotes/<remote>/<name>`),
   never by its bare name, which git takes for a tag of the same name first. Only
   `git switch` takes a bare name, through `git.SWITCH`.

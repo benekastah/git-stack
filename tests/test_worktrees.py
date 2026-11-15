@@ -182,3 +182,19 @@ def test_sync_fails_when_upstream_commits_cant_be_pulled_into_branch_in_other_wo
 
     with pytest.raises(StackError, match="didn't push pr1:"):
         client.sync()
+
+
+def test_a_worktree_added_by_a_path_in_another_case_is_this_one(repo: Repo) -> None:
+    """On a case-insensitive filesystem (as macOS's and Windows' usually are),
+    git records a worktree's path as it was given, which can differ in case
+    from how it's reached later."""
+    respelled = repo.tmp.with_name(repo.tmp.name.swapcase())
+    if not respelled.exists():
+        pytest.skip("the filesystem is case-sensitive")
+    repo.git("branch", "feature")
+    repo.git("worktree", "add", "--quiet", str(respelled / "feature-worktree"), "feature")
+
+    git = GitClient(repo.tmp / "feature-worktree")
+
+    assert git.worktree_of("feature") is not None
+    assert git.other_worktree_of("feature") is None
