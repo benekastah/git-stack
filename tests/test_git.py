@@ -322,3 +322,53 @@ def test_snapshot_reads_an_unborn_current_branch(repo: Repo) -> None:
     git = GitClient(repo.path)
     with git.snapshot():
         assert git.current_branch() == "new"
+
+
+def separate_patch_ids(repo: Repo, *command: str) -> list[tuple[str, str]]:
+    """`git patch-id --stable` of what `git <command>` prints, run on its own."""
+    output = repo.git(command[0], "--no-color", *command[1:])
+    result = subprocess.run(
+        ["git", "patch-id", "--stable"], input=output.encode() + b"\n", cwd=repo.path, capture_output=True, check=True
+    )
+    return [(patch_id, commit) for patch_id, commit in (line.split() for line in result.stdout.decode().splitlines())]
+
+
+def test_commit_patch_ids_reads_each_commands_patches_with_one_patch_id(repo: Repo, git_calls: list[list[str]]) -> None:
+    base = repo.git("rev-parse", "HEAD")
+    repo.commit("a", "one\n", "one")
+    repo.git("commit", "--quiet", "--allow-empty", "-m", "empty")
+    (repo.path / "binary").write_bytes(b"\0\1\2")
+    repo.git("add", "binary")
+    repo.git("commit", "--quiet", "-m", "binary")
+    repo.commit("b", "two\n", "two")
+    commands = [
+        ("log", "-p", f"{base}..HEAD"),
+        ("log", "-p", "-R", f"{base}..HEAD"),  # the same commits again
+        ("log", "-p", "HEAD..HEAD"),  # nothing
+        ("diff", base, "HEAD"),
+        ("diff", "-R", base, "HEAD"),
+        ("diff", "HEAD", "HEAD"),  # nothing
+    ]
+    git = GitClient(repo.path)
+    git.object_id_length()
+    git_calls.clear()
+
+    result = git.commit_patch_ids(*commands)
+
+    assert result == [separate_patch_ids(repo, *command) for command in commands]
+    assert [len(patches) for patches in result] == [3, 3, 0, 1, 1, 0]
+    assert [call[0] for call in git_calls].count("patch-id") == 1
+
+
+def test_commit_patch_ids_in_a_sha256_repository(tmp_path: pathlib.Path, repo: Repo) -> None:
+    sha256 = Repo(path=tmp_path / "sha256", origin=repo.origin, forge=repo.forge, tmp=tmp_path)
+    repo.git("init", "--quiet", "--object-format=sha256", str(sha256.path))
+    sha256.write("a", "one\n")
+    sha256.git("add", "a")
+    sha256.git("commit", "--quiet", "-m", "one")
+    sha256.commit("a", "two\n", "two")
+    commands = [("log", "-p", "HEAD~1..HEAD"), ("diff", "HEAD~1", "HEAD")]
+
+    assert GitClient(sha256.path).commit_patch_ids(*commands) == [
+        separate_patch_ids(sha256, *command) for command in commands
+    ]

@@ -5,7 +5,7 @@ import tempfile
 import threading
 import time
 from collections import Counter
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from typing import TextIO
 
@@ -47,6 +47,9 @@ SWITCH = ("-c", "core.warnAmbiguousRefs=false", "switch", "--quiet")
 # How long the upstreams' refnames can be, together, for the ref snapshot to
 # name them to git (see GitClient._snapshot_refs).
 MAX_UPSTREAM_PATTERNS_LENGTH = 16384
+# The diff of the patch GitClient.commit_patch_ids ends each command's output
+# with.
+END_MARKER_DIFF = "diff --git a/end b/end\n--- a/end\n+++ b/end\n@@ -0,0 +1 @@\n+end\n"
 # Characters a branch name can't have, but a revision (e.g. main~1) can.
 REVISION_SYNTAX = frozenset("~^:?*[\\ ")
 
@@ -115,6 +118,7 @@ class GitClient:
         self.directory = pathlib.Path(directory)
         self._common_dir: pathlib.Path | None = None
         self._toplevel: pathlib.Path | None = None
+        self._object_id_length: int | None = None
         # See branch_config: whether it has read the config file, and the
         # file's stat when it did (None if there was no file).
         self._config_read = False
@@ -644,17 +648,41 @@ class GitClient:
                 merges.append(commit)
         return merges
 
-    def patch_ids(self, *args: str) -> set[str]:
-        """The patch-ids of the commits or diff that `git <args>` prints."""
-        return {patch_id for patch_id, _ in self.commit_patch_ids(*args)}
+    def commit_patch_ids(self, *commands: Sequence[str]) -> list[list[tuple[str, str]]]:
+        """For each of commands, (patch-id, commit) for each commit that
+        `git <command>` prints, in the order it prints them. For a diff, the
+        commit is all zeros.
 
-    def commit_patch_ids(self, *args: str) -> list[tuple[str, str]]:
-        """(patch-id, commit) for each commit that `git <args>` prints, in the
-        order it prints them. For a diff, the commit is all zeros."""
-        command, *rest = args
-        patches = self.run("--literal-pathspecs", command, "--no-color", "--no-ext-diff", *rest)
-        lines = self.run("patch-id", "--stable", input=patches + "\n").splitlines()
-        return [(patch_id, commit) for patch_id, commit in (line.split() for line in lines)]
+        Each command runs, but one `git patch-id` reads them all: after each
+        command's output comes a patch of our own, whose commit (1, 2, ...)
+        can't be a real one's, to mark where it ends.
+        """
+        length = self.object_id_length()
+        patches = []
+        for i, (command, *rest) in enumerate(commands, 1):
+            if command == "diff":
+                # Without a commit line, patch-id would take it as part of the
+                # marker before it.
+                patches.append(f"commit {'0' * length}")
+            patches.append(self.run("--literal-pathspecs", command, "--no-color", "--no-ext-diff", *rest))
+            patches.append(f"commit {i:0{length}x}\n\n{END_MARKER_DIFF}")
+        results: list[list[tuple[str, str]]] = [[]]
+        for line in self.run("patch-id", "--stable", input="\n".join(patches) + "\n").splitlines():
+            patch_id, commit = line.split()
+            if commit == f"{len(results):0{length}x}":
+                results.append([])
+            else:
+                results[-1].append((patch_id, commit))
+        if len(results) != len(commands) + 1:
+            raise StackError(f"git patch-id printed {len(results) - 1} end markers for {len(commands)} commands")
+        return results[:-1]
+
+    def object_id_length(self) -> int:
+        """How many hex digits the repository's object IDs have: 40 for SHA-1,
+        64 for SHA-256."""
+        if self._object_id_length is None:
+            self._object_id_length = 64 if self.run("rev-parse", "--show-object-format") == "sha256" else 40
+        return self._object_id_length
 
     def identity_counts(self, *args: str) -> Counter[str]:
         """Count commit identities, including repeated author, date and subject."""
