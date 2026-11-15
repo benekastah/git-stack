@@ -1,5 +1,6 @@
 import os
 import pathlib
+import shutil
 import subprocess
 
 import pytest
@@ -34,24 +35,17 @@ def git_exec_path() -> pathlib.Path:
     )
 
 
-@pytest.fixture
-def repo(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, git_exec_path: pathlib.Path) -> Repo:
-    """A repository with a, b and c committed to main and pushed to origin.
-
-    git, git stack run as a separate process, and repo.client see an isolated
-    git config and identity for the rest of the test. PATH has tmp_path /
-    "bin" first, which other fixtures can add commands to (see
-    install_command), then git_exec_path, so git is the git there.
-    """
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    monkeypatch.setenv("PATH", os.pathsep.join([str(bin_dir), str(git_exec_path), os.environ["PATH"]]))
+def isolate_git(mp: pytest.MonkeyPatch, directory: pathlib.Path, path: list[pathlib.Path]) -> None:
+    """Give git, git stack run as a separate process, and StackClient an
+    isolated git config (directory / "gitconfig") and identity, with path
+    before PATH."""
+    mp.setenv("PATH", os.pathsep.join([*map(str, path), os.environ["PATH"]]))
     # A git hook runs with these pointing at its repository (in a linked
     # worktree, GIT_DIR is absolute), so the tests run by the pre-push hook
     # would otherwise commit to, and push from, the repository being pushed.
     for name in GIT_REPOSITORY_VARIABLES:
-        monkeypatch.delenv(name, raising=False)
-    global_config = tmp_path / "gitconfig"
+        mp.delenv(name, raising=False)
+    global_config = directory / "gitconfig"
     # Without auto-maintenance, which would otherwise start a `git maintenance
     # run --auto` after each commit, fetch, merge and push: thousands of
     # processes over the tests, none of which they need.
@@ -68,17 +62,52 @@ def repo(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, git_exec_path:
         "GIT_EDITOR": "true",
         "PYTHONPATH": str(ROOT),
     }.items():
-        monkeypatch.setenv(name, value)
+        mp.setenv(name, value)
 
+
+@pytest.fixture(scope="session")
+def repo_template(tmp_path_factory: pytest.TempPathFactory, git_exec_path: pathlib.Path) -> pathlib.Path:
+    """origin.git, local and forge as the repo fixture starts with them, made
+    once (for each test worker) and copied for each test, which is much
+    quicker than making them with git each time."""
+    template = tmp_path_factory.mktemp("template")
+    repo = Repo(path=template / "local", origin=template / "origin.git", forge=template / "forge", tmp=template)
+    with pytest.MonkeyPatch.context() as mp:
+        isolate_git(mp, template, [git_exec_path])
+        subprocess.run(["git", "init", "--quiet", "--bare", repo.origin], check=True)
+        subprocess.run(["git", "clone", "--quiet", repo.origin, repo.path], check=True, capture_output=True)
+        for name in ("a", "b", "c"):
+            repo.write(name, "base\n")
+        repo.git("add", ".")
+        repo.git("commit", "--quiet", "-m", "init")
+        repo.git("push", "--quiet", "--set-upstream", "origin", "main")
+        subprocess.run(["git", "clone", "--quiet", repo.origin, repo.forge], check=True, capture_output=True)
+    # Fewer files to copy. The hooks directories stay, for Repo.add_hook.
+    for sample in template.glob("**/hooks/*.sample"):
+        sample.unlink()
+    return template
+
+
+@pytest.fixture
+def repo(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, git_exec_path: pathlib.Path, repo_template: pathlib.Path
+) -> Repo:
+    """A repository with a, b and c committed to main and pushed to origin.
+
+    git, git stack run as a separate process, and repo.client see an isolated
+    git config and identity for the rest of the test. PATH has tmp_path /
+    "bin" first, which other fixtures can add commands to (see
+    install_command), then git_exec_path, so git is the git there.
+    """
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    isolate_git(monkeypatch, tmp_path, [bin_dir, git_exec_path])
     repo = Repo(path=tmp_path / "local", origin=tmp_path / "origin.git", forge=tmp_path / "forge", tmp=tmp_path)
-    subprocess.run(["git", "init", "--quiet", "--bare", repo.origin], check=True)
-    subprocess.run(["git", "clone", "--quiet", repo.origin, repo.path], check=True, capture_output=True)
-    for name in ("a", "b", "c"):
-        repo.write(name, "base\n")
-    repo.git("add", ".")
-    repo.git("commit", "--quiet", "-m", "init")
-    repo.git("push", "--quiet", "--set-upstream", "origin", "main")
-    subprocess.run(["git", "clone", "--quiet", repo.origin, repo.forge], check=True, capture_output=True)
+    for name in ("origin.git", "local", "forge"):
+        shutil.copytree(repo_template / name, tmp_path / name, symlinks=True)
+    # The clones' only reference to where they were made.
+    for clone in (repo.path, repo.forge):
+        repo.git("config", "remote.origin.url", str(repo.origin), cwd=clone)
     # Everything should target repo.path explicitly. Run from a directory
     # that isn't a repository, so anything that doesn't fails instead of
     # touching the repository the tests were started in.
