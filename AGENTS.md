@@ -15,6 +15,13 @@ most severe first.
   `show`: `run` does the command and returns a dataclass result, and `show`
   prints it as text. With `--json`, the CLI prints the result as JSON instead
   (see below), so the result has to hold everything the command reports.
+- Each git call is slow enough to add up, so `GitClient` reads branch config
+  and refs in bulk and caches them. Refs are cached only within a command (see
+  `GitClient.snapshot`): a command that changes anything is `@exclusive`, which
+  takes the snapshot under the lock, and one that only reads is `@snapshot`.
+  Run git through `GitClient` so the snapshot is forgotten when a git command
+  may change refs, and only add a command to `READ_ONLY_COMMANDS` if it never
+  does.
 - Progress and warnings are events (`git_stack/events.py`), passed to the
   client's `on_event`. `git_stack/output.py` turns them into text, or into JSON
   lines.
