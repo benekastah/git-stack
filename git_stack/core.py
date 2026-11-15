@@ -26,9 +26,15 @@ TRACK_UPSTREAM_KEY = "stackTrackUpstream"
 # Written before a rebase starts and promoted to PARENT_KEY/BASE_KEY once the
 # rebase is known to have finished. This lets the user resolve conflicts with a
 # plain `git rebase --continue` (or back out with `git rebase --abort`).
-PENDING_PARENT_KEY = "stackPendingParent"
-PENDING_BASE_KEY = "stackPendingBase"
-PENDING_RESTACK_FROM_KEY = "stackPendingRestackFrom"
+# A restack that's started, as "<the branch's tip before> <the parent's tip
+# it's rebased onto> <the parent>", in one setting, so it's recorded with one
+# git process, and all of it or none (see settle_restack).
+PENDING_RESTACK_KEY = "stackPendingRestack"
+# How older versions recorded it, in three settings, which a restack they
+# started and didn't finish may have left.
+LEGACY_PENDING_PARENT_KEY = "stackPendingParent"
+LEGACY_PENDING_BASE_KEY = "stackPendingBase"
+LEGACY_PENDING_RESTACK_FROM_KEY = "stackPendingRestackFrom"
 # Same idea for pulling upstream commits with `git cherry-pick`: the branch tip
 # before the pull, the upstream tip being pulled, and the identity (see
 # GitClient.identity_counts) of each commit being cherry-picked, one per line.
@@ -313,11 +319,27 @@ class StackCore:
 
     def settle_restack(self, branch: str, forget_unfinished: bool, completed: bool = False) -> None:
         git = self.git
-        pending_parent = git.config_get(branch, PENDING_PARENT_KEY)
-        if pending_parent is None:
-            return
-        pending_base = git.config_get(branch, PENDING_BASE_KEY)
-        before = git.config_get(branch, PENDING_RESTACK_FROM_KEY)
+        before: str | None
+        pending_base: str | None
+        if (pending := git.config_get(branch, PENDING_RESTACK_KEY)) is not None:
+            before, pending_base, pending_parent = pending.split(" ", 2)
+            recorded = {PENDING_RESTACK_KEY: pending}
+        else:
+            legacy_parent = git.config_get(branch, LEGACY_PENDING_PARENT_KEY)
+            if legacy_parent is None:
+                return
+            pending_parent = legacy_parent
+            pending_base = git.config_get(branch, LEGACY_PENDING_BASE_KEY)
+            before = git.config_get(branch, LEGACY_PENDING_RESTACK_FROM_KEY)
+            recorded = {
+                key: value
+                for key, value in (
+                    (LEGACY_PENDING_PARENT_KEY, pending_parent),
+                    (LEGACY_PENDING_BASE_KEY, pending_base),
+                    (LEGACY_PENDING_RESTACK_FROM_KEY, before),
+                )
+                if value is not None
+            }
         if (
             pending_base is not None
             and (completed or (before is not None and git.finished_rebase(branch, before, pending_base)))
@@ -328,11 +350,10 @@ class StackCore:
         elif not forget_unfinished or git.other_worktree_of(branch) is not None:
             # Another worktree may have stopped partway through it.
             return
-        # Only if they're unchanged, in case another process has started a new
-        # restack since we read them.
-        git.config_unset(branch, PENDING_PARENT_KEY, pending_parent)
-        git.config_unset(branch, PENDING_BASE_KEY, pending_base)
-        git.config_unset(branch, PENDING_RESTACK_FROM_KEY, before)
+        # Only if it's unchanged, in case another process has started a new
+        # restack since we read it.
+        for key, value in recorded.items():
+            git.config_unset(branch, key, value)
 
     def settle_pull(self, branch: str, forget_unfinished: bool) -> None:
         git = self.git
@@ -444,17 +465,13 @@ class StackCore:
             self.emit(events.NotRestackedInOtherWorktree(branch, str(worktree)))
             return False
         self.emit(events.Restacking(branch, parent))
-        git.config_set(branch, PENDING_RESTACK_FROM_KEY, git.tip(branch))
-        git.config_set(branch, PENDING_PARENT_KEY, parent)
-        git.config_set(branch, PENDING_BASE_KEY, parent_tip)
+        git.config_set(branch, PENDING_RESTACK_KEY, f"{git.tip(branch)} {parent_tip} {parent}")
         if git.passthrough("rebase", "--no-update-refs", "--onto", parent_tip, base, branch):
             self.settle(branch, restack_completed=True)
             return True
         if git.operation_in_progress():
             raise self.stopped(f"restacking {branch}", "rebase", "rerun this command to finish the stack")
-        git.config_unset(branch, PENDING_PARENT_KEY)
-        git.config_unset(branch, PENDING_BASE_KEY)
-        git.config_unset(branch, PENDING_RESTACK_FROM_KEY)
+        git.config_unset(branch, PENDING_RESTACK_KEY)
         raise StackError(f"restacking {branch} onto {parent} failed; see git's output above")
 
     def restack_all(self, branches: Iterable[str], stacks: Stacks, latest: bool = False) -> None:
