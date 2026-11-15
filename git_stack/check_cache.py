@@ -1,5 +1,6 @@
 """The answers StackCore.remembered remembers, kept in a file of their own."""
 
+import contextlib
 import json
 import os
 import pathlib
@@ -68,10 +69,15 @@ class CheckCache:
     def _write(self, entries: dict[str, dict[str, str]]) -> None:
         """Replace the file with entries. Failing to only means checking again."""
         self._entries = entries
+        temp = None
         try:
-            fd, temp = tempfile.mkstemp(dir=self.path.parent, prefix=".git-stack-cache-")
+            fd, name = tempfile.mkstemp(dir=self.path.parent, prefix=".git-stack-cache-")
+            temp = pathlib.Path(name)
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump(entries, f)
-            pathlib.Path(temp).replace(self.path)
+            temp.replace(self.path)
         except OSError:
-            pass
+            # E.g. on Windows, while another process has the cache open.
+            if temp is not None:
+                with contextlib.suppress(OSError):
+                    temp.unlink(missing_ok=True)
