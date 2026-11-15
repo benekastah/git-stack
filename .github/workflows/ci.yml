@@ -20,10 +20,16 @@ jobs:
       PYTEST_XDIST_AUTO_NUM_WORKERS: 8
     strategy:
       fail-fast: false
+      # Every Python pyproject.toml allows on Linux, and only the oldest and
+      # newest on macOS and Windows, whose runners are slower and fewer.
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        # The oldest Python pyproject.toml allows, and the newest.
-        python: ["3.11", "3.15"]
+        os: [ubuntu-latest]
+        python: ["3.11", "3.12", "3.13", "3.14", "3.15"]
+        include:
+          - {os: macos-latest, python: "3.11"}
+          - {os: macos-latest, python: "3.15"}
+          - {os: windows-latest, python: "3.11"}
+          - {os: windows-latest, python: "3.15"}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
