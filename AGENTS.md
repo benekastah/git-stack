@@ -85,6 +85,11 @@ three. Keep it that way:
 - Use `pathlib.Path` and its `/` operator for paths, not `os.path` or strings
   joined with `/`, and compare paths as `Path`s (resolved, if they may be
   spelled differently), not as strings: git writes Windows paths with `/`.
+- Name a branch to git as `refs/heads/<name>` (or `refs/remotes/<remote>/<name>`),
+  never by its bare name, which git takes for a tag of the same name first. Only
+  `git switch` takes a bare name, through `git.SWITCH`.
+  `tests/test_branch_names.py` runs commands with a tag named like every branch
+  and fails on git's "ambiguous" warning; add a case there for a new command.
 - Run git through `GitClient`, with arguments as a list, never through a shell,
   and don't call other Unix tools (`sed`, `grep`, ...) from Python.
 - Don't use Unix-only modules or calls (`fcntl`, `os.fork`, `signal`, ...). If
