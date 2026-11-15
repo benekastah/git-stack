@@ -4,6 +4,7 @@ import json
 import os
 import pathlib
 import subprocess
+from typing import Any
 
 import pytest
 
@@ -373,3 +374,58 @@ def test_commit_patch_ids_in_a_sha256_repository(tmp_path: pathlib.Path, repo: R
     assert GitClient(sha256.path).commit_patch_ids(*commands) == [
         separate_patch_ids(sha256, *command) for command in commands
     ]
+
+
+def test_snapshot_looks_up_objects_with_one_cat_file(
+    repo: Repo, git_calls: list[list[str]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo.commit("a", "one\n", "one")
+    repo.commit("a", "two\n", "two")
+    commits = repo.git("rev-list", "HEAD").split()
+    git = GitClient(repo.path)
+    started: list[subprocess.Popen[Any]] = []
+    popen = subprocess.Popen
+
+    def recording(args: list[str], *rest: Any, **kwargs: Any) -> subprocess.Popen[Any]:
+        process = popen(args, *rest, **kwargs)
+        if "cat-file" in args:
+            started.append(process)
+        return process
+
+    monkeypatch.setattr(subprocess, "Popen", recording)
+
+    with git.snapshot():
+        for _ in range(2):
+            for commit in commits:
+                assert git.rev(commit) == commit
+                assert git.tree(commit) == repo.git("rev-parse", f"{commit}^{{tree}}")
+        assert git.rev("0" * 40) is None
+
+    assert [call[0] for call in git_calls] == ["cat-file"]
+    # It ends with the snapshot.
+    assert [process.poll() for process in started] == [0]
+
+
+def test_snapshot_asks_about_the_same_commits_once_but_sees_a_branch_move(
+    repo: Repo, git_calls: list[list[str]]
+) -> None:
+    repo.git("branch", "other")
+    git = GitClient(repo.path)
+    with git.snapshot():
+        for _ in range(2):
+            assert git.is_ancestor("refs/heads/other", "refs/heads/main")
+            assert git.contained_in("refs/heads/other", "refs/heads/main")
+        repo.write("a", "main moves on\n")
+        git.run("commit", "--quiet", "-am", "main moves on")
+
+        assert not git.is_ancestor("refs/heads/main", "refs/heads/other")
+        assert not git.contained_in("refs/heads/main", "refs/heads/other")
+
+    commands = [call[0] for call in git_calls]
+    assert (commands.count("merge-base"), commands.count("merge-tree")) == (2, 2)
+
+
+def test_nothing_is_contained_in_a_branch_that_doesnt_exist(repo: Repo) -> None:
+    git = GitClient(repo.path)
+    with git.snapshot():
+        assert not git.contained_in("refs/heads/main", "refs/heads/nope")
