@@ -19,6 +19,18 @@ def add_worktree(repo: Repo, branch: str) -> pathlib.Path:
     return path
 
 
+WorktreeEvent = events.NotRestackedInOtherWorktree | events.NotPulledInOtherWorktree | events.NotDeletedInOtherWorktree
+
+
+def warned(emitted: list[events.Event], kind: type[WorktreeEvent], branch: str, worktree: pathlib.Path) -> bool:
+    """Whether emitted has a kind event saying branch is checked out in
+    worktree, compared as paths (git writes Windows paths with /)."""
+    return any(
+        isinstance(e, kind) and e.branch == branch and pathlib.Path(e.path).resolve() == worktree.resolve()
+        for e in emitted
+    )
+
+
 def test_restack_skips_branch_in_other_worktree_and_its_children(
     repo: Repo, client: StackClient, emitted: list[events.Event]
 ) -> None:
@@ -30,7 +42,7 @@ def test_restack_skips_branch_in_other_worktree_and_its_children(
 
     client.restack()
 
-    assert events.NotRestackedInOtherWorktree("pr2", str(worktree)) in emitted
+    assert warned(emitted, events.NotRestackedInOtherWorktree, "pr2", worktree)
     assert events.ParentSkipped("pr3", "pr2") in emitted
     assert repo.git("rev-parse", "pr2") == pr2
     assert repo.git("status", "--porcelain", cwd=worktree) == ""
@@ -74,7 +86,7 @@ def test_sync_skips_branch_in_other_worktree_and_restacks_the_rest(
     client.sync(push=False)
 
     repo.assert_stacked("pr1", "main", ["pr1 c3", "pr1 c2", "pr1 c1"])
-    assert events.NotRestackedInOtherWorktree("pr2", str(worktree)) in emitted
+    assert warned(emitted, events.NotRestackedInOtherWorktree, "pr2", worktree)
     assert events.ParentSkipped("pr3", "pr2") in emitted
     assert repo.git("status", "--porcelain", cwd=worktree) == ""
 
@@ -89,7 +101,7 @@ def test_sync_leaves_upstream_commits_for_branch_in_other_worktree(
 
     client.sync(push=False)
 
-    assert events.NotPulledInOtherWorktree("pr1", str(worktree)) in emitted
+    assert warned(emitted, events.NotPulledInOtherWorktree, "pr1", worktree)
     assert repo.own_commits("pr1", "main") == ["pr1 c2", "pr1 c1"]
     repo.assert_stacked("pr3", "pr2", ["pr3 c1"])
 
@@ -104,7 +116,7 @@ def test_sync_delete_untracks_but_keeps_merged_branch_in_other_worktree(
 
     client.sync(delete=Delete.LOCAL)
 
-    assert events.NotDeletedInOtherWorktree("pr1", str(worktree)) in emitted
+    assert warned(emitted, events.NotDeletedInOtherWorktree, "pr1", worktree)
     repo.assert_untracked("pr1")
     assert repo.git("rev-parse", "--verify", "--quiet", "refs/heads/pr1")
     repo.assert_stacked("pr2", "main", ["pr2 c1"])
@@ -138,7 +150,7 @@ def test_restack_stopped_in_other_worktree_is_left_to_finish_there(
     # Here, pr2 is neither checked out nor rebasing, but must be left alone.
     client.restack()
 
-    assert events.NotRestackedInOtherWorktree("pr2", str(worktree)) in emitted
+    assert warned(emitted, events.NotRestackedInOtherWorktree, "pr2", worktree)
     (worktree / "b").write_text("resolved\n")
     repo.git("add", "b", cwd=worktree)
     repo.git("rebase", "--continue", cwd=worktree)

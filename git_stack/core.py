@@ -439,7 +439,7 @@ class StackCore:
                 f"then run `git stack track {parent} --base <sha>`"
             )
         if (worktree := git.other_worktree_of(branch)) is not None:
-            self.emit(events.NotRestackedInOtherWorktree(branch, worktree))
+            self.emit(events.NotRestackedInOtherWorktree(branch, str(worktree)))
             return False
         self.emit(events.Restacking(branch, parent))
         git.config_set(branch, PENDING_RESTACK_FROM_KEY, git.tip(branch))
@@ -576,7 +576,7 @@ class StackCore:
                 "if they are obsolete copies of your own work, use `git stack push --force` to replace them"
             )
         if (worktree := git.other_worktree_of(branch)) is not None:
-            self.emit(events.NotPulledInOtherWorktree(branch, worktree))
+            self.emit(events.NotPulledInOtherWorktree(branch, str(worktree)))
             return False
         self.emit(events.PullingUpstream(branch, len(commits)))
         git.config_set(branch, PENDING_PULL_FROM_KEY, git.tip(branch))
@@ -709,7 +709,7 @@ class StackCore:
                 git.run("merge", "--ff-only", "--quiet", new)
             elif (worktree := git.worktree_of(root)) is not None:
                 # Moving the branch would leave that worktree's files behind.
-                self.emit(events.TrunkInOtherWorktree(root, upstream, worktree))
+                self.emit(events.TrunkInOtherWorktree(root, upstream, str(worktree)))
                 continue
             else:
                 git.run("update-ref", f"refs/heads/{root}", new, old)
@@ -738,7 +738,7 @@ class StackCore:
         new_parent = stacks.parent(branch)
         children = tuple(stacks.remove_merged(branch))
         if delete and (worktree := git.other_worktree_of(branch)) is not None:
-            self.emit(events.NotDeletedInOtherWorktree(branch, worktree))
+            self.emit(events.NotDeletedInOtherWorktree(branch, str(worktree)))
             delete = False
         if not delete:
             self.save(stacks)
