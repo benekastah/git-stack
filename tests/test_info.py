@@ -73,7 +73,7 @@ def test_bare_group_selects_all_current_group_stacks(repo: Repo, client: StackCl
     client.group_add("feature", ["pr1", "other"])
     repo.git("switch", "--quiet", "pr2")
 
-    assert set(client.selected_bottoms([], [CURRENT_GROUP], client.tracked_branches(), "show")) == {"pr1", "other"}
+    assert set(client.selected_bottoms([], [CURRENT_GROUP], client.stacks(), "show")) == {"pr1", "other"}
     assert {b.name for b in client.info(groups=[CURRENT_GROUP], offline=True)} == {"main", "pr1", "pr2", "pr3", "other"}
 
     with pytest.raises(StackError, match="there's no group"):

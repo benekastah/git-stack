@@ -158,8 +158,8 @@ def test_import_keeps_a_branch_targeted_by_merged_prs_as_a_root(
 
     assert result.without_prs[0].action is ImportAction.CREATE_ROOT
     assert repo.git("rev-parse", "refs/heads/release") == repo.git("rev-parse", "refs/remotes/origin/release")
-    assert "release" not in client.tracked_branches()
-    assert client.tracked_branches()["feature"] == "release"
+    assert "release" not in client.stacks()
+    assert client.stacks().parent("feature") == "release"
 
 
 def test_import_says_what_its_doing_before_the_slow_parts(
@@ -180,7 +180,7 @@ def test_import_dry_run_changes_nothing(repo: Repo, gh: FakeGitHub, client: Stac
 
     assert [s.action for s in steps] == [ImportAction.CREATE, ImportAction.CREATE]
     assert repo.git("branch", "--list", "pr1", "pr2") == ""
-    assert client.tracked_branches() == {}
+    assert client.stacks().parents() == {}
 
 
 def test_import_tracks_existing_local_branch_and_sets_its_upstream(
@@ -231,7 +231,7 @@ def test_import_leaves_tracked_branches_alone(repo: Repo, gh: FakeGitHub, client
 
     assert actions(steps) == [("pr1", ImportAction.ALREADY_TRACKED), ("pr2", ImportAction.PARENT_DIFFERS)]
     assert steps[1].tracked_parent == "main"
-    assert client.tracked_branches() == {"pr1": "main", "pr2": "main"}
+    assert client.stacks().parents() == {"pr1": "main", "pr2": "main"}
 
 
 def test_import_ignores_other_peoples_prs(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:

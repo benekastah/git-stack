@@ -10,9 +10,10 @@ from typing import Self, TypeVar
 from git_stack import events, stack_section
 from git_stack.adapters.git import GitAdapter, PullRequestLink, PullRequestState
 from git_stack.adapters.merge_state import MergeState
-from git_stack.core import BASE_KEY, Parents, StackCore
+from git_stack.core import BASE_KEY, StackCore
 from git_stack.errors import StackError
 from git_stack.git import GitClient
+from git_stack.stacks import Stacks
 
 # Matches https://host/owner/repo, ssh://user@host:port/owner/repo and
 # user@host:owner/repo, with or without .git.
@@ -200,7 +201,7 @@ class GitHubAdapter(GitAdapter):
             ) from e
 
     def look_up_pull_requests(self) -> dict[str, PullRequest]:
-        branches = [b for b in self.core.tracked_branches() if self.git.config_get(b, "remote") == self.remote]
+        branches = [b for b in self.core.stacks() if self.git.config_get(b, "remote") == self.remote]
         if not branches:
             return {}
         # Branch names are passed as variables, so they needn't be escaped.
@@ -525,16 +526,16 @@ class GitHubAdapter(GitAdapter):
             raise StackError(f"can't retarget {branch}'s pull request: its parent {parent} tracks {base_remote}")
 
     def ensure_pr_parent_remotes(
-        self, branches: list[str], parents: Parents, prs: dict[str, PullRequest], opening: bool
+        self, branches: list[str], stacks: Stacks, prs: dict[str, PullRequest], opening: bool
     ) -> None:
         for branch in branches:
             if (branch in prs and prs[branch].state == "OPEN") or (opening and branch not in prs):
-                self.ensure_pr_parent_remote(branch, parents[branch])
+                self.ensure_pr_parent_remote(branch, stacks.parent(branch))
 
     def before_push(
         self,
         to_push: list[str],
-        parents: Parents,
+        stacks: Stacks,
         rebuild_stack: bool = False,
         scope: list[str] | None = None,
         opening: bool = False,
@@ -551,7 +552,7 @@ class GitHubAdapter(GitAdapter):
         # until after the push. Check its stack now to avoid pushing first and
         # only then discovering that unstacking requires consent.
         prs = self.pull_requests()
-        self.ensure_pr_parent_remotes(to_push, parents, prs, opening)
+        self.ensure_pr_parent_remotes(to_push, stacks, prs, opening)
         allowed = {
             prs[b].number for b in (scope if scope is not None else to_push) if b in prs and prs[b].state == "OPEN"
         }
@@ -560,8 +561,8 @@ class GitHubAdapter(GitAdapter):
             for b in to_push
             if b in prs
             and prs[b].state == "OPEN"
-            and prs[b].base != self.git.remote_branch_name(parents[b], self.remote)
-            and self.git.rev(f"refs/remotes/{self.remote}/{self.git.remote_branch_name(parents[b], self.remote)}")
+            and prs[b].base != self.git.remote_branch_name(stacks.parent(b), self.remote)
+            and self.git.rev(f"refs/remotes/{self.remote}/{self.git.remote_branch_name(stacks.parent(b), self.remote)}")
             is None
         }
         if pending:
@@ -586,15 +587,15 @@ class GitHubAdapter(GitAdapter):
                         self.ensure_stack_scope(GitHubStack.from_json(stack), allowed)
         for b in to_push:
             if (
-                self.git.rev(f"refs/remotes/{self.remote}/{self.git.remote_branch_name(parents[b], self.remote)}")
+                self.git.rev(f"refs/remotes/{self.remote}/{self.git.remote_branch_name(stacks.parent(b), self.remote)}")
                 is not None
             ):
-                self.retarget(b, parents[b], rebuild_stack, allowed)
+                self.retarget(b, stacks.parent(b), rebuild_stack, allowed)
 
     def after_push(
         self,
         pushed: list[str],
-        parents: Parents,
+        stacks: Stacks,
         opening: bool = False,
         rebuild_stack: bool = False,
         scope: list[str] | None = None,
@@ -608,7 +609,7 @@ class GitHubAdapter(GitAdapter):
         }
         for b in pushed:
             if b in prs:
-                self.retarget(b, parents[b], rebuild_stack, allowed)
+                self.retarget(b, stacks.parent(b), rebuild_stack, allowed)
         without = tuple(b for b in pushed if b not in prs)
         if without and not opening:
             self.core.emit(events.NoPullRequests(without))
@@ -760,7 +761,7 @@ class GitHubAdapter(GitAdapter):
         return {n: repository.get(f"p{n}") for n in numbers}
 
     def update_stack_sections(
-        self, branches: list[str], parents: Parents, rebuild_stack: bool = False, dry_run: bool = False
+        self, branches: list[str], stacks: Stacks, rebuild_stack: bool = False, dry_run: bool = False
     ) -> None:
         """Make the stack section at the end of the description of each open
         pull request of branches, a stack parent-before-child, show the stack,
@@ -778,12 +779,12 @@ class GitHubAdapter(GitAdapter):
         itself, they get no section, and the ones they have are removed.
         """
         prs = self.pull_requests()
-        root = parents[branches[0]]
+        root = stacks.parent(branches[0])
 
         def node(branch: str) -> stack_section.Node:
             return prs[branch].number if branch in prs else branch
 
-        current = {node(b): node(parents[b]) if parents[b] in branches else root for b in branches}
+        current = {node(b): node(stacks.parent(b)) if stacks.parent(b) in branches else root for b in branches}
         to_update = {b: prs[b].number for b in branches if b in prs and prs[b].state == "OPEN"}
         try:
             fields = self.pull_request_fields(to_update.values(), f"body {BASE_CHANGES} {STACK_FIELDS}")
@@ -792,7 +793,7 @@ class GitHubAdapter(GitAdapter):
             # doesn't know the field.
             fields = self.pull_request_fields(to_update.values(), f"body {BASE_CHANGES}")
         bodies = {n: field(pr, "body", str) for n, pr in fields.items()}
-        on_root = [n for b, n in to_update.items() if parents[b] not in branches]
+        on_root = [n for b, n in to_update.items() if stacks.parent(b) not in branches]
         merged = self.merged_parents({n: fields[n] for n in on_root}, root)
         # Each pull request on root goes on the merged one it was on, on root.
         tree = dict(current)
@@ -800,14 +801,14 @@ class GitHubAdapter(GitAdapter):
             tree[number] = parent
             tree[parent] = root
         shown = sum(isinstance(n, int) for n in tree) >= 2
-        chain = [to_update[b] for b in branches] if is_chain(branches, parents, root, to_update) else []
-        stacks = {
+        chain = [to_update[b] for b in branches] if is_chain(branches, stacks, root, to_update) else []
+        github_stacks = {
             n: GitHubStack.from_json(stack) if (stack := optional_field(pr, "stack", dict)) is not None else None
             for n, pr in fields.items()
         }
-        if dry_run and rebuild_stack and self.plan_retargets(to_update, prs, parents, stacks, chain):
+        if dry_run and rebuild_stack and self.plan_retargets(to_update, prs, stacks, github_stacks, chain):
             return
-        linked = shown and len(chain) > 1 and self.link_github_stack(chain, stacks, rebuild_stack, dry_run)
+        linked = shown and len(chain) > 1 and self.link_github_stack(chain, github_stacks, rebuild_stack, dry_run)
         if dry_run:
             return
         for number in to_update.values():
@@ -823,21 +824,24 @@ class GitHubAdapter(GitAdapter):
         self,
         to_update: dict[str, int],
         prs: dict[str, PullRequest],
-        parents: Parents,
-        stacks: dict[int, GitHubStack | None],
+        stacks: Stacks,
+        github_stacks: dict[int, GitHubStack | None],
         chain: list[int],
     ) -> bool:
         """Report unstacking needed for retargets in a dry run, if any."""
         affected = [
             n
             for b, n in to_update.items()
-            if prs[b].base != self.git.remote_branch_name(parents[b], self.remote) and stacks[n] is not None
+            if prs[b].base != self.git.remote_branch_name(stacks.parent(b), self.remote)
+            and github_stacks[n] is not None
         ]
         if not affected:
             return False
         can_link = len(chain) > 1 and self.github_stacks_enabled()
         found = {
-            stack.number: stack for n, stack in stacks.items() if stack is not None and (n in affected or can_link)
+            stack.number: stack
+            for n, stack in github_stacks.items()
+            if stack is not None and (n in affected or can_link)
         }
         for stack in found.values():
             self.ensure_stack_scope(stack, set(to_update.values()))
@@ -1003,10 +1007,10 @@ class GitHubAdapter(GitAdapter):
         )
 
 
-def is_chain(branches: list[str], parents: Parents, root: str, open_prs: dict[str, int]) -> bool:
+def is_chain(branches: list[str], stacks: Stacks, root: str, open_prs: dict[str, int]) -> bool:
     """Whether branches, parent-before-child, each have an open pull request
     (in open_prs) and are each stacked on the one before, the first on root."""
-    return all(b in open_prs and parents[b] == (branches[i - 1] if i else root) for i, b in enumerate(branches))
+    return all(b in open_prs and stacks.parent(b) == (branches[i - 1] if i else root) for i, b in enumerate(branches))
 
 
 def github_repo(git: GitClient, remote: str) -> tuple[str, str, str] | None:

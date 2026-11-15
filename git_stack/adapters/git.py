@@ -6,9 +6,9 @@ from git_stack.core import (
     BASE_KEY,
     LANDED_CHECK_KEY,
     REVERTED_CHECK_KEY,
-    Parents,
     StackCore,
 )
+from git_stack.stacks import Stacks
 
 
 class PullRequestState(enum.Enum):
@@ -232,7 +232,7 @@ class GitAdapter:
     def before_push(
         self,
         to_push: list[str],
-        parents: Parents,
+        stacks: Stacks,
         rebuild_stack: bool = False,
         scope: list[str] | None = None,
         opening: bool = False,
@@ -242,7 +242,7 @@ class GitAdapter:
     def after_push(
         self,
         pushed: list[str],
-        parents: Parents,
+        stacks: Stacks,
         opening: bool = False,
         rebuild_stack: bool = False,
         scope: list[str] | None = None,

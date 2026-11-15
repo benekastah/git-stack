@@ -1,6 +1,7 @@
 """git stack sync."""
 
 from collections.abc import Callable
+from typing import Any
 
 import pytest
 
@@ -1200,3 +1201,26 @@ def test_sync_ignore_revert_refuses_branch_outside_the_stacks_it_syncs(repo: Rep
     # pr1 is tracked, but in another stack, so this sync would never see it.
     with pytest.raises(StackError, match="there's no revert of pr1 to ignore in the stacks being synced"):
         client.sync(ignore_reverts=["pr1"])
+
+
+def test_sync_keeps_tracking_a_merged_branch_it_failed_to_delete(
+    repo: Repo, client: StackClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo.make_stack()
+    client.push()
+    repo.merge_on_forge("pr1", delete_branch=False)
+    run = client.git.run
+
+    def failing_delete(*args: str, **kwargs: Any) -> str:
+        if args[:2] == ("branch", "--quiet") and "--delete" in args:
+            raise StackError("deleting failed")
+        return run(*args, **kwargs)
+
+    monkeypatch.setattr(client.git, "run", failing_delete)
+
+    with pytest.raises(StackError, match="deleting failed"):
+        client.sync(delete="local")
+
+    # So the next sync finds it merged, and deletes it, again.
+    assert repo.config("pr1", "stackParent") == "main"
+    assert repo.config("pr2", "stackParent") == "pr1"

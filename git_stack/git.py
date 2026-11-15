@@ -198,19 +198,21 @@ class GitClient:
             self._common_dir = self.run("rev-parse", "--path-format=absolute", "--git-common-dir")
         return self._common_dir
 
-    def branch_config(self) -> dict[tuple[str, str], str]:
+    def branch_config(self, fresh: bool = False) -> dict[tuple[str, str], str]:
         """Every branch.<name>.<key> setting, as {(name, key in lower case): value}.
 
         Read with one git call, and read again only once the repository's config
         file has changed, which is whenever anything (us, a git command we run,
         or another process) writes to it. Commands look up the same few keys of
         every tracked branch over and over, and each git call is slow enough to
-        add up.
+        add up. With fresh, it's read again regardless, for when a missed write
+        (see "The branch config cache could miss a write" in ISSUES.md) would
+        matter.
         """
         # Before reading, so a write that lands in between is read again next time.
         st = os.stat(os.path.join(self.common_dir(), "config"))
         stat = (st.st_ino, st.st_mtime_ns, st.st_size)
-        if stat != self._config_stat:
+        if fresh or stat != self._config_stat:
             config = {}
             for entry in filter(
                 None, self.run("config", "--null", "--get-regexp", r"^branch\.", check=False).split("\0")
