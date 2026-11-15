@@ -1221,7 +1221,7 @@ def test_sync_keeps_tracking_a_merged_branch_it_failed_to_delete(
     monkeypatch.setattr(client.git, "run", failing_delete)
 
     with pytest.raises(StackError, match="deleting failed"):
-        client.sync(delete="local")
+        client.sync(delete=Delete.LOCAL)
 
     # So the next sync finds it merged, and deletes it, again.
     assert repo.config("pr1", "stackParent") == "main"
