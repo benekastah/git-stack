@@ -140,16 +140,17 @@ class GitClient:
         # See snapshot: how many snapshot blocks we're in; the refs, as
         # {refname: (commit, the full refname of its upstream, or "")}, the
         # upstreams' refnames they were listed for, and the branch HEAD is on,
-        # if it's one of them; `git worktree list
-        # --porcelain`'s output, and {worktree: the branch a rebase in it is
-        # rebasing}, once read; and {remote: its default branch}. The lock is
-        # for commands that read them in several threads.
+        # if it's one of them; `git worktree list --porcelain`'s output,
+        # {worktree: the branch a rebase in it is rebasing} and {branch: its
+        # reflog's commits}, once read; and {remote: its default branch}. The
+        # lock is for commands that read them in several threads.
         self._snapshot_depth = 0
         self._refs: dict[str, tuple[str, str]] | None = None
         self._listed_upstreams: frozenset[str] = frozenset()
         self._head: str | None = None
         self._worktrees: str | None = None
         self._rebasing: dict[pathlib.Path, str | None] = {}
+        self._reflogs: dict[str, tuple[str, ...]] = {}
         self._remote_defaults: dict[str, str | None] = {}
         self._refs_lock = threading.Lock()
         # Where passthrough sends git's stdout (default: ours), e.g. stderr when
@@ -166,13 +167,14 @@ class GitClient:
             self._forget_refs()
 
     def _forget_refs(self) -> None:
-        """Forget the ref snapshot, and the worktrees' branches, waiting for a
-        thread reading them to finish, so it can't then keep what it read from
-        before the change."""
+        """Forget the ref snapshot, the worktrees' branches and the reflogs,
+        waiting for a thread reading them to finish, so it can't then keep
+        what it read from before the change."""
         with self._refs_lock:
             self._refs = None
             self._worktrees = None
             self._rebasing = {}
+            self._reflogs = {}
 
     def run(self, *args: str, check: bool = True, input: str | None = None) -> str:
         """Run git and return stripped stdout.
@@ -208,9 +210,10 @@ class GitClient:
         one git call, and read them again only after a
         git call that may have changed them (see changes_refs). A command asks
         about the same few refs over and over, and each git call is slow
-        enough to add up. The worktrees' branches (see worktree_of) are read
-        once too, and forgotten along with the refs, and each remote's default
-        branch (see remote_default_branch) is asked once.
+        enough to add up. The worktrees' branches (see worktree_of) and
+        branches' reflogs (see reflog_tips) are read once too, and forgotten
+        along with the refs, and each remote's default branch (see
+        remote_default_branch) is asked once.
 
         Other remote-tracking branches aren't read (unless there are too many
         upstreams to name), since a clone can have tens of thousands of them;
@@ -652,8 +655,15 @@ class GitClient:
             raise StackError(f"fetching {remote} failed")
 
     def reflog_tips(self, branch: str) -> list[str]:
-        """Every commit branch has pointed at, as far back as its reflog goes."""
-        return self.run("log", "--walk-reflogs", "--format=%H", f"refs/heads/{branch}", check=False).split()
+        """Every commit branch has pointed at, as far back as its reflog goes.
+        Read once per snapshot, and forgotten with the refs (moving a branch
+        adds to its reflog)."""
+        if self._snapshot_depth and (known := self._reflogs.get(branch)) is not None:
+            return list(known)
+        tips = self.run("log", "--walk-reflogs", "--format=%H", f"refs/heads/{branch}", check=False).split()
+        if self._snapshot_depth:
+            self._reflogs[branch] = tuple(tips)
+        return tips
 
     def finished_rebase(self, branch: str, before: str, onto: str) -> bool:
         """Whether the branch reflog records a rebase onto onto since before."""

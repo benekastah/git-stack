@@ -410,3 +410,16 @@ def test_nothing_is_contained_in_a_branch_that_doesnt_exist(repo: Repo) -> None:
     git = GitClient(repo.path)
     with git.snapshot():
         assert not git.contained_in("refs/heads/main", "refs/heads/nope")
+
+
+def test_snapshot_reads_a_reflog_once_until_its_branch_moves(repo: Repo, git_calls: list[list[str]]) -> None:
+    git = GitClient(repo.path)
+    with git.snapshot():
+        first = git.reflog_tips("main")
+        assert git.reflog_tips("main") == first
+        repo.write("a", "moved\n")
+        git.run("commit", "--quiet", "-am", "moved")
+
+        assert git.reflog_tips("main") == [git.tip("main"), *first]
+
+    assert [call[1] for call in git_calls if call[0] == "log"] == ["--walk-reflogs"] * 2
