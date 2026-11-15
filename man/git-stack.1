@@ -1870,5 +1870,18 @@ This only happens if the branch hasn\(aqt changed since you last pushed
 it, so no local commit is dropped; if it has, pull the remote
 branch\(aqs commits in by hand, or push over them with
 \f[CR]git stack push \-\-force\f[R].
+.SH WHICH GIT IT RUNS
+git\-stack runs the \f[CR]git\f[R] on your \f[CR]PATH\f[R], including a
+wrapper there (such as git\-ai).
+To run another git, set \f[CR]GIT_STACK_GIT\f[R] to its path.
+For example, to run git itself, skipping wrappers, which starts it
+noticeably quicker on macOS and Windows:
+.IP
+.EX
+export GIT_STACK_GIT=\(dq$(git \-\-exec\-path)/git\(dq
+.EE
+.PP
+A wrapper that needs to see what git\-stack does (e.g.
+the commits a restack rewrites) then won\(aqt.
 .SH LICENSE
 git\-stack is released under the MIT License; see \f[CR]LICENSE\f[R].

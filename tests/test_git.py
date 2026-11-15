@@ -4,14 +4,38 @@ import json
 import os
 import pathlib
 import subprocess
+from collections.abc import Iterator
 from typing import Any
 
 import pytest
 
 from git_stack.errors import StackError
-from git_stack.git import GitClient, changes_refs, changes_worktrees
-from tests.conftest import GIT_REPOSITORY_VARIABLES
+from git_stack.git import GitClient, changes_refs, changes_worktrees, git_program, same_file
+from tests.conftest import GIT_EXEC_PATH, GIT_REPOSITORY_VARIABLES
 from tests.helpers import Repo
+
+
+@pytest.fixture
+def fresh_git_program() -> Iterator[None]:
+    """Make git_program look for git again, in this test and after it."""
+    git_program.cache_clear()
+    yield
+    git_program.cache_clear()
+
+
+@pytest.mark.usefixtures("fresh_git_program")
+def test_git_program_is_git_stack_git_when_set(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GIT_STACK_GIT", "/opt/git/bin/git")
+    assert git_program() == "/opt/git/bin/git"
+
+
+@pytest.mark.usefixtures("fresh_git_program")
+def test_git_program_is_the_git_on_path_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("GIT_STACK_GIT", raising=False)
+    monkeypatch.setenv("PATH", str(GIT_EXEC_PATH))
+    program = pathlib.Path(git_program())
+    assert program.is_absolute()
+    assert same_file(program.parent, GIT_EXEC_PATH)
 
 
 def test_config_get_sees_changes_made_by_other_processes(repo: Repo) -> None:

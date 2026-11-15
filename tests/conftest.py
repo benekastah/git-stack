@@ -8,7 +8,7 @@ import pytest
 
 from git_stack import events
 from git_stack.stack import StackClient
-from tests.helpers import FakeGitHub, Repo, install_command
+from tests.helpers import FakeGitHub, GitCommand, Repo, install_command, mark_git_commands
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 # The environment variables that tell git which repository to use, instead of
@@ -25,15 +25,15 @@ GIT_REPOSITORY_VARIABLES = (
 )
 
 
-@pytest.fixture(scope="session")
-def git_exec_path() -> pathlib.Path:
-    """The directory git runs its own commands from, which holds the git
-    binary itself rather than any wrapper (such as git-ai) or shim on PATH.
-    Wrappers can make each of the tests' many git processes several times
-    slower."""
-    return pathlib.Path(
-        subprocess.run(["git", "--exec-path"], check=True, capture_output=True, text=True).stdout.strip()
-    )
+# git itself, from the directory it runs its own commands from, rather than a
+# wrapper (such as git-ai) or shim on PATH, which can make each of the tests'
+# many git processes several times slower. git-stack, which reads
+# GIT_STACK_GIT once (see git_program), runs it too.
+GIT_EXEC_PATH = pathlib.Path(
+    subprocess.run(["git", "--exec-path"], check=True, capture_output=True, text=True).stdout.strip()
+)
+if (real_git := GIT_EXEC_PATH / ("git.exe" if os.name == "nt" else "git")).exists():
+    os.environ["GIT_STACK_GIT"] = str(real_git)
 
 
 def isolate_git(mp: pytest.MonkeyPatch, directory: pathlib.Path, path: list[pathlib.Path]) -> None:
@@ -64,22 +64,22 @@ def isolate_git(mp: pytest.MonkeyPatch, directory: pathlib.Path, path: list[path
 
 
 @pytest.fixture(scope="session")
-def repo_template(tmp_path_factory: pytest.TempPathFactory, git_exec_path: pathlib.Path) -> pathlib.Path:
+def repo_template(tmp_path_factory: pytest.TempPathFactory) -> pathlib.Path:
     """origin.git, local and forge as the repo fixture starts with them, made
     once (for each test worker) and copied for each test, which is much
     quicker than making them with git each time."""
     template = tmp_path_factory.mktemp("template")
     repo = Repo(path=template / "local", origin=template / "origin.git", forge=template / "forge", tmp=template)
     with pytest.MonkeyPatch.context() as mp:
-        isolate_git(mp, template, [git_exec_path])
-        subprocess.run(["git", "init", "--quiet", "--bare", repo.origin], check=True)
-        subprocess.run(["git", "clone", "--quiet", repo.origin, repo.path], check=True, capture_output=True)
+        isolate_git(mp, template, [GIT_EXEC_PATH])
+        repo.git("init", "--quiet", "--bare", str(repo.origin), cwd=template)
+        repo.git("clone", "--quiet", str(repo.origin), str(repo.path), cwd=template)
         for name in ("a", "b", "c"):
             repo.write(name, "base\n")
         repo.git("add", ".")
         repo.git("commit", "--quiet", "-m", "init")
         repo.git("push", "--quiet", "--set-upstream", "origin", "main")
-        subprocess.run(["git", "clone", "--quiet", repo.origin, repo.forge], check=True, capture_output=True)
+        repo.git("clone", "--quiet", str(repo.origin), str(repo.forge), cwd=template)
     # Fewer files to copy. The hooks directories stay, for Repo.add_hook.
     for sample in template.glob("**/hooks/*.sample"):
         sample.unlink()
@@ -87,19 +87,17 @@ def repo_template(tmp_path_factory: pytest.TempPathFactory, git_exec_path: pathl
 
 
 @pytest.fixture
-def repo(
-    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, git_exec_path: pathlib.Path, repo_template: pathlib.Path
-) -> Repo:
+def repo(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, repo_template: pathlib.Path) -> Repo:
     """A repository with a, b and c committed to main and pushed to origin.
 
     git and git stack, in this process or another, see an isolated git config
     and identity for the rest of the test. PATH has tmp_path /
     "bin" first, which other fixtures can add commands to (see
-    install_command), then git_exec_path, so git is the git there.
+    install_command), then GIT_EXEC_PATH, so git is the git there.
     """
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    isolate_git(monkeypatch, tmp_path, [bin_dir, git_exec_path])
+    isolate_git(monkeypatch, tmp_path, [bin_dir, GIT_EXEC_PATH])
     repo = Repo(path=tmp_path / "local", origin=tmp_path / "origin.git", forge=tmp_path / "forge", tmp=tmp_path)
     for name in ("origin.git", "local", "forge"):
         shutil.copytree(repo_template / name, tmp_path / name, symlinks=True)
@@ -116,12 +114,13 @@ def repo(
 @pytest.fixture
 def git_calls(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
     """The git processes GitClient starts from now on, each as its arguments
-    without `git -C <dir>` (which the tests' own git commands don't have)."""
+    without `git -C <dir>`."""
     calls: list[list[str]] = []
+    mark_git_commands(monkeypatch)
 
     class Popen(subprocess.Popen[Any]):
         def __init__(self, args: list[str], *rest: Any, **kwargs: Any) -> None:
-            if args[:2] == ["git", "-C"]:
+            if isinstance(args, GitCommand):
                 calls.append(args[3:])
             super().__init__(args, *rest, **kwargs)
 
