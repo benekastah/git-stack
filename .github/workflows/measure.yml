@@ -1,7 +1,8 @@
 # Throwaway (don't merge): on Windows, with Defender off as in CI, times single operations and
 # the whole suite in the default temporary directory and on a Dev Drive (.github/actions/
-# fast-temp). Operations alternate default, Dev Drive, default, Dev Drive; the suite runs on the
-# Dev Drive first, so a warm second run can't favor it. Two jobs, on two runners.
+# fast-temp). Each runs three times: twice in the default directory, then on the Dev Drive. The
+# first run warms what any run warms (Python's .pyc files, the OS's file cache), so the second
+# and third are both warm and differ only in the directory. Two jobs, on two runners.
 name: Measure
 
 on:
@@ -17,7 +18,7 @@ jobs:
   measure:
     name: windows-latest, run ${{ matrix.run }}
     runs-on: windows-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -38,23 +39,19 @@ jobs:
       - name: Remember the default temporary directory
         run: echo "DEFAULT_TMP=$(python -c 'import tempfile; print(tempfile.gettempdir())')" >> "$GITHUB_ENV"
       - uses: ./.github/actions/fast-temp
-      - name: Single operations, default, Dev Drive, default, Dev Drive
+      - name: Single operations, default (to warm up), default, Dev Drive
         run: |
-          for round in 1 2; do
-            for where in default devdrive; do
-              if [ "$where" = default ]; then dir="$DEFAULT_TMP"; else dir='R:\temp'; fi
-              echo "### Operations: $where, round $round" >> "$GITHUB_STEP_SUMMARY"
-              TMPDIR="$dir" TEMP="$dir" TMP="$dir" python -m tests.measure_costs "$dir"
-            done
+          for where in warm-up default devdrive; do
+            if [ "$where" = devdrive ]; then dir='R:\temp'; else dir="$DEFAULT_TMP"; fi
+            echo "### Operations: $where" >> "$GITHUB_STEP_SUMMARY"
+            TMPDIR="$dir" TEMP="$dir" TMP="$dir" python -m tests.measure_costs "$dir"
           done
-      - name: The tests, on the Dev Drive
+      - name: The tests, default (to warm up), default, Dev Drive
         run: |
-          started=$SECONDS
-          python -m pytest -q -p no:cacheprovider --basetemp='R:\temp\pytest'
-          echo "Tests on the Dev Drive: $((SECONDS - started))s" | tee -a "$GITHUB_STEP_SUMMARY"
-      - name: The tests, in the default temporary directory
-        run: |
-          started=$SECONDS
-          TMPDIR="$DEFAULT_TMP" TEMP="$DEFAULT_TMP" TMP="$DEFAULT_TMP" \
-            python -m pytest -q -p no:cacheprovider --basetemp="$DEFAULT_TMP/pytest"
-          echo "Tests in the default temporary directory: $((SECONDS - started))s" | tee -a "$GITHUB_STEP_SUMMARY"
+          for where in warm-up default devdrive; do
+            if [ "$where" = devdrive ]; then dir='R:\temp'; else dir="$DEFAULT_TMP"; fi
+            rm -rf "$dir/pytest"
+            started=$SECONDS
+            TMPDIR="$dir" TEMP="$dir" TMP="$dir" python -m pytest -q -p no:cacheprovider --basetemp="$dir/pytest"
+            echo "Tests, $where: $((SECONDS - started))s" | tee -a "$GITHUB_STEP_SUMMARY"
+          done
