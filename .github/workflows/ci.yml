@@ -29,6 +29,10 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: Set-MpPreference -DisableRealtimeMonitoring $true
+      # Likewise, Spotlight indexes the files as they're written.
+      - name: Stop Spotlight indexing files
+        if: runner.os == 'macOS'
+        run: sudo mdutil -a -i off
       - name: Run every check
         if: runner.os != 'Windows'
         run: ./check.sh
