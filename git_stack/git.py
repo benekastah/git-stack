@@ -120,14 +120,16 @@ class GitClient:
         self._config_stat: tuple[int, int, int] | None = None
         self._branch_config: dict[tuple[str, str], str] = {}
         # See snapshot: how many snapshot blocks we're in; the refs, as
-        # {refname: (commit, the full refname of its upstream, or "")}, and the
-        # upstreams' refnames they were listed for; `git worktree list
+        # {refname: (commit, the full refname of its upstream, or "")}, the
+        # upstreams' refnames they were listed for, and the branch HEAD is on,
+        # if it's one of them; `git worktree list
         # --porcelain`'s output, and {worktree: the branch a rebase in it is
         # rebasing}, once read; and {remote: its default branch}. The lock is
         # for commands that read them in several threads.
         self._snapshot_depth = 0
         self._refs: dict[str, tuple[str, str]] | None = None
         self._listed_upstreams: frozenset[str] = frozenset()
+        self._head: str | None = None
         self._worktrees: str | None = None
         self._rebasing: dict[pathlib.Path, str | None] = {}
         self._remote_defaults: dict[str, str | None] = {}
@@ -183,8 +185,9 @@ class GitClient:
 
     @contextmanager
     def snapshot(self) -> Iterator[None]:
-        """Within this, read every local branch's commit and upstream, and its
-        upstream's commit, with one git call, and read them again only after a
+        """Within this, read every local branch's commit and upstream, its
+        upstream's commit, and which is checked out (see current_branch), with
+        one git call, and read them again only after a
         git call that may have changed them (see changes_refs). A command asks
         about the same few refs over and over, and each git call is slow
         enough to add up. The worktrees' branches (see worktree_of) are read
@@ -232,12 +235,18 @@ class GitClient:
                     else ["refs/remotes/"]
                 )
                 listing = self.run(
-                    "for-each-ref", "--format=%(refname)%00%(objectname)%00%(upstream)", "refs/heads/", *patterns
+                    "for-each-ref",
+                    "--format=%(refname)%00%(objectname)%00%(upstream)%00%(HEAD)",
+                    "refs/heads/",
+                    *patterns,
                 )
+                head = None
                 for line in listing.splitlines():
-                    name, commit, upstream = line.split("\0")
+                    name, commit, upstream, current = line.split("\0")
                     refs[name] = (commit, upstream)
-                self._refs, self._listed_upstreams = refs, frozenset(upstreams)
+                    if current == "*":
+                        head = name.removeprefix("refs/heads/")
+                self._refs, self._listed_upstreams, self._head = refs, frozenset(upstreams), head
             return self._refs
 
     def _upstream_refs(self) -> list[str]:
@@ -377,6 +386,11 @@ class GitClient:
         return ident[start + 1 : end] or None
 
     def current_branch(self) -> str | None:
+        """The branch checked out in this worktree, or None if HEAD is
+        detached. Read from the snapshot if there is one and HEAD is on a
+        branch that has a commit; an unborn one isn't a ref yet."""
+        if self._snapshot_refs() is not None and self._head is not None:
+            return self._head
         return self.run("branch", "--show-current") or None
 
     def local_branch_exists(self, name: str) -> bool:
