@@ -54,15 +54,20 @@ END_MARKER_DIFF = "diff --git a/end b/end\n--- a/end\n+++ b/end\n@@ -0,0 +1 @@\n
 REVISION_SYNTAX = frozenset("~^:?*[\\ ")
 
 
-def changes_refs(args: tuple[str, ...]) -> bool:
-    """Whether `git <args>` may move a ref or change a branch's upstream,
-    which the ref snapshot holds. Only commands known to be read-only don't."""
-    # The command is the first argument that isn't an option to git itself
-    # (e.g. --literal-pathspecs), or the value of one (e.g. -c's).
+def split_command(args: tuple[str, ...]) -> tuple[str, list[str]]:
+    """The command `git <args>` runs, and its arguments: the first argument
+    that isn't an option to git itself (e.g. --literal-pathspecs), or the value
+    of one (e.g. -c's), and the rest."""
     start = 0
     while start < len(args) and args[start].startswith("-"):
         start += 2 if args[start] in GIT_OPTIONS_WITH_VALUES else 1
-    command, rest = (args[start], list(args[start + 1 :])) if start < len(args) else ("", [])
+    return (args[start], list(args[start + 1 :])) if start < len(args) else ("", [])
+
+
+def changes_refs(args: tuple[str, ...]) -> bool:
+    """Whether `git <args>` may move a ref or change a branch's upstream,
+    which the ref snapshot holds. Only commands known to be read-only don't."""
+    command, rest = split_command(args)
     if command in READ_ONLY_COMMANDS:
         return False
     if command == "branch":
@@ -79,6 +84,17 @@ def changes_refs(args: tuple[str, ...]) -> bool:
     # Including switch, which creates a branch from a remote one of its name
     # (--guess) when there's no local one.
     return True
+
+
+def changes_worktrees(args: tuple[str, ...]) -> bool:
+    """Whether `git <args>`, which changes refs (see changes_refs), may also
+    change which branch a worktree has checked out (or that it's detached, or
+    rebasing), or the worktrees themselves. Only commands known to leave
+    every worktree's HEAD alone don't."""
+    command, rest = split_command(args)
+    if command == "update-ref":
+        return "HEAD" in rest
+    return command not in {"fetch", "push", "config", "remote", "tag"}
 
 
 def is_branch_name(name: str) -> bool:
@@ -164,17 +180,18 @@ class GitClient:
         """Forget the ref snapshot if `git <args>`, which just ran, may have
         changed it, whether or not it succeeded."""
         if changes_refs(args):
-            self._forget_refs()
+            self._forget_refs(worktrees=changes_worktrees(args))
 
-    def _forget_refs(self) -> None:
-        """Forget the ref snapshot, the worktrees' branches and the reflogs,
-        waiting for a thread reading them to finish, so it can't then keep
-        what it read from before the change."""
+    def _forget_refs(self, worktrees: bool = True) -> None:
+        """Forget the ref snapshot and the reflogs, and unless worktrees is
+        false, the worktrees' branches, waiting for a thread reading them to
+        finish, so it can't then keep what it read from before the change."""
         with self._refs_lock:
             self._refs = None
-            self._worktrees = None
-            self._rebasing = {}
             self._reflogs = {}
+            if worktrees:
+                self._worktrees = None
+                self._rebasing = {}
 
     def run(self, *args: str, check: bool = True, input: str | None = None) -> str:
         """Run git and return stripped stdout.
