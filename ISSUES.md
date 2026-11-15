@@ -44,15 +44,6 @@ branch can't leave its settings behind, but every other read still trusts it.
 Comparing the file's contents (or a hash of them) instead of its metadata
 would rule out the missed write at little cost, since the file is small.
 
-## A repository without a config file gets a traceback
-
-git works without `.git/config`, but `GitClient.branch_config` stats it to
-decide whether to reread it, and the `FileNotFoundError` isn't a `StackError`,
-so every command that reads stack metadata ends in a Python traceback. With
-`--json` there's no `error` line, which scripts rely on. Reproduced with
-`git stack info --json`. Treating a missing file as an empty config (and its
-stat as "changed") would fix it.
-
 ## The check cache can leave temporary files behind
 
 `CheckCache._write` writes to a `mkstemp` file and renames it over
