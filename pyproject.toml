@@ -27,7 +27,7 @@ include = ["git_stack*"]
 
 [tool.pytest]
 testpaths = ["tests"]
-addopts = ["-n", "auto"]
+addopts = ["-n", "auto", "-p", "tests.spawn_timing"]
 
 [tool.ruff]
 line-length = 120
