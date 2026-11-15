@@ -44,24 +44,6 @@ branch can't leave its settings behind, but every other read still trusts it.
 Comparing the file's contents (or a hash of them) instead of its metadata
 would rule out the missed write at little cost, since the file is small.
 
-## Some git calls are repeated where they could be cached
-
-Each git call costs a process, and a few are made over and over in one
-command:
-
-- `other_worktree_of`, which restack, sync and pull call for each branch, runs
-  `git worktree list`, a `rev-parse --absolute-git-dir` for each detached
-  worktree, and `rev-parse --show-toplevel` every time. The worktree list could
-  be read once per snapshot, as refs are, and the toplevel cached, as
-  `common_dir` is.
-- With `-d remote` (or `both`), `untrack_merged` asks the remote for its
-  default branch (`git ls-remote`, a network round trip) for each merged branch
-  it deletes; once per command and remote would do.
-- The ref snapshot reads every local and remote-tracking branch again after
-  any git command that may change refs. In a clone with tens of thousands of
-  remote branches, each reread may cost more than the calls it saves; reading
-  only the remotes in use would bound it.
-
 ## `prs` says "the current stack" for named stacks
 
 When every branch looks merged, `git stack prs` prints "nothing to open: every

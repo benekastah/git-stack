@@ -56,6 +56,9 @@ def git_calls(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
 def test_snapshot_reads_refs_once(repo: Repo, git_calls: list[list[str]]) -> None:
     git = GitClient(repo.path)
     main = repo.git("rev-parse", "main")
+    # As a command has, to know which upstreams to read.
+    git.branch_config()
+    git_calls.clear()
 
     with git.snapshot():
         assert git.rev("refs/heads/main") == main
@@ -111,6 +114,8 @@ def test_snapshot_outlives_stack_metadata_writes_but_not_upstream_changes(
 ) -> None:
     git = GitClient(repo.path)
     repo.git("branch", "--no-track", "new")
+    git.branch_config()
+    git_calls.clear()
     with git.snapshot():
         assert git.rev("new@{upstream}") is None
         git.config_set("new", "stackParent", "main")
@@ -202,3 +207,79 @@ def test_a_repository_without_a_config_file_works(repo: Repo) -> None:
     assert git.branch_config() == {}
     git.config_set("main", "stackParent", "trunk")
     assert git.config_get("main", "stackParent") == "trunk"
+
+
+def test_snapshot_reads_only_the_remote_branches_upstreams_are(repo: Repo, git_calls: list[list[str]]) -> None:
+    """A clone can have tens of thousands of remote branches; the others are
+    asked of git as they're needed."""
+    repo.git("push", "--quiet", "origin", "main:other")
+    repo.git("fetch", "--quiet")
+    git = GitClient(repo.path)
+    with git.snapshot():
+        assert git.rev("refs/remotes/origin/other") == git.tip("main")
+        assert git.rev("main@{upstream}") == git.tip("main")
+
+    listing = next(call for call in git_calls if call[0] == "for-each-ref")
+    assert listing[2:] == ["refs/heads/", "refs/remotes/origin/main"]
+
+
+def test_snapshot_reads_every_remote_branch_when_upstreams_are_too_many_to_name(
+    repo: Repo, git_calls: list[list[str]]
+) -> None:
+    """Naming them all could make a command line longer than Windows allows."""
+    main = repo.git("rev-parse", "main")
+    # 600 upstreams, whose refnames come to over 35000 characters.
+    names = [f"{'long-branch-name-' * 2}{i:04}" for i in range(600)]
+    subprocess.run(
+        ["git", "update-ref", "--stdin"],
+        # As bytes, so Windows doesn't end lines with \r\n.
+        input="".join(f"create refs/heads/{n} {main}\ncreate refs/remotes/origin/{n} {main}\n" for n in names).encode(),
+        cwd=repo.path,
+        check=True,
+    )
+    with (repo.path / ".git" / "config").open("a", encoding="utf-8", newline="\n") as f:
+        f.writelines(f'[branch "{n}"]\n\tremote = origin\n\tmerge = refs/heads/{n}\n' for n in names)
+    git = GitClient(repo.path)
+
+    with git.snapshot():
+        assert all(git.rev(f"{n}@{{upstream}}") == main for n in names)
+        assert not git.upstream_gone(names[0])
+
+    listing = next(call for call in git_calls if call[0] == "for-each-ref")
+    assert listing[2:] == ["refs/heads/", "refs/remotes/"]
+
+
+def test_snapshot_reads_an_upstream_with_an_unusual_refspec(repo: Repo) -> None:
+    """Its remote-tracking branch isn't where the snapshot looks, so it isn't
+    taken as deleted."""
+    repo.git("remote", "add", "mirror", str(repo.origin))
+    repo.git("config", "remote.mirror.fetch", "+refs/heads/*:refs/remotes/elsewhere/*")
+    repo.git("fetch", "--quiet", "mirror")
+    repo.git("branch", "--quiet", "--track", "mirrored", "refs/remotes/elsewhere/main")
+    git = GitClient(repo.path)
+    with git.snapshot():
+        assert not git.upstream_gone("mirrored")
+        assert git.rev("mirrored@{upstream}") == git.tip("main")
+
+
+def test_snapshot_reads_worktrees_and_the_remotes_default_branch_once(repo: Repo, git_calls: list[list[str]]) -> None:
+    git = GitClient(repo.path)
+    with git.snapshot():
+        for _ in range(3):
+            assert git.other_worktree_of("main") is None
+            assert git.remote_default_branch("origin") == "main"
+
+    commands = [call[0] for call in git_calls]
+    assert commands.count("worktree") == 1
+    assert commands.count("ls-remote") == 1
+    assert [call[:2] for call in git_calls].count(["rev-parse", "--show-toplevel"]) == 1
+
+
+def test_switching_forgets_the_worktrees(repo: Repo) -> None:
+    repo.git("branch", "other")
+    git = GitClient(repo.path)
+    with git.snapshot():
+        assert git.worktree_of("main") is not None
+        git.switch("other")
+        assert git.worktree_of("main") is None
+        assert git.worktree_of("other") is not None
