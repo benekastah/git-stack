@@ -81,6 +81,16 @@ def is_branch_name(name: str) -> bool:
     return bool(name) and "@{" not in name and REVISION_SYNTAX.isdisjoint(name)
 
 
+def same_file(a: pathlib.Path, b: pathlib.Path) -> bool:
+    """Whether a and b are the same file or directory, however each is spelled:
+    on a case-insensitive filesystem (as macOS's and Windows' usually are),
+    paths that differ in case can be. False if either doesn't exist."""
+    try:
+        return a.samefile(b)
+    except OSError:
+        return False
+
+
 def decode(output: bytes) -> str:
     """git's output as text: UTF-8, which git writes on every system (rather
     than in the locale's encoding, which on Windows usually isn't), keeping
@@ -380,7 +390,7 @@ class GitClient:
         if that isn't this one. git won't check out, rebase or delete a branch
         that's checked out or being rebased elsewhere."""
         path = self.worktree_of(branch)
-        if path is None or path.resolve() == pathlib.Path(self.run("rev-parse", "--show-toplevel")).resolve():
+        if path is None or same_file(path, pathlib.Path(self.run("rev-parse", "--show-toplevel"))):
             return None
         return path
 
