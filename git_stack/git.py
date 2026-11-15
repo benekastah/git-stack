@@ -348,22 +348,21 @@ class GitClient:
         """Whether the index has unmerged paths, i.e. a merge stopped on a conflict."""
         return bool(self.run("diff", "--name-only", "--diff-filter=U"))
 
-    def worktree_of(self, branch: str) -> str | None:
+    def worktree_of(self, branch: str) -> pathlib.Path | None:
         """The path of the worktree branch is checked out in, if any, or that a
-        rebase of branch is in progress in, in the system's form (git gives
-        C:/... on Windows). The rebase detaches that worktree's HEAD, so
-        `git worktree list` doesn't show the branch."""
+        rebase of branch is in progress in. The rebase detaches that worktree's
+        HEAD, so `git worktree list` doesn't show the branch."""
         path = None
         for line in self.run("worktree", "list", "--porcelain").splitlines():
             if line.startswith("worktree "):
-                path = line.removeprefix("worktree ")
+                path = pathlib.Path(line.removeprefix("worktree "))
             elif path is not None and (
                 line == f"branch refs/heads/{branch}" or (line == "detached" and self.rebasing_in(path) == branch)
             ):
-                return str(pathlib.Path(path))
+                return path
         return None
 
-    def rebasing_in(self, worktree: str) -> str | None:
+    def rebasing_in(self, worktree: pathlib.Path) -> str | None:
         """The branch a rebase in progress in worktree is rebasing, if any."""
         git_dir = GitClient(worktree).run("rev-parse", "--absolute-git-dir", check=False)
         if not git_dir:  # e.g. the worktree was deleted without `git worktree remove`
@@ -376,15 +375,12 @@ class GitClient:
             return head.removeprefix("refs/heads/") if head.startswith("refs/heads/") else None
         return None
 
-    def other_worktree_of(self, branch: str) -> str | None:
+    def other_worktree_of(self, branch: str) -> pathlib.Path | None:
         """The path of the worktree branch is checked out (or being rebased) in,
         if that isn't this one. git won't check out, rebase or delete a branch
         that's checked out or being rebased elsewhere."""
         path = self.worktree_of(branch)
-        if (
-            path is None
-            or pathlib.Path(path).resolve() == pathlib.Path(self.run("rev-parse", "--show-toplevel")).resolve()
-        ):
+        if path is None or path.resolve() == pathlib.Path(self.run("rev-parse", "--show-toplevel")).resolve():
             return None
         return path
 

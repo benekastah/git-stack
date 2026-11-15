@@ -121,12 +121,3 @@ format, but it lives in `git_stack/stack.py` rather than in
 `pull_request_number`). It should move there, still checked before the pull
 requests are looked up, so its error doesn't get the "check `gh auth status`"
 hint.
-
-## Worktree paths are strings, not `Path`s
-
-`GitClient.worktree_of` and `other_worktree_of` return strings, while
-`GitClient.directory` and `common_dir()` are `Path`s, so `other_worktree_of`
-wraps its result in a `Path` again to compare it, and the tests compare
-worktree paths in events as strings, which `AGENTS.md` says not to do. They
-could return `Path`s, made strings only where an event (whose `path` field is
-a string in JSON) is built.
