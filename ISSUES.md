@@ -24,6 +24,18 @@ were stacked on it are warned about. Nothing is lost, and
 `clean --ignore-revert <branch>` (or `sync`'s) says it wasn't a revert, but
 until then every command skips it.
 
+## The current worktree can look like another one on a case-insensitive filesystem
+
+`GitClient.other_worktree_of` tells whether a branch is checked out in another
+worktree by comparing resolved paths: the one `git worktree list` gives and
+`git rev-parse --show-toplevel`. `Path.resolve()` doesn't fix a path's case,
+so on macOS or Windows, if the two spell the same directory in different cases
+(e.g. the worktree was added as `~/Code/wt` and is now reached as
+`~/code/wt`), the current worktree counts as another. `restack`, `sync` and
+`pull` then skip its branch, and `-d` doesn't delete it, each saying it's
+checked out elsewhere. Not reproduced. Comparing with `os.path.samefile` (or
+device and inode) would fix it.
+
 ## The branch config cache could miss a write
 
 `GitClient.branch_config` rereads `.git/config` only when its inode, mtime or
@@ -35,8 +47,50 @@ leave the file the same size (e.g. overwriting a commit ID with another) would
 then look like no change, and git-stack would keep using the old values. Not
 reproduced; on btrfs, where inode numbers aren't reused, it can't happen.
 
+It also only watches the common `.git/config`, so `branch.*` settings changed
+in another config file (`git config --worktree` with `extensions.worktreeConfig`,
+or an included file) aren't seen until something writes `.git/config`.
+
+`forget` rereads the config rather than trusting the cache, so untracking a
+branch can't leave its settings behind, but every other read still trusts it.
 Comparing the file's contents (or a hash of them) instead of its metadata
-would rule it out at little cost, since the file is small.
+would rule out the missed write at little cost, since the file is small.
+
+## A repository without a config file gets a traceback
+
+git works without `.git/config`, but `GitClient.branch_config` stats it to
+decide whether to reread it, and the `FileNotFoundError` isn't a `StackError`,
+so every command that reads stack metadata ends in a Python traceback. With
+`--json` there's no `error` line, which scripts rely on. Reproduced with
+`git stack info --json`. Treating a missing file as an empty config (and its
+stat as "changed") would fix it.
+
+## The check cache can leave temporary files behind
+
+`CheckCache._write` writes to a `mkstemp` file and renames it over
+`git-stack-cache.json`, but if the write or the rename fails (e.g. on Windows,
+while another process has the cache open), it ignores the error without
+removing the temporary file. Each failed write leaves another
+`.git-stack-cache-*` file in the git directory. Removing it in the `except`
+would fix it.
+
+## Some git calls are repeated where they could be cached
+
+Each git call costs a process, and a few are made over and over in one
+command:
+
+- `other_worktree_of`, which restack, sync and pull call for each branch, runs
+  `git worktree list`, a `rev-parse --absolute-git-dir` for each detached
+  worktree, and `rev-parse --show-toplevel` every time. The worktree list could
+  be read once per snapshot, as refs are, and the toplevel cached, as
+  `common_dir` is.
+- With `-d remote` (or `both`), `untrack_merged` asks the remote for its
+  default branch (`git ls-remote`, a network round trip) for each merged branch
+  it deletes; once per command and remote would do.
+- The ref snapshot reads every local and remote-tracking branch again after
+  any git command that may change refs. In a clone with tens of thousands of
+  remote branches, each reread may cost more than the calls it saves; reading
+  only the remotes in use would bound it.
 
 ## `prs` says "the current stack" for named stacks
 
@@ -67,3 +121,12 @@ format, but it lives in `git_stack/stack.py` rather than in
 `pull_request_number`). It should move there, still checked before the pull
 requests are looked up, so its error doesn't get the "check `gh auth status`"
 hint.
+
+## Worktree paths are strings, not `Path`s
+
+`GitClient.worktree_of` and `other_worktree_of` return strings, while
+`GitClient.directory` and `common_dir()` are `Path`s, so `other_worktree_of`
+wraps its result in a `Path` again to compare it, and the tests compare
+worktree paths in events as strings, which `AGENTS.md` says not to do. They
+could return `Path`s, made strings only where an event (whose `path` field is
+a string in JSON) is built.
