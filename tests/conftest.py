@@ -9,6 +9,18 @@ from git_stack.stack import StackClient
 from tests.helpers import FakeGitHub, Repo, install_command
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
+# The environment variables that tell git which repository to use, instead of
+# the one in the directory it runs in.
+GIT_REPOSITORY_VARIABLES = (
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_COMMON_DIR",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_NAMESPACE",
+    "GIT_PREFIX",
+)
 
 
 @pytest.fixture(scope="session")
@@ -34,6 +46,11 @@ def repo(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, git_exec_path:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     monkeypatch.setenv("PATH", os.pathsep.join([str(bin_dir), str(git_exec_path), os.environ["PATH"]]))
+    # A git hook runs with these pointing at its repository (in a linked
+    # worktree, GIT_DIR is absolute), so the tests run by the pre-push hook
+    # would otherwise commit to, and push from, the repository being pushed.
+    for name in GIT_REPOSITORY_VARIABLES:
+        monkeypatch.delenv(name, raising=False)
     global_config = tmp_path / "gitconfig"
     global_config.write_text("[init]\n\tdefaultBranch = main\n")
     for name, value in {
