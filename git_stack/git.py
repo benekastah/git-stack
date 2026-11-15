@@ -44,6 +44,9 @@ GIT_OPTIONS_WITH_VALUES = frozenset({"-c", "-C", "--git-dir", "--work-tree", "--
 # can't be what's meant, but git still warns that the name is ambiguous, which
 # this turns off. Everywhere else, branches are named as refs/heads/<name>.
 SWITCH = ("-c", "core.warnAmbiguousRefs=false", "switch", "--quiet")
+# How long the upstreams' refnames can be, together, for the ref snapshot to
+# name them to git (see GitClient._snapshot_refs).
+MAX_UPSTREAM_PATTERNS_LENGTH = 16384
 # Characters a branch name can't have, but a revision (e.g. main~1) can.
 REVISION_SYNTAX = frozenset("~^:?*[\\ ")
 
@@ -110,16 +113,24 @@ class GitClient:
     def __init__(self, directory: str | os.PathLike[str] = ".") -> None:
         self.directory = pathlib.Path(directory)
         self._common_dir: pathlib.Path | None = None
+        self._toplevel: pathlib.Path | None = None
         # See branch_config: whether it has read the config file, and the
         # file's stat when it did (None if there was no file).
         self._config_read = False
         self._config_stat: tuple[int, int, int] | None = None
         self._branch_config: dict[tuple[str, str], str] = {}
-        # See snapshot: how many snapshot blocks we're in, and the refs, as
-        # {refname: (commit, the full refname of its upstream, or "")}, once
-        # read. The lock is for commands that read refs in several threads.
+        # See snapshot: how many snapshot blocks we're in; the refs, as
+        # {refname: (commit, the full refname of its upstream, or "")}, and the
+        # upstreams' refnames they were listed for; `git worktree list
+        # --porcelain`'s output, and {worktree: the branch a rebase in it is
+        # rebasing}, once read; and {remote: its default branch}. The lock is
+        # for commands that read them in several threads.
         self._snapshot_depth = 0
         self._refs: dict[str, tuple[str, str]] | None = None
+        self._listed_upstreams: frozenset[str] = frozenset()
+        self._worktrees: str | None = None
+        self._rebasing: dict[pathlib.Path, str | None] = {}
+        self._remote_defaults: dict[str, str | None] = {}
         self._refs_lock = threading.Lock()
         # Where passthrough sends git's stdout (default: ours), e.g. stderr when
         # our stdout is for --json output.
@@ -135,10 +146,13 @@ class GitClient:
             self._forget_refs()
 
     def _forget_refs(self) -> None:
-        """Forget the ref snapshot, waiting for a thread reading it to finish,
-        so it can't then keep what it read from before the change."""
+        """Forget the ref snapshot, and the worktrees' branches, waiting for a
+        thread reading them to finish, so it can't then keep what it read from
+        before the change."""
         with self._refs_lock:
             self._refs = None
+            self._worktrees = None
+            self._rebasing = {}
 
     def run(self, *args: str, check: bool = True, input: str | None = None) -> str:
         """Run git and return stripped stdout.
@@ -169,11 +183,17 @@ class GitClient:
 
     @contextmanager
     def snapshot(self) -> Iterator[None]:
-        """Within this, read every local and remote-tracking branch's commit,
-        and each local branch's upstream, with one git call, and read them
-        again only after a git call that may have changed them (see
-        changes_refs). A command asks about the same few refs over and over,
-        and each git call is slow enough to add up.
+        """Within this, read every local branch's commit and upstream, and its
+        upstream's commit, with one git call, and read them again only after a
+        git call that may have changed them (see changes_refs). A command asks
+        about the same few refs over and over, and each git call is slow
+        enough to add up. The worktrees' branches (see worktree_of) are read
+        once too, and forgotten along with the refs, and each remote's default
+        branch (see remote_default_branch) is asked once.
+
+        Other remote-tracking branches aren't read (unless there are too many
+        upstreams to name), since a clone can have tens of thousands of them;
+        they're asked of git as they're needed.
 
         Changes made meanwhile by anything else, such as another process, or
         a test running git, aren't seen, so a snapshot is only for the length
@@ -191,7 +211,8 @@ class GitClient:
         finally:
             self._snapshot_depth -= 1
             if not self._snapshot_depth:
-                self._refs = None
+                self._forget_refs()
+                self._remote_defaults = {}
 
     def _snapshot_refs(self) -> dict[str, tuple[str, str]] | None:
         """The refs (see snapshot), reading them if they haven't been, or None
@@ -201,14 +222,38 @@ class GitClient:
         with self._refs_lock:
             if self._refs is None:
                 refs = {}
+                upstreams = self._upstream_refs()
+                # Unless there are too many to name on a command line (Windows
+                # limits one to 32767 characters); then list every
+                # remote-tracking branch.
+                patterns = (
+                    upstreams
+                    if sum(len(u) + 1 for u in upstreams) <= MAX_UPSTREAM_PATTERNS_LENGTH
+                    else ["refs/remotes/"]
+                )
                 listing = self.run(
-                    "for-each-ref", "--format=%(refname)%00%(objectname)%00%(upstream)", "refs/heads", "refs/remotes"
+                    "for-each-ref", "--format=%(refname)%00%(objectname)%00%(upstream)", "refs/heads/", *patterns
                 )
                 for line in listing.splitlines():
                     name, commit, upstream = line.split("\0")
                     refs[name] = (commit, upstream)
-                self._refs = refs
+                self._refs, self._listed_upstreams = refs, frozenset(upstreams)
             return self._refs
+
+    def _upstream_refs(self) -> list[str]:
+        """The refnames of local branches' upstreams on remotes, as their
+        config (branch.<name>.remote and .merge) gives them with the usual
+        fetch refspec (refs/remotes/<remote>/<branch>)."""
+        config = self.branch_config()
+        return sorted(
+            {
+                f"refs/remotes/{remote}/{merge.removeprefix('refs/heads/')}"
+                for (branch, key), remote in config.items()
+                if key == "remote"
+                and remote != "."
+                and (merge := config.get((branch, "merge"), "")).startswith("refs/heads/")
+            }
+        )
 
     def common_dir(self) -> pathlib.Path:
         """The absolute path of the git directory every worktree shares."""
@@ -370,7 +415,7 @@ class GitClient:
         rebase of branch is in progress in. The rebase detaches that worktree's
         HEAD, so `git worktree list` doesn't show the branch."""
         path = None
-        for line in self.run("worktree", "list", "--porcelain").splitlines():
+        for line in self._worktree_list().splitlines():
             if line.startswith("worktree "):
                 path = pathlib.Path(line.removeprefix("worktree "))
             elif path is not None and (
@@ -379,8 +424,26 @@ class GitClient:
                 return path
         return None
 
+    def _worktree_list(self) -> str:
+        """`git worktree list --porcelain`'s output, read once per snapshot."""
+        if not self._snapshot_depth:
+            return self.run("worktree", "list", "--porcelain")
+        with self._refs_lock:
+            if self._worktrees is None:
+                self._worktrees = self.run("worktree", "list", "--porcelain")
+            return self._worktrees
+
     def rebasing_in(self, worktree: pathlib.Path) -> str | None:
-        """The branch a rebase in progress in worktree is rebasing, if any."""
+        """The branch a rebase in progress in worktree is rebasing, if any,
+        found once per snapshot."""
+        if self._snapshot_depth and worktree in self._rebasing:
+            return self._rebasing[worktree]
+        branch = self._read_rebasing(worktree)
+        if self._snapshot_depth:
+            self._rebasing[worktree] = branch
+        return branch
+
+    def _read_rebasing(self, worktree: pathlib.Path) -> str | None:
         git_dir = GitClient(worktree).run("rev-parse", "--absolute-git-dir", check=False)
         if not git_dir:  # e.g. the worktree was deleted without `git worktree remove`
             return None
@@ -397,7 +460,7 @@ class GitClient:
         if that isn't this one. git won't check out, rebase or delete a branch
         that's checked out or being rebased elsewhere."""
         path = self.worktree_of(branch)
-        if path is None or same_file(path, pathlib.Path(self.run("rev-parse", "--show-toplevel"))):
+        if path is None or same_file(path, self.toplevel()):
             return None
         return path
 
@@ -406,7 +469,11 @@ class GitClient:
         `git fetch --prune` saw it deleted."""
         if (refs := self._snapshot_refs()) is not None:
             upstream = refs.get(f"refs/heads/{branch}", ("", ""))[1]
-            return bool(upstream) and upstream not in refs
+            if not upstream or upstream in refs:
+                return False
+            # Unless it wasn't listed, as with an unusual fetch refspec.
+            if upstream.startswith("refs/heads/") or upstream in self._listed_upstreams:
+                return True
         return self.run("for-each-ref", "--format=%(upstream:track)", f"refs/heads/{branch}") == "[gone]"
 
     def remotes(self) -> list[str]:
@@ -436,13 +503,28 @@ class GitClient:
             return ref.removeprefix("refs/heads/")
         return branch
 
+    def toplevel(self) -> pathlib.Path:
+        """The top directory of the worktree directory is in."""
+        if self._toplevel is None:
+            self._toplevel = pathlib.Path(self.run("rev-parse", "--show-toplevel"))
+        return self._toplevel
+
     def remote_default_branch(self, remote: str) -> str | None:
         """The branch remote's HEAD points at on the server, or None if it can't
         be asked or its HEAD isn't a branch.
 
-        Asked every time rather than read from refs/remotes/<remote>/HEAD, which
-        fetch doesn't update when the server's default branch changes.
+        Asked rather than read from refs/remotes/<remote>/HEAD, which fetch
+        doesn't update when the server's default branch changes, once per
+        snapshot.
         """
+        if self._snapshot_depth and remote in self._remote_defaults:
+            return self._remote_defaults[remote]
+        default = self._ask_remote_default_branch(remote)
+        if self._snapshot_depth:
+            self._remote_defaults[remote] = default
+        return default
+
+    def _ask_remote_default_branch(self, remote: str) -> str | None:
         heads = self.run("ls-remote", "--symref", remote, "HEAD", check=False).splitlines()
         for line in heads:
             target, _, name = line.partition("\t")
