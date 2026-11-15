@@ -1,15 +1,13 @@
-# Times what the tests spend their time on, on each CI system, and the tests
-# themselves, in the default temporary directory and then in a fast one (see
-# .github/actions/fast-temp), to see where macOS and Windows are slower than
-# Linux. It's for reading, not checking: it runs when it changes, or by hand.
+# Throwaway (don't merge): on Windows, with Defender off as in CI, times single operations and
+# the whole suite in the default temporary directory and on a Dev Drive (.github/actions/
+# fast-temp). Operations alternate default, Dev Drive, default, Dev Drive; the suite runs on the
+# Dev Drive first, so a warm second run can't favor it. Two jobs, on two runners.
 name: Measure
 
 on:
   pull_request:
     paths:
       - .github/workflows/measure.yml
-      - .github/actions/fast-temp/**
-      - tests/measure_costs.py
   workflow_dispatch:
 
 permissions:
@@ -17,26 +15,46 @@ permissions:
 
 jobs:
   measure:
-    name: ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
+    name: windows-latest, run ${{ matrix.run }}
+    runs-on: windows-latest
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        run: [1, 2]
+    defaults:
+      run:
+        shell: bash
     steps:
+      - name: Stop Windows Defender scanning files as they're written
+        shell: pwsh
+        run: Set-MpPreference -DisableRealtimeMonitoring $true
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.15"
       - name: Install the dev dependencies
         run: python -m pip install --group dev
-      - name: Time single operations, in the default temporary directory
-        run: python -m tests.measure_costs
-      - name: Run the tests, in the default temporary directory
-        run: python -m pytest -q -p no:cacheprovider
+      - name: Remember the default temporary directory
+        run: echo "DEFAULT_TMP=$(python -c 'import tempfile; print(tempfile.gettempdir())')" >> "$GITHUB_ENV"
       - uses: ./.github/actions/fast-temp
-      - name: Time single operations, in the fast temporary directory
-        run: python -m tests.measure_costs
-      - name: Run the tests, in the fast temporary directory
-        run: python -m pytest -q -p no:cacheprovider
+      - name: Single operations, default, Dev Drive, default, Dev Drive
+        run: |
+          for round in 1 2; do
+            for where in default devdrive; do
+              if [ "$where" = default ]; then dir="$DEFAULT_TMP"; else dir='R:\temp'; fi
+              echo "### Operations: $where, round $round" >> "$GITHUB_STEP_SUMMARY"
+              TMPDIR="$dir" TEMP="$dir" TMP="$dir" python -m tests.measure_costs "$dir"
+            done
+          done
+      - name: The tests, on the Dev Drive
+        run: |
+          started=$SECONDS
+          python -m pytest -q -p no:cacheprovider --basetemp='R:\temp\pytest'
+          echo "Tests on the Dev Drive: $((SECONDS - started))s" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: The tests, in the default temporary directory
+        run: |
+          started=$SECONDS
+          TMPDIR="$DEFAULT_TMP" TEMP="$DEFAULT_TMP" TMP="$DEFAULT_TMP" \
+            python -m pytest -q -p no:cacheprovider --basetemp="$DEFAULT_TMP/pytest"
+          echo "Tests in the default temporary directory: $((SECONDS - started))s" | tee -a "$GITHUB_STEP_SUMMARY"
