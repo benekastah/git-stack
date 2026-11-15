@@ -352,6 +352,10 @@ class StackClient(StackCore):
         parent = git.current_branch()
         if parent is None:
             raise StackError("not on a branch")
+        if not git.local_branch_exists(parent):
+            # git would switch to name without creating it, leaving it
+            # tracked on parent with nothing to stack on.
+            raise StackError(f"{parent} has no commits yet, so there's nothing to build {name} on; commit to it first")
         self.ensure_name_free_on_remotes(name)
         # The branch at the bottom of name's stack, which is what's in a group,
         # or None if that's name itself.

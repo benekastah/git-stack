@@ -317,6 +317,10 @@ would overwrite it.
 In a shared repository, prefixing branch names with your username (e.g.
 \f[CR]jane/add\-api\f[R]) avoids picking a name that\(aqs taken.
 .IP \(bu 2
+Refuses on a branch with no commits yet (e.g.
+in a new repository), since there\(aqs nothing to build on; commit to it
+first.
+.IP \(bu 2
 The new branch has no upstream until you \f[CR]git stack push\f[R] it,
 even if \f[CR]branch.autoSetupMerge\f[R] would normally give it its
 parent\(aqs.
