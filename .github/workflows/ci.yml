@@ -8,6 +8,13 @@ on:
 permissions:
   contents: read
 
+# A new push to a pull request cancels the run on its older commit, which no
+# one needs any more, so runs don't pile up in the account's few runners. Each
+# push to main gets a group of its own, so its run always finishes.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
   check:
     name: ${{ matrix.os }}, Python ${{ matrix.python }}
