@@ -169,8 +169,10 @@ class GitClient:
 
     def _forget_refs(self) -> None:
         """Forget the ref snapshot, the worktrees' branches and the reflogs,
-        waiting for a thread reading them to finish, so it can't then keep
-        what it read from before the change."""
+        so a thread reading them meanwhile can't then keep what it read from
+        before the change: this waits for a thread holding the lock, and the
+        others store what they read only if this hasn't replaced their dict
+        meanwhile (see reflog_tips)."""
         with self._refs_lock:
             self._refs = None
             self._worktrees = None
@@ -545,11 +547,14 @@ class GitClient:
     def rebasing_in(self, worktree: pathlib.Path) -> str | None:
         """The branch a rebase in progress in worktree is rebasing, if any,
         found once per snapshot."""
-        if self._snapshot_depth and worktree in self._rebasing:
-            return self._rebasing[worktree]
+        rebasing = self._rebasing
+        if self._snapshot_depth and worktree in rebasing:
+            return rebasing[worktree]
         branch = self._read_rebasing(worktree)
-        if self._snapshot_depth:
-            self._rebasing[worktree] = branch
+        with self._refs_lock:
+            # As in reflog_tips.
+            if self._snapshot_depth and self._rebasing is rebasing:
+                rebasing[worktree] = branch
         return branch
 
     def _read_rebasing(self, worktree: pathlib.Path) -> str | None:
