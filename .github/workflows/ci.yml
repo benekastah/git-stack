@@ -140,6 +140,8 @@ jobs:
           gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/force-cancel"
           sleep 60
           exit 1
+      # always(): without it, this step doesn't run in a cancelled run, so one
+      # in which a check failed could end green.
       - name: Fail unless every check passed
         if: always() && (needs.lint.result != 'success' || needs.test.result != 'success')
         run: exit 1
