@@ -4,6 +4,7 @@ import json
 import os
 import pathlib
 import subprocess
+import sys
 from collections.abc import Iterator
 from typing import Any
 
@@ -492,6 +493,23 @@ def test_snapshot_looks_up_objects_with_one_cat_file(
     # It ends with the snapshot.
     assert [process.poll() for process in started] == [0]
     assert all(process.stdout is not None and process.stdout.closed for process in started)
+
+
+def test_cat_file_does_not_keep_a_pipe_open(repo: Repo) -> None:
+    if sys.platform == "win32":
+        pytest.skip("Windows closes them for every git process")
+    # Where Python can't open a pipe non-inheritable at once (on macOS), it's
+    # inheritable for a moment, in which another thread may start cat-file.
+    read, write = os.pipe()
+    os.set_inheritable(write, True)
+    git = GitClient(repo.path)
+    with git.snapshot():
+        assert git.tree("main") is not None
+        os.close(write)
+        os.set_blocking(read, False)
+        # Not BlockingIOError: no process still has the pipe open to write.
+        assert os.read(read, 1) == b""
+    os.close(read)
 
 
 def test_cat_file_stopping_is_an_error_and_the_next_snapshot_starts_another(repo: Repo) -> None:

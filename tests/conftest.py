@@ -115,7 +115,8 @@ def repo(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, repo_template:
 @pytest.fixture
 def git_calls(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
     """The git processes GitClient starts from now on, each as its arguments
-    without `git -C <dir>`. Each must pass close_fds=CLOSE_FDS, which this
+    without `git -C <dir>`. Each must pass close_fds=CLOSE_FDS, or close them
+    if it's the `git cat-file` that runs until a snapshot ends, which this
     checks only for the calls the tests that use it reach."""
     calls: list[list[str]] = []
     mark_git_commands(monkeypatch)
@@ -124,7 +125,7 @@ def git_calls(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
         def __init__(self, args: list[str], *rest: Any, **kwargs: Any) -> None:
             if isinstance(args, GitCommand):
                 calls.append(args[3:])
-                assert kwargs.get("close_fds") == CLOSE_FDS
+                assert kwargs.get("close_fds") == (args[3] == "cat-file" or CLOSE_FDS)
             super().__init__(args, *rest, **kwargs)
 
     # subprocess.run starts its process with subprocess.Popen too.
