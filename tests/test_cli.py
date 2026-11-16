@@ -87,6 +87,8 @@ def stack(autospec_stack: Any) -> Any:
     ("argv", "method", "args", "kwargs"),
     [
         (["branch", "pr1"], "branch", ("pr1",), {"group": None}),
+        (["create", "pr1"], "branch", ("pr1",), {"group": None}),
+        (["create", "pr1", "--group", "feat"], "branch", ("pr1",), {"group": "feat"}),
         (["branch", "pr1", "--group", "feat"], "branch", ("pr1",), {"group": "feat"}),
         (["track", "main"], "track", ("main", []), {"base": None}),
         (["track", "main", "pr1", "pr2", "--base", "abc123"], "track", ("main", ["pr1", "pr2"]), {"base": "abc123"}),
@@ -763,6 +765,7 @@ def test_clean_json_ends_with_the_error_when_it_fails(stack: Any, capsys: pytest
             {"old": "old", "new": "new", "children": ["pr2"], "upstream": "origin/old"},
         ),
         (["branch", "pr2", "--group", "g"], "branch", "pr1", {"branch": "pr2", "parent": "pr1", "group": "g"}),
+        (["create", "pr2", "--group", "g"], "branch", "pr1", {"branch": "pr2", "parent": "pr1", "group": "g"}),
         (["group", "add", "g", "pr1"], "group_add", ["pr1"], {"group": "g", "bottoms": ["pr1"]}),
         (["group", "remove"], "group_remove", [("pr1", "g")], {"removed": [{"bottom": "pr1", "group": "g"}]}),
         (["ungroup"], "group_remove", [], {"removed": []}),
