@@ -1,7 +1,8 @@
 # Times what the tests spend their time on, on each CI system, and the tests
-# themselves, in the default temporary directory and then in a fast one (see
-# .github/actions/fast-temp), to see where macOS and Windows are slower than
-# Linux. It's for reading, not checking: it runs when it changes, or by hand.
+# themselves, run as CI runs them, in the default temporary directory and then,
+# on Windows, in the Dev Drive CI uses (see .github/actions/fast-temp), to see
+# where macOS and Windows are slower than Linux. It's for reading, not
+# checking: it runs when it changes, or by hand.
 name: Measure
 
 on:
@@ -20,6 +21,9 @@ jobs:
     name: ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
+    env:
+      # As in ci.yml.
+      PYTEST_XDIST_AUTO_NUM_WORKERS: 8
     strategy:
       fail-fast: false
       matrix:
@@ -35,8 +39,12 @@ jobs:
         run: python -m tests.measure_costs
       - name: Run the tests, in the default temporary directory
         run: python -m pytest -q -p no:cacheprovider
+      # Linux and macOS have no fast temporary directory to compare.
       - uses: ./.github/actions/fast-temp
-      - name: Time single operations, in the fast temporary directory
+        if: runner.os == 'Windows'
+      - name: Time single operations, in the Dev Drive
+        if: runner.os == 'Windows'
         run: python -m tests.measure_costs
-      - name: Run the tests, in the fast temporary directory
+      - name: Run the tests, in the Dev Drive
+        if: runner.os == 'Windows'
         run: python -m pytest -q -p no:cacheprovider
