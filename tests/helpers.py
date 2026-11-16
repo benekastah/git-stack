@@ -51,7 +51,10 @@ def captured_output() -> Iterator[list[str]]:
         for f in (out, err):
             f.seek(0)
             # Text mode, as subprocess.run's, so Windows' \r\n reads as \n.
-            output.append(io.TextIOWrapper(f, encoding="utf-8").read())
+            text = io.TextIOWrapper(f, encoding="utf-8")
+            output.append(text.read())
+            # Leave f to the with block to close.
+            text.detach()
 
 
 def install_command(bin_dir: pathlib.Path, name: str, module: str) -> None:
