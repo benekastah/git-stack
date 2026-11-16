@@ -1,0 +1,32 @@
+name: Fast temporary directory
+description: >-
+  On Windows, point the temporary directory, where the tests make their git
+  repositories, at a Dev Drive, which writes small files about twice as fast:
+  with Defender off as in CI, writing 100 small files took 28ms against 58-60ms,
+  an empty commit 32ms against 42ms, and the whole suite 7-10% less time (#92's
+  measurement). Later steps get it as TMPDIR, TEMP and TMP. It does nothing on
+  Linux or macOS, where a tmpfs or a RAM disk measured no faster.
+runs:
+  using: composite
+  steps:
+    - name: Make a Dev Drive
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        # A Dev Drive is ReFS, which Defender scans asynchronously once it's
+        # trusted, instead of before each file is written.
+        $vhd = "$env:RUNNER_TEMP\fast-temp.vhdx"
+        $script = "$env:RUNNER_TEMP\fast-temp.diskpart"
+        @(
+          "create vdisk file=`"$vhd`" maximum=4096 type=expandable",
+          "attach vdisk",
+          "convert gpt",
+          "create partition primary",
+          "assign letter=R"
+        ) | Set-Content -Path $script
+        diskpart /s $script
+        if ($LASTEXITCODE) { exit $LASTEXITCODE }
+        Format-Volume -DriveLetter R -DevDrive -Confirm:$false -Force
+        fsutil devdrv trust R:
+        New-Item -ItemType Directory -Path R:\temp | Out-Null
+        foreach ($name in "TMPDIR", "TEMP", "TMP") { "$name=R:\temp" >> $env:GITHUB_ENV }
