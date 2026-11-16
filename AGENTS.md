@@ -99,10 +99,15 @@ The tooling comes from the python-template Copier template (see the README's
   git-stack's own commands and install steps to `dev_project.py` (standard
   library only, like `dev.py`).
 - The template never touches this file, the README or
-  `.github/workflows/check.yml`. Elsewhere, where git-stack differs from the
-  template on purpose (setuptools, for the man page; Ruff's line length; the
-  pre-commit hook's man page step), keep the difference when resolving an
-  update's conflicts.
+  `.github/workflows/check.yml`. Elsewhere, keep git-stack's differences when
+  resolving an update's conflicts:
+  - `pyproject.toml`: every setting the template doesn't have, and every value
+    that differs from it, e.g. setuptools and its `data-files` (the man page;
+    the package is at the root, not in `src/`), `pypandoc_binary` in `dev`,
+    Ruff's line length, extra rules, `force-exclude` and `dev.py`'s exclusions,
+    and basedpyright's `include` and relaxed rules.
+  - `git_hooks/pre-commit`'s man page step.
+  - The extra lines in `.gitattributes` and `.gitignore`.
 
 ## Linux, macOS and Windows
 

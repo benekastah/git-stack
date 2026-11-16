@@ -50,7 +50,7 @@ def pre_commit_man(_: list[str]) -> None:
         staged_readme = Path(scratch) / "README.md"
         staged_readme.write_bytes(readme)
         man(["--readme", str(staged_readme)])
-    run("git", "add", "--", str(PAGE.relative_to(ROOT)))
+    subprocess.run(["git", "add", "--", str(PAGE.relative_to(ROOT))], cwd=ROOT, check=True)
 
 
 def after_install() -> None:
@@ -60,7 +60,14 @@ def after_install() -> None:
         _link_man_page()
     # `git blame` fails if the file is missing (e.g. with an older commit checked out), unless
     # this git supports marking the path :(optional).
-    optional = subprocess.run(
+    prefix = ":(optional)" if _git_has_optional_paths() else ""
+    run("git", "config", "blame.ignoreRevsFile", f"{prefix}.git-blame-ignore-revs")
+    print("made git blame skip the commits in .git-blame-ignore-revs")
+
+
+def _git_has_optional_paths() -> bool:
+    """Whether this git takes a path marked :(optional), which it ignores if missing."""
+    probe = subprocess.run(
         [
             "git",
             "-c",
@@ -75,9 +82,7 @@ def after_install() -> None:
         capture_output=True,
         check=False,
     )
-    prefix = ":(optional)" if optional.returncode == 0 else ""
-    run("git", "config", "blame.ignoreRevsFile", f"{prefix}.git-blame-ignore-revs")
-    print("made git blame skip the commits in .git-blame-ignore-revs")
+    return probe.returncode == 0
 
 
 def _link_man_page() -> None:

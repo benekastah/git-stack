@@ -39,6 +39,8 @@ line-length = 120
 target-version = "py311"
 # dev.py runs under an older Python too, to say it's too old: keep it to syntax that parses there.
 per-file-target-version = { "dev.py" = "py311" }
+# Leave out dev.py even when named, as the pre-commit hook names files.
+force-exclude = true
 
 [tool.ruff.format]
 # dev.py is the template's, formatted at its line length (100); `copier update` replaces it.
@@ -48,6 +50,10 @@ exclude = ["dev.py"]
 # ANN: every function's parameters and return annotated (a return isn't inferred), but Any allowed.
 extend-select = ["I", "UP", "B", "C4", "SIM", "ANN", "C901", "PERF401"]
 ignore = ["ANN401"]
+
+[tool.ruff.lint.per-file-ignores]
+# dev.py is the template's: hold it only to the template's rules.
+"dev.py" = ["ANN", "C901", "PERF401"]
 
 [tool.basedpyright]
 include = ["git_stack", "tests", "man/build.py", "dev.py", "dev_project.py"]
