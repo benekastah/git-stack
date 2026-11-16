@@ -1509,7 +1509,7 @@ keeps it up to date; without the hook, regenerate it with
 
 The tooling (`dev.py`, the git hooks, CI's `ci.yml`, `cancel.yml` and
 `.github/actions/setup`, Dependabot's config, `.gitignore`, `.gitattributes`,
-`CLAUDE.md` and much of `pyproject.toml`) comes from the
+`AGENTS.md`, `CLAUDE.md` and much of `pyproject.toml`) comes from the
 [python-template](https://github.com/benekastah/python-template) Copier
 template, whose answers `.copier-answers.yml` records. Take in its later
 changes with:
@@ -1518,9 +1518,13 @@ changes with:
 uvx copier update --defaults
 ```
 
-and resolve any conflicts it marks, keeping what's git-stack's own. `dev.py`
-stays the template's: git-stack's own commands and install steps (the man
-page, `git blame`) are in `dev_project.py`.
+and resolve any conflicts it marks, keeping what's git-stack's own (see
+`PROJECT_AGENTS.md`'s "Where git-stack differs from the template"). `dev.py`
+and `AGENTS.md` stay the template's: git-stack's own commands and install
+steps (the man page, `git blame`) are in `dev_project.py`, and its own rules
+for agents (and people) changing it are in `PROJECT_AGENTS.md`. It never
+changes this README, `PROJECT_AGENTS.md`, `docs/` or
+`.github/workflows/project.yml`.
 
 ## License
 
