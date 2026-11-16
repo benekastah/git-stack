@@ -67,7 +67,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 1  # git-stack's: it took 12s
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
@@ -87,7 +87,8 @@ jobs:
   tests:
     needs: changes
     if: needs.changes.outputs.code == 'true'
-    timeout-minutes: 5
+    # git-stack's: a shard took up to 183s on Windows, 149s on macOS and 57s on Linux.
+    timeout-minutes: ${{ matrix.os == 'windows-latest' && 4 || matrix.os == 'macos-latest' && 3 || 2 }}
     strategy:
       fail-fast: false
       matrix:
@@ -135,7 +136,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 2  # git-stack's: it took 63s
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
