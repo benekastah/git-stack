@@ -1,9 +1,9 @@
 """Commands running at once: the git-stack lock, and git config's."""
 
+import os
 import subprocess
 import sys
 import threading
-import time
 
 import pytest
 
@@ -33,13 +33,22 @@ def test_command_waits_for_another_holding_the_lock(repo: Repo, client: StackCli
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             encoding="utf-8",
+            # Unbuffered, so it prints that it's waiting as it starts to.
+            env={**os.environ, "PYTHONUNBUFFERED": "1"},
         )
-        time.sleep(1)
+        stdout = restack.stdout
+        assert stdout is not None
+        # Read in a thread, to give up if it never says it's waiting.
+        first_line: list[str] = []
+        reader = threading.Thread(target=lambda: first_line.append(stdout.readline()), daemon=True)
+        reader.start()
+        reader.join(timeout=60)
+        assert first_line == ["waiting for another git stack command in this repository to finish\n"]
         assert restack.poll() is None
     out, err = restack.communicate(timeout=60)
 
     assert restack.returncode == 0, err
-    assert "waiting for another git stack command in this repository to finish" in out
+    assert "restacking pr1 onto main" in out
     repo.assert_stacked("pr1", "main", ["pr1 c2", "pr1 c1"])
 
 
@@ -56,12 +65,19 @@ def test_config_write_waits_while_another_process_has_config_locked(repo: Repo, 
     repo.git("config", "core.configLockTimeout", "0")
     config_lock = repo.path / ".git" / "config.lock"
     config_lock.touch()
-    threading.Timer(0.3, config_lock.unlink).start()
-    started = time.monotonic()
+    unlocked = threading.Event()
+
+    def unlock() -> None:
+        # Set first: a write that lands as soon as the lock goes still finds it set.
+        unlocked.set()
+        config_lock.unlink()
+
+    threading.Timer(0.3, unlock).start()
 
     client.git.config_set("pr1", "stackBase", "x")
 
-    assert time.monotonic() - started >= 0.3
+    # It waited for the lock, rather than failing while it was held.
+    assert unlocked.is_set()
     assert repo.config("pr1", "stackBase") == "x"
 
 
