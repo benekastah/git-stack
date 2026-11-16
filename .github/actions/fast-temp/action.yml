@@ -13,8 +13,9 @@ runs:
       if: runner.os == 'Windows'
       shell: pwsh
       run: |
-        # A Dev Drive is ReFS, which Defender scans asynchronously once it's
-        # trusted, instead of before each file is written.
+        # A Dev Drive is ReFS, made for many small files: Windows attaches
+        # fewer filesystem filters to it than to the system drive, and fewer
+        # still once it's trusted.
         $vhd = "$env:RUNNER_TEMP\fast-temp.vhdx"
         $script = "$env:RUNNER_TEMP\fast-temp.diskpart"
         @(
