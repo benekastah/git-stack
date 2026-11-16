@@ -10,7 +10,8 @@ permissions:
 
 # A new push to a pull request cancels the run on its older commit, which no
 # one needs any more, so runs don't pile up in the account's few runners. Each
-# push to main gets a group of its own, so its run always finishes.
+# push to main gets a group of its own, so its run always finishes. A cancelled
+# run's "CI passed" still runs, and fails, as it should (see below).
 concurrency:
   group: ci-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: true
