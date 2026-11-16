@@ -77,6 +77,11 @@ Text meant for people (messages, `info`'s tree) can change.
   a case in `test_json_prints_the_result_on_stdout`.
 - Run `./check.sh` (formatting, Ruff, mypy in strict mode, shellcheck, the
   tests) before committing. The pre-push hook runs it too.
+- Each CI job has a time limit (`timeout-minutes` in
+  `.github/workflows/ci.yml`), about 20% over how long it takes. If a job
+  starts hitting it, speed the tests up if you can (most of their time is
+  spent starting git processes, which is slow on macOS and Windows); only if
+  you can't, raise the limit.
 - Update the README with behavior changes; the pre-commit hook regenerates
   `man/git-stack.1` from it (or run `.venv/bin/python man/build.py`).
 
