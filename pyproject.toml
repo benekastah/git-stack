@@ -45,7 +45,7 @@ pythonVersion = "3.11"
 # One system at a time, so a call another system lacks (e.g. fcntl's on Windows) is reported:
 # lint.sh also runs it with --pythonplatform Windows and Darwin.
 pythonPlatform = "Linux"
-# Off, until about 130 places, mostly JSON read from GitHub, get types: these let a value of
+# Off, until about 95 places, mostly JSON read from GitHub, get types: these let a value of
 # unknown type (e.g. from json.loads) be passed, called or read from unchecked.
 reportUnknownArgumentType = false
 reportUnknownLambdaType = false
