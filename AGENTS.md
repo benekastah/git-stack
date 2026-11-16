@@ -105,7 +105,9 @@ The tooling comes from the python-template Copier template (see the README's
     that differs from it, e.g. setuptools and its `data-files` (the man page;
     the package is at the root, not in `src/`), `pypandoc_binary` in `dev`,
     Ruff's line length, extra rules, `force-exclude` and `dev.py`'s exclusions,
-    and basedpyright's `include` and relaxed rules.
+    and basedpyright's `include` and relaxed rules. Add dev dependencies to
+    `dev`, not `template-dev`, and rules and paths below the template's
+    `# The project's own below:` lines, so updates merge them.
   - `git_hooks/pre-commit`'s man page step.
   - The extra lines in `.gitattributes` and `.gitignore`.
 

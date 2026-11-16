@@ -13,10 +13,19 @@ dependencies = []
 git-stack = "git_stack.cli:main"
 
 [dependency-groups]
+# The template's dev tools, kept current by `copier update`; the project's own go in `dev`
+# (`uv add --dev`), so the two never conflict.
+template-dev = [
+    "basedpyright>=1.40.2",
+    "coverage>=7.17.3",
+    "pytest>=9.2.0",
+    "pytest-xdist>=3.8.0",
+    "ruff>=0.17.5",
+]
 # pypandoc_binary is pinned because man/build.py --check (and so the tests) compares
 # its pandoc's exact output with the committed man/git-stack.1. distlib makes the
 # tests' commands on Windows (tests/helpers.py's install_command).
-dev = ["basedpyright>=1.40.2", "coverage>=7.17.3", "distlib>=0.4.4", "pypandoc_binary==1.17", "pytest>=9.2.0", "pytest-xdist>=3.8.0", "ruff>=0.17.5"]
+dev = [{ include-group = "template-dev" }, "distlib>=0.4.4", "pypandoc_binary==1.17"]
 
 # setuptools rather than the template's hatchling, for data-files: a wheel installs the man page.
 [build-system]
@@ -47,8 +56,19 @@ force-exclude = true
 exclude = ["dev.py"]
 
 [tool.ruff.lint]
-# ANN: every function's parameters and return annotated (a return isn't inferred), but Any allowed.
-extend-select = ["I", "UP", "B", "C4", "SIM", "ANN", "C901", "PERF401"]
+extend-select = [
+    "I",
+    "UP",
+    "B",
+    "C4",
+    "SIM",
+    # The project's own below:
+    # ANN: every function's parameters and return annotated (a return isn't inferred), but Any
+    # allowed.
+    "ANN",
+    "C901",
+    "PERF401",
+]
 ignore = ["ANN401"]
 
 [tool.ruff.lint.per-file-ignores]
@@ -56,7 +76,14 @@ ignore = ["ANN401"]
 "dev.py" = ["ANN", "C901", "PERF401"]
 
 [tool.basedpyright]
-include = ["git_stack", "tests", "man/build.py", "dev.py", "dev_project.py"]
+include = [
+    "git_stack",  # the template's "src": git-stack's package is at the root
+    "tests",
+    "dev.py",
+    # The project's own below:
+    "man/build.py",
+    "dev_project.py",
+]
 typeCheckingMode = "strict"
 pythonVersion = "3.11"
 # One system at a time, so a call another system lacks (e.g. fcntl's on Windows) is reported:
