@@ -73,3 +73,12 @@ format, but it lives in `git_stack/stack.py` rather than in
 `pull_request_number`). It should move there, still checked before the pull
 requests are looked up, so its error doesn't get the "check `gh auth status`"
 hint.
+
+## An older git-stack can't finish a restack this one stopped
+
+A restack that stops on a conflict is recorded in one setting,
+`stackPendingRestack`, which versions before it don't read. Finishing the
+rebase with an older git-stack leaves that record behind, and the next run
+of a newer one may then apply it over what the older one did since (e.g. a
+`track` onto another parent). Finish a stopped restack with the version
+that started it, or a newer one.
