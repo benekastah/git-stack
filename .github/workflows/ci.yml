@@ -11,8 +11,8 @@ permissions:
 # A new push to a pull request, or to main, cancels the run on the older
 # commit, which no one needs any more, so runs don't pile up in the account's
 # few shared runners. (Each pull request passed CI before it merged.) A re-run
-# doesn't cancel anything, so re-running an older commit's run waits for the
-# newest's rather than cancelling it.
+# doesn't cancel a run in progress: re-running an older commit's run waits for
+# the newest's, unless that's still waiting to start, which it replaces.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.run_attempt == 1 }}
@@ -59,15 +59,15 @@ jobs:
       # it too, which only force-cancel can, marks it cancelled rather than
       # failed, which blocks a merge just the same. (A fork's pull request
       # can't, so there it fails.) The steps below don't run in a cancelled
-      # run, so if the force-cancel hasn't stopped this job by the end of the
-      # sleep, fail.
+      # run, so if the force-cancel hasn't stopped this job within a minute,
+      # fail.
       - name: Cancel this job if the run was cancelled
         if: cancelled()
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/force-cancel"
-          sleep 300
+          sleep 60
           exit 1
       - name: Fail unless every check passed
         if: needs.check.result != 'success'
