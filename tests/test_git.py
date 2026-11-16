@@ -283,6 +283,7 @@ def test_snapshot_keeps_the_worktrees_while_no_head_moves(repo: Repo, git_calls:
         assert git.worktree_of("main") is not None
         git.run("fetch", "--quiet", "origin")
         git.run("update-ref", "refs/heads/other", git.tip("main"))
+        git.config_set("other", "remote", "origin")
         assert git.worktree_of("main") is not None
         assert git.worktree_of("other") is None
 

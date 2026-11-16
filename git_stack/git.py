@@ -231,8 +231,10 @@ class GitClient:
         changed them (see changes_refs). A command asks about the same few refs
         over and over, and each git call is slow enough to add up. The
         worktrees' branches (see worktree_of) and branches' reflogs (see
-        reflog_tips) are read once too, and forgotten along with the refs, and
-        each remote's default branch (see remote_default_branch) is asked once.
+        reflog_tips) are read once too, and forgotten along with the refs
+        (the worktrees' branches only after a git call that may move a
+        worktree's HEAD; see changes_worktrees), and each remote's default
+        branch (see remote_default_branch) is asked once.
 
         Other remote-tracking branches aren't read (unless there are too many
         upstreams to name), since a clone can have tens of thousands of them;
@@ -386,7 +388,8 @@ class GitClient:
             delay = min(delay * 2, 0.5)
         key = next((a for a in args if not a.startswith("-")), "")
         if not key.rpartition(".")[2].lower().startswith("stack"):
-            self._forget_refs()
+            # A config write can't move a worktree's HEAD.
+            self._forget_refs(worktrees=False)
         if check and result.returncode != 0:
             raise StackError(f"git config {' '.join(args)} failed:\n{result.stderr.strip()}")
 
