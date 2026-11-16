@@ -2,10 +2,10 @@ name: Fast temporary directory
 description: >-
   On Windows, point the temporary directory, where the tests make their git
   repositories, at a Dev Drive, which writes small files about twice as fast:
-  with Defender off as in CI, writing 100 small files took 28ms against 58-60ms,
-  an empty commit 32ms against 42ms, and the whole suite 7-10% less time (#92's
-  measurement). Later steps get it as TMPDIR, TEMP and TMP. It does nothing on
-  Linux or macOS, where a tmpfs or a RAM disk measured no faster.
+  with Defender's real-time scanning off, as GitHub's images have it, writing
+  100 small files took 28ms against 58-60ms, an empty commit 32ms against 42ms,
+  and the whole suite 7-10% less time (#92's measurement). Later steps get it as
+  TMPDIR, TEMP and TMP. It does nothing on Linux or macOS.
 runs:
   using: composite
   steps:
