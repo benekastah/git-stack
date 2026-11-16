@@ -103,7 +103,7 @@ def repo(
     repo = Repo(path=tmp_path / "local", origin=tmp_path / "origin.git", forge=tmp_path / "forge", tmp=tmp_path)
     for name in ("origin.git", "local", "forge"):
         shutil.copytree(repo_template / name, tmp_path / name, symlinks=True)
-    # The clones' only reference to where they were made.
+    # Point the clones at this test's origin, not the template's.
     for clone in (repo.path, repo.forge):
         repo.git("config", "remote.origin.url", str(repo.origin), cwd=clone)
     # Everything should target repo.path explicitly. Run from a directory
