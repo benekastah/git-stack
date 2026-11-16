@@ -479,6 +479,9 @@ class StackCore:
         equivalent patch, if branch ever pointed at it or a descendant of it, or if
         an earlier pull or push already took it (so the old copies of commits we
         have since rebased don't count).
+
+        upstream_tip must be a commit ID, not a ref, since the answer is
+        remembered for the commits asked about.
         """
         git = self.git
         tip = git.tip(branch)
@@ -493,13 +496,10 @@ class StackCore:
         key = (upstream_tip, *known)
         if (cached := self._unpulled.get(key)) is not None:
             return list(cached)
-        unseen = {
-            commit: parents
-            for commit, *parents in (
-                line.split() for line in git.run("rev-list", "--parents", upstream_tip, "--not", *known).splitlines()
-            )
-        }
-        if any(len(parents) > 1 for parents in unseen.values()):
+        # Each commit, then its parents.
+        lines = [line.split() for line in git.run("rev-list", "--parents", upstream_tip, "--not", *known).splitlines()]
+        unseen = {commit for commit, *_ in lines}
+        if any(len(parents) > 1 for _, *parents in lines):
             raise StackError(
                 f"{branch}'s upstream contains unseen merge commits; inspect and integrate them manually "
                 "before syncing or pushing"
