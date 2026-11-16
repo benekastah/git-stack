@@ -55,10 +55,11 @@ END_MARKER_DIFF = "diff --git a/end b/end\n--- a/end\n+++ b/end\n@@ -0,0 +1 @@\n
 # Characters a branch name can't have, but a revision (e.g. main~1) can.
 REVISION_SYNTAX = frozenset("~^:?*[\\ ")
 # Whether git's processes close the file descriptors they'd otherwise inherit.
-# Python opens files non-inheritable, so on Linux and macOS there's nothing to
-# close, and not closing anything lets Python start git with posix_spawn, which
-# on macOS is much quicker than forking. On Windows, closing them keeps a git
-# process from inheriting the pipes another thread is starting a process with.
+# On Linux and macOS, not closing them lets Python start git with posix_spawn,
+# which on macOS is much quicker than forking. Python opens files
+# non-inheritable, so git inherits only what git-stack itself inherited, as it
+# would if run from the shell. On Windows, closing them keeps a git process
+# from inheriting the pipes another thread is starting a process with.
 CLOSE_FDS = os.name == "nt"
 
 
@@ -66,8 +67,10 @@ CLOSE_FDS = os.name == "nt"
 def git_program() -> str:
     """The git that git-stack runs: $GIT_STACK_GIT if set, otherwise the git on
     PATH (a wrapper such as git-ai included), as an absolute path, which Python
-    needs to use posix_spawn (see CLOSE_FDS)."""
-    return os.environ.get("GIT_STACK_GIT") or shutil.which("git") or "git"
+    needs to use posix_spawn (see CLOSE_FDS). On Windows, only a git.exe, as
+    starting "git" would find: a git.cmd or git.bat would run in cmd.exe, which
+    interprets characters such as & that a branch name can have."""
+    return os.environ.get("GIT_STACK_GIT") or shutil.which("git.exe" if os.name == "nt" else "git") or "git"
 
 
 def split_command(args: tuple[str, ...]) -> tuple[str, list[str]]:

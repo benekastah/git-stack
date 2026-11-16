@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 
 from git_stack import events
+from git_stack.git import CLOSE_FDS
 from git_stack.stack import StackClient
 from tests.helpers import FakeGitHub, GitCommand, Repo, install_command, mark_git_commands
 
@@ -122,6 +123,7 @@ def git_calls(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
         def __init__(self, args: list[str], *rest: Any, **kwargs: Any) -> None:
             if isinstance(args, GitCommand):
                 calls.append(args[3:])
+                assert kwargs.get("close_fds") == CLOSE_FDS
             super().__init__(args, *rest, **kwargs)
 
     # subprocess.run starts its process with subprocess.Popen too.

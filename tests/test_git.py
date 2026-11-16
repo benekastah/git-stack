@@ -38,6 +38,30 @@ def test_git_program_is_the_git_on_path_by_default(monkeypatch: pytest.MonkeyPat
     assert same_file(program.parent, GIT_EXEC_PATH)
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows runs .cmd and .bat files in cmd.exe")
+@pytest.mark.usefixtures("fresh_git_program")
+def test_git_program_isnt_a_batch_file_on_windows(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in ("git.cmd", "git.bat"):
+        (tmp_path / name).write_text("@echo off\n", encoding="utf-8")
+    monkeypatch.delenv("GIT_STACK_GIT", raising=False)
+    monkeypatch.setenv("PATH", os.pathsep.join([str(tmp_path), str(GIT_EXEC_PATH)]))
+    assert same_file(pathlib.Path(git_program()).parent, GIT_EXEC_PATH)
+
+
+def test_git_client_runs_git_program(repo: Repo, monkeypatch: pytest.MonkeyPatch) -> None:
+    started: list[str] = []
+    popen = subprocess.Popen
+
+    def recording(args: list[str], *rest: Any, **kwargs: Any) -> subprocess.Popen[Any]:
+        started.append(args[0])
+        return popen(args, *rest, **kwargs)
+
+    monkeypatch.setattr(subprocess, "Popen", recording)
+    GitClient(repo.path).run("status")
+
+    assert started == [git_program()]
+
+
 def test_config_get_sees_changes_made_by_other_processes(repo: Repo) -> None:
     git = GitClient(repo.path)
     assert git.config_get("main", "stackParent") is None
@@ -239,10 +263,9 @@ def test_snapshot_reads_every_remote_branch_when_upstreams_are_too_many_to_name(
     # 600 upstreams, whose refnames come to over 35000 characters.
     names = [f"{'long-branch-name-' * 2}{i:04}" for i in range(600)]
     subprocess.run(
-        ["git", "update-ref", "--stdin"],
+        [git_program(), "-C", str(repo.path), "update-ref", "--stdin"],
         # As bytes, so Windows doesn't end lines with \r\n.
         input="".join(f"create refs/heads/{n} {main}\ncreate refs/remotes/origin/{n} {main}\n" for n in names).encode(),
-        cwd=repo.path,
         check=True,
     )
     with (repo.path / ".git" / "config").open("a", encoding="utf-8", newline="\n") as f:
@@ -367,7 +390,10 @@ def separate_patch_ids(repo: Repo, *command: str) -> list[tuple[str, str]]:
     """`git patch-id --stable` of what `git <command>` prints, run on its own."""
     output = repo.git(command[0], "--no-color", *command[1:])
     result = subprocess.run(
-        ["git", "patch-id", "--stable"], input=output.encode() + b"\n", cwd=repo.path, capture_output=True, check=True
+        [git_program(), "-C", str(repo.path), "patch-id", "--stable"],
+        input=output.encode() + b"\n",
+        capture_output=True,
+        check=True,
     )
     return [(patch_id, commit) for patch_id, commit in (line.split() for line in result.stdout.decode().splitlines())]
 
