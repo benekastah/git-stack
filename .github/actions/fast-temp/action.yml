@@ -1,27 +1,14 @@
 name: Fast temporary directory
 description: >-
-  Point the temporary directory, where the tests make their git repositories,
-  at storage that's quick to write many small files to: a tmpfs on Linux, a RAM
-  disk on macOS, and a Dev Drive on Windows. Later steps get it as TMPDIR (and
-  TEMP and TMP on Windows).
+  On Windows, point the temporary directory, where the tests make their git
+  repositories, at a Dev Drive, which writes small files about twice as fast:
+  with Defender off as in CI, writing 100 small files took 28ms against 58-60ms,
+  an empty commit 32ms against 42ms, and the whole suite 7-10% less time (#92's
+  measurement). Later steps get it as TMPDIR, TEMP and TMP. It does nothing on
+  Linux or macOS, where a tmpfs or a RAM disk measured no faster.
 runs:
   using: composite
   steps:
-    - name: Mount a tmpfs
-      if: runner.os == 'Linux'
-      shell: bash
-      run: |
-        sudo mkdir -p /mnt/fast-temp
-        sudo mount -t tmpfs -o size=2g,mode=1777 tmpfs /mnt/fast-temp
-        echo "TMPDIR=/mnt/fast-temp" >> "$GITHUB_ENV"
-    - name: Make a RAM disk
-      if: runner.os == 'macOS'
-      shell: bash
-      run: |
-        # 2 GiB, in 512-byte sectors.
-        device=$(hdiutil attach -nomount ram://4194304 | tr -d '[:space:]')
-        diskutil erasevolume APFS FastTemp "$device"
-        echo "TMPDIR=/Volumes/FastTemp" >> "$GITHUB_ENV"
     - name: Make a Dev Drive
       if: runner.os == 'Windows'
       shell: pwsh
