@@ -231,6 +231,30 @@ def test_conflict_from_an_older_version_is_finished_by_this_one(repo: Repo, clie
     )
 
 
+def test_conflict_from_an_older_version_that_was_aborted_is_forgotten(repo: Repo, client: StackClient) -> None:
+    repo.make_stack()
+    old_base = repo.config("pr2", "stackBase")
+    repo.git("switch", "--quiet", "pr1")
+    repo.commit("b", "pr1 change\n", "pr1 touches b")
+    with pytest.raises(StackError, match="restacking pr2 stopped on a conflict"):
+        client.restack()
+    before, base, parent = repo.config("pr2", "stackPendingRestack").split(" ")
+    repo.git("config", "--unset", "branch.pr2.stackPendingRestack")
+    for key, value in (("RestackFrom", before), ("Base", base), ("Parent", parent)):
+        repo.git("config", f"branch.pr2.stackPending{key}", value)
+    repo.git("rebase", "--abort")
+    # So restacking doesn't stop on the same conflict again.
+    repo.git("switch", "--quiet", "pr1")
+    repo.git("reset", "--quiet", "--hard", "HEAD~1")
+
+    client.restack()
+
+    assert repo.config("pr2", "stackBase") == old_base
+    assert not any(
+        key.startswith("branch.pr2.stackpending") for key in repo.git("config", "--list", "--name-only").split()
+    )
+
+
 def test_restack_stopped_by_untracked_file_is_not_reported_as_conflict(repo: Repo, client: StackClient) -> None:
     repo.make_stack()
     repo.git("switch", "--quiet", "pr2")

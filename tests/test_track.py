@@ -118,13 +118,18 @@ def test_track_later_branch_uses_where_it_forked_from_rewritten_parent(repo: Rep
     repo.assert_stacked("pr2", "pr1", ["pr2 c1"])
 
 
-def test_track_isnt_undone_by_an_earlier_interrupted_restack(repo: Repo, client: StackClient) -> None:
+@pytest.mark.parametrize("legacy", [False, True])
+def test_track_isnt_undone_by_an_earlier_interrupted_restack(repo: Repo, client: StackClient, legacy: bool) -> None:
     repo.make_stack()
     pr1_tip = repo.git("rev-parse", "pr1")
     # As if a restack of pr2 onto pr1 stopped on a conflict and the user then
-    # finished the rebase by hand.
-    repo.git("config", "branch.pr2.stackPendingParent", "pr1")
-    repo.git("config", "branch.pr2.stackPendingBase", pr1_tip)
+    # finished the rebase by hand; or one an older version started, which
+    # recorded it in three settings.
+    if legacy:
+        repo.git("config", "branch.pr2.stackPendingParent", "pr1")
+        repo.git("config", "branch.pr2.stackPendingBase", pr1_tip)
+    else:
+        repo.git("config", "branch.pr2.stackPendingRestack", f"{repo.git('rev-parse', 'pr2')} {pr1_tip} pr1")
 
     client.track("main", ["pr2"], base=pr1_tip)
     client.info()

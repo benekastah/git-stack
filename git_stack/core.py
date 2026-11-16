@@ -28,7 +28,9 @@ TRACK_UPSTREAM_KEY = "stackTrackUpstream"
 # plain `git rebase --continue` (or back out with `git rebase --abort`).
 # A restack that's started, as "<the branch's tip before> <the parent's tip
 # it's rebased onto> <the parent>", in one setting, so it's recorded with one
-# git process, and all of it or none (see settle_restack).
+# git process, and all of it or none (see settle_restack). Older versions
+# don't read it, so a restack this version stopped is finished with this
+# version or a later one.
 PENDING_RESTACK_KEY = "stackPendingRestack"
 # How older versions recorded it, in three settings, which a restack they
 # started and didn't finish may have left.
