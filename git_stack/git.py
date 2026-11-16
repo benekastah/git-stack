@@ -15,9 +15,9 @@ DEFAULT_REMOTE = "origin"
 # How long to keep retrying a git config write that finds the config file locked
 # by another process, which usually only holds it for a moment.
 CONFIG_LOCK_TIMEOUT = 5.0
-# The git commands git-stack runs that never move a ref or change a branch's
-# upstream, so the ref snapshot (see GitClient.snapshot) outlives them. See
-# changes_refs for a few more.
+# The git commands git-stack runs that never move a ref or HEAD, or change a
+# branch's upstream, so the ref snapshot (see GitClient.snapshot) outlives them.
+# See changes_refs for a few more.
 READ_ONLY_COMMANDS = frozenset(
     {
         "cat-file",
@@ -52,8 +52,9 @@ REVISION_SYNTAX = frozenset("~^:?*[\\ ")
 
 
 def changes_refs(args: tuple[str, ...]) -> bool:
-    """Whether `git <args>` may move a ref or change a branch's upstream,
-    which the ref snapshot holds. Only commands known to be read-only don't."""
+    """Whether `git <args>` may move a ref or HEAD, or change a branch's
+    upstream, which the ref snapshot holds. Only commands known to be read-only
+    don't."""
     # The command is the first argument that isn't an option to git itself
     # (e.g. --literal-pathspecs), or the value of one (e.g. -c's).
     start = 0
@@ -122,10 +123,10 @@ class GitClient:
         # See snapshot: how many snapshot blocks we're in; the refs, as
         # {refname: (commit, the full refname of its upstream, or "")}, the
         # upstreams' refnames they were listed for, and the branch HEAD is on,
-        # if it's one of them; `git worktree list
-        # --porcelain`'s output, and {worktree: the branch a rebase in it is
-        # rebasing}, once read; and {remote: its default branch}. The lock is
-        # for commands that read them in several threads.
+        # if it's one of them; `git worktree list --porcelain`'s output, and
+        # {worktree: the branch a rebase in it is rebasing}, once read; and
+        # {remote: its default branch}. The lock is for commands that read them
+        # in several threads.
         self._snapshot_depth = 0
         self._refs: dict[str, tuple[str, str]] | None = None
         self._listed_upstreams: frozenset[str] = frozenset()
@@ -187,10 +188,9 @@ class GitClient:
     def snapshot(self) -> Iterator[None]:
         """Within this, read every local branch's commit and upstream, its
         upstream's commit, and which is checked out (see current_branch), with
-        one git call, and read them again only after a
-        git call that may have changed them (see changes_refs). A command asks
-        about the same few refs over and over, and each git call is slow
-        enough to add up. The worktrees' branches (see worktree_of) are read
+        one git call, and read them again only after a git call that may have
+        changed them (see changes_refs). A command asks about the same few refs
+        over and over, and each git call is slow enough to add up. The worktrees' branches (see worktree_of) are read
         once too, and forgotten along with the refs, and each remote's default
         branch (see remote_default_branch) is asked once.
 
