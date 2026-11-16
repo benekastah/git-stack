@@ -68,8 +68,9 @@ def test_config_write_waits_while_another_process_has_config_locked(repo: Repo, 
     unlocked = threading.Event()
 
     def unlock() -> None:
-        config_lock.unlink()
+        # Set first: a write that lands as soon as the lock goes still finds it set.
         unlocked.set()
+        config_lock.unlink()
 
     threading.Timer(0.3, unlock).start()
 
