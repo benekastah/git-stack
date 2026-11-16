@@ -451,3 +451,55 @@ def test_nothing_is_contained_in_a_branch_that_doesnt_exist(repo: Repo) -> None:
     git = GitClient(repo.path)
     with git.snapshot():
         assert not git.contained_in("refs/heads/main", "refs/heads/nope")
+
+
+def test_snapshot_reads_a_reflog_once_until_its_branch_moves(repo: Repo, git_calls: list[list[str]]) -> None:
+    git = GitClient(repo.path)
+    with git.snapshot():
+        first = git.reflog_tips("main")
+        assert git.reflog_tips("main") == first
+        repo.write("a", "moved\n")
+        git.run("commit", "--quiet", "-am", "moved")
+
+        assert git.reflog_tips("main") == [git.tip("main"), *first]
+
+    assert [call[1] for call in git_calls if call[0] == "log"] == ["--walk-reflogs"] * 2
+
+
+def test_snapshot_doesnt_keep_a_reflog_read_while_it_was_forgotten(
+    repo: Repo, git_calls: list[list[str]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    git = GitClient(repo.path)
+    run = git.run
+
+    def forgetting_meanwhile(*args: str, **kwargs: Any) -> str:
+        """As if another thread moved a branch while the reflog was read."""
+        git._forget_refs()
+        return run(*args, **kwargs)
+
+    with git.snapshot():
+        monkeypatch.setattr(git, "run", forgetting_meanwhile)
+        git.reflog_tips("main")
+        monkeypatch.setattr(git, "run", run)
+        git.reflog_tips("main")
+
+    assert [call[1] for call in git_calls if call[0] == "log"] == ["--walk-reflogs"] * 2
+
+
+def test_snapshot_doesnt_keep_a_rebase_read_while_it_was_forgotten(repo: Repo, monkeypatch: pytest.MonkeyPatch) -> None:
+    git = GitClient(repo.path)
+    read = git._read_rebasing
+    reads: list[pathlib.Path] = []
+
+    def forgetting_meanwhile(worktree: pathlib.Path) -> str | None:
+        """As if another thread moved a branch while it was read."""
+        reads.append(worktree)
+        git._forget_refs()
+        return read(worktree)
+
+    monkeypatch.setattr(git, "_read_rebasing", forgetting_meanwhile)
+    with git.snapshot():
+        git.rebasing_in(repo.path)
+        git.rebasing_in(repo.path)
+
+    assert reads == [repo.path] * 2
