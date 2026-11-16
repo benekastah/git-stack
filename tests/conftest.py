@@ -52,7 +52,10 @@ def repo(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, git_exec_path:
     for name in GIT_REPOSITORY_VARIABLES:
         monkeypatch.delenv(name, raising=False)
     global_config = tmp_path / "gitconfig"
-    global_config.write_text("[init]\n\tdefaultBranch = main\n")
+    # Without auto-maintenance, which would otherwise start a `git maintenance
+    # run --auto` after each commit, fetch, merge and push: thousands of
+    # processes over the tests, none of which they need.
+    global_config.write_text("[init]\n\tdefaultBranch = main\n[maintenance]\n\tauto = false\n", encoding="utf-8")
     for name, value in {
         "GIT_CONFIG_GLOBAL": str(global_config),
         "GIT_CONFIG_NOSYSTEM": "1",
