@@ -1452,14 +1452,19 @@ Dependabot proposes new versions weekly. Arguments are passed to pytest, so
 git-stack itself still has no runtime dependencies.
 
 The tests run in parallel, with one worker per CPU (pytest-xdist's
-`--numprocesses auto`). Set `PYTEST_XDIST_AUTO_NUM_WORKERS` to use another
+`--numprocesses auto`; in CI, 8). Set `PYTEST_XDIST_AUTO_NUM_WORKERS` to use another
 number of workers, e.g. `PYTEST_XDIST_AUTO_NUM_WORKERS=4 python3 dev.py tests`,
 or pass `-n 0` to run them one at a time, e.g. to debug a failing test.
 
-CI (`.github/workflows/check.yml`) runs `dev.py static` and
-`dev.py types-other-platforms` once, on Linux, and `dev.py tests` on Linux,
-macOS and Windows, for every push to `main` and every pull request. A new push
-to a pull request, or to `main`, cancels the run on the older commit.
+CI (`.github/workflows/ci.yml`, with git-stack's own jobs in `project.yml`)
+runs `dev.py static`, `dev.py types-other-platforms` and `dev.py coverage`
+once, on Linux, and `dev.py tests` on Linux, macOS and Windows with the oldest
+and newest Python git-stack supports (and on Linux, every Python between), for
+every push to `main` and every pull request. On macOS and Windows, the tests
+are split over several jobs (`dev.py tests --shard I/N`), so each finishes
+within CI's 5-minute limit. A new push to a pull request, or to `main`,
+cancels the run on the older commit, and so does merging or closing a pull
+request.
 
 ### Git hooks
 
@@ -1472,8 +1477,8 @@ change that adds one) is installed by the next commit or push that uses it.
   lint fixes, then regenerates the man page, `man/git-stack.1`, and adds it to
   any commit that changes this README. It works on what's staged, so a partly
   staged file commits just its staged part, formatted.
-- `pre-push` runs every check before a push to `main`. Skip it with
-  `git push --no-verify`.
+- `pre-push` runs `dev.py static` (formatting, lint and types) before every
+  push; CI runs the tests. Skip it with `git push --no-verify`.
 
 ### Skipping reformatting in `git blame`
 
@@ -1501,8 +1506,9 @@ keeps it up to date; without the hook, regenerate it with
 
 ### The project template
 
-The tooling (`dev.py`, the git hooks, Dependabot's config, `.gitignore`,
-`.gitattributes`, `CLAUDE.md` and much of `pyproject.toml`) comes from the
+The tooling (`dev.py`, the git hooks, CI's `ci.yml`, `cancel.yml` and
+`.github/actions/setup`, Dependabot's config, `.gitignore`, `.gitattributes`,
+`CLAUDE.md` and much of `pyproject.toml`) comes from the
 [python-template](https://github.com/benekastah/python-template) Copier
 template, whose answers `.copier-answers.yml` records. Take in its later
 changes with:

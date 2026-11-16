@@ -1,0 +1,66 @@
+# This project's own CI jobs. ci.yml (the template's) runs them alongside its checks, in the
+# same run, and its "CI passed" job fails if one of them fails, so they gate merges too. Copier
+# wrote this file once: it's the project's, and `copier update` never touches it.
+#
+# Add jobs under `jobs:` as in any workflow. Each checks out the repository, then can set up
+# uv and Python with ./.github/actions/setup. Give each a time limit (see AGENTS.md). Don't
+# set `concurrency` here: ci.yml's covers this run, and a group of the same name would cancel
+# it. Jobs here get at most `contents: read` (ci.yml's grant, which a called workflow can only
+# lower): one needing more, to comment on a pull request or to publish, say, belongs in a
+# workflow of its own, outside CI passed.
+name: project
+
+on:
+  workflow_call:
+    inputs:
+      # A JSON object; a job reads a key with `fromJSON(inputs.context).<key>`:
+      # - code: false when docs alone changed, so a job checking only code can skip with
+      #   `if: fromJSON(inputs.context).code`.
+      # - min_python and newest_python: the oldest Python the project supports and the newest
+      #   CI tests it on, e.g. "3.11" and "3.15".
+      # One input, so the template can add keys without breaking this file: passing an input
+      # a workflow doesn't declare is an error. Nothing checks a key's name, though: a
+      # misspelt one reads as null, so `if:` skips the job rather than failing it.
+      context:
+        description: What ci.yml knows of the run, as JSON (see above)
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Type checks as if on Windows and macOS. ci.yml's static job checks as if on Linux
+  # (pyproject.toml's pythonPlatform), which misses a call another system lacks.
+  types-other-platforms:
+    if: fromJSON(inputs.context).code
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          python-version: ${{ fromJSON(inputs.context).min_python }}
+      - run: uv run --no-project python dev.py types-other-platforms
+
+  # The tests with the Pythons between the oldest and newest, which ci.yml's tests job runs:
+  # on Linux only, whose runners are quick and many.
+  tests-other-pythons:
+    if: fromJSON(inputs.context).code
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.13", "3.14"]
+    name: ubuntu-latest, Python ${{ matrix.python }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          python-version: ${{ matrix.python }}
+      - run: uv run --no-project python dev.py tests

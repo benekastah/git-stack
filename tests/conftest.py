@@ -26,6 +26,20 @@ GIT_REPOSITORY_VARIABLES = (
 )
 
 
+CI_WORKERS = 8
+"""pytest -n auto's workers in CI, rather than one per CPU (3 or 4 on its runners): the tests
+spend most of their time waiting for the git processes they start, and the files they write,
+so more keep the CPUs busy."""
+
+
+def pytest_xdist_auto_num_workers(config: pytest.Config) -> int | None:
+    """-n auto's workers: CI_WORKERS in CI ($CI set), unless PYTEST_XDIST_AUTO_NUM_WORKERS
+    says how many; otherwise (None) pytest-xdist's own choice."""
+    if os.environ.get("CI") and "PYTEST_XDIST_AUTO_NUM_WORKERS" not in os.environ:
+        return CI_WORKERS
+    return None
+
+
 # git itself, from the directory it runs its own commands from, rather than a
 # wrapper (such as git-ai) or shim on PATH, which can make each of the tests'
 # many git processes several times slower. git-stack, which reads

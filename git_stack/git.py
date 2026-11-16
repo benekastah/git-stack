@@ -350,7 +350,7 @@ class GitClient:
         or another process) writes to it. Commands look up the same few keys of
         every tracked branch over and over, and each git call is slow enough to
         add up. With fresh, it's read again regardless, for when a missed write
-        (see "The branch config cache could miss a write" in ISSUES.md) would
+        (see "The branch config cache could miss a write" in docs/issues.md) would
         matter.
         """
         # Before reading, so a write that lands in between is read again next time.
