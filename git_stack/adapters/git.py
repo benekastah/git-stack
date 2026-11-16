@@ -117,13 +117,17 @@ class GitAdapter:
         files = self.changed_files(base, f"refs/heads/{branch}")
         if not files:
             return False
-        # Only the parent's commits that touch the same files can match.
-        landed = git.patch_ids(
-            "log", "-p", "--no-merges", "--full-diff", parent_tip, "--not", f"refs/heads/{branch}", "--", *files
+        landed, squashed, own = (
+            {patch_id for patch_id, _ in patches}
+            for patches in git.commit_patch_ids(
+                # Only the parent's commits that touch the same files can match.
+                ("log", "-p", "--no-merges", "--full-diff", parent_tip, "--not", f"refs/heads/{branch}", "--", *files),
+                ("diff", base, f"refs/heads/{branch}"),
+                ("log", "-p", "--no-merges", f"{base}..refs/heads/{branch}"),
+            )
         )
-        if git.patch_ids("diff", base, f"refs/heads/{branch}") & landed:
+        if squashed & landed:
             return True
-        own = git.patch_ids("log", "-p", "--no-merges", f"{base}..refs/heads/{branch}")
         # A merge's own changes aren't in any of the commits compared.
         return (
             bool(own)
@@ -179,21 +183,22 @@ class GitAdapter:
         # even when it was reverted after later commits changed the lines
         # around it. Without prefixes, so -R doesn't swap "a/" and "b/".
         diff = ("-U0", "--no-prefix")
-        # Each change the branch made, as (the patch-id of doing it, of undoing it).
         own = f"{base}..{tip}"
-        changes = [
-            (done, undone)
-            for (done, _), (undone, _) in zip(
-                git.commit_patch_ids("log", "-p", "--no-merges", *diff, own),
-                git.commit_patch_ids("log", "-p", "--no-merges", "-R", *diff, own),
-                strict=True,
-            )
-        ]
-        for old, new in [(base, tip), *((f"{m}^", m) for m in merges)]:
-            forward, backward = git.patch_ids("diff", *diff, old, new), git.patch_ids("diff", "-R", *diff, old, new)
+        # The whole branch, and each merge that landed it, as (before, after).
+        landings = [(base, tip), *((f"{m}^", m) for m in merges)]
+        own_done, own_undone, *landing_patches, since = git.commit_patch_ids(
+            ("log", "-p", "--no-merges", *diff, own),
+            ("log", "-p", "--no-merges", "-R", *diff, own),
+            *(("diff", *reverse, *diff, old, new) for old, new in landings for reverse in ((), ("-R",))),
+            # The parent's commits since, which may do or undo those changes.
+            ("log", "-p", "--no-merges", "--full-diff", *diff, parent_tip, "--not", tip, "--", *files),
+        )
+        # Each change the branch made, as (the patch-id of doing it, of undoing it).
+        changes = [(done, undone) for (done, _), (undone, _) in zip(own_done, own_undone, strict=True)]
+        for forward, backward in zip(landing_patches[::2], landing_patches[1::2], strict=True):
             # Empty for a merge that changed nothing.
             if forward and backward:
-                changes.append((forward.pop(), backward.pop()))
+                changes.append((forward[0][0], backward[0][0]))
         doing: dict[str, set[int]] = {}
         undoing: dict[str, set[int]] = {}
         for i, (done, undone) in enumerate(changes):
@@ -206,8 +211,7 @@ class GitAdapter:
         # The newest commit that does or undoes a change says whether it's undone.
         decided: set[int] = set()
         reverts = []
-        log = ("log", "-p", "--no-merges", "--full-diff", *diff, parent_tip, "--not", tip, "--", *files)
-        for patch, commit in git.commit_patch_ids(*log):
+        for patch, commit in since:
             if undecided := undoing.get(patch, set()) - decided:
                 reverts.append(commit)
             decided |= undecided | doing.get(patch, set())
