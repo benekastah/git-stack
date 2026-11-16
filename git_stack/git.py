@@ -54,16 +54,21 @@ END_MARKER_DIFF = "diff --git a/end b/end\n--- a/end\n+++ b/end\n@@ -0,0 +1 @@\n
 REVISION_SYNTAX = frozenset("~^:?*[\\ ")
 
 
+def split_command(args: tuple[str, ...]) -> tuple[str, list[str]]:
+    """The command `git <args>` runs, and its arguments: the first argument
+    that isn't an option to git itself (e.g. --literal-pathspecs), or the value
+    of one (e.g. -c's), and the rest."""
+    start = 0
+    while start < len(args) and args[start].startswith("-"):
+        start += 2 if args[start] in GIT_OPTIONS_WITH_VALUES else 1
+    return (args[start], list(args[start + 1 :])) if start < len(args) else ("", [])
+
+
 def changes_refs(args: tuple[str, ...]) -> bool:
     """Whether `git <args>` may move a ref or HEAD, or change a branch's
     upstream, which the ref snapshot holds. Only commands known to be read-only
     don't."""
-    # The command is the first argument that isn't an option to git itself
-    # (e.g. --literal-pathspecs), or the value of one (e.g. -c's).
-    start = 0
-    while start < len(args) and args[start].startswith("-"):
-        start += 2 if args[start] in GIT_OPTIONS_WITH_VALUES else 1
-    command, rest = (args[start], list(args[start + 1 :])) if start < len(args) else ("", [])
+    command, rest = split_command(args)
     if command in READ_ONLY_COMMANDS:
         return False
     if command == "branch":
@@ -80,6 +85,17 @@ def changes_refs(args: tuple[str, ...]) -> bool:
     # Including switch, which creates a branch from a remote one of its name
     # (--guess) when there's no local one.
     return True
+
+
+def changes_worktrees(args: tuple[str, ...]) -> bool:
+    """Whether `git <args>`, which changes refs (see changes_refs), may also
+    change which branch a worktree has checked out (or that it's detached, or
+    rebasing), or the worktrees themselves. Only commands known to leave
+    every worktree's HEAD alone don't."""
+    command, rest = split_command(args)
+    if command == "update-ref":
+        return "HEAD" in rest
+    return command not in {"fetch", "push", "config", "remote", "tag"}
 
 
 def is_branch_name(name: str) -> bool:
@@ -165,19 +181,20 @@ class GitClient:
         """Forget the ref snapshot if `git <args>`, which just ran, may have
         changed it, whether or not it succeeded."""
         if changes_refs(args):
-            self._forget_refs()
+            self._forget_refs(worktrees=changes_worktrees(args))
 
-    def _forget_refs(self) -> None:
-        """Forget the ref snapshot, the worktrees' branches and the reflogs,
-        so a thread reading them meanwhile can't then keep what it read from
-        before the change: this waits for a thread holding the lock, and the
-        others store what they read only if this hasn't replaced their dict
-        meanwhile (see reflog_tips)."""
+    def _forget_refs(self, worktrees: bool = True) -> None:
+        """Forget the ref snapshot and the reflogs, and unless worktrees is
+        false, the worktrees' branches, so a thread reading them meanwhile
+        can't then keep what it read from before the change: this waits for a
+        thread holding the lock, and the others store what they read only if
+        this hasn't replaced their dict meanwhile (see reflog_tips)."""
         with self._refs_lock:
             self._refs = None
-            self._worktrees = None
-            self._rebasing = {}
             self._reflogs = {}
+            if worktrees:
+                self._worktrees = None
+                self._rebasing = {}
 
     def run(self, *args: str, check: bool = True, input: str | None = None) -> str:
         """Run git and return stripped stdout.
@@ -214,8 +231,10 @@ class GitClient:
         changed them (see changes_refs). A command asks about the same few refs
         over and over, and each git call is slow enough to add up. The
         worktrees' branches (see worktree_of) and branches' reflogs (see
-        reflog_tips) are read once too, and forgotten along with the refs, and
-        each remote's default branch (see remote_default_branch) is asked once.
+        reflog_tips) are read once too, and forgotten along with the refs
+        (the worktrees' branches only after a git call that may move a
+        worktree's HEAD; see changes_worktrees), and each remote's default
+        branch (see remote_default_branch) is asked once.
 
         Other remote-tracking branches aren't read (unless there are too many
         upstreams to name), since a clone can have tens of thousands of them;
@@ -369,7 +388,8 @@ class GitClient:
             delay = min(delay * 2, 0.5)
         key = next((a for a in args if not a.startswith("-")), "")
         if not key.rpartition(".")[2].lower().startswith("stack"):
-            self._forget_refs()
+            # A config write can't move a worktree's HEAD.
+            self._forget_refs(worktrees=False)
         if check and result.returncode != 0:
             raise StackError(f"git config {' '.join(args)} failed:\n{result.stderr.strip()}")
 

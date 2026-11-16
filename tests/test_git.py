@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 
 from git_stack.errors import StackError
-from git_stack.git import GitClient, changes_refs
+from git_stack.git import GitClient, changes_refs, changes_worktrees
 from tests.conftest import GIT_REPOSITORY_VARIABLES
 from tests.helpers import Repo
 
@@ -257,6 +257,37 @@ def test_snapshot_reads_worktrees_and_the_remotes_default_branch_once(repo: Repo
     assert commands.count("worktree") == 1
     assert commands.count("ls-remote") == 1
     assert [call[:2] for call in git_calls].count(["rev-parse", "--show-toplevel"]) == 1
+
+
+@pytest.mark.parametrize(
+    ("args", "changes"),
+    [
+        (("fetch", "--prune", "origin"), False),
+        (("push", "--atomic", "origin", "main"), False),
+        (("config", "branch.main.stackParent", "x"), False),
+        (("update-ref", "refs/heads/main", "abc"), False),
+        (("update-ref", "--no-deref", "HEAD", "abc"), True),
+        (("switch", "--quiet", "main"), True),
+        (("rebase", "main"), True),
+        (("branch", "-m", "old", "new"), True),
+        (("worktree", "add", "x"), True),
+    ],
+)
+def test_changes_worktrees(args: tuple[str, ...], changes: bool) -> None:
+    assert changes_worktrees(args) is changes
+
+
+def test_snapshot_keeps_the_worktrees_while_no_head_moves(repo: Repo, git_calls: list[list[str]]) -> None:
+    git = GitClient(repo.path)
+    with git.snapshot():
+        assert git.worktree_of("main") is not None
+        git.run("fetch", "--quiet", "origin")
+        git.run("update-ref", "refs/heads/other", git.tip("main"))
+        git.config_set("other", "remote", "origin")
+        assert git.worktree_of("main") is not None
+        assert git.worktree_of("other") is None
+
+    assert [call[0] for call in git_calls].count("worktree") == 1
 
 
 def test_switching_forgets_the_worktrees(repo: Repo) -> None:
