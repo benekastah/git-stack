@@ -10,9 +10,9 @@ keeps what it knows in your repository's git config.
 pipx install git+https://github.com/benekastah/git-stack   # see Install for uv and requirements
 
 git switch main
-git stack branch add-api        # a branch for PR 1
+git stack create add-api        # a branch for PR 1
 # ...commit...
-git stack branch use-api        # a branch for PR 2, built on PR 1
+git stack create use-api        # a branch for PR 2, built on PR 1
 # ...commit...
 git stack push --prs            # push both, and open draft PRs for them, each into the branch it's built on
 ```
@@ -34,7 +34,7 @@ git stack sync                  # catch up: drop merged PRs, rebase what's left,
 
 | I want to... | Run |
 | --- | --- |
-| start a PR | `git stack branch <name>`, from `main` or from the PR it builds on |
+| start a PR | `git stack create <name>`, from `main` or from the PR it builds on |
 | see my stacks and what needs doing | `git stack info --all` |
 | update the PRs above one I just changed | `git stack restack`, then `git stack push` |
 | catch up after a PR merged, or `main` changed | `git stack sync` |
@@ -60,7 +60,7 @@ git stack sync                  # catch up: drop merged PRs, rebase what's left,
 - **root**: the branch at the bottom of a stack, usually `main`. git-stack
   doesn't manage it, but `sync` keeps it up to date.
 - **tracked**: a branch git-stack knows about, because you made it with
-  `git stack branch`, or added it with `git stack track` or
+  `git stack create`, or added it with `git stack track` or
   `git stack import`.
 - **restack**: rebase a branch onto its parent's latest commit, replaying only
   the branch's own commits.
@@ -179,9 +179,10 @@ Like git, every command accepts `-C <path>` before it to run as if started in
 `<path>`, e.g. `git stack -C ~/src/app info`, and `git -C <path> stack ...`
 works too.
 
-### `git stack branch <name> [--group <group>]`
+### `git stack create <name> [--group <group>]`
 
 Create `<name>` on top of the current branch, switch to it, and track it.
+`git stack branch` remains available as an alias.
 
 **When would I use it?** Whenever you start a new branch for a pull request,
 use this instead of `git switch -c`, so git-stack knows what it's built on. Run
@@ -190,10 +191,10 @@ for a change that depends on that PR before it's merged.
 
 ```sh
 git switch main
-git stack branch add-api        # stacked on main
-git stack branch use-api        # stacked on add-api
+git stack create add-api        # stacked on main
+git stack create use-api        # stacked on add-api
 git switch main
-git stack branch search-ui --group search   # a new stack, in group search
+git stack create search-ui --group search   # a new stack, in group search
 ```
 
 - Uncommitted changes come along to the new branch, as with `git switch -c`.
@@ -347,7 +348,7 @@ git stack rename api-v2                 # rename the current branch
 git stack rename add-api api-v2
 ```
 
-- Like `branch`, refuses a new name a remote already has a branch of.
+- Like `create`, refuses a new name a remote already has a branch of.
 - Its remote branch isn't renamed, and its pull request stays with the old
   name. The renamed branch's upstream is unset, so the next `git stack push`
   pushes it under the new name, and you have to open its pull request again.
@@ -901,7 +902,7 @@ git stack unrevert add-api-unrevert 1a2b3c4d5e6f --stack use-api
 # note: run `git stack push --prs` to open a pull request for add-api-unrevert
 ```
 
-- `<name>` must be a new branch, and like `branch`, it refuses a name a remote
+- `<name>` must be a new branch, and like `create`, it refuses a name a remote
   already has a branch of. It's tracked on `--from`, which defaults to the
   root of the first `--stack` branch's stack (e.g. `main`), or without
   `--stack`, to the remote's default branch.
@@ -1022,7 +1023,7 @@ What each command's result has, besides `type` and `events`:
 
 | Command | Result |
 | --- | --- |
-| `branch` | `branch`, the `parent` it was created on, and its `group` (or `null`) |
+| `create`, `branch` | `branch`, the `parent` it was created on, and its `group` (or `null`) |
 | `track` | `tracked`: each branch's `branch`, `parent` and `base` |
 | `import` | `stacks`, and `steps`, one for each pull request: its `branch`, the `parent` it merges into, its `number`, and the `action`: `create`, `track`, `already-tracked`, `parent-differs` or `skip`. `base` is the commit a branch it creates or tracks is built on, `tracked_parent` the parent a `parent-differs` branch is tracked on instead, and `reason` why it skipped one; each is `null` otherwise. `other_authors` has the pull request's author if it isn't you (so it needs `-f`), and is empty otherwise. `without_prs` has the same for the branches without a pull request that the pull requests are built on, without `number` or `tracked_parent`, and `create`, `create-root` or `skip`; their `other_authors` are email addresses, and `parent` is `null` for a root or if it couldn't tell which branch one is built on. `remote` is the remote it imported from |
 | `untrack` | `untracked`: each `branch`, and the `children` still stacked on it |

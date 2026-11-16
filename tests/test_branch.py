@@ -1,4 +1,4 @@
-"""git stack branch."""
+"""git stack create."""
 
 import pytest
 
@@ -7,8 +7,9 @@ from git_stack.stack import StackClient
 from tests.helpers import Repo
 
 
-def test_branch_stacks_new_branch_on_current_one(repo: Repo, client: StackClient) -> None:
-    client.branch("pr1")
+@pytest.mark.parametrize("command", ["create", "branch"])
+def test_create_stacks_new_branch_on_current_one(repo: Repo, command: str) -> None:
+    repo.stack(command, "pr1")
 
     assert repo.git("branch", "--show-current") == "pr1"
     repo.assert_stacked("pr1", "main", [])

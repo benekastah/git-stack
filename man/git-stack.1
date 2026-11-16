@@ -18,9 +18,9 @@ it knows in your repository\(aqs git config.
 pipx install git+https://github.com/benekastah/git\-stack   \f[I]# see Install for uv and requirements\f[R]
 
 git switch main
-git stack branch add\-api        \f[I]# a branch for PR 1\f[R]
+git stack create add\-api        \f[I]# a branch for PR 1\f[R]
 \f[I]# ...commit...\f[R]
-git stack branch use\-api        \f[I]# a branch for PR 2, built on PR 1\f[R]
+git stack create use\-api        \f[I]# a branch for PR 2, built on PR 1\f[R]
 \f[I]# ...commit...\f[R]
 git stack push \-\-prs            \f[I]# push both, and open draft PRs for them, each into the branch it\(aqs built on\f[R]
 .EE
@@ -52,7 +52,7 @@ _
 T{
 start a PR
 T}@T{
-\f[CR]git stack branch <name>\f[R], from \f[CR]main\f[R] or from the PR
+\f[CR]git stack create <name>\f[R], from \f[CR]main\f[R] or from the PR
 it builds on
 T}
 T{
@@ -155,7 +155,7 @@ git\-stack doesn\(aqt manage it, but \f[CR]sync\f[R] keeps it up to
 date.
 .IP \(bu 2
 \f[B]tracked\f[R]: a branch git\-stack knows about, because you made it
-with \f[CR]git stack branch\f[R], or added it with
+with \f[CR]git stack create\f[R], or added it with
 \f[CR]git stack track\f[R] or \f[CR]git stack import\f[R].
 .IP \(bu 2
 \f[B]restack\f[R]: rebase a branch onto its parent\(aqs latest commit,
@@ -289,9 +289,10 @@ Like git, every command accepts \f[CR]\-C <path>\f[R] before it to run
 as if started in \f[CR]<path>\f[R], e.g.
 \f[CR]git stack \-C \(ti/src/app info\f[R], and
 \f[CR]git \-C <path> stack ...\f[R] works too.
-.SS \f[CR]git stack branch <name> [\-\-group <group>]\f[R]
+.SS \f[CR]git stack create <name> [\-\-group <group>]\f[R]
 Create \f[CR]<name>\f[R] on top of the current branch, switch to it, and
 track it.
+\f[CR]git stack branch\f[R] remains available as an alias.
 .PP
 \f[B]When would I use it?\f[R] Whenever you start a new branch for a
 pull request, use this instead of \f[CR]git switch \-c\f[R], so
@@ -302,10 +303,10 @@ it\(aqs merged.
 .IP
 .EX
 git switch main
-git stack branch add\-api        \f[I]# stacked on main\f[R]
-git stack branch use\-api        \f[I]# stacked on add\-api\f[R]
+git stack create add\-api        \f[I]# stacked on main\f[R]
+git stack create use\-api        \f[I]# stacked on add\-api\f[R]
 git switch main
-git stack branch search\-ui \-\-group search   \f[I]# a new stack, in group search\f[R]
+git stack create search\-ui \-\-group search   \f[I]# a new stack, in group search\f[R]
 .EE
 .IP \(bu 2
 Uncommitted changes come along to the new branch, as with
@@ -509,7 +510,7 @@ git stack rename api\-v2                 \f[I]# rename the current branch\f[R]
 git stack rename add\-api api\-v2
 .EE
 .IP \(bu 2
-Like \f[CR]branch\f[R], refuses a new name a remote already has a branch
+Like \f[CR]create\f[R], refuses a new name a remote already has a branch
 of.
 .IP \(bu 2
 Its remote branch isn\(aqt renamed, and its pull request stays with the
@@ -1234,7 +1235,7 @@ git stack unrevert add\-api\-unrevert 1a2b3c4d5e6f \-\-stack use\-api
 \f[I]# note: run \(gagit stack push \-\-prs\(ga to open a pull request for add\-api\-unrevert\f[R]
 .EE
 .IP \(bu 2
-\f[CR]<name>\f[R] must be a new branch, and like \f[CR]branch\f[R], it
+\f[CR]<name>\f[R] must be a new branch, and like \f[CR]create\f[R], it
 refuses a name a remote already has a branch of.
 It\(aqs tracked on \f[CR]\-\-from\f[R], which defaults to the root of
 the first \f[CR]\-\-stack\f[R] branch\(aqs stack (e.g.
@@ -1389,7 +1390,7 @@ Result
 T}
 _
 T{
-\f[CR]branch\f[R]
+\f[CR]create\f[R], \f[CR]branch\f[R]
 T}@T{
 \f[CR]branch\f[R], the \f[CR]parent\f[R] it was created on, and its
 \f[CR]group\f[R] (or \f[CR]null\f[R])
