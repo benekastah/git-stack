@@ -558,7 +558,7 @@ git stack restack --latest              # also move the stack onto main's latest
 - A branch checked out in another worktree is skipped, with a warning; see
   [Branches checked out in other worktrees](#branches-checked-out-in-other-worktrees).
 
-### `git stack sync [<branch|glob>...] [-g <group>] [--remote <name>] [-d local|remote|both] [-l] [--force] [--ignore-revert <branch>] [--allow-shared] [--pull-tracked-upstream] [--rewritten-upstream] [--rebuild-stack]`
+### `git stack sync [<branch|glob>...] [-g <group>] [--remote <name>] [-d local|remote|both] [-l] [--force] [--no-verify] [--ignore-revert <branch>] [--allow-shared] [--pull-tracked-upstream] [--rewritten-upstream] [--rebuild-stack]`
 
 Bring the current stack (or the ones named, see [Groups](#groups)) up to date
 with the remote:
@@ -573,6 +573,8 @@ with the remote:
      [Pulling commits others pushed](#pulling-commits-others-pushed)).
 4. Push the branches that differ from the remote branch they already have,
    like `push` does.
+
+Pass `--no-verify` to skip the local pre-push hook.
 
 **When would I use it?** Your everyday command for catching up: after a pull
 request in the stack was merged, when `main` changed in a way that conflicts
@@ -684,7 +686,7 @@ git stack clean -d local
   are fine, unless you're on a stack's root, which `clean` fast-forwards, or,
   with `-d local` or `-d both`, on a tracked branch, which it could delete.
 
-### `git stack push [<branch|glob>...] [-g <group>] [--remote <name>] [--force] [--prs] [--allow-shared] [--rebuild-stack]`
+### `git stack push [<branch|glob>...] [-g <group>] [--remote <name>] [--force] [--no-verify] [--prs] [--allow-shared] [--rebuild-stack]`
 
 Force-push (with lease) every branch in the current stack (or the ones named,
 see [Groups](#groups)), and set each one's upstream.
@@ -701,6 +703,7 @@ git stack push
 git stack push use-api          # push use-api's stack from anywhere
 git stack push 'search-*'       # the stacks of every search-* branch
 git stack push --force          # drop commits on the remote you didn't pull
+git stack push --no-verify      # skip the local pre-push hook
 git stack push --prs            # then open pull requests, as `git stack prs` does
 ```
 
@@ -1492,7 +1495,7 @@ change that adds one) is installed by the next commit or push that uses it.
   any commit that changes this README. It works on what's staged, so a partly
   staged file commits just its staged part, formatted.
 - `pre-push` runs `dev.py static` (formatting, lint and types) before every
-  push; CI runs the tests. Skip it with `git push --no-verify`.
+  push; CI runs the tests. Skip it with `git stack push --no-verify`.
 
 ### Skipping reformatting in `git blame`
 

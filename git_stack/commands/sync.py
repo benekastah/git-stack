@@ -31,6 +31,7 @@ class Args(argparse.Namespace):
     rewritten_upstream: bool
     force: bool
     rebuild_stack: bool
+    no_verify: bool
 
 
 def register(subparsers: Subparsers) -> None:
@@ -41,6 +42,7 @@ def register(subparsers: Subparsers) -> None:
     )
     add_stack_arguments(p, "sync")
     p.add_argument("--remote", help="only sync branches tracking this remote")
+    p.add_argument("--no-verify", action="store_true", help="skip the pre-push hook")
     p.add_argument("--force", action="store_true", help="allow syncing a branch to the remote default branch")
     add_delete_argument(p)
     add_latest_argument(p)
@@ -74,6 +76,7 @@ def run(stack: StackClient, args: Args) -> SyncResult:
         rewritten_upstream=args.rewritten_upstream,
         force=args.force,
         rebuild_stack=args.rebuild_stack,
+        no_verify=args.no_verify,
     )
 
 

@@ -475,6 +475,17 @@ def test_a_branch_whose_commits_are_in_its_parent_is_deleted(repo: Repo, client:
     assert repo.git("branch", "--list", "pr1", cwd=repo.origin) == ""
 
 
+def test_sync_no_verify_also_skips_hook_when_deleting_merged_remote_branch(repo: Repo, client: StackClient) -> None:
+    repo.make_stack()
+    client.push()
+    repo.merge_on_forge("pr1", delete_branch=False)
+    repo.add_hook(repo.path, "pre-push", "#!/bin/sh\nexit 1\n")
+
+    repo.stack("sync", "--delete", "remote", "--no-verify")
+
+    assert repo.git("branch", "--list", "pr1", cwd=repo.origin) == ""
+
+
 def test_sync_delete_remote_deletes_only_remote_branch(repo: Repo, client: StackClient) -> None:
     repo.make_stack()
     client.push()
