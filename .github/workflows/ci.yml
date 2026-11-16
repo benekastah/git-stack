@@ -32,6 +32,7 @@ jobs:
           python-version: "3.11"
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
+          enable-cache: false
           # The venv's Python (setup-python's), named so uv can't choose another.
           python-version: "3.11"
           # Makes .venv, where lint.sh looks for the tools.
@@ -80,6 +81,7 @@ jobs:
         run: sudo mdutil -a -i off
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
+          enable-cache: false
           python-version: ${{ matrix.python }}
           activate-environment: true
       - name: Install the dev dependencies
