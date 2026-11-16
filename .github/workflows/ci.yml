@@ -10,10 +10,10 @@ permissions:
 
 # A new push to a pull request cancels the run on its older commit, which no
 # one needs any more, so runs don't pile up in the account's few runners. Each
-# push to main gets a group of its own, so its run always finishes. A cancelled
-# run's "CI passed" still runs, and fails, as it should (see below).
+# push to main, and each re-run, gets a group of its own, so it always
+# finishes, and re-running an older commit's run doesn't cancel the newest's.
 concurrency:
-  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  group: ci-${{ github.event_name == 'pull_request' && github.run_attempt == 1 && github.ref || github.run_id }}
   cancel-in-progress: true
 
 jobs:
@@ -51,7 +51,19 @@ jobs:
     if: always()
     needs: check
     runs-on: ubuntu-latest
+    permissions:
+      actions: write
     steps:
+      # A cancelled run still runs this job, because of always(). Cancelling
+      # it too, which only force-cancel can, marks it cancelled rather than
+      # failed, which blocks a merge just the same.
+      - name: Cancel this job if the run was cancelled
+        if: cancelled()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/force-cancel"
+          sleep 300
       - name: Fail unless every check passed
         if: needs.check.result != 'success'
         run: exit 1
