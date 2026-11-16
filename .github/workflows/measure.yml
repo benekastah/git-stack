@@ -16,6 +16,13 @@ on:
 permissions:
   contents: read
 
+# A new push to a pull request cancels the measurement of the older commit,
+# which no one will read, so it doesn't hold the few macOS and Windows runners
+# CI needs for half an hour.
+concurrency:
+  group: measure-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   measure:
     name: ${{ matrix.os }}
