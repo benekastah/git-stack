@@ -1,7 +1,7 @@
 import enum
 import fnmatch
 from collections import Counter
-from collections.abc import Callable, Iterable, Iterator, Sequence
+from collections.abc import Callable, Generator, Iterable, Sequence
 from contextlib import contextmanager
 
 from git_stack import events
@@ -135,7 +135,7 @@ class StackCore:
         self._exclusive_depth = 0
 
     @contextmanager
-    def exclusive(self) -> Iterator[None]:
+    def exclusive(self) -> Generator[None, None, None]:
         """Hold the repository's git-stack lock (see LOCK_FILE), waiting for
         another git-stack command to finish if it has it.
 

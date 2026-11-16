@@ -70,7 +70,7 @@ def main(argv: list[str] | None = None, stack: StackClient | None = None) -> int
     """Run the `git stack` command in argv (default: sys.argv) with stack (default:
     a StackClient working in the directory -C names, or the current one,
     printing what it reports). Returns the exit status."""
-    parser = argparse.ArgumentParser(prog="git stack", description=git_stack.__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(prog="git stack", description=(git_stack.__doc__ or "").partition("\n")[0])
     parser.add_argument(
         "-C",
         dest="directories",
@@ -94,6 +94,7 @@ def main(argv: list[str] | None = None, stack: StackClient | None = None) -> int
     stack.on_event = stream.event if stream else print_event
     if stream:
         stack.git.passthrough_stdout = sys.stderr
+    status: int | None = None
     try:
         result = args.run(stack, args)
         # A command can fail after doing part of its work (e.g. push --prs,
@@ -106,7 +107,7 @@ def main(argv: list[str] | None = None, stack: StackClient | None = None) -> int
             # A command's show prints its result, and returns its exit status,
             # or None for 0. It can fail too, e.g. on a bad setting for how to
             # show it.
-            status: int | None = args.show(stack, args, result)
+            status = args.show(stack, args, result)
     except StackError as e:
         if stream:
             stream.error(str(e))

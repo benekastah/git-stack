@@ -1400,7 +1400,7 @@ page into `~/.local/share/man/man1` (an editable install doesn't install it),
 makes the clone use the [git hooks](#git-hooks) in `git_hooks/`, and makes
 `git blame` skip [reformatting commits](#skipping-reformatting-in-git-blame).
 It also sets up the clone's own virtualenv, `.venv`, with the dev
-dependencies (e.g. Ruff and mypy) that the [checks](#checks) and the hooks
+dependencies (e.g. Ruff and basedpyright) that the [checks](#checks) and the hooks
 use. It's safe to rerun, e.g. when `pyproject.toml` changes, to pick up a new
 command-line entry point.
 
@@ -1421,7 +1421,7 @@ either won't work:
 Run every check (shellcheck on the shell scripts, that the Python code is
 formatted with [Ruff](https://docs.astral.sh/ruff/), Ruff's linter with its
 default rules plus the ones `pyproject.toml` adds (e.g. a limit on functions'
-cyclomatic complexity), mypy in strict mode, then the tests) with:
+cyclomatic complexity), basedpyright in strict mode, then the tests) with:
 
 ```sh
 ./check.sh

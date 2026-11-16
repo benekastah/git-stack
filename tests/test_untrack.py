@@ -62,7 +62,7 @@ def test_untrack_removes_settings_the_config_cache_missed(repo: Repo, client: St
     # As if the write left the config file looking unchanged, so the cache
     # missed it.
     st = (client.git.common_dir() / "config").stat()
-    client.git._config_stat = (st.st_ino, st.st_mtime_ns, st.st_size)
+    client.git._config_stat = (st.st_ino, st.st_mtime_ns, st.st_size)  # pyright: ignore[reportPrivateUsage]
 
     client.untrack(["pr2"])
 
