@@ -681,8 +681,9 @@ class GitClient:
         """How many hex digits the repository's object IDs have: 40 for SHA-1,
         64 for SHA-256. Taken from the ref snapshot if it's been read."""
         if self._object_id_length is None:
-            if self._refs:
-                self._object_id_length = len(next(iter(self._refs.values()))[0])
+            # Read once, since another thread may forget it meanwhile.
+            if refs := self._refs:
+                self._object_id_length = len(next(iter(refs.values()))[0])
             else:
                 self._object_id_length = 64 if self.run("rev-parse", "--show-object-format") == "sha256" else 40
         return self._object_id_length
