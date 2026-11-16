@@ -7,7 +7,7 @@ released.
 
 import dataclasses
 import enum
-from typing import Any
+from typing import Any, cast
 
 JSON_NAME = "json_name"
 
@@ -29,5 +29,5 @@ def to_json(value: Any) -> Any:
     if isinstance(value, enum.Enum):
         return value.value
     if isinstance(value, list | tuple):
-        return [to_json(item) for item in value]
+        return [to_json(item) for item in cast("list[Any] | tuple[Any, ...]", value)]
     return value

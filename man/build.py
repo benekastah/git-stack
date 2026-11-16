@@ -9,7 +9,7 @@ import argparse
 import pathlib
 import sys
 
-import pypandoc  # type: ignore[import-untyped]
+import pypandoc  # pyright: ignore[reportMissingTypeStubs]
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 README = ROOT / "README.md"
@@ -25,7 +25,7 @@ def render(readme: pathlib.Path) -> str:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(description=(__doc__ or "").partition("\n")[0])
     parser.add_argument(
         "--check", action="store_true", help="don't write the page; fail if it's out of date with README.md"
     )

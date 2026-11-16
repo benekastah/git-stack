@@ -518,9 +518,9 @@ def test_cat_file_stopping_is_an_error_and_the_next_snapshot_starts_another(repo
     tree = repo.git("rev-parse", "main^{tree}")
     with pytest.raises(StackError, match="git cat-file stopped"), git.snapshot():
         assert git.rev(commit) == commit
-        assert git._cat_file is not None
-        git._cat_file.kill()
-        git._cat_file.wait()
+        assert git._cat_file is not None  # pyright: ignore[reportPrivateUsage]
+        git._cat_file.kill()  # pyright: ignore[reportPrivateUsage]
+        git._cat_file.wait()  # pyright: ignore[reportPrivateUsage]
         git.tree(commit)
 
     with git.snapshot():
@@ -573,7 +573,7 @@ def test_snapshot_doesnt_keep_a_reflog_read_while_it_was_forgotten(
 
     def forgetting_meanwhile(*args: str, **kwargs: Any) -> str:
         """As if another thread moved a branch while the reflog was read."""
-        git._forget_refs()
+        git._forget_refs()  # pyright: ignore[reportPrivateUsage]
         return run(*args, **kwargs)
 
     with git.snapshot():
@@ -587,13 +587,13 @@ def test_snapshot_doesnt_keep_a_reflog_read_while_it_was_forgotten(
 
 def test_snapshot_doesnt_keep_a_rebase_read_while_it_was_forgotten(repo: Repo, monkeypatch: pytest.MonkeyPatch) -> None:
     git = GitClient(repo.path)
-    read = git._read_rebasing
+    read = git._read_rebasing  # pyright: ignore[reportPrivateUsage]
     reads: list[pathlib.Path] = []
 
     def forgetting_meanwhile(worktree: pathlib.Path) -> str | None:
         """As if another thread moved a branch while it was read."""
         reads.append(worktree)
-        git._forget_refs()
+        git._forget_refs()  # pyright: ignore[reportPrivateUsage]
         return read(worktree)
 
     monkeypatch.setattr(git, "_read_rebasing", forgetting_meanwhile)

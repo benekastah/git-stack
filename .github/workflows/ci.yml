@@ -18,9 +18,9 @@ concurrency:
   cancel-in-progress: ${{ github.run_attempt == 1 }}
 
 jobs:
-  # Linting and type checking give the same answer everywhere (mypy checks for
-  # Windows too, and for the oldest Python pyproject.toml allows), so they run
-  # once.
+  # Linting and type checking give the same answer everywhere (basedpyright
+  # checks as if on each system in turn, and on the oldest Python
+  # pyproject.toml allows), so they run once.
   lint:
     name: Lint
     runs-on: ubuntu-latest

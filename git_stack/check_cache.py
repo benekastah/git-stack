@@ -7,6 +7,7 @@ import pathlib
 import tempfile
 import threading
 from collections.abc import Collection
+from typing import cast
 
 
 class CheckCache:
@@ -60,9 +61,10 @@ class CheckCache:
             return {}
         if not isinstance(entries, dict):
             return {}
+        # JSON's objects have string keys; their values are checked here.
         return {
-            b: {k: v for k, v in keys.items() if isinstance(v, str)}
-            for b, keys in entries.items()
+            b: {k: v for k, v in cast("dict[str, object]", keys).items() if isinstance(v, str)}
+            for b, keys in cast("dict[str, object]", entries).items()
             if isinstance(keys, dict)
         }
 

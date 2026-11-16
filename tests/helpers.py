@@ -7,7 +7,7 @@ import pathlib
 import subprocess
 import sys
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any
@@ -20,7 +20,7 @@ from git_stack.stack import BranchInfo, StackClient
 
 
 @contextmanager
-def captured_output() -> Iterator[list[str]]:
+def captured_output() -> Generator[list[str], None, None]:
     """Capture what this process, and the processes it starts, write to stdout
     and stderr, as [stdout, stderr], filled in on leaving. Their file
     descriptors are pointed at files for the duration, and sys.stdout and
@@ -63,9 +63,10 @@ def install_command(bin_dir: pathlib.Path, name: str, module: str) -> None:
     if sys.platform == "win32":
         # Windows only runs .exe files found on PATH, so wrap it in distlib's
         # launcher, which pip makes console scripts with.
-        import distlib.scripts  # type: ignore[import-untyped]
+        import distlib.scripts  # pyright: ignore[reportMissingTypeStubs]
 
-        maker = distlib.scripts.ScriptMaker(None, str(bin_dir))
+        # Any: distlib has no types, and what's inferred from its source is too narrow.
+        maker: Any = distlib.scripts.ScriptMaker(None, str(bin_dir))
         maker.executable = sys.executable
         maker.variants = {""}
         maker.make(f"{name} = {module}:main")
@@ -82,7 +83,7 @@ class GitCommand(list[str]):
 def mark_git_commands(monkeypatch: pytest.MonkeyPatch) -> None:
     """Make GitClient's git command lines GitCommands, to tell its git
     processes apart from the tests' own, which run the same git with -C too."""
-    build = GitClient._command
+    build = GitClient._command  # pyright: ignore[reportPrivateUsage]
     monkeypatch.setattr(GitClient, "_command", lambda self, *args: GitCommand(build(self, *args)))
 
 

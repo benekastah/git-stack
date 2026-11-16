@@ -15,7 +15,7 @@ requires-python = ">=3.11"
 # pypandoc_binary is pinned because man/build.py --check (and so the tests) compares
 # its pandoc's exact output with the committed man/git-stack.1. distlib makes the
 # tests' commands on Windows (tests/helpers.py's install_command).
-dev = ["distlib>=0.4.4", "mypy>=2.4.0", "pypandoc_binary==1.17", "pytest>=9.1.1", "pytest-xdist>=3.8.0", "ruff>=0.17.1", "shellcheck-py>=0.11.0.1"]
+dev = ["basedpyright>=1.40.2", "distlib>=0.4.4", "pypandoc_binary==1.17", "pytest>=9.1.1", "pytest-xdist>=3.8.0", "ruff>=0.17.1", "shellcheck-py>=0.11.0.1"]
 
 [project.scripts]
 git-stack = "git_stack.cli:main"
@@ -34,9 +34,19 @@ addopts = ["-n", "auto"]
 line-length = 120
 
 [tool.ruff.lint]
-extend-select = ["B904", "B905", "C901", "PERF401"]
+# ANN: every function's parameters and return annotated (a return isn't inferred), but Any allowed.
+extend-select = ["ANN", "B904", "B905", "C901", "PERF401"]
+ignore = ["ANN401"]
 
-[tool.mypy]
-strict = true
-python_version = "3.11"
-files = ["git_stack", "tests", "man/build.py"]
+[tool.basedpyright]
+include = ["git_stack", "tests", "man/build.py"]
+typeCheckingMode = "strict"
+pythonVersion = "3.11"
+# One system at a time, so a call another system lacks (e.g. fcntl's on Windows) is reported:
+# lint.sh also runs it with --pythonplatform Windows and Darwin.
+pythonPlatform = "Linux"
+# Off, until about 95 places, mostly JSON read from GitHub, get types: these let a value of
+# unknown type (e.g. from json.loads) be passed, called or read from unchecked.
+reportUnknownArgumentType = false
+reportUnknownLambdaType = false
+reportUnknownMemberType = false

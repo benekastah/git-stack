@@ -14,7 +14,7 @@ from typing import TypeAlias
 from git_stack.core import CURRENT_GROUP, Delete
 
 # argparse doesn't export the type of add_subparsers()'s result.
-Subparsers: TypeAlias = "argparse._SubParsersAction[argparse.ArgumentParser]"
+Subparsers: TypeAlias = "argparse._SubParsersAction[argparse.ArgumentParser]"  # pyright: ignore[reportPrivateUsage]
 
 DELETE_HELP = "besides untracking merged branches, delete their local branches, their remote branches, or both"
 
@@ -79,7 +79,9 @@ def add_delete_argument(parser: argparse.ArgumentParser) -> None:
 
 
 # parser can be a mutually exclusive group, whose type argparse doesn't export either.
-def add_json_argument(parser: argparse.ArgumentParser | argparse._MutuallyExclusiveGroup) -> None:
+def add_json_argument(
+    parser: argparse.ArgumentParser | argparse._MutuallyExclusiveGroup,  # pyright: ignore[reportPrivateUsage]
+) -> None:
     parser.add_argument(
         "--json",
         action="store_true",

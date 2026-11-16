@@ -7,7 +7,7 @@ import tempfile
 import threading
 import time
 from collections import Counter
-from collections.abc import Iterator, Sequence
+from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from typing import TextIO
 
@@ -252,7 +252,7 @@ class GitClient:
         return result.returncode == 0
 
     @contextmanager
-    def snapshot(self) -> Iterator[None]:
+    def snapshot(self) -> Generator[None, None, None]:
         """Within this, read every local branch's commit and upstream, its
         upstream's commit, and which is checked out (see current_branch), with
         one git call, and read them again only after a git call that may have
@@ -813,7 +813,7 @@ class GitClient:
         Their own changes are in neither parent, so commits alone don't
         account for them.
         """
-        merges = []
+        merges: list[str] = []
         for line in self.run("rev-list", "--merges", "--parents", *args).splitlines():
             commit, *parents = line.split()
             if len(parents) != 2 or self.merged_tree(*parents) != self.tree(commit):

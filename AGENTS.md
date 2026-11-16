@@ -75,7 +75,7 @@ Text meant for people (messages, `info`'s tree) can change.
   `tests/test_end_to_end.py` runs it as a separate process (`Repo.stack_process`),
   for what only that checks, like the entry point. A new command or `--json` result needs
   a case in `test_json_prints_the_result_on_stdout`.
-- Run `./check.sh` (`lint.sh`: formatting, Ruff, mypy in strict mode,
+- Run `./check.sh` (`lint.sh`: formatting, Ruff, basedpyright in strict mode,
   shellcheck; then the tests) before committing. The pre-push hook runs it
   too. CI lints once, on Linux, and runs the tests on each OS.
 - Development needs [uv](https://docs.astral.sh/uv/): `dev-venv.sh` installs
@@ -107,8 +107,9 @@ three. Keep it that way:
   and don't call other Unix tools (`sed`, `grep`, ...) from Python.
 - Don't use Unix-only modules or calls (`fcntl`, `os.fork`, `signal`, ...). If
   a feature needs one, keep it behind a function with a Windows version too,
-  as `git_stack/file_lock.py` does. `check.sh` type-checks as if on Windows as
-  well, so mypy sees the Windows version.
+  as `git_stack/file_lock.py` does. `lint.sh` type-checks as if on Linux,
+  Windows and macOS in turn, so basedpyright sees each version, and reports a
+  call one of them lacks.
 - Decode git's output, and read and write files, as UTF-8 (`encoding="utf-8"`,
   not `text=True`), not in the locale's encoding, which on Windows usually
   isn't UTF-8.
