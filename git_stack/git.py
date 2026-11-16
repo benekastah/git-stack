@@ -59,11 +59,11 @@ REVISION_SYNTAX = frozenset("~^:?*[\\ ")
 # which on macOS is much quicker than forking. Python opens files
 # non-inheritable, so git inherits only what git-stack itself inherited, as it
 # would if run from the shell. A pipe, though, is inheritable for a moment
-# where Python can't open it non-inheritable at once (macOS has no pipe2), and
-# a git another thread starts then keeps it open, so whoever reads it waits for
-# that git to end. Most git processes end soon, but the `git cat-file` that
-# GitClient._object starts runs until its snapshot ends, which can wait for
-# that reader, so it always closes them. On Windows, closing them keeps a git
+# where Python can't open it non-inheritable at once (macOS before 27, which
+# has no pipe2), and a git another thread starts then keeps it open, so whoever
+# reads it waits for that git to end. Most git processes end soon, but the
+# `git cat-file` that GitClient._object starts runs until its snapshot ends,
+# which can wait for that reader, so it always closes them. On Windows, closing them keeps a git
 # process from inheriting the pipes another thread is starting a process with.
 CLOSE_FDS = os.name == "nt"
 

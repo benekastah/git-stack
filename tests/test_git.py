@@ -498,7 +498,7 @@ def test_snapshot_looks_up_objects_with_one_cat_file(
 def test_cat_file_does_not_keep_a_pipe_open(repo: Repo) -> None:
     if sys.platform == "win32":
         pytest.skip("Windows closes them for every git process")
-    # Where Python can't open a pipe non-inheritable at once (on macOS), it's
+    # Where Python can't open a pipe non-inheritable at once (macOS before 27), it's
     # inheritable for a moment, in which another thread may start cat-file.
     read, write = os.pipe()
     os.set_inheritable(write, True)

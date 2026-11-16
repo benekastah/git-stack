@@ -125,7 +125,8 @@ def git_calls(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
         def __init__(self, args: list[str], *rest: Any, **kwargs: Any) -> None:
             if isinstance(args, GitCommand):
                 calls.append(args[3:])
-                assert kwargs.get("close_fds") == (args[3] == "cat-file" or CLOSE_FDS)
+                long_lived = args[3:5] == ["cat-file", "--batch-check=%(objectname)"]
+                assert kwargs.get("close_fds") == (long_lived or CLOSE_FDS)
             super().__init__(args, *rest, **kwargs)
 
     # subprocess.run starts its process with subprocess.Popen too.
