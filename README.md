@@ -1384,28 +1384,30 @@ they're merged, see [Development](#development).
 
 ### Setting up
 
-Install [uv](https://docs.astral.sh/uv/getting-started/installation/), which
-sets up the dev dependencies. Then clone the repository and run its
-`dev-install.sh`:
+Clone the repository, then run its `dev.py install` (on Windows, `py dev.py
+install`):
 
 ```sh
 git clone https://github.com/benekastah/git-stack ~/src/git-stack
-~/src/git-stack/dev-install.sh
+cd ~/src/git-stack
+python3 dev.py install
 ```
 
-`dev-install.sh` installs git-stack in editable mode into a virtualenv in
-`~/.local/share/git-stack/venv`, so changes to the clone take effect without
-reinstalling. It links the `git-stack` command into `~/.local/bin` and the man
-page into `~/.local/share/man/man1` (an editable install doesn't install it),
-makes the clone use the [git hooks](#git-hooks) in `git_hooks/`, and makes
+`dev.py install` sets up the clone's virtualenv, `.venv`, with git-stack in
+editable mode, so changes to the clone take effect without reinstalling, and
+the dev dependencies (e.g. Ruff and basedpyright) that the [checks](#checks)
+and the hooks use. It uses [uv](https://docs.astral.sh/uv/) and `uv.lock`
+when uv is installed, and venv and pip (25.1+) otherwise. It links the
+`git-stack` command into `~/.local/bin` (on Windows, writes a `git-stack.cmd`
+there and adds it to your `PATH`) and, except on Windows, the man page into
+`~/.local/share/man/man1` (an editable install doesn't install it). It makes
+the clone use the [git hooks](#git-hooks) in `git_hooks/`, and makes
 `git blame` skip [reformatting commits](#skipping-reformatting-in-git-blame).
-It also sets up the clone's own virtualenv, `.venv`, with the dev
-dependencies (e.g. Ruff and basedpyright) that the [checks](#checks) and the hooks
-use. It's safe to rerun, e.g. when `pyproject.toml` changes, to pick up a new
+It's safe to rerun, e.g. when `pyproject.toml` changes, to pick up a new
 command-line entry point.
 
 To check the install worked, `git stack -h` should print git-stack's usage,
-and `git stack --help` should open the man page. `dev-install.sh` warns if
+and `git stack --help` should open the man page. `dev.py install` warns if
 either won't work:
 
 - If `git stack` isn't found, `~/.local/bin` isn't on your `PATH`; add it in
@@ -1418,13 +1420,13 @@ either won't work:
 
 ### Checks
 
-Run every check (shellcheck on the shell scripts, that the Python code is
-formatted with [Ruff](https://docs.astral.sh/ruff/), Ruff's linter with its
-default rules plus the ones `pyproject.toml` adds (e.g. a limit on functions'
-cyclomatic complexity), basedpyright in strict mode, then the tests) with:
+Run every check (that the Python code is formatted with
+[Ruff](https://docs.astral.sh/ruff/), Ruff's linter with the rules
+`pyproject.toml` adds to its defaults (e.g. a limit on functions' cyclomatic
+complexity), basedpyright in strict mode, then the tests) with:
 
 ```sh
-./check.sh
+python3 dev.py check
 ```
 
 If the formatting check fails, format the code with:
@@ -1434,49 +1436,51 @@ If the formatting check fails, format the code with:
 ```
 
 If the linter fails, `.venv/bin/ruff check --fix` fixes what it can.
+`python3 dev.py static` runs only the formatting, lint and type checks,
+`python3 dev.py tests` only the tests, and `python3 dev.py coverage` the tests
+under coverage.py, then what they don't run. `python3 dev.py types-other-platforms` type-checks
+the code as if on Windows and macOS, as `check` does as if on Linux; CI runs
+both.
 
-It runs `dev-venv.sh` first, which uses [uv](https://docs.astral.sh/uv/) to
-bring `.venv` up to date with `uv.lock`: git-stack and the `dev` dependency
-group, at the versions locked there. If you change the dependencies in
-`pyproject.toml`, it updates `uv.lock` too; commit both. CI installs from
-`uv.lock` and fails if it's out of date. Dependabot proposes new versions
-weekly. Arguments are passed to pytest, so `./check.sh -k sync` runs only the
-tests whose names contain `sync`. git-stack itself still has no runtime
-dependencies.
+Each brings `.venv` up to date first, reinstalling whenever `pyproject.toml` or
+`uv.lock` has changed since. With [uv](https://docs.astral.sh/uv/), it installs
+git-stack and the `dev` dependency group at the versions locked in `uv.lock`;
+if you change the dependencies in `pyproject.toml`, it updates `uv.lock` too;
+commit both. CI installs from `uv.lock` and fails if it's out of date.
+Dependabot proposes new versions weekly. Arguments are passed to pytest, so
+`python3 dev.py check -k sync` runs only the tests whose names contain `sync`.
+git-stack itself still has no runtime dependencies.
 
-The tests run in parallel, with one worker per CPU (pytest-xdist's `-n auto`).
-Set `PYTEST_XDIST_AUTO_NUM_WORKERS` to use another number of workers, e.g.
-`PYTEST_XDIST_AUTO_NUM_WORKERS=4 ./check.sh`, or pass `-n 0` to run them one
-at a time, e.g. to debug a failing test.
+The tests run in parallel, with one worker per CPU (pytest-xdist's
+`--numprocesses auto`). Set `PYTEST_XDIST_AUTO_NUM_WORKERS` to use another
+number of workers, e.g. `PYTEST_XDIST_AUTO_NUM_WORKERS=4 python3 dev.py tests`,
+or pass `-n 0` to run them one at a time, e.g. to debug a failing test.
 
-`./lint.sh` runs every check but the tests, with the tools `./check.sh` (or
-`./dev-venv.sh`) installed in `.venv`.
-
-CI (`.github/workflows/ci.yml`) runs `./lint.sh` once, on Linux, and the tests
-on Linux, macOS and Windows, for every push to `main` and every pull request. A
-new push to a pull request, or to `main`, cancels the run on the older commit.
+CI (`.github/workflows/check.yml`) runs `dev.py static` and
+`dev.py types-other-platforms` once, on Linux, and `dev.py tests` on Linux,
+macOS and Windows, for every push to `main` and every pull request. A new push
+to a pull request, or to `main`, cancels the run on the older commit.
 
 ### Git hooks
 
-`dev-install.sh` makes the clone use the hooks in `git_hooks/`. To turn them on
-without it, run `git config core.hooksPath git_hooks`. They bring `.venv` up to
-date with `dev-venv.sh` when they need it, so a new dev dependency (say, after
-pulling a change that adds one) is installed by the next commit or push that
-uses it.
+`dev.py install` makes the clone use the hooks in `git_hooks/`. To turn them
+on without it, run `git config core.hooksPath git_hooks`. They bring `.venv`
+up to date when they need it, so a new dev dependency (say, after pulling a
+change that adds one) is installed by the next commit or push that uses it.
 
-- `pre-commit` formats the staged Python files with Ruff, and regenerates the
-  man page, `man/git-stack.1`, and adds it to any commit that changes this
-  README. It works on what's staged, so a partly staged file commits just its
-  staged part, formatted.
-- `pre-push` runs `./check.sh` before every push that pushes commits. Skip it
-  with `git push --no-verify`.
+- `pre-commit` formats the staged Python files with Ruff and applies its safe
+  lint fixes, then regenerates the man page, `man/git-stack.1`, and adds it to
+  any commit that changes this README. It works on what's staged, so a partly
+  staged file commits just its staged part, formatted.
+- `pre-push` runs every check before a push to `main`. Skip it with
+  `git push --no-verify`.
 
 ### Skipping reformatting in `git blame`
 
 `.git-blame-ignore-revs` lists commits that only reformat code, so `git blame`
 attributes their lines to the commits before them. GitHub's blame view reads
-it by itself; `dev-install.sh` sets `blame.ignoreRevsFile` so git does too. To
-set it without `dev-install.sh`, run:
+it by itself; `dev.py install` sets `blame.ignoreRevsFile` so git does too. To
+set it without `dev.py install`, run:
 
 ```sh
 git config blame.ignoreRevsFile ':(optional).git-blame-ignore-revs'
@@ -1493,7 +1497,23 @@ request with a merge commit rather than squashing it.
 (from the `pypandoc_binary` dev dependency) and the filter `man/git-stack.lua`,
 which leaves out the Install and Development sections. The pre-commit hook
 keeps it up to date; without the hook, regenerate it with
-`.venv/bin/python man/build.py`. The tests fail if it's out of date.
+`python3 dev.py man`. The tests fail if it's out of date.
+
+### The project template
+
+The tooling (`dev.py`, the git hooks, Dependabot's config, `.gitignore`,
+`.gitattributes`, `CLAUDE.md` and much of `pyproject.toml`) comes from the
+[python-template](https://github.com/benekastah/python-template) Copier
+template, whose answers `.copier-answers.yml` records. Take in its later
+changes with:
+
+```sh
+uvx copier update --defaults
+```
+
+and resolve any conflicts it marks, keeping what's git-stack's own. `dev.py`
+stays the template's: git-stack's own commands and install steps (the man
+page, `git blame`) are in `dev_project.py`.
 
 ## License
 

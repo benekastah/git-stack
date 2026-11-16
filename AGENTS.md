@@ -75,19 +75,34 @@ Text meant for people (messages, `info`'s tree) can change.
   `tests/test_end_to_end.py` runs it as a separate process (`Repo.stack_process`),
   for what only that checks, like the entry point. A new command or `--json` result needs
   a case in `test_json_prints_the_result_on_stdout`.
-- Run `./check.sh` (`lint.sh`: formatting, Ruff, basedpyright in strict mode,
-  shellcheck; then the tests) before committing. The pre-push hook runs it
-  too. CI lints once, on Linux, and runs the tests on each OS.
-- Development needs [uv](https://docs.astral.sh/uv/): `dev-venv.sh` installs
-  `.venv` from `uv.lock`. Commit a change to `pyproject.toml`'s dependencies
-  with the `uv.lock` it updates; CI fails on a stale one.
+- Run `python3 dev.py check` (formatting, Ruff, basedpyright in strict mode,
+  the tests) before committing. The pre-push hook runs it before a push to
+  `main`. CI lints once, on Linux, and runs the tests on each OS.
+- `dev.py` installs `.venv` from `uv.lock` with [uv](https://docs.astral.sh/uv/)
+  (without uv, with pip, which ignores the lock). Commit a change to
+  `pyproject.toml`'s dependencies with the `uv.lock` it updates; CI fails on a
+  stale one.
 - Each CI job has a time limit (`timeout-minutes` in
-  `.github/workflows/ci.yml`), about 20% over how long it takes. If a job
+  `.github/workflows/check.yml`), about 20% over how long it takes. If a job
   starts hitting it, speed the tests up if you can (most of their time is
   spent starting git processes, which is slow on macOS and Windows); only if
   you can't, raise the limit.
 - Update the README with behavior changes; the pre-commit hook regenerates
-  `man/git-stack.1` from it (or run `.venv/bin/python man/build.py`).
+  `man/git-stack.1` from it (or run `python3 dev.py man`).
+
+## Tooling
+
+The tooling comes from the python-template Copier template (see the README's
+"The project template"); `uvx copier update --defaults` takes in its changes.
+
+- Keep `dev.py` as the template's, verbatim, so updates apply cleanly. Add
+  git-stack's own commands and install steps to `dev_project.py` (standard
+  library only, like `dev.py`).
+- The template never touches this file, the README or
+  `.github/workflows/check.yml`. Elsewhere, where git-stack differs from the
+  template on purpose (setuptools, for the man page; Ruff's line length; the
+  pre-commit hook's man page step), keep the difference when resolving an
+  update's conflicts.
 
 ## Linux, macOS and Windows
 
@@ -107,9 +122,10 @@ three. Keep it that way:
   and don't call other Unix tools (`sed`, `grep`, ...) from Python.
 - Don't use Unix-only modules or calls (`fcntl`, `os.fork`, `signal`, ...). If
   a feature needs one, keep it behind a function with a Windows version too,
-  as `git_stack/file_lock.py` does. `lint.sh` type-checks as if on Linux,
-  Windows and macOS in turn, so basedpyright sees each version, and reports a
-  call one of them lacks.
+  as `git_stack/file_lock.py` does. `dev.py check` type-checks as if on
+  Linux, and `dev.py types-other-platforms` (which CI runs) as if on Windows
+  and macOS, so basedpyright sees each version, and reports a call one of
+  them lacks.
 - Decode git's output, and read and write files, as UTF-8 (`encoding="utf-8"`,
   not `text=True`), not in the locale's encoding, which on Windows usually
   isn't UTF-8.
@@ -118,5 +134,5 @@ three. Keep it that way:
   make.
 - Don't assume `\n` line endings in files git or the user wrote, or a
   case-sensitive filesystem (macOS and Windows usually aren't).
-- Shell scripts (`check.sh`, the hooks) are for development only; git-stack
-  itself mustn't need a shell.
+- Dev tooling goes in `dev.py` and `dev_project.py`, not shell scripts. The
+  hooks are the only ones, and git-stack itself mustn't need a shell.
