@@ -35,7 +35,7 @@ line-length = 120
 
 [tool.ruff.lint]
 # ANN: every function's parameters and return annotated (a return isn't inferred), but Any allowed.
-extend-select = ["ANN", "B904", "B905", "C901", "PERF401"]
+extend-select = ["I", "UP", "B", "C4", "SIM", "ANN", "C901", "PERF401"]
 ignore = ["ANN401"]
 
 [tool.basedpyright]
