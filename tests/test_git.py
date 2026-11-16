@@ -394,16 +394,22 @@ def test_snapshot_looks_up_objects_with_one_cat_file(
 
     monkeypatch.setattr(subprocess, "Popen", recording)
 
+    trees = {commit: repo.git("rev-parse", f"{commit}^{{tree}}") for commit in commits}
+
     with git.snapshot():
-        for _ in range(2):
-            for commit in commits:
-                assert git.rev(commit) == commit
-                assert git.tree(commit) == repo.git("rev-parse", f"{commit}^{{tree}}")
+        for commit in commits:
+            assert git.rev(commit) == commit
+            assert git.tree(commit) == trees[commit]
         assert git.rev("0" * 40) is None
+    # Objects don't change, so what was found is remembered after it too.
+    for commit in commits:
+        assert git.rev(commit) == commit
+        assert git.tree(commit) == trees[commit]
 
     assert [call[0] for call in git_calls] == ["cat-file"]
     # It ends with the snapshot.
     assert [process.poll() for process in started] == [0]
+    assert all(process.stdout is not None and process.stdout.closed for process in started)
 
 
 def test_snapshot_asks_about_the_same_commits_once_but_sees_a_branch_move(

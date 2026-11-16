@@ -89,8 +89,8 @@ def is_branch_name(name: str) -> bool:
 
 
 def is_object_id(name: str) -> bool:
-    """Whether name is a full object ID (SHA-1 or SHA-256), which always names
-    the same object, unlike a ref."""
+    """Whether name is as long as a full object ID (40 hex digits for SHA-1, 64
+    for SHA-256), which, unlike a ref, can't come to name another object."""
     return len(name) in (40, 64) and all(c in "0123456789abcdef" for c in name)
 
 
@@ -432,9 +432,12 @@ class GitClient:
                         stdout=subprocess.PIPE,
                     )
                 assert self._cat_file.stdin is not None and self._cat_file.stdout is not None
-                self._cat_file.stdin.write(encode(query) + b"\n")
-                self._cat_file.stdin.flush()
-                answer = decode(self._cat_file.stdout.readline()).strip()
+                try:
+                    self._cat_file.stdin.write(encode(query) + b"\n")
+                    self._cat_file.stdin.flush()
+                    answer = decode(self._cat_file.stdout.readline()).strip()
+                except OSError:  # e.g. a broken pipe, if it stopped before
+                    answer = ""
             if not answer:
                 raise StackError(f"git cat-file stopped while looking up {query}")
             # Or "<query> missing", or "<query> ambiguous".
@@ -447,9 +450,10 @@ class GitClient:
         """End the `git cat-file` _object started, if it did."""
         with self._cat_file_lock:
             if self._cat_file is not None:
-                assert self._cat_file.stdin is not None
+                assert self._cat_file.stdin is not None and self._cat_file.stdout is not None
                 self._cat_file.stdin.close()
                 self._cat_file.wait()
+                self._cat_file.stdout.close()
                 self._cat_file = None
 
     def author_email(self) -> str | None:
@@ -686,7 +690,7 @@ class GitClient:
         """Whether merging branch into target would change nothing.
 
         This is true after a squash merge even though none of branch's commits are
-        in target's history.
+        in target's history. False if target names no commit.
         """
         tree = self.tree(target)
         return tree is not None and self.merged_tree(target, branch) == tree
