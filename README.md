@@ -519,7 +519,7 @@ explicit `ownership owned` or `ownership shared` choice can change the default.
 Existing stacks default to owned. Ownership is local to this clone, not a
 permission or a substitute for coordinating with contributors.
 
-### `git stack restack [<branch|glob>...] [-g <group>] [--onto <parent>] [--latest] [--allow-shared]`
+### `git stack restack [<branch|glob>...] [-g <group>] [--onto <parent>] [-l] [--allow-shared]`
 
 Rebase every branch in the current stack (or the ones named, see
 [Groups](#groups)) onto its parent, bottom-up, except
@@ -547,7 +547,7 @@ git stack restack --latest              # also move the stack onto main's latest
   those merges; git-stack refuses to replay it as a linear history.
 - `--onto` retargets only the current branch, onto another local branch. The
   branches stacked on it come along.
-- `--latest` moves the branches on the stack's root onto its latest commit
+- `-l`/`--latest` moves the branches on the stack's root onto its latest commit
   even if they don't conflict with it (and the rest of the stack with them).
 - Merged branches are skipped and their children restacked onto their parent;
   `sync` or `clean` removes them from the stack.
@@ -557,7 +557,7 @@ git stack restack --latest              # also move the stack onto main's latest
 - A branch checked out in another worktree is skipped, with a warning; see
   [Branches checked out in other worktrees](#branches-checked-out-in-other-worktrees).
 
-### `git stack sync [<branch|glob>...] [-g <group>] [--remote <name>] [-d local|remote|both] [--latest] [--force] [--ignore-revert <branch>] [--allow-shared] [--pull-tracked-upstream] [--rewritten-upstream] [--rebuild-stack]`
+### `git stack sync [<branch|glob>...] [-g <group>] [--remote <name>] [-d local|remote|both] [-l] [--force] [--ignore-revert <branch>] [--allow-shared] [--pull-tracked-upstream] [--rewritten-upstream] [--rebuild-stack]`
 
 Bring the current stack (or the ones named, see [Groups](#groups)) up to date
 with the remote:
@@ -567,7 +567,7 @@ with the remote:
 3. Go through the stack's branches, each before the branches stacked on it:
    - stop tracking a merged one, moving its children onto its parent;
    - restack the rest, like `restack` does: a branch on the root only moves
-     if it conflicts with the root's new commits, or with `--latest`;
+     if it conflicts with the root's new commits, or with `-l`/`--latest`;
    - and pull in commits others pushed to it (see
      [Pulling commits others pushed](#pulling-commits-others-pushed)).
 4. Push the branches that differ from the remote branch they already have,
@@ -647,11 +647,11 @@ git stack sync -d both          # ...and their remote branches
   for that reason.
 - Needs a clean worktree, and refuses to run outside a stack.
 
-### `git stack pull [<branch|glob>...] [-g <group>] [--remote <name>] [-d local] [--latest] [--ignore-revert <branch>] [--allow-shared] [--pull-tracked-upstream] [--rewritten-upstream]`
+### `git stack pull [<branch|glob>...] [-g <group>] [--remote <name>] [-d local] [-l] [--ignore-revert <branch>] [--allow-shared] [--pull-tracked-upstream] [--rewritten-upstream]`
 
 Fetch and update the selected stacks locally. It can
 fast-forward local roots, untrack merged branches, and restack or pull into
-local branches; `-d local` also deletes merged local branches. It does not push or delete remote branches. Unseen upstream
+local branches; `-d local` also deletes merged local branches, and `-l`/`--latest` works as for `sync`. It does not push or delete remote branches. Unseen upstream
 merge commits need manual inspection and integration before pulling.
 For stacks whose branches track different remotes, select one with `--remote`.
 When the upstream has unseen commits and its history was rewritten (or its

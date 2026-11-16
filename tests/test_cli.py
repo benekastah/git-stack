@@ -125,9 +125,16 @@ def stack() -> Any:
             ([], []),
             {"remote": "origin", "delete": None, "latest": False, "push": False, "ignore_reverts": []},
         ),
+        (
+            ["pull", "-l"],
+            "sync",
+            ([], []),
+            {"remote": "origin", "delete": None, "latest": True, "push": False, "ignore_reverts": []},
+        ),
         (["next"], "next", (), {}),
         (["prev"], "prev", (), {}),
         (["restack"], "restack", ([], []), {"onto": None, "latest": False}),
+        (["restack", "-l"], "restack", ([], []), {"onto": None, "latest": True}),
         (["restack", "--allow-shared"], "restack", ([], []), {"onto": None, "latest": False}),
         (
             ["restack", "--onto", "main", "--latest"],
@@ -140,6 +147,12 @@ def stack() -> Any:
             "sync",
             ([], []),
             {"remote": "origin", "delete": None, "latest": False, "push": True, "ignore_reverts": []},
+        ),
+        (
+            ["sync", "-l"],
+            "sync",
+            ([], []),
+            {"remote": "origin", "delete": None, "latest": True, "push": True, "ignore_reverts": []},
         ),
         (
             ["sync", "--allow-shared"],
