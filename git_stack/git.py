@@ -438,8 +438,10 @@ class GitClient:
                     answer = decode(self._cat_file.stdout.readline()).strip()
                 except OSError:  # e.g. a broken pipe, if it stopped before
                     answer = ""
-            if not answer:
-                raise StackError(f"git cat-file stopped while looking up {query}")
+                if not answer:
+                    # So the next lookup starts another.
+                    self._end_cat_file(kill=True)
+                    raise StackError(f"git cat-file stopped while looking up {query}")
             # Or "<query> missing", or "<query> ambiguous".
             found = None if " " in answer else answer
         if found is not None:
@@ -449,12 +451,23 @@ class GitClient:
     def _stop_cat_file(self) -> None:
         """End the `git cat-file` _object started, if it did."""
         with self._cat_file_lock:
-            if self._cat_file is not None:
-                assert self._cat_file.stdin is not None and self._cat_file.stdout is not None
-                self._cat_file.stdin.close()
-                self._cat_file.wait()
-                self._cat_file.stdout.close()
-                self._cat_file = None
+            self._end_cat_file()
+
+    def _end_cat_file(self, kill: bool = False) -> None:
+        """End the `git cat-file` _object started, if it did (killing it if
+        kill is set), and forget it. The caller holds _cat_file_lock."""
+        process, self._cat_file = self._cat_file, None
+        if process is None:
+            return
+        assert process.stdin is not None and process.stdout is not None
+        if kill:
+            process.kill()
+        try:
+            process.stdin.close()
+        except OSError:  # a broken pipe, if it stopped with a query unread
+            pass
+        process.wait()
+        process.stdout.close()
 
     def author_email(self) -> str | None:
         """The email address git authors commits with, or None if it has none."""

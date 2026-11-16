@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+from git_stack.errors import StackError
 from git_stack.git import GitClient, changes_refs
 from tests.conftest import GIT_REPOSITORY_VARIABLES
 from tests.helpers import Repo
@@ -410,6 +411,21 @@ def test_snapshot_looks_up_objects_with_one_cat_file(
     # It ends with the snapshot.
     assert [process.poll() for process in started] == [0]
     assert all(process.stdout is not None and process.stdout.closed for process in started)
+
+
+def test_cat_file_stopping_is_an_error_and_the_next_snapshot_starts_another(repo: Repo) -> None:
+    git = GitClient(repo.path)
+    commit = git.tip("main")
+    tree = repo.git("rev-parse", "main^{tree}")
+    with pytest.raises(StackError, match="git cat-file stopped"), git.snapshot():
+        assert git.rev(commit) == commit
+        assert git._cat_file is not None
+        git._cat_file.kill()
+        git._cat_file.wait()
+        git.tree(commit)
+
+    with git.snapshot():
+        assert git.tree(commit) == tree
 
 
 def test_snapshot_asks_about_the_same_commits_once_but_sees_a_branch_move(
