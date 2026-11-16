@@ -1445,10 +1445,12 @@ Set `PYTEST_XDIST_AUTO_NUM_WORKERS` to use another number of workers, e.g.
 `PYTEST_XDIST_AUTO_NUM_WORKERS=4 ./check.sh`, or pass `-n 0` to run them one
 at a time, e.g. to debug a failing test.
 
-CI (`.github/workflows/ci.yml`) runs `./check.sh` on Linux and macOS, with the
-oldest and newest Python git-stack supports, for every push to `main` and
-every pull request, and the tests on Windows, where `check.sh` can't run. A new
-push to a pull request, or to `main`, cancels the run on the older commit.
+`./lint.sh` runs every check but the tests, with the tools `./check.sh` (or
+`./dev-venv.sh`) installed in `.venv`.
+
+CI (`.github/workflows/ci.yml`) runs `./lint.sh` once, on Linux, and the tests
+on Linux, macOS and Windows, for every push to `main` and every pull request. A
+new push to a pull request, or to `main`, cancels the run on the older commit.
 
 ### Git hooks
 

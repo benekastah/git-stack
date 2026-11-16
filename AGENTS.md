@@ -75,8 +75,9 @@ Text meant for people (messages, `info`'s tree) can change.
   `tests/test_end_to_end.py` runs it as a separate process (`Repo.stack_process`),
   for what only that checks, like the entry point. A new command or `--json` result needs
   a case in `test_json_prints_the_result_on_stdout`.
-- Run `./check.sh` (formatting, Ruff, mypy in strict mode, shellcheck, the
-  tests) before committing. The pre-push hook runs it too.
+- Run `./check.sh` (`lint.sh`: formatting, Ruff, mypy in strict mode,
+  shellcheck; then the tests) before committing. The pre-push hook runs it
+  too. CI lints once, on Linux, and runs the tests on each OS.
 - Each CI job has a time limit (`timeout-minutes` in
   `.github/workflows/ci.yml`), about 20% over how long it takes. If a job
   starts hitting it, speed the tests up if you can (most of their time is

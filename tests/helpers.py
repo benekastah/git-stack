@@ -1,6 +1,5 @@
 """Test repositories and a fake GitHub, which tests/conftest.py provides as fixtures."""
 
-import importlib
 import io
 import json
 import os
@@ -62,10 +61,11 @@ def install_command(bin_dir: pathlib.Path, name: str, module: str) -> None:
     Python, as git-stack runs gh or ssh. module must be importable, as the
     repo fixture's PYTHONPATH makes the tests' modules."""
     if sys.platform == "win32":
-        # Windows only runs .exe files found on PATH, so wrap it in the
-        # launcher pip makes console scripts with.
-        scripts: Any = importlib.import_module("pip._vendor.distlib.scripts")
-        maker = scripts.ScriptMaker(None, str(bin_dir))
+        # Windows only runs .exe files found on PATH, so wrap it in distlib's
+        # launcher, which pip makes console scripts with.
+        import distlib.scripts  # type: ignore[import-untyped]
+
+        maker = distlib.scripts.ScriptMaker(None, str(bin_dir))
         maker.executable = sys.executable
         maker.variants = {""}
         maker.make(f"{name} = {module}:main")
