@@ -1448,7 +1448,7 @@ at a time, e.g. to debug a failing test.
 CI (`.github/workflows/ci.yml`) runs `./check.sh` on Linux and macOS, with the
 oldest and newest Python git-stack supports, for every push to `main` and
 every pull request, and the tests on Windows, where `check.sh` can't run. A new
-push to a pull request cancels the run on its older commit.
+push to a pull request, or to `main`, cancels the run on the older commit.
 
 ### Git hooks
 
