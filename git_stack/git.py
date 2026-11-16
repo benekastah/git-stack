@@ -1,8 +1,5 @@
-import contextlib
-import functools
 import os
 import pathlib
-import shutil
 import subprocess
 import tempfile
 import threading
@@ -11,6 +8,9 @@ from collections import Counter
 from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from typing import TextIO
+
+import git_client
+from git_client import CatFile, ConfigLockedError, Git, GitError
 
 from git_stack.errors import StackError
 
@@ -50,33 +50,10 @@ SWITCH = ("-c", "core.warnAmbiguousRefs=false", "switch", "--quiet")
 # How long the upstreams' refnames can be, together, for the ref snapshot to
 # name them to git (see GitClient._snapshot_refs).
 MAX_UPSTREAM_PATTERNS_LENGTH = 16384
-# The diff of the patch GitClient.commit_patch_ids ends each command's output
-# with.
-END_MARKER_DIFF = "diff --git a/end b/end\n--- a/end\n+++ b/end\n@@ -0,0 +1 @@\n+end\n"
+# The environment variable that names the git to run, if not the one on PATH.
+GIT_VARIABLE = "GIT_STACK_GIT"
 # Characters a branch name can't have, but a revision (e.g. main~1) can.
 REVISION_SYNTAX = frozenset("~^:?*[\\ ")
-# Whether git's processes close the file descriptors they'd otherwise inherit.
-# On Linux and macOS, not closing them lets Python start git with posix_spawn,
-# which on macOS is much quicker than forking. Python opens files
-# non-inheritable, so git inherits only what git-stack itself inherited, as it
-# would if run from the shell. A pipe, though, is inheritable for a moment
-# where Python can't open it non-inheritable at once (macOS before 27, which
-# has no pipe2), and a git another thread starts then keeps it open, so whoever
-# reads it waits for that git to end. Most git processes end soon, but the
-# `git cat-file` that GitClient._object starts runs until its snapshot ends,
-# which can wait for that reader, so it always closes them. On Windows, closing them keeps a git
-# process from inheriting the pipes another thread is starting a process with.
-CLOSE_FDS = os.name == "nt"
-
-
-@functools.cache
-def git_program() -> str:
-    """The git that git-stack runs: $GIT_STACK_GIT if set, otherwise the git on
-    PATH (a wrapper such as git-ai included), as an absolute path, which Python
-    needs to use posix_spawn (see CLOSE_FDS). On Windows, only a git.exe, as
-    starting "git" would find: a git.cmd or git.bat would run in cmd.exe, which
-    interprets characters such as & that a branch name can have."""
-    return os.environ.get("GIT_STACK_GIT") or shutil.which("git.exe" if os.name == "nt" else "git") or "git"
 
 
 def split_command(args: tuple[str, ...]) -> tuple[str, list[str]]:
@@ -145,35 +122,33 @@ def same_file(a: pathlib.Path, b: pathlib.Path) -> bool:
         return False
 
 
-def decode(output: bytes) -> str:
-    """git's output as text: UTF-8, which git writes on every system (rather
-    than in the locale's encoding, which on Windows usually isn't), keeping
-    bytes that aren't (e.g. a file's in a diff) as they are, so encode gives
-    them back unchanged."""
-    return output.decode("utf-8", "surrogateescape")
-
-
-def encode(text: str) -> bytes:
-    """text, from decode, as the bytes git wrote."""
-    return text.encode("utf-8", "surrogateescape")
+@contextmanager
+def git_errors() -> Generator[None, None, None]:
+    """Report a git command that fails in the block as a StackError, which
+    the command line prints as git-stack's own errors."""
+    try:
+        yield
+    except GitError as e:
+        raise StackError(str(e)) from e
 
 
 class GitClient:
-    """Runs git in directory, as `git -C <directory>` does."""
+    """Runs git in directory, as `git -C <directory>` does: $GIT_STACK_GIT if
+    set, otherwise the git on PATH (see git_client.find_git), started through
+    py-git-client's Git."""
 
     def __init__(self, directory: str | os.PathLike[str] = ".") -> None:
         self.directory = pathlib.Path(directory)
+        self._git = Git(self.directory, env_var=GIT_VARIABLE)
         self._common_dir: pathlib.Path | None = None
         self._toplevel: pathlib.Path | None = None
-        self._object_id_length: int | None = None
         # See _object, is_ancestor and merged_tree: what they've found, for the
-        # commits they were asked about, and the cat-file process _object runs
-        # within a snapshot.
+        # commits they were asked about, and the cat-file _object asks within a
+        # snapshot, which starts its process when first asked.
         self._objects: dict[tuple[str, str], str] = {}
         self._ancestry: dict[tuple[str, str], bool] = {}
         self._merged_trees: dict[tuple[str, str], str | None] = {}
-        self._cat_file: subprocess.Popen[bytes] | None = None
-        self._cat_file_lock = threading.Lock()
+        self._cat_file = CatFile(self._git)
         # See branch_config: whether it has read the config file, and the
         # file's stat when it did (None if there was no file).
         self._config_read = False
@@ -199,9 +174,6 @@ class GitClient:
         # our stdout is for --json output.
         self.passthrough_stdout: TextIO | None = None
 
-    def _command(self, *args: str) -> list[str]:
-        return [git_program(), "-C", str(self.directory), *args]
-
     def _ran(self, args: tuple[str, ...]) -> None:
         """Forget the ref snapshot if `git <args>`, which just ran, may have
         changed it, whether or not it succeeded."""
@@ -222,35 +194,31 @@ class GitClient:
                 self._rebasing = {}
 
     def run(self, *args: str, check: bool = True, input: str | None = None) -> str:
-        """Run git and return stripped stdout.
-
-        Input and output are bytes, decoded and encoded here (see decode), so
-        Windows doesn't turn \n into \r\n on the way in.
-        """
-        result = subprocess.run(
-            self._command(*args),
-            capture_output=True,
-            input=None if input is None else encode(input),
-            close_fds=CLOSE_FDS,
-            check=False,
-        )
-        self._ran(args)
-        if check and result.returncode != 0:
-            raise StackError(f"git {' '.join(args)} failed:\n{decode(result.stderr).strip()}")
-        return decode(result.stdout).strip()
+        """Run git and return stripped stdout, even if it fails when check is
+        false."""
+        try:
+            return self._git.run(*args, input=input)
+        except GitError as e:
+            if check:
+                raise StackError(f"git {' '.join(args)} failed:\n{e.stderr.strip()}") from e
+            return e.stdout.strip()
+        finally:
+            self._ran(args)
 
     def ok(self, *args: str) -> bool:
-        """Run git and report whether it succeeded."""
-        result = subprocess.run(self._command(*args), capture_output=True, close_fds=CLOSE_FDS, check=False)
+        """Run git and report whether it succeeded: unlike git_client's ok,
+        any failure is a no."""
+        result = self._git.process(*args, capture_output=True, stdout=subprocess.DEVNULL)
         self._ran(args)
         return result.returncode == 0
 
     def passthrough(self, *args: str) -> bool:
         """Run git with output going straight to the terminal (stdout to
         passthrough_stdout)."""
-        result = subprocess.run(self._command(*args), stdout=self.passthrough_stdout, close_fds=CLOSE_FDS, check=False)
-        self._ran(args)
-        return result.returncode == 0
+        try:
+            return self._git.passthrough(*args, stdout=self.passthrough_stdout)
+        finally:
+            self._ran(args)
 
     @contextmanager
     def snapshot(self) -> Generator[None, None, None]:
@@ -287,7 +255,7 @@ class GitClient:
             if not self._snapshot_depth:
                 self._forget_refs()
                 self._remote_defaults = {}
-                self._stop_cat_file()
+                self._cat_file.close()
 
     def _snapshot_refs(self) -> dict[str, tuple[str, str]] | None:
         """The refs (see snapshot), reading them if they haven't been, or None
@@ -296,7 +264,6 @@ class GitClient:
             return None
         with self._refs_lock:
             if self._refs is None:
-                refs = {}
                 upstreams = self._upstream_refs()
                 # Unless there are too many to name on a command line (Windows
                 # limits one to 32767 characters); then list every
@@ -306,19 +273,11 @@ class GitClient:
                     if sum(len(u) + 1 for u in upstreams) <= MAX_UPSTREAM_PATTERNS_LENGTH
                     else ["refs/remotes/"]
                 )
-                listing = self.run(
-                    "for-each-ref",
-                    "--format=%(refname)%00%(objectname)%00%(upstream)%00%(HEAD)",
-                    "refs/heads/",
-                    *patterns,
-                )
-                head = None
-                for line in listing.splitlines():
-                    name, commit, upstream, current = line.split("\0")
-                    refs[name] = (commit, upstream)
-                    if current == "*":
-                        head = name.removeprefix("refs/heads/")
-                self._refs, self._listed_upstreams, self._head = refs, frozenset(upstreams), head
+                with git_errors():
+                    listed = git_client.refs(self._git, "refs/heads/", *patterns)
+                head = next((ref.name.removeprefix("refs/heads/") for ref in listed.values() if ref.head), None)
+                self._refs = {ref.name: (ref.object, ref.upstream) for ref in listed.values()}
+                self._listed_upstreams, self._head = frozenset(upstreams), head
             return self._refs
 
     def _upstream_refs(self) -> list[str]:
@@ -362,15 +321,16 @@ class GitClient:
             # git works without one, as if it were empty.
             stat = None
         if fresh or not self._config_read or stat != self._config_stat:
-            config = {}
-            for entry in filter(
-                None, self.run("config", "--null", "--get-regexp", r"^branch\.", check=False).split("\0")
-            ):
-                key, _, value = entry.partition("\n")
-                # Branch names can contain dots, but keys can't.
-                branch, _, name = key.removeprefix("branch.").rpartition(".")
-                config[branch, name] = value
-            self._branch_config, self._config_stat, self._config_read = config, stat, True
+            branches: dict[tuple[str, str], str] = {}
+            with git_errors():
+                entries = git_client.config(self._git)
+            for key, values in entries.items():
+                if key.startswith("branch."):
+                    # Branch names can contain dots, but keys can't. The last
+                    # value wins, as git reads it; a key with none is "".
+                    branch, _, name = key.removeprefix("branch.").rpartition(".")
+                    branches[branch, name] = values[-1] or ""
+            self._branch_config, self._config_stat, self._config_read = branches, stat, True
         return self._branch_config
 
     def config_get(self, branch: str, key: str) -> str | None:
@@ -402,26 +362,26 @@ class GitClient:
         """
         deadline = time.monotonic() + CONFIG_LOCK_TIMEOUT
         delay = 0.01
+        error: GitError | None = None
         while True:
-            result = subprocess.run(
-                self._command("config", *args),
-                capture_output=True,
-                encoding="utf-8",
-                errors="surrogateescape",
-                close_fds=CLOSE_FDS,
-                check=False,
-            )
-            locked = result.returncode != 0 and "could not lock config file" in result.stderr
-            if not locked or time.monotonic() >= deadline:
-                break
-            time.sleep(delay)
-            delay = min(delay * 2, 0.5)
+            try:
+                self._git.run("config", *args)
+                error = None
+            except ConfigLockedError as e:
+                error = e
+                if time.monotonic() < deadline:
+                    time.sleep(delay)
+                    delay = min(delay * 2, 0.5)
+                    continue
+            except GitError as e:
+                error = e
+            break
         key = next((a for a in args if not a.startswith("-")), "")
         if not key.rpartition(".")[2].lower().startswith("stack"):
             # A config write can't move a worktree's HEAD.
             self._forget_refs(worktrees=False)
-        if check and result.returncode != 0:
-            raise StackError(f"git config {' '.join(args)} failed:\n{result.stderr.strip()}")
+        if check and error is not None:
+            raise StackError(f"git config {' '.join(args)} failed:\n{error.stderr.strip()}") from error
 
     def rev(self, ref: str) -> str | None:
         """The commit ref names, or None if it names none. A local or
@@ -471,59 +431,19 @@ class GitClient:
     def _object(self, object_id: str, kind: str) -> str | None:
         """The kind object (e.g. a commit's tree) that object_id names, as
         `object_id^{kind}`, or None if there's none. Objects don't change, so
-        each is looked up once; within a snapshot, by a `git cat-file
-        --batch-check` that runs until it ends, rather than a process each."""
+        each is looked up once; within a snapshot, by a `git cat-file` that
+        runs until it ends, rather than a process each."""
         if (known := self._objects.get((object_id, kind))) is not None:
             return known
         query = f"{object_id}^{{{kind}}}"
         if not self._snapshot_depth:
             found = self.run("rev-parse", "--verify", "--quiet", query, check=False) or None
         else:
-            with self._cat_file_lock:
-                if self._cat_file is None:
-                    self._cat_file = subprocess.Popen(
-                        self._command("cat-file", "--batch-check=%(objectname)"),
-                        stdin=subprocess.PIPE,
-                        stdout=subprocess.PIPE,
-                        # Not CLOSE_FDS: it runs until the snapshot ends, so
-                        # a pipe it inherited might never end (see CLOSE_FDS).
-                        close_fds=True,
-                    )
-                assert self._cat_file.stdin is not None and self._cat_file.stdout is not None
-                try:
-                    self._cat_file.stdin.write(encode(query) + b"\n")
-                    self._cat_file.stdin.flush()
-                    answer = decode(self._cat_file.stdout.readline()).strip()
-                except OSError:  # e.g. a broken pipe, if it stopped before
-                    answer = ""
-                if not answer:
-                    # So the next lookup starts another.
-                    self._end_cat_file(kill=True)
-                    raise StackError(f"git cat-file stopped while looking up {query}")
-            # Or "<query> missing", or "<query> ambiguous".
-            found = None if " " in answer else answer
+            with git_errors():
+                found = self._cat_file.resolve(query)
         if found is not None:
             self._objects[object_id, kind] = found
         return found
-
-    def _stop_cat_file(self) -> None:
-        """End the `git cat-file` _object started, if it did."""
-        with self._cat_file_lock:
-            self._end_cat_file()
-
-    def _end_cat_file(self, kill: bool = False) -> None:
-        """End the `git cat-file` _object started, if it did (killing it if
-        kill is set), and forget it. The caller holds _cat_file_lock."""
-        process, self._cat_file = self._cat_file, None
-        if process is None:
-            return
-        assert process.stdin is not None and process.stdout is not None
-        if kill:
-            process.kill()
-        with contextlib.suppress(OSError):  # a broken pipe, if it stopped with a query unread
-            process.stdin.close()
-        process.wait()
-        process.stdout.close()
 
     def author_email(self) -> str | None:
         """The email address git authors commits with, or None if it has none."""
@@ -715,15 +635,11 @@ class GitClient:
         """Why `git push <args>` would fail (git's error output), found with a
         dry run, or None if it wouldn't. The dry run skips the pre-push hook,
         which the real push runs, so it doesn't run twice."""
-        result = subprocess.run(
-            self._command("push", "--dry-run", "--no-verify", *args),
-            capture_output=True,
-            encoding="utf-8",
-            errors="surrogateescape",
-            close_fds=CLOSE_FDS,
-            check=False,
-        )
-        return result.stderr.strip() if result.returncode != 0 else None
+        try:
+            self._git.run("push", "--dry-run", "--no-verify", *args)
+        except GitError as e:
+            return e.stderr.strip()
+        return None
 
     def fetch(self, remote: str) -> None:
         if not self.passthrough("fetch", "--prune", remote):
@@ -759,17 +675,11 @@ class GitClient:
 
     def conflicts(self, branch: str, target: str) -> bool:
         """Whether merging branch into target would conflict."""
-        result = subprocess.run(
-            self._command("merge-tree", "--write-tree", "--name-only", target, branch),
-            capture_output=True,
-            encoding="utf-8",
-            errors="surrogateescape",
-            close_fds=CLOSE_FDS,
-            check=False,
-        )
-        if result.returncode not in (0, 1):
-            raise StackError(f"git merge-tree {target} {branch} failed:\n{result.stderr.strip()}")
-        return result.returncode == 1
+        try:
+            # merge-tree's no (1) is a conflict.
+            return not self._git.ok("merge-tree", "--write-tree", "--name-only", target, branch)
+        except GitError as e:
+            raise StackError(f"git merge-tree {target} {branch} failed:\n{e.stderr.strip()}") from e
 
     def contained_in(self, branch: str, target: str) -> bool:
         """Whether merging branch into target would change nothing.
@@ -794,15 +704,10 @@ class GitClient:
         return self._merged_trees[a, b]
 
     def _merge_tree(self, ours: str, theirs: str) -> str | None:
-        result = subprocess.run(
-            self._command("merge-tree", "--write-tree", ours, theirs),
-            capture_output=True,
-            encoding="utf-8",
-            errors="surrogateescape",
-            close_fds=CLOSE_FDS,
-            check=False,
-        )
-        return result.stdout.splitlines()[0] if result.returncode == 0 else None
+        try:
+            return self._git.run("merge-tree", "--write-tree", ours, theirs).splitlines()[0]
+        except GitError:
+            return None
 
     def merges_with_own_changes(self, *args: str) -> list[str]:
         """The merge commits `git rev-list <args>` lists that change something
@@ -822,52 +727,17 @@ class GitClient:
 
     def commit_patch_ids(self, *commands: Sequence[str]) -> list[list[tuple[str, str]]]:
         """For each of commands, (patch-id, commit) for each commit that
-        `git <command>` prints, in the order it prints them, with every file's
-        changes, even with diff.relative set. For a diff, the commit is all
-        zeros. Paths after `--` are files as git lists them (e.g. `git diff
-        --name-only`): from the top of the worktree, whatever directory git
-        runs in, and taken literally, even with GIT_LITERAL_PATHSPECS set.
-
-        Each command runs, but one `git patch-id` reads them all: after each
-        command's output comes a patch of our own, whose commit (1, 2, ...)
-        can't be a real one's, to mark where it ends.
-        """
-        length = self.object_id_length()
-        patches = []
-        for i, (command, *rest) in enumerate(commands, 1):
-            if "--" in rest:
-                end = rest.index("--") + 1
-                rest = [*rest[:end], *(f":(top,literal){path}" for path in rest[end:])]
-            if command == "diff":
-                # A diff has no commit line, so give it one, rather than rely on
-                # the blank line after the marker before it to end the marker.
-                patches.append(f"commit {'0' * length}")
-            # --no-literal-pathspecs: GIT_LITERAL_PATHSPECS would turn off the marks.
-            patches.append(
-                self.run("--no-literal-pathspecs", command, "--no-color", "--no-ext-diff", "--no-relative", *rest)
-            )
-            patches.append(f"commit {i:0{length}x}\n\n{END_MARKER_DIFF}")
-        results: list[list[tuple[str, str]]] = [[]]
-        for line in self.run("patch-id", "--stable", input="\n".join(patches) + "\n").splitlines():
-            patch_id, commit = line.split()
-            if commit == f"{len(results):0{length}x}":
-                results.append([])
-            else:
-                results[-1].append((patch_id, commit))
-        if len(results) != len(commands) + 1:
-            raise StackError(f"git patch-id printed {len(results) - 1} end markers for {len(commands)} commands")
-        return results[:-1]
-
-    def object_id_length(self) -> int:
-        """How many hex digits the repository's object IDs have: 40 for SHA-1,
-        64 for SHA-256. Taken from the ref snapshot if it's been read."""
-        if self._object_id_length is None:
-            # Read once, since another thread may forget it meanwhile.
-            if refs := self._refs:
-                self._object_id_length = len(next(iter(refs.values()))[0])
-            else:
-                self._object_id_length = 64 if self.run("rev-parse", "--show-object-format") == "sha256" else 40
-        return self._object_id_length
+        `git <command>` prints, in the order it prints them, with one `git
+        patch-id` for them all (see git_client.patch_ids). For a diff, the
+        commit is all zeros. Paths after `--` are files as git lists them
+        (e.g. `git diff --name-only`): from the top of the worktree, and
+        taken literally."""
+        marked = []
+        for command in commands:
+            end = command.index("--") + 1 if "--" in command else len(command)
+            marked.append([*command[:end], *(f":(top,literal){path}" for path in command[end:])])
+        with git_errors():
+            return git_client.patch_ids(self._git, *marked)
 
     def identity_counts(self, *args: str) -> Counter[str]:
         """Count commit identities, including repeated author, date and subject."""
@@ -884,15 +754,13 @@ class GitClient:
         if len(ours) != len(theirs) or [i for _, i in ours] != [i for _, i in theirs]:
             return False
         with tempfile.TemporaryDirectory(prefix="git-stack-index-") as directory:
-            env = {**os.environ, "GIT_INDEX_FILE": str(pathlib.Path(directory) / "index")}
+            env = {"GIT_INDEX_FILE": str(pathlib.Path(directory) / "index")}
             # Where git apply runs: in a subdirectory, it leaves out the paths
             # outside it.
             top = str(self.toplevel())
 
             def run(*args: str, input: bytes | None = None) -> subprocess.CompletedProcess[bytes]:
-                return subprocess.run(
-                    self._command(*args), input=input, env=env, capture_output=True, close_fds=CLOSE_FDS, check=False
-                )
+                return self._git.process(*args, capture_output=True, input=input, env=env)
 
             if run("read-tree", new_base).returncode:
                 raise StackError("couldn't prepare an index to check the upstream rebase")

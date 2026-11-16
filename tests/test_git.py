@@ -1,68 +1,37 @@
 """GitClient's reading of branch config and refs, which it caches."""
 
 import json
-import os
 import pathlib
 import subprocess
-import sys
-from collections.abc import Iterator
 from typing import Any
 
 import pytest
+from git_client import Arg, Git
+from git_client.testing import real_git
 
 from git_stack.adapters.git import GitAdapter
 from git_stack.core import StackCore
 from git_stack.errors import StackError
-from git_stack.git import GitClient, changes_refs, changes_worktrees, git_program, same_file
-from tests.conftest import GIT_EXEC_PATH, GIT_REPOSITORY_VARIABLES
+from git_stack.git import GIT_VARIABLE, GitClient, changes_refs, changes_worktrees
 from tests.helpers import Repo
 
 
-@pytest.fixture
-def fresh_git_program() -> Iterator[None]:
-    """Make git_program look for git again, in this test and after it."""
-    git_program.cache_clear()
-    yield
-    git_program.cache_clear()
+def test_git_client_runs_git_stack_git(repo: Repo, fresh_find_git: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    # After repo, whose client has found git already.
+    monkeypatch.setenv(GIT_VARIABLE, str(repo.tmp / "no-git-here"))
+
+    with pytest.raises(FileNotFoundError):
+        GitClient(repo.path).run("status")
 
 
-@pytest.mark.usefixtures("fresh_git_program")
-def test_git_program_is_git_stack_git_when_set(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("GIT_STACK_GIT", "/opt/git/bin/git")
-    assert git_program() == "/opt/git/bin/git"
-
-
-@pytest.mark.usefixtures("fresh_git_program")
-def test_git_program_is_the_git_on_path_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("GIT_STACK_GIT", raising=False)
-    monkeypatch.setenv("PATH", str(GIT_EXEC_PATH))
-    program = pathlib.Path(git_program())
-    assert program.is_absolute()
-    assert same_file(program.parent, GIT_EXEC_PATH)
-
-
-@pytest.mark.skipif(os.name != "nt", reason="Windows runs .cmd and .bat files in cmd.exe")
-@pytest.mark.usefixtures("fresh_git_program")
-def test_git_program_isnt_a_batch_file_on_windows(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    for name in ("git.cmd", "git.bat"):
-        (tmp_path / name).write_text("@echo off\n", encoding="utf-8")
-    monkeypatch.delenv("GIT_STACK_GIT", raising=False)
-    monkeypatch.setenv("PATH", os.pathsep.join([str(tmp_path), str(GIT_EXEC_PATH)]))
-    assert same_file(pathlib.Path(git_program()).parent, GIT_EXEC_PATH)
-
-
-def test_git_client_runs_git_program(repo: Repo, monkeypatch: pytest.MonkeyPatch) -> None:
-    started: list[str] = []
-    popen = subprocess.Popen
-
-    def recording(args: list[str], *rest: Any, **kwargs: Any) -> subprocess.Popen[Any]:
-        started.append(args[0])
-        return popen(args, *rest, **kwargs)
-
-    monkeypatch.setattr(subprocess, "Popen", recording)
-    GitClient(repo.path).run("status")
-
-    assert started == [git_program()]
+def test_a_git_error_is_a_stack_error(tmp_path: pathlib.Path) -> None:
+    """The command line reports StackErrors as git-stack's own; any other
+    error would print a traceback."""
+    git = GitClient(tmp_path)
+    with pytest.raises(StackError, match="not a git repository"), git.snapshot():
+        git.local_branches()
+    with pytest.raises(StackError, match="not a git repository"), git.snapshot():
+        git.tree("0" * 40)
 
 
 def test_config_get_sees_changes_made_by_other_processes(repo: Repo) -> None:
@@ -78,14 +47,6 @@ def test_config_get_handles_dots_in_branch_names_and_any_key_case(repo: Repo) ->
     repo.git("config", "branch.release.1.2.stackParent", "main")
 
     assert GitClient(repo.path).config_get("release.1.2", "STACKPARENT") == "main"
-
-
-def test_tests_ignore_a_hooks_repository(repo: Repo) -> None:
-    """A git hook that runs the tests (e.g. `dev.py check` from one) runs them
-    with GIT_DIR set to its repository, which their git commands mustn't use."""
-    assert not set(GIT_REPOSITORY_VARIABLES) & os.environ.keys()
-    # As paths, since git writes Windows paths with forward slashes.
-    assert pathlib.Path(repo.git("rev-parse", "--absolute-git-dir")).resolve() == (repo.path / ".git").resolve()
 
 
 def test_snapshot_reads_refs_once(repo: Repo, git_calls: list[list[str]]) -> None:
@@ -255,7 +216,7 @@ def test_snapshot_reads_only_the_remote_branches_upstreams_are(repo: Repo, git_c
         assert git.rev("main@{upstream}") == git.tip("main")
 
     listing = next(call for call in git_calls if call[0] == "for-each-ref")
-    assert listing[2:] == ["refs/heads/", "refs/remotes/origin/main"]
+    assert listing[-2:] == ["refs/heads/", "refs/remotes/origin/main"]
 
 
 def test_snapshot_reads_every_remote_branch_when_upstreams_are_too_many_to_name(
@@ -266,7 +227,7 @@ def test_snapshot_reads_every_remote_branch_when_upstreams_are_too_many_to_name(
     # 600 upstreams, whose refnames come to over 35000 characters.
     names = [f"{'long-branch-name-' * 2}{i:04}" for i in range(600)]
     subprocess.run(
-        [git_program(), "-C", str(repo.path), "update-ref", "--stdin"],
+        [real_git(), "-C", str(repo.path), "update-ref", "--stdin"],
         # As bytes, so Windows doesn't end lines with \r\n.
         input="".join(f"create refs/heads/{n} {main}\ncreate refs/remotes/origin/{n} {main}\n" for n in names).encode(),
         check=True,
@@ -280,7 +241,7 @@ def test_snapshot_reads_every_remote_branch_when_upstreams_are_too_many_to_name(
         assert not git.upstream_gone(names[0])
 
     listing = next(call for call in git_calls if call[0] == "for-each-ref")
-    assert listing[2:] == ["refs/heads/", "refs/remotes/"]
+    assert listing[-2:] == ["refs/heads/", "refs/remotes/"]
 
 
 def test_snapshot_reads_an_upstream_with_an_unusual_refspec(repo: Repo) -> None:
@@ -393,7 +354,7 @@ def separate_patch_ids(repo: Repo, *command: str) -> list[tuple[str, str]]:
     """`git patch-id --stable` of what `git <command>` prints, run on its own."""
     output = repo.git(command[0], "--no-color", *command[1:])
     result = subprocess.run(
-        [git_program(), "-C", str(repo.path), "patch-id", "--stable"],
+        [real_git(), "-C", str(repo.path), "patch-id", "--stable"],
         input=output.encode() + b"\n",
         capture_output=True,
         check=True,
@@ -418,8 +379,6 @@ def test_commit_patch_ids_reads_each_commands_patches_with_one_patch_id(repo: Re
         ("diff", "HEAD", "HEAD"),  # nothing
     ]
     git = GitClient(repo.path)
-    git.object_id_length()
-    git_calls.clear()
 
     result = git.commit_patch_ids(*commands)
 
@@ -439,19 +398,6 @@ def sha256_repo(tmp_path: pathlib.Path, repo: Repo) -> Repo:
     return sha256
 
 
-@pytest.mark.parametrize("sha256", [False, True])
-def test_object_id_length(tmp_path: pathlib.Path, repo: Repo, git_calls: list[list[str]], sha256: bool) -> None:
-    path = sha256_repo(tmp_path, repo).path if sha256 else repo.path
-    assert GitClient(path).object_id_length() == (64 if sha256 else 40)
-    git = GitClient(path)
-    with git.snapshot():
-        git.rev("refs/heads/main")
-        git_calls.clear()
-        assert git.object_id_length() == (64 if sha256 else 40)
-    # Taken from the snapshot, which has read the refs.
-    assert git_calls == []
-
-
 def test_commit_patch_ids_in_a_sha256_repository(tmp_path: pathlib.Path, repo: Repo) -> None:
     sha256 = sha256_repo(tmp_path, repo)
     commands = [("log", "-p", "HEAD~1..HEAD"), ("diff", "HEAD~1", "HEAD")]
@@ -468,16 +414,14 @@ def test_snapshot_looks_up_objects_with_one_cat_file(
     repo.commit("a", "two\n", "two")
     commits = repo.git("rev-list", "HEAD").split()
     git = GitClient(repo.path)
-    started: list[subprocess.Popen[Any]] = []
-    popen = subprocess.Popen
+    started: list[subprocess.Popen[bytes]] = []
+    popen = Git.popen
 
-    def recording(args: list[str], *rest: Any, **kwargs: Any) -> subprocess.Popen[Any]:
-        process = popen(args, *rest, **kwargs)
-        if "cat-file" in args:
-            started.append(process)
-        return process
+    def recording(self: Git, *args: Arg, **kwargs: Any) -> subprocess.Popen[bytes]:
+        started.append(popen(self, *args, **kwargs))
+        return started[-1]
 
-    monkeypatch.setattr(subprocess, "Popen", recording)
+    monkeypatch.setattr(Git, "popen", recording)
 
     trees = {commit: repo.git("rev-parse", f"{commit}^{{tree}}") for commit in commits}
 
@@ -495,38 +439,6 @@ def test_snapshot_looks_up_objects_with_one_cat_file(
     # It ends with the snapshot.
     assert [process.poll() for process in started] == [0]
     assert all(process.stdout is not None and process.stdout.closed for process in started)
-
-
-def test_cat_file_does_not_keep_a_pipe_open(repo: Repo) -> None:
-    if sys.platform == "win32":
-        pytest.skip("Windows closes them for every git process")
-    # Where Python can't open a pipe non-inheritable at once (macOS before 27), it's
-    # inheritable for a moment, in which another thread may start cat-file.
-    read, write = os.pipe()
-    os.set_inheritable(write, True)
-    git = GitClient(repo.path)
-    with git.snapshot():
-        assert git.tree("main") is not None
-        os.close(write)
-        os.set_blocking(read, False)
-        # Not BlockingIOError: no process still has the pipe open to write.
-        assert os.read(read, 1) == b""
-    os.close(read)
-
-
-def test_cat_file_stopping_is_an_error_and_the_next_snapshot_starts_another(repo: Repo) -> None:
-    git = GitClient(repo.path)
-    commit = git.tip("main")
-    tree = repo.git("rev-parse", "main^{tree}")
-    with pytest.raises(StackError, match="git cat-file stopped"), git.snapshot():
-        assert git.rev(commit) == commit
-        assert git._cat_file is not None  # pyright: ignore[reportPrivateUsage]
-        git._cat_file.kill()  # pyright: ignore[reportPrivateUsage]
-        git._cat_file.wait()  # pyright: ignore[reportPrivateUsage]
-        git.tree(commit)
-
-    with git.snapshot():
-        assert git.tree(commit) == tree
 
 
 def test_snapshot_asks_about_the_same_commits_once_but_sees_a_branch_move(
@@ -612,7 +524,7 @@ def test_has_conflicts_sees_one_at_the_top_from_a_subdirectory_with_diff_relativ
     repo.commit("a", "other\n", "other")
     repo.git("switch", "--quiet", "main")
     repo.commit("a", "main\n", "main")
-    subprocess.run([git_program(), "-C", str(repo.path), "merge", "--quiet", "other"], capture_output=True, check=False)
+    subprocess.run([real_git(), "-C", str(repo.path), "merge", "--quiet", "other"], capture_output=True, check=False)
     (repo.path / "sub").mkdir()
     repo.git("config", "diff.relative", "true")
 

@@ -11,6 +11,16 @@ man page is generated from it.
   the work. `git_stack/git.py` (`GitClient`) runs git; the adapters in
   `git_stack/adapters/` say which branches were merged, locally or by asking
   GitHub.
+- `GitClient` runs git through [py-git-client](https://github.com/benekastah/py-git-client)
+  (`git_client`), which git-stack shares with git-recommit and move-forward:
+  its `Git` starts each process, the quickest way each system allows (and
+  finds git, `$GIT_STACK_GIT` or the one on PATH), its `CatFile` is the
+  snapshot's long-lived `git cat-file`, and its batched reads (`refs`,
+  `config`, `patch_ids`) and error classes (e.g. `ConfigLockedError`) are
+  git-stack's. What git-stack adds stays in `GitClient`: the snapshot and its
+  caches, `check=False`, and turning a `GitError` into a `StackError` (see
+  `git_errors`), which the command line reports as its own. Change how git is
+  started or read in py-git-client, not here.
 - `git_stack/stacks.py` (`Stacks`) holds the tracked branches as trees, with
   the rules for groups and ownership, without touching the repository.
   `StackCore.stacks()` reads it, a command changes it in memory, and
@@ -71,11 +81,16 @@ Text meant for people (messages, `info`'s tree) can change.
 
 - `tests/test_cli.py` checks how each command maps its arguments and prints its
   result, with a mock `StackClient`; the other tests run git-stack against real
-  repositories (see `tests/helpers.py`). `Repo.stack` runs the command line in
+  repositories (see `tests/helpers.py`), copied for each test from ones
+  `repo_templates` builds once. `Repo.stack` runs the command line in
   the test process, which is much quicker than starting one; only
   `tests/test_end_to_end.py` runs it as a separate process (`Repo.stack_process`),
   for what only that checks, like the entry point. A new command or `--json`
   result needs a case in `test_json_prints_the_result_on_stdout`.
+- The tests load py-git-client's pytest plugin (`git_client.testing`, in
+  `tests/conftest.py`): each test's git has a config of its own, none of the
+  user's config or git's variables (e.g. a hook's `GIT_DIR`). `git_calls` lists the git processes
+  git-stack starts; the tests' own (`Repo.git`) aren't in it.
 - The man page, `man/git-stack.1`, is generated from the README, and a test
   fails if it's out of date: the pre-commit hook regenerates it (or run
   `python3 dev.py man`).

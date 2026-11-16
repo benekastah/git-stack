@@ -1340,7 +1340,9 @@ export GIT_STACK_GIT="$(git --exec-path)/git"
 ```
 
 A wrapper that needs to see what git-stack does (e.g. the commits a restack
-rewrites) then won't.
+rewrites) then won't. On Windows, `GIT_STACK_GIT` has to name an `.exe`:
+git-stack refuses a batch file (`.bat` or `.cmd`), which would run in cmd.exe,
+where characters a branch name can have (`&`, `|`, `%`) mean something else.
 
 ## Install
 
