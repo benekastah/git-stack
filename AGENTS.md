@@ -45,6 +45,8 @@ Development section says how to set up a clone and run the checks.
   `uv add --dev`, never to `template-dev`, and add to Ruff's `extend-select` and
   basedpyright's `include` below their `# The project's own below:` line, which stays as it
   is, so the template's changes merge without conflicts.
+- Commit `uv.lock` with the `pyproject.toml` change that updates it: in CI, `dev.py` runs
+  `uv sync --locked`, which fails on a stale lock. `dev.py venv` says when it changed.
 
 ## Tests and checks
 
