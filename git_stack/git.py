@@ -1,3 +1,4 @@
+import contextlib
 import functools
 import os
 import pathlib
@@ -519,10 +520,8 @@ class GitClient:
         assert process.stdin is not None and process.stdout is not None
         if kill:
             process.kill()
-        try:
+        with contextlib.suppress(OSError):  # a broken pipe, if it stopped with a query unread
             process.stdin.close()
-        except OSError:  # a broken pipe, if it stopped with a query unread
-            pass
         process.wait()
         process.stdout.close()
 

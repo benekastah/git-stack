@@ -30,17 +30,19 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.11"
+      # dev.py installs .venv with uv, from uv.lock, and fails if it's out of date ($CI is set).
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: false
           # The venv's Python (setup-python's), named so uv can't choose another.
           python-version: "3.11"
-          # Makes .venv, where lint.sh looks for the tools.
-          activate-environment: true
-      - name: Install the dev dependencies
-        run: uv sync --locked
       - name: Lint
-        run: ./lint.sh
+        run: python dev.py static
+      # dev.py static type-checks as if on Linux; this, as if on the other systems, even when
+      # the step above failed.
+      - name: Check types as if on Windows and macOS
+        if: ${{ !cancelled() }}
+        run: python dev.py types-other-platforms
 
   test:
     name: ${{ matrix.os }}, Python ${{ matrix.python }}
@@ -79,11 +81,8 @@ jobs:
         with:
           enable-cache: false
           python-version: ${{ matrix.python }}
-          activate-environment: true
-      - name: Install the dev dependencies
-        run: uv sync --locked
       - name: Run the tests
-        run: python -m pytest
+        run: python dev.py tests
 
   # The one check the ruleset on main requires, so changing the jobs doesn't
   # change what's required. It runs even if a check failed (a skipped required

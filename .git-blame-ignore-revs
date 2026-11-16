@@ -1,5 +1,5 @@
 # Commits that only reformat code, which `git blame` skips. GitHub's blame view
-# reads this file itself; dev-install.sh sets blame.ignoreRevsFile so git does
+# reads this file itself; `dev.py install` sets blame.ignoreRevsFile so git does
 # too. A commit must keep its hash when merged (e.g. not be squash-merged with
 # other changes) for its line here to match.
 
