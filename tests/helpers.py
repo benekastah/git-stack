@@ -109,7 +109,7 @@ class Repo:
             try:
                 status = cli.main(argv)
             except SystemExit as e:  # argparse's, for arguments it doesn't understand
-                status = e.code if isinstance(e.code, int) else 1
+                status = 0 if e.code is None else e.code if isinstance(e.code, int) else 1
         return self._check_result(args, subprocess.CompletedProcess(argv, status, *output), expect_success)
 
     def stack_process(self, *args: str, expect_success: bool = True) -> subprocess.CompletedProcess[str]:
