@@ -1449,7 +1449,9 @@ if you change the dependencies in `pyproject.toml`, it updates `uv.lock` too;
 commit both. CI installs from `uv.lock` and fails if it's out of date.
 Dependabot proposes new versions weekly. Arguments are passed to pytest, so
 `python3 dev.py check -k sync` runs only the tests whose names contain `sync`.
-git-stack itself still has no runtime dependencies.
+git-stack's only runtime dependency is
+[py-git-client](https://github.com/benekastah/py-git-client), which has none of
+its own.
 
 The tests run in parallel, with one worker per CPU (pytest-xdist's
 `--numprocesses auto`; in CI, 8). Set `PYTEST_XDIST_AUTO_NUM_WORKERS` to use another

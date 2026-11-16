@@ -7,7 +7,9 @@ license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Paul Harper", email = "benekastah@gmail.com" }]
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "py-git-client @ git+https://github.com/benekastah/py-git-client@v0.0.1",
+]
 
 [project.scripts]
 git-stack = "git_stack.cli:main"

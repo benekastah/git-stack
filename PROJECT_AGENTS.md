@@ -35,8 +35,12 @@ man page is generated from it.
   the code compares members rather than strings, and adding a value happens in
   one place. Give it the values the outside world uses, so JSON output, which
   prints an enum as its value, doesn't change.
-- git-stack has no runtime dependencies. Keep it that way: use the standard
-  library, and add dev dependencies to `pyproject.toml`'s `dev` group.
+- git-stack's only runtime dependency is py-git-client, which has none of its
+  own. Add no other: use the standard library, and add dev dependencies to
+  `pyproject.toml`'s `dev` group. py-git-client isn't on PyPI, so
+  `dependencies` names it by its git URL and tag (`uv add --raw-sources`),
+  which pip and pipx read too, unlike uv's `[tool.uv.sources]`; `uv.lock`
+  pins the commit. To take a new release, change the tag and run `uv lock`.
 
 ## Don't break output formats
 
