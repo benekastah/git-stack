@@ -1,6 +1,8 @@
 """dev_project.py: git-stack's additions to dev.py's install and pre-commit hook."""
 
 import os
+import re
+import subprocess
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -58,6 +60,20 @@ def test_install_links_the_man_page_and_sets_up_git_blame(
         assert not man_link.exists()
     else:
         assert man_link.readlink() == ROOT / "man" / "git-stack.1"
+
+
+def git_version() -> tuple[int, int]:
+    version = subprocess.run(["git", "version"], capture_output=True, encoding="utf-8", check=True).stdout
+    match = re.search(r"(\d+)\.(\d+)", version)
+    assert match is not None, version
+    return int(match[1]), int(match[2])
+
+
+@pytest.mark.skipif(git_version() < (2, 52), reason="git takes :(optional) paths from 2.52")
+def test_the_optional_paths_probe_says_yes_on_a_git_that_takes_them(dev_project: ModuleType) -> None:
+    # The real probe, in this clone: a broken one would answer no, and install would set a
+    # blame.ignoreRevsFile that fails on checkouts without the file.
+    assert dev_project._git_has_optional_paths()  # pyright: ignore[reportPrivateUsage]
 
 
 def commit_new(repo: Repo, files: dict[str, str]) -> None:
