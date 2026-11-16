@@ -8,6 +8,15 @@ on:
 permissions:
   contents: read
 
+# A new push to a pull request, or to main, cancels the run on the older
+# commit, which no one needs any more, so runs don't pile up in the account's
+# few shared runners. (Each pull request passed CI before it merged.) A re-run
+# doesn't cancel a run in progress: re-running an older commit's run waits for
+# the newest's, unless that's still waiting to start, which it replaces.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.run_attempt == 1 }}
+
 jobs:
   check:
     name: ${{ matrix.os }}, Python ${{ matrix.python }}
@@ -43,7 +52,36 @@ jobs:
     if: always()
     needs: check
     runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      checks: read
     steps:
+      # A cancelled run still runs this job, because of always(), and if it
+      # was cancelled before this job started, cancelled() is false here, but
+      # the checks' result is 'cancelled'. Cancelling this job too, which only
+      # force-cancel can, marks it cancelled rather than failed, which blocks
+      # a merge just the same. (A fork's pull request can't, so there it
+      # fails.) A check that ran out of time is cancelled too, but that's a
+      # failure, which GitHub says only in the check's annotations. If the
+      # force-cancel hasn't stopped this job within a minute, it fails. A run
+      # in which a check failed ends red, since the commit really failed.
+      - name: Cancel this job if the run was cancelled
+        if: cancelled() || needs.check.result == 'cancelled'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          jobs=$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs" \
+            -q '.jobs[] | select(.conclusion == "cancelled") | .id')
+          for job in $jobs; do
+            messages=$(gh api --paginate "repos/$GITHUB_REPOSITORY/check-runs/$job/annotations" -q '.[].message')
+            if grep -q 'exceeded the maximum execution time' <<<"$messages"; then
+              echo "A check ran out of time."
+              exit 1
+            fi
+          done
+          gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/force-cancel"
+          sleep 60
+          exit 1
       - name: Fail unless every check passed
         if: needs.check.result != 'success'
         run: exit 1
