@@ -464,3 +464,23 @@ def test_snapshot_reads_a_reflog_once_until_its_branch_moves(repo: Repo, git_cal
         assert git.reflog_tips("main") == [git.tip("main"), *first]
 
     assert [call[1] for call in git_calls if call[0] == "log"] == ["--walk-reflogs"] * 2
+
+
+def test_snapshot_doesnt_keep_a_reflog_read_while_it_was_forgotten(
+    repo: Repo, git_calls: list[list[str]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    git = GitClient(repo.path)
+    run = git.run
+
+    def forgetting_meanwhile(*args: str, **kwargs: Any) -> str:
+        """As if another thread moved a branch while the reflog was read."""
+        git._forget_refs()
+        return run(*args, **kwargs)
+
+    with git.snapshot():
+        monkeypatch.setattr(git, "run", forgetting_meanwhile)
+        git.reflog_tips("main")
+        monkeypatch.setattr(git, "run", run)
+        git.reflog_tips("main")
+
+    assert [call[1] for call in git_calls if call[0] == "log"] == ["--walk-reflogs"] * 2

@@ -675,11 +675,14 @@ class GitClient:
         """Every commit branch has pointed at, as far back as its reflog goes.
         Read once per snapshot, and forgotten with the refs (moving a branch
         adds to its reflog)."""
-        if self._snapshot_depth and (known := self._reflogs.get(branch)) is not None:
+        reflogs = self._reflogs
+        if self._snapshot_depth and (known := reflogs.get(branch)) is not None:
             return list(known)
         tips = self.run("log", "--walk-reflogs", "--format=%H", f"refs/heads/{branch}", check=False).split()
-        if self._snapshot_depth:
-            self._reflogs[branch] = tuple(tips)
+        with self._refs_lock:
+            # Unless _forget_refs, which replaces the dict, ran meanwhile.
+            if self._snapshot_depth and self._reflogs is reflogs:
+                reflogs[branch] = tuple(tips)
         return tips
 
     def finished_rebase(self, branch: str, before: str, onto: str) -> bool:
