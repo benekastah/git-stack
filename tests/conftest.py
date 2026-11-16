@@ -38,9 +38,8 @@ def git_exec_path() -> pathlib.Path:
 
 
 def isolate_git(mp: pytest.MonkeyPatch, directory: pathlib.Path, path: list[pathlib.Path]) -> None:
-    """Give git, git stack run as a separate process, and StackClient an
-    isolated git config (directory / "gitconfig") and identity, with path
-    before PATH."""
+    """Give git and git stack, in this process or another, an isolated git
+    config (directory / "gitconfig") and identity, with path before PATH."""
     mp.setenv("PATH", os.pathsep.join([*map(str, path), os.environ["PATH"]]))
     # A git hook runs with these pointing at its repository (in a linked
     # worktree, GIT_DIR is absolute), so the tests run by the pre-push hook
@@ -94,8 +93,8 @@ def repo(
 ) -> Repo:
     """A repository with a, b and c committed to main and pushed to origin.
 
-    git, git stack run as a separate process, and repo.client see an isolated
-    git config and identity for the rest of the test. PATH has tmp_path /
+    git and git stack, in this process or another, see an isolated git config
+    and identity for the rest of the test. PATH has tmp_path /
     "bin" first, which other fixtures can add commands to (see
     install_command), then git_exec_path, so git is the git there.
     """
