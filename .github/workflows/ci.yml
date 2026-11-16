@@ -32,11 +32,9 @@ jobs:
           python-version: "3.11"
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
-          version: "0.13.8"
+          enable-cache: false
           # The venv's Python (setup-python's), named so uv can't choose another.
           python-version: "3.11"
-          enable-cache: true
-          cache-dependency-glob: uv.lock
           # Makes .venv, where lint.sh looks for the tools.
           activate-environment: true
       - name: Install the dev dependencies
@@ -77,22 +75,10 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: ${{ matrix.python }}
-      # Defender scans each of the many small files the tests' git
-      # repositories are made of as they're written, slowing every git call.
-      - name: Stop Windows Defender scanning files as they're written
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: Set-MpPreference -DisableRealtimeMonitoring $true
-      # Likewise, Spotlight indexes the files as they're written.
-      - name: Stop Spotlight indexing files
-        if: runner.os == 'macOS'
-        run: sudo mdutil -a -i off
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
-          version: "0.13.8"
+          enable-cache: false
           python-version: ${{ matrix.python }}
-          enable-cache: true
-          cache-dependency-glob: uv.lock
           activate-environment: true
       - name: Install the dev dependencies
         run: uv sync --locked
