@@ -107,8 +107,9 @@ three. Keep it that way:
   and don't call other Unix tools (`sed`, `grep`, ...) from Python.
 - Don't use Unix-only modules or calls (`fcntl`, `os.fork`, `signal`, ...). If
   a feature needs one, keep it behind a function with a Windows version too,
-  as `git_stack/file_lock.py` does. basedpyright checks every system's code
-  (`pythonPlatform = "All"`), so it sees the Windows version too.
+  as `git_stack/file_lock.py` does. `lint.sh` type-checks as if on Linux,
+  Windows and macOS in turn, so basedpyright sees each version, and reports a
+  call one of them lacks.
 - Decode git's output, and read and write files, as UTF-8 (`encoding="utf-8"`,
   not `text=True`), not in the locale's encoding, which on Windows usually
   isn't UTF-8.

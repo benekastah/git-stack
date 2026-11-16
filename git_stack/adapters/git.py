@@ -210,7 +210,7 @@ class GitAdapter:
             undoing.pop(patch, None)
         # The newest commit that does or undoes a change says whether it's undone.
         decided: set[int] = set()
-        reverts = []
+        reverts: list[str] = []
         for patch, commit in since:
             if undecided := undoing.get(patch, set()) - decided:
                 reverts.append(commit)

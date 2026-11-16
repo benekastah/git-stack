@@ -1,3 +1,4 @@
+# pyright: reportUnknownVariableType=false
 import enum
 import json
 import re

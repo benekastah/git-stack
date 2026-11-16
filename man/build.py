@@ -9,7 +9,7 @@ import argparse
 import pathlib
 import sys
 
-import pypandoc  # type: ignore[import-untyped]
+import pypandoc  # pyright: ignore[reportMissingTypeStubs]
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 README = ROOT / "README.md"

@@ -480,7 +480,7 @@ class StackCore:
         """Restack branches, parent-before-child, skipping those stacked on a
         branch that couldn't be restacked."""
         original = self.git.current_branch()
-        skipped = set()
+        skipped: set[str] = set()
         for branch in branches:
             parent = stacks.parent(branch)
             if parent in skipped:

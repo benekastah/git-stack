@@ -813,7 +813,7 @@ class GitClient:
         Their own changes are in neither parent, so commits alone don't
         account for them.
         """
-        merges = []
+        merges: list[str] = []
         for line in self.run("rev-list", "--merges", "--parents", *args).splitlines():
             commit, *parents = line.split()
             if len(parents) != 2 or self.merged_tree(*parents) != self.tree(commit):

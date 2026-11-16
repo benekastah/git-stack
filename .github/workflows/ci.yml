@@ -19,8 +19,8 @@ concurrency:
 
 jobs:
   # Linting and type checking give the same answer everywhere (basedpyright
-  # checks every system's code, as if on the oldest Python pyproject.toml
-  # allows), so they run once.
+  # checks as if on each system in turn, and on the oldest Python
+  # pyproject.toml allows), so they run once.
   lint:
     name: Lint
     runs-on: ubuntu-latest

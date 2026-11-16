@@ -34,19 +34,19 @@ addopts = ["-n", "auto"]
 line-length = 120
 
 [tool.ruff.lint]
-extend-select = ["B904", "B905", "C901", "PERF401"]
+# ANN: every function's parameters and return annotated (a return isn't inferred), but Any allowed.
+extend-select = ["ANN", "B904", "B905", "C901", "PERF401"]
+ignore = ["ANN401"]
 
 [tool.basedpyright]
 include = ["git_stack", "tests", "man/build.py"]
 typeCheckingMode = "strict"
 pythonVersion = "3.11"
-# Every system's code: what's under `sys.platform == "win32"` (e.g. in file_lock.py) and what
-# isn't are both checked, wherever this runs.
-pythonPlatform = "All"
-# Strict's rules about values of unknown type are off: about 170 places, mostly JSON read from
-# GitHub, would need types first.
+# One system at a time, so a call another system lacks (e.g. fcntl's on Windows) is reported:
+# lint.sh also runs it with --pythonplatform Windows and Darwin.
+pythonPlatform = "Linux"
+# Off, until about 130 places, mostly JSON read from GitHub, get types: these let a value of
+# unknown type (e.g. from json.loads) be passed, called or read from unchecked.
 reportUnknownArgumentType = false
 reportUnknownLambdaType = false
 reportUnknownMemberType = false
-reportUnknownParameterType = false
-reportUnknownVariableType = false

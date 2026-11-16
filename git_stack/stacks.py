@@ -92,7 +92,7 @@ class Stacks:
     def descendants(self, branch: str) -> list[str]:
         """The branches stacked on branch, on those, and so on,
         parent-before-child (branch excluded)."""
-        order = []
+        order: list[str] = []
         for child in self.children(branch):
             order.append(child)
             order.extend(self.descendants(child))

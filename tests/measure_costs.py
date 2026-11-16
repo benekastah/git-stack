@@ -29,7 +29,7 @@ def git(*args: str, cwd: pathlib.Path) -> None:
 
 
 def median_ms(operation: Callable[[], object], runs: int = RUNS) -> float:
-    times = []
+    times: list[float] = []
     for _ in range(runs):
         started = time.perf_counter()
         operation()

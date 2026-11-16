@@ -409,7 +409,7 @@ class StackClient(StackCore):
         # Work out the whole chain before writing anything, so a bad argument
         # doesn't leave the stack half-tracked.
         stacks = self.stacks()
-        plan = []
+        plan: list[Tracked] = []
         explicit_base = base is not None
         base_arg = base
         for branch in branches:
@@ -567,7 +567,7 @@ class StackClient(StackCore):
             commit_authors = (
                 set(git.run("log", "--format=%ae", f"{base}..refs/heads/{step.branch}").lower().splitlines())
                 if base
-                else set()
+                else set[str]()
             )
             pr_is_other = isinstance(step, ImportStep) and (not viewer or authors.get(step.number) != viewer)
             if not email or not commit_authors or commit_authors != {email} or pr_is_other:
@@ -590,7 +590,7 @@ class StackClient(StackCore):
             raise lookup_failed(e) from e
         if closed := [number for number, login in logins.items() if login is None]:
             raise StackError(f"#{closed[0]} isn't an open pull request")
-        authors = {author} if author else ({"@me"} if mine else set())
+        authors = {author} if author else ({"@me"} if mine else set[str]())
         authors |= {login for login in logins.values() if login}
         prs: dict[int, OpenPullRequest] = {}
         try:
@@ -706,7 +706,7 @@ class StackClient(StackCore):
         self.ensure_no_operation_in_progress()
         self.settle_all()
         stacks = self.stacks()
-        removed = []
+        removed: list[tuple[str, str]] = []
         for bottom in self.selected_bottoms(branches, groups, stacks, "ungroup"):
             if (group := stacks.group(bottom)) is not None:
                 stacks.set_group(bottom, None)
@@ -1030,7 +1030,7 @@ class StackClient(StackCore):
         shown_groups = {
             b: g for b, g in stacks.groups().items() if stacks.is_bottom(b) and len(stacks.group_bottoms(b)) > 1
         }
-        result = []
+        result: list[BranchInfo] = []
         for root in stacks.roots():
             result.append(BranchInfo(root, None, None, root == current))
             result.extend(
@@ -1074,8 +1074,8 @@ class StackClient(StackCore):
         """Leave merged branches out of branches (parent-before-child), moving
         their children down in stacks (see Stacks.drop). Leave reverted ones
         out too, with the branches stacked on them, as sync does."""
-        remaining = []
-        skipped = set()
+        remaining: list[str] = []
+        skipped: set[str] = set()
         for branch in branches:
             parent = stacks.parent(branch)
             if parent in skipped:
@@ -1276,10 +1276,10 @@ class StackClient(StackCore):
         roots_to_update = {root for root in roots if not only_remote or self.git.config_get(root, "remote") == remote}
         root_remotes = self.upstream_remotes(roots_to_update)
         push_remote = remote if only_remote else self.stack_remote(upstream_remotes, root_remotes)
-        protected = self.protected_sync_destinations(stack, roots, push_remote) if push and not force else set()
+        protected = self.protected_sync_destinations(stack, roots, push_remote) if push and not force else set[str]()
         original = self.current_checkout()
         adapter = self.checked_adapter(push_remote)
-        remotes = {push_remote} | upstream_remotes | root_remotes | ({remote} if only_remote else set())
+        remotes = {push_remote} | upstream_remotes | root_remotes | ({remote} if only_remote else set[str]())
         for name in sorted(remotes, key=lambda name: (name != remote, name)):
             self.fetch(name)
         # A group's stacks can be on different roots.
@@ -1541,7 +1541,8 @@ class StackClient(StackCore):
     ) -> tuple[list[str], list[str]]:
         """Validate destinations and pin leases to the remote tips we checked."""
         git = self.git
-        leases, refspecs = [], []
+        leases: list[str] = []
+        refspecs: list[str] = []
         destinations: set[str] = set()
         for b in branches:
             target = git.remote_branch_name(b, remote) if use_upstreams else b
@@ -1999,7 +2000,7 @@ class ImportPlanner:
                 seen.add(branch)
             return branch
 
-        bottoms = set()
+        bottoms: set[str] = set()
         for number in numbers:
             if number not in by_number:
                 # It's open, so its author's pull requests were looked up.
