@@ -1,5 +1,5 @@
 # Times what the tests spend their time on, on each CI system, and the tests
-# themselves, with CI's 8 workers, in the default temporary directory and then,
+# themselves, with CI's workers (tests/conftest.py's CI_WORKERS), in the default temporary directory and then,
 # on Windows, in the Dev Drive CI uses (see .github/actions/fast-temp), to see
 # where macOS and Windows are slower than Linux. It's for reading, not
 # checking: it runs when it changes, or by hand.
@@ -28,9 +28,6 @@ jobs:
     name: ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
-    env:
-      # As CI has (tests/conftest.py).
-      PYTEST_XDIST_AUTO_NUM_WORKERS: 8
     strategy:
       fail-fast: false
       matrix:

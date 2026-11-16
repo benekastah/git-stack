@@ -56,8 +56,9 @@ def isolate_git(mp: pytest.MonkeyPatch, directory: pathlib.Path, path: list[path
     config (directory / "gitconfig") and identity, with path before PATH."""
     mp.setenv("PATH", os.pathsep.join([*map(str, path), os.environ["PATH"]]))
     # A git hook runs with these pointing at its repository (in a linked
-    # worktree, GIT_DIR is absolute), so the tests run by the pre-push hook
-    # would otherwise commit to, and push from, the repository being pushed.
+    # worktree, GIT_DIR is absolute), so tests run from a hook (e.g. `dev.py
+    # check` from one) would otherwise commit to, and push from, the
+    # repository being pushed.
     for name in GIT_REPOSITORY_VARIABLES:
         mp.delenv(name, raising=False)
     global_config = directory / "gitconfig"

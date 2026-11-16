@@ -105,9 +105,11 @@ The tooling comes from the python-template Copier template (see the README's
 - Keep `dev.py` as the template's, verbatim, so updates apply cleanly. Add
   git-stack's own commands and install steps to `dev_project.py` (standard
   library only, like `dev.py`).
-- The template never changes this file (for now), `PROJECT_AGENTS.md`, the
-  README, `docs/` or `.github/workflows/project.yml`. Elsewhere, keep
-  git-stack's differences when resolving an update's conflicts:
+- An update conflicts on this file until its rules move to `PROJECT_AGENTS.md`
+  (#98): keep git-stack's side. The template never changes
+  `PROJECT_AGENTS.md`, the README, `docs/` or `.github/workflows/project.yml`.
+  Elsewhere, keep git-stack's differences when resolving an update's
+  conflicts:
   - `pyproject.toml`: every setting the template doesn't have, and every value
     that differs from it, e.g. setuptools and its `data-files` (the man page;
     the package is at the root, not in `src/`), `pypandoc_binary` in `dev`,

@@ -60,7 +60,9 @@ jobs:
       - run: uv run --no-project python dev.py types-other-platforms
 
   # The tests with the Pythons between the oldest and newest, which ci.yml's tests job runs:
-  # on Linux only, whose runners are quick and many.
+  # on Linux only, whose runners are quick and many. A matrix can't be a range of the context's
+  # Pythons, so keep this list in step with min_python and newest_python in
+  # .copier-answers.yml.
   tests-other-pythons:
     if: fromJSON(inputs.context).code
     strategy:
