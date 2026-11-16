@@ -16,7 +16,7 @@ from tests.helpers import FakeGitHub, Repo, install_command
 # py-git-client's plugin gives every test (session fixtures included) a git
 # config of its own, and keeps the user's config and git's variables (e.g. a
 # hook's GIT_DIR) from reaching it; and its fixtures (repo_templates,
-# git_calls) are the tests'.
+# git_calls, outside_any_repository) are the tests'.
 pytest_plugins = ["git_client.testing"]
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -41,6 +41,13 @@ def pytest_xdist_auto_num_workers(config: pytest.Config) -> int | None:
 # which reads $GIT_STACK_GIT once (see git_client.find_git), runs it too.
 os.environ[GIT_VARIABLE] = real_git()
 GIT_EXEC_PATH = pathlib.Path(real_git()).parent
+
+
+@pytest.fixture(autouse=True)
+def _outside_any_repository(outside_any_repository: pathlib.Path) -> None:  # pyright: ignore[reportUnusedFunction]
+    """Run every test from a directory where git finds no repository, so
+    anything that doesn't name its repository fails, rather than change the
+    one the tests were started in (its config, say)."""
 
 
 def make_repositories(directory: pathlib.Path) -> None:
@@ -72,10 +79,6 @@ def repo(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, repo_templates
     monkeypatch.setenv("PYTHONPATH", str(ROOT))
     repo_templates.build("repo", make_repositories)
     repos = repo_templates.copy("repo", tmp_path / "repos")
-    # Everything should target repo.path explicitly. Run from a directory
-    # that isn't a repository, so anything that doesn't fails instead of
-    # touching the repository the tests were started in.
-    monkeypatch.chdir(tmp_path)
     return Repo(path=repos / "local", origin=repos / "origin.git", forge=repos / "forge", tmp=repos)
 
 
