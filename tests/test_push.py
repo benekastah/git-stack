@@ -8,6 +8,21 @@ from git_stack.stack import StackClient
 from tests.helpers import Repo
 
 
+@pytest.mark.parametrize("command", ["push", "sync"])
+def test_no_verify_skips_pre_push_hook(repo: Repo, client: StackClient, command: str) -> None:
+    client.branch("feature")
+    repo.commit("a", "first\n", "first")
+    if command == "sync":
+        client.push()
+        repo.commit("a", "second\n", "second")
+    repo.add_hook(repo.path, "pre-push", "#!/bin/sh\nexit 1\n")
+
+    repo.stack(command, expect_success=False)
+    repo.stack(command, "--no-verify")
+
+    assert repo.remote_subject("feature") == ("second" if command == "sync" else "first")
+
+
 def test_push_force_targets_the_configured_upstream_name(repo: Repo, client: StackClient) -> None:
     client.branch("local-feature")
     repo.commit("a", "local\n", "local")

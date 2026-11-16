@@ -295,6 +295,7 @@ class SyncState:
     scope: frozenset[str] = frozenset()
     protected: frozenset[str] = frozenset()
     command: SyncCommand = SyncCommand.SYNC
+    no_verify: bool = False
     skipped: set[str] = field(default_factory=set)
     blocked: list[str] = field(default_factory=list)
     pushable: list[str] = field(default_factory=list)
@@ -1236,6 +1237,7 @@ class StackClient(StackCore):
         force: bool = False,
         only_remote: bool = False,
         rebuild_stack: bool = False,
+        no_verify: bool = False,
     ) -> SyncResult:
         """Fetch, untrack the merged branches in the current stack, or in the
         stacks of the branches that branches and groups name (see named), deleting what
@@ -1298,6 +1300,7 @@ class StackClient(StackCore):
             frozenset(stack),
             frozenset(protected),
             command,
+            no_verify,
         )
         # Parent-before-child, so by the time we reach a branch its parent is
         # final: merged branches have been removed (and their children reparented
@@ -1307,7 +1310,14 @@ class StackClient(StackCore):
 
         self.restore_checkout(state.original)
         self.push_branches(
-            state.pushable, stacks, adapter, push_remote, rebuild_stack=rebuild_stack, scope=stack, use_upstreams=True
+            state.pushable,
+            stacks,
+            adapter,
+            push_remote,
+            rebuild_stack=rebuild_stack,
+            scope=stack,
+            use_upstreams=True,
+            no_verify=no_verify,
         )
         if push and state.blocked:
             raise StackError(
@@ -1338,7 +1348,12 @@ class StackClient(StackCore):
                 )
             confirmed = adapter.merge_confirmed(branch, parent)
             if not self.untrack_merged(
-                branch, state.stacks, state.delete, allow_different_upstream=True, confirmed=confirmed
+                branch,
+                state.stacks,
+                state.delete,
+                allow_different_upstream=True,
+                confirmed=confirmed,
+                no_verify=state.no_verify,
             ):
                 state.skipped.add(branch)
             elif branch == state.original:
@@ -1468,6 +1483,7 @@ class StackClient(StackCore):
         allow_shared: bool = False,
         rebuild_stack: bool = False,
         only_remote: bool = False,
+        no_verify: bool = False,
     ) -> PushResult:
         """Force-push (with lease) every unmerged branch in the current stack, or
         in the stacks of the branches that branches and groups name (see named), then let
@@ -1522,6 +1538,7 @@ class StackClient(StackCore):
             opening=github is not None,
             rebuild_stack=rebuild_stack,
             use_upstreams=True,
+            no_verify=no_verify,
         )
         steps = (
             self.open_pull_requests(pushed, stacks, github, push_remote, rebuild_stack=rebuild_stack)
@@ -1571,6 +1588,7 @@ class StackClient(StackCore):
         rebuild_stack: bool = False,
         scope: list[str] | None = None,
         use_upstreams: bool = False,
+        no_verify: bool = False,
     ) -> list[str]:
         """Force-push (with lease) branches, which must be unmerged, in one atomic
         push, then let the adapter update their pull requests (see
@@ -1607,7 +1625,8 @@ class StackClient(StackCore):
             ) from e
         # Atomic, so a branch that can't be pushed doesn't leave the rest of the
         # stack pushed without it, and its pull requests not retargeted.
-        if not git.passthrough("push", "--atomic", *leases, "--set-upstream", remote, *refspecs):
+        verify_options = ["--no-verify"] if no_verify else []
+        if not git.passthrough("push", "--atomic", *verify_options, *leases, "--set-upstream", remote, *refspecs):
             raise StackError(
                 "push failed, so nothing was pushed; if the remote has new commits, run `git stack sync` and try "
                 f"again{self.changes_left(adapter)}"

@@ -174,6 +174,13 @@ def stack() -> Any:
             {"remote": "upstream", "force": False, "prs": False},
         ),
         (["push", "--force"], "push", ([], []), {"remote": "origin", "force": True, "prs": False}),
+        (["push", "--no-verify"], "push", ([], []), {"remote": "origin", "force": False, "prs": False}),
+        (
+            ["sync", "--no-verify"],
+            "sync",
+            ([], []),
+            {"remote": "origin", "delete": None, "latest": False, "push": True, "ignore_reverts": []},
+        ),
         (["push", "--rebuild-stack"], "push", ([], []), {"remote": "origin", "force": False, "prs": False}),
         (["push", "--allow-shared"], "push", ([], []), {"remote": "origin", "force": False, "prs": False}),
         (["push", "--prs"], "push", ([], []), {"remote": "origin", "force": False, "prs": True}),
@@ -218,6 +225,8 @@ def test_command_calls_its_client_method(
         kwargs = {**kwargs, "allow_shared": "--allow-shared" in argv}
     if method in ("sync", "push"):
         kwargs = {**kwargs, "rebuild_stack": "--rebuild-stack" in argv}
+        if argv[0] != "pull":
+            kwargs = {**kwargs, "no_verify": "--no-verify" in argv}
     if method == "push":
         kwargs = {**kwargs, "only_remote": "--remote" in argv}
     if method == "sync":
