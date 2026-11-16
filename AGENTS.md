@@ -83,11 +83,11 @@ Text meant for people (messages, `info`'s tree) can change.
   `pyproject.toml`'s dependencies with the `uv.lock` it updates; CI fails on a
   stale one.
 - CI is the template's `.github/workflows/ci.yml` (and `cancel.yml`), with
-  git-stack's own jobs in `.github/workflows/project.yml`: the type checks as
-  if on Windows and macOS, and the tests with the Pythons between the oldest
-  and newest, on Linux. `ci.yml` has two edits of git-stack's, each commented:
-  the tests job sets up the Windows Dev Drive (`.github/actions/fast-temp`),
-  and the time limits. `tests/conftest.py` gives CI 8 test workers.
+  git-stack's own jobs in `.github/workflows/project.yml`: the man page check
+  (on docs-only changes too), the type checks as if on Windows and macOS, and
+  the tests with the Pythons between the oldest and newest, on Linux.
+  `ci.yml` has two edits of git-stack's, each commented: the tests job sets up
+  the Windows Dev Drive (`.github/actions/fast-temp`), and the time limits. `tests/conftest.py` gives CI 8 test workers.
 - Each CI job has a time limit (`timeout-minutes`), about 20% over how long it
   takes, and at most 5 minutes. If a job starts hitting it, speed the tests up
   if you can (most of their time is spent starting git processes, which is
