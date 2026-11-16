@@ -79,8 +79,8 @@ def test_config_get_handles_dots_in_branch_names_and_any_key_case(repo: Repo) ->
 
 
 def test_tests_ignore_a_hooks_repository(repo: Repo) -> None:
-    """The pre-push hook runs the tests with GIT_DIR set to the repository
-    being pushed, which their git commands mustn't use."""
+    """A git hook that runs the tests (e.g. `dev.py check` from one) runs them
+    with GIT_DIR set to its repository, which their git commands mustn't use."""
     assert not set(GIT_REPOSITORY_VARIABLES) & os.environ.keys()
     # As paths, since git writes Windows paths with forward slashes.
     assert pathlib.Path(repo.git("rev-parse", "--absolute-git-dir")).resolve() == (repo.path / ".git").resolve()

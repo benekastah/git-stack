@@ -26,6 +26,20 @@ GIT_REPOSITORY_VARIABLES = (
 )
 
 
+CI_WORKERS = 8
+"""pytest -n auto's workers in CI, rather than one per CPU (3 or 4 on its runners): the tests
+spend most of their time waiting for the git processes they start, and the files they write,
+so more keep the CPUs busy."""
+
+
+def pytest_xdist_auto_num_workers(config: pytest.Config) -> int | None:
+    """-n auto's workers: CI_WORKERS in CI ($CI set), unless PYTEST_XDIST_AUTO_NUM_WORKERS
+    says how many; otherwise (None) pytest-xdist's own choice."""
+    if os.environ.get("CI") and "PYTEST_XDIST_AUTO_NUM_WORKERS" not in os.environ:
+        return CI_WORKERS
+    return None
+
+
 # git itself, from the directory it runs its own commands from, rather than a
 # wrapper (such as git-ai) or shim on PATH, which can make each of the tests'
 # many git processes several times slower. git-stack, which reads
@@ -42,8 +56,9 @@ def isolate_git(mp: pytest.MonkeyPatch, directory: pathlib.Path, path: list[path
     config (directory / "gitconfig") and identity, with path before PATH."""
     mp.setenv("PATH", os.pathsep.join([*map(str, path), os.environ["PATH"]]))
     # A git hook runs with these pointing at its repository (in a linked
-    # worktree, GIT_DIR is absolute), so the tests run by the pre-push hook
-    # would otherwise commit to, and push from, the repository being pushed.
+    # worktree, GIT_DIR is absolute), so tests run from a hook (e.g. `dev.py
+    # check` from one) would otherwise commit to, and push from, the
+    # repository being pushed.
     for name in GIT_REPOSITORY_VARIABLES:
         mp.delenv(name, raising=False)
     global_config = directory / "gitconfig"

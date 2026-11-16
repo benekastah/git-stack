@@ -4,12 +4,21 @@
     python dev.py check [ARGS...]    # static, then tests (ARGS go to pytest)
     python dev.py static             # format, lint and types: the same on every system
     python dev.py tests [ARGS...]    # the tests, in parallel (ARGS go to pytest)
+    python dev.py tests --shard I/N  # the Ith of N even parts of the tests, as CI splits them
     python dev.py coverage [ARGS...] # the tests under coverage.py, and what they don't run
     python dev.py install            # venv, the package's commands on PATH, the git hooks
     python dev.py pre-commit         # what the pre-commit hook runs
-    python dev.py pre-push           # what the pre-push hook runs
 
 On Windows, run it with `py` (`py dev.py check`). The hooks in git_hooks/ call it.
+
+`static` runs every check even when one fails, and `check` runs the tests even when `static`
+fails, so one run reports every failure; the exit status is the first failure's. `venv` says so
+when it changes uv.lock, which should be committed with the pyproject.toml change behind it.
+
+`tests` runs pytest with this file as a plugin (`-p dev`), which adds `--shard I/N`: it sorts
+the tests by node id and keeps every Nth from the Ith, so the N shards run each test exactly
+once between them, and as many tests each, give or take one. CI runs a system's tests in N
+jobs this way when the project's Copier answers say so (see AGENTS.md).
 
 It comes from python-template, and `copier update` replaces it: a project adds to it in
 dev_project.py, its own file, if it has one. That can define `COMMANDS`, a dict of extra
@@ -21,6 +30,7 @@ whichever `python3` comes first: everything but making .venv with venv and pip r
 tools, and uv picks its own Python.
 """
 
+import argparse
 import importlib
 import os
 import shutil
@@ -31,6 +41,10 @@ import tomllib
 from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:  # only for the plugin's types: pytest is .venv's, not standard library
+    import pytest
 
 ROOT = Path(__file__).resolve().parent
 VENV = ROOT / ".venv"
@@ -99,9 +113,14 @@ def tool(name: str) -> str:
 
 def run(*args: str) -> None:
     """Run a command; its failure ends this script with its exit code."""
-    result = subprocess.run(args, cwd=ROOT, check=False)
-    if result.returncode != 0:
-        sys.exit(result.returncode)
+    code = run_code(*args)
+    if code != 0:
+        sys.exit(code)
+
+
+def run_code(*args: str) -> int:
+    """Run a command and return its exit code, for a caller that goes on after a failure."""
+    return subprocess.run(args, cwd=ROOT, check=False).returncode
 
 
 def venv() -> None:
@@ -112,14 +131,23 @@ def venv() -> None:
     Uses uv when it's installed: from uv.lock, which it updates when pyproject.toml's
     dependencies change, except in CI (where $CI is set), where an out-of-date uv.lock is an
     error. Without uv, it uses venv and pip (25.1+ for --group), which don't read uv.lock.
-    Either makes .venv again when an older Python made it."""
+    Either makes .venv again when an older Python made it.
+
+    Says so when uv changed uv.lock (compared by content, so a rewrite to the same text is
+    silent): it should be committed with the pyproject.toml change that caused it."""
     sources = [ROOT / "pyproject.toml", ROOT / "uv.lock"]
     newest = max(path.stat().st_mtime for path in sources if path.exists())
     if STAMP.exists() and STAMP.stat().st_mtime >= newest:
         return
     print("dev: installing the package and dev dependencies into .venv", file=sys.stderr)
     if shutil.which("uv"):
+        lock = ROOT / "uv.lock"
+        before = lock.read_bytes() if lock.exists() else None
         run("uv", "sync", "--quiet", *(["--locked"] if os.environ.get("CI") else []))
+        after = lock.read_bytes() if lock.exists() else None
+        if after != before:
+            what = "created" if before is None else "changed"
+            print(f"dev: uv.lock {what}; commit it with pyproject.toml", file=sys.stderr)
     else:
         required = required_python(_pyproject_text())
         cfg = VENV / "pyvenv.cfg"
@@ -141,34 +169,100 @@ def venv() -> None:
 
 
 def check(pytest_args: list[str]) -> None:
-    """Every check: `static`, then `tests`."""
-    static()
-    tests(pytest_args)
+    """Every check: `static`, then `tests`, which runs even if `static` failed, so one run
+    reports everything; the exit status is the first failure's."""
+    venv()
+    static_code = _static()
+    tests_code = _tests(pytest_args)
+    if static_code or tests_code:
+        sys.exit(static_code or tests_code)
 
 
 def static() -> None:
     """The checks that don't depend on the system, so CI runs them once: Ruff's formatting
     (fix with `ruff format`) and linter (`ruff check --fix` fixes what it can), and
-    basedpyright in strict mode."""
+    basedpyright in strict mode. Runs all of them even if one fails, then exits with the first
+    failure's code, so one run reports every failure."""
     venv()
-    run(tool("ruff"), "format", "--check", "--quiet")
-    run(tool("ruff"), "check", "--quiet")
-    run(tool("basedpyright"))
+    code = _static()
+    if code:
+        sys.exit(code)
+
+
+def _static() -> int:
+    """`static`'s checks, in .venv, as the first failing one's exit code (0 if none failed)."""
+    codes = [
+        run_code(tool("ruff"), "format", "--check", "--quiet"),
+        run_code(tool("ruff"), "check", "--quiet"),
+        run_code(tool("basedpyright")),
+    ]
+    return next((code for code in codes if code), 0)
 
 
 def tests(pytest_args: list[str]) -> None:
     """The tests, spread over the machine's cores (pytest-xdist, through pyproject.toml's
-    `addopts`)."""
+    `addopts`), with this file as a plugin, for `--shard`. pytest imports it as `dev`, which
+    works because `run` starts it in this directory, and `python -m` puts the working directory
+    on `sys.path`."""
     venv()
-    run(tool("python"), "-m", "pytest", *pytest_args)
+    code = _tests(pytest_args)
+    if code:
+        sys.exit(code)
+
+
+def _tests(pytest_args: list[str]) -> int:
+    """`tests`' pytest run, in .venv, as its exit code."""
+    return run_code(tool("python"), "-m", "pytest", "-p", "dev", *pytest_args)
+
+
+def shard(value: str) -> tuple[int, int]:
+    """`--shard`'s value, `I/N`: the Ith of N shards, from 1."""
+    index, _, count = value.partition("/")
+    if not (index.isdecimal() and count.isdecimal() and 1 <= int(index) <= int(count)):
+        raise argparse.ArgumentTypeError(f"{value!r} isn't I/N with 1 <= I <= N, e.g. 2/3")
+    return int(index), int(count)
+
+
+def pytest_addoption(parser: "pytest.Parser") -> None:
+    """Add `--shard` to pytest when it loads this file as a plugin (`-p dev`, as `tests`
+    does)."""
+    parser.addoption(
+        "--shard",
+        type=shard,
+        default=(1, 1),
+        metavar="I/N",
+        help="run only the Ith of N shards of the tests (see dev.py)",
+    )
+
+
+def pytest_collection_modifyitems(config: "pytest.Config", items: "list[pytest.Item]") -> None:
+    """Keep only `--shard`'s tests: of the tests sorted by node id, every Nth from the Ith.
+    Every shard collects the same tests, so they split them exactly; the kept ones run in
+    pytest's order."""
+    index, count = config.option.shard
+    if count == 1:
+        return
+    ordered = sorted(item.nodeid for item in items)
+    kept = set(ordered[index - 1 :: count])
+    config.hook.pytest_deselected(items=[item for item in items if item.nodeid not in kept])
+    items[:] = [item for item in items if item.nodeid in kept]
 
 
 def coverage(pytest_args: list[str]) -> None:
-    """The tests under coverage.py, in one process, then each file's lines and branches they
-    didn't run (see `[tool.coverage]` in pyproject.toml); htmlcov/index.html shows them in the
-    source."""
+    """The tests under coverage.py, spread over the cores as in `tests` (pyproject.toml has it
+    measure each worker), then each file's lines and branches they didn't run (see
+    `[tool.coverage]`); htmlcov/index.html shows them in the source. The workers' data is
+    combined into .coverage even when a test fails, for CI's report."""
     venv()
-    run(tool("coverage"), "run", "-m", "pytest", "-q", "--numprocesses", "0", *pytest_args)
+    run(tool("coverage"), "erase")  # an interrupted run's data files would be combined too
+    tested = subprocess.run(
+        [tool("coverage"), "run", "-m", "pytest", "-q", "-p", "dev", *pytest_args],
+        cwd=ROOT,
+        check=False,
+    )
+    combined = subprocess.run([tool("coverage"), "combine", "--quiet"], cwd=ROOT, check=False)
+    if tested.returncode != 0 or combined.returncode != 0:
+        sys.exit(tested.returncode or combined.returncode)
     run(tool("coverage"), "report")
     run(tool("coverage"), "html", "--quiet")
     print("line by line: htmlcov/index.html")
@@ -288,20 +382,6 @@ def pre_commit() -> None:
             run(tool("ruff"), "format", "--quiet", "--", path)
 
 
-def pushes_to_main(refs: str) -> bool:
-    """Whether a push brings commits to `main`. git passes each ref being pushed on stdin as
-    "<local ref> <local sha> <remote ref> <remote sha>"; a deletion's local sha is all zeros."""
-    pushed = [line.split() for line in refs.splitlines() if line.split()]
-    return any(sha.strip("0") and remote == "refs/heads/main" for _, sha, remote, _ in pushed)
-
-
-def pre_push() -> None:
-    """Run every check before pushing to `main`, which nothing else stands in front of. A
-    branch has CI, on every system. Skip it with `git push --no-verify`."""
-    if pushes_to_main(sys.stdin.read()):
-        check(["-q"])
-
-
 def main(argv: list[str]) -> None:
     command, *rest = argv or ["help"]
     if command == "venv":
@@ -318,8 +398,6 @@ def main(argv: list[str]) -> None:
         install()
     elif command == "pre-commit":
         pre_commit()
-    elif command == "pre-push":
-        pre_push()
     else:
         commands: dict[str, Callable[[list[str]], None]] = getattr(_project(), "COMMANDS", {})
         if command not in commands:

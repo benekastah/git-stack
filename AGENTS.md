@@ -2,7 +2,7 @@
 
 Notes for agents (and people) changing this repo. The README is the user
 documentation, and the man page is generated from it; its Development section
-says how to set up a clone and run the checks. `ISSUES.md` lists known issues,
+says how to set up a clone and run the checks. `docs/issues.md` lists known issues,
 most severe first.
 
 ## Shape of the code
@@ -76,17 +76,24 @@ Text meant for people (messages, `info`'s tree) can change.
   for what only that checks, like the entry point. A new command or `--json` result needs
   a case in `test_json_prints_the_result_on_stdout`.
 - Run `python3 dev.py check` (formatting, Ruff, basedpyright in strict mode,
-  the tests) before committing. The pre-push hook runs it before a push to
-  `main`. CI lints once, on Linux, and runs the tests on each OS.
+  the tests) before committing. The pre-push hook runs `dev.py static` before
+  every push. CI lints once, on Linux, and runs the tests on each OS.
 - `dev.py` installs `.venv` from `uv.lock` with [uv](https://docs.astral.sh/uv/)
   (without uv, with pip, which ignores the lock). Commit a change to
   `pyproject.toml`'s dependencies with the `uv.lock` it updates; CI fails on a
   stale one.
-- Each CI job has a time limit (`timeout-minutes` in
-  `.github/workflows/check.yml`), about 20% over how long it takes. If a job
-  starts hitting it, speed the tests up if you can (most of their time is
-  spent starting git processes, which is slow on macOS and Windows); only if
-  you can't, raise the limit.
+- CI is the template's `.github/workflows/ci.yml` (and `cancel.yml`), with
+  git-stack's own jobs in `.github/workflows/project.yml`: the man page check
+  (on docs-only changes too), the type checks as if on Windows and macOS, and
+  the tests with the Pythons between the oldest and newest, on Linux.
+  `ci.yml` has two edits of git-stack's, each commented: the tests job sets up
+  the Windows Dev Drive (`.github/actions/fast-temp`), and the time limits. `tests/conftest.py` gives CI 8 test workers.
+- Each CI job has a time limit (`timeout-minutes`), about 20% over how long it
+  takes, and at most 5 minutes. If a job starts hitting it, speed the tests up
+  if you can (most of their time is spent starting git processes, which is
+  slow on macOS and Windows); if you can't, split that system's tests into
+  more shards (`test_shards_windows` and the like in `.copier-answers.yml`; see
+  the template's README).
 - Update the README with behavior changes; the pre-commit hook regenerates
   `man/git-stack.1` from it (or run `python3 dev.py man`).
 
@@ -98,9 +105,11 @@ The tooling comes from the python-template Copier template (see the README's
 - Keep `dev.py` as the template's, verbatim, so updates apply cleanly. Add
   git-stack's own commands and install steps to `dev_project.py` (standard
   library only, like `dev.py`).
-- The template never touches this file, the README or
-  `.github/workflows/check.yml`. Elsewhere, keep git-stack's differences when
-  resolving an update's conflicts:
+- An update conflicts on this file until its rules move to `PROJECT_AGENTS.md`
+  (#98): keep git-stack's side. The template never changes
+  `PROJECT_AGENTS.md`, the README, `docs/` or `.github/workflows/project.yml`.
+  Elsewhere, keep git-stack's differences when resolving an update's
+  conflicts:
   - `pyproject.toml`: every setting the template doesn't have, and every value
     that differs from it, e.g. setuptools and its `data-files` (the man page;
     the package is at the root, not in `src/`), `pypandoc_binary` in `dev`,
@@ -108,7 +117,7 @@ The tooling comes from the python-template Copier template (see the README's
     and basedpyright's `include` and relaxed rules. Add dev dependencies to
     `dev`, not `template-dev`, and rules and paths below the template's
     `# The project's own below:` lines, so updates merge them.
-  - `git_hooks/pre-commit`'s man page step.
+  - `git_hooks/pre-commit`'s man page step, and `ci.yml`'s edits (above).
   - The extra lines in `.gitattributes` and `.gitignore`.
 
 ## Linux, macOS and Windows
