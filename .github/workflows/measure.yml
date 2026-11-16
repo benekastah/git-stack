@@ -1,5 +1,5 @@
 # Times what the tests spend their time on, on each CI system, and the tests
-# themselves, run as CI runs them, in the default temporary directory and then,
+# themselves, with CI's 8 workers, in the default temporary directory and then,
 # on Windows, in the Dev Drive CI uses (see .github/actions/fast-temp), to see
 # where macOS and Windows are slower than Linux. It's for reading, not
 # checking: it runs when it changes, or by hand.
