@@ -4,9 +4,9 @@
 # the type checker (also as if on Windows, for code only Windows runs). Each
 # runs even if one before it failed, so one run reports every failure.
 #
-# Uses the tools in .venv, as dev-venv.sh (which check.sh runs) or, in CI,
-# setup-uv sets it up. It doesn't run dev-venv.sh itself: CI's .venv is made
-# by uv, without pip.
+# Uses the tools in .venv, which dev-venv.sh (which check.sh runs) or, in CI,
+# `uv sync --locked` installs. It doesn't run dev-venv.sh itself, so CI's
+# install fails if uv.lock is out of date rather than updating it.
 
 set -eu
 

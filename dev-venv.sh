@@ -1,20 +1,20 @@
 #!/bin/sh
-# Create .venv with the dev dependencies from pyproject.toml, or bring it up to
-# date with them: they're reinstalled whenever pyproject.toml has changed since
-# they were last installed. check.sh, dev-install.sh and the pre-commit hook
-# run it; it's quick when there's nothing to do.
+# Bring .venv up to date with uv.lock: git-stack and the dev dependencies, at
+# the versions locked there (updating uv.lock first if pyproject.toml's
+# dependencies have changed, and saying so). check.sh, dev-install.sh and the
+# pre-commit hook run it; it's quick when there's nothing to do. Needs uv
+# (https://docs.astral.sh/uv/).
 
 set -eu
 
 cd "$(dirname "$0")"
 
-if [ ! -x .venv/bin/python ]; then
-    echo "dev-venv: creating .venv" >&2
-    python3 -m venv .venv
+if ! command -v uv > /dev/null; then
+    echo "dev-venv: uv isn't installed; see https://docs.astral.sh/uv/getting-started/installation/" >&2
+    exit 1
 fi
-if [ ! -f .venv/installed ] || [ pyproject.toml -nt .venv/installed ]; then
-    echo "dev-venv: installing the dev dependencies from pyproject.toml into .venv" >&2
-    .venv/bin/python -m pip install --quiet --upgrade pip
-    .venv/bin/python -m pip install --quiet --group dev
-    touch .venv/installed
+lock_before=$(cat uv.lock 2> /dev/null || true)
+uv sync --quiet
+if [ "$(cat uv.lock)" != "$lock_before" ]; then
+    echo "dev-venv: updated uv.lock; commit it with pyproject.toml" >&2
 fi

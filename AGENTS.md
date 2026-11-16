@@ -78,6 +78,9 @@ Text meant for people (messages, `info`'s tree) can change.
 - Run `./check.sh` (`lint.sh`: formatting, Ruff, mypy in strict mode,
   shellcheck; then the tests) before committing. The pre-push hook runs it
   too. CI lints once, on Linux, and runs the tests on each OS.
+- Development needs [uv](https://docs.astral.sh/uv/): `dev-venv.sh` installs
+  `.venv` from `uv.lock`. Commit a change to `pyproject.toml`'s dependencies
+  with the `uv.lock` it updates; CI fails on a stale one.
 - Each CI job has a time limit (`timeout-minutes` in
   `.github/workflows/ci.yml`), about 20% over how long it takes. If a job
   starts hitting it, speed the tests up if you can (most of their time is
