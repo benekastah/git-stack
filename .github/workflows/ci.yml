@@ -63,7 +63,9 @@ jobs:
       # a merge just the same. (A fork's pull request can't, so there it
       # fails.) A check that ran out of time is cancelled too, but that's a
       # failure, which GitHub says only in the check's annotations. If the
-      # force-cancel hasn't stopped this job within a minute, it fails.
+      # force-cancel hasn't stopped this job within a minute, it fails. (If a
+      # check had already failed, the checks' result is 'failure', and this
+      # job fails, as that commit did.)
       - name: Cancel this job if the run was cancelled
         if: cancelled() || needs.check.result == 'cancelled'
         env:
@@ -72,8 +74,8 @@ jobs:
           jobs=$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs" \
             -q '.jobs[] | select(.conclusion == "cancelled") | .id')
           for job in $jobs; do
-            if gh api "repos/$GITHUB_REPOSITORY/check-runs/$job/annotations" -q '.[].message' |
-              grep -q 'exceeded the maximum execution time'; then
+            messages=$(gh api --paginate "repos/$GITHUB_REPOSITORY/check-runs/$job/annotations" -q '.[].message')
+            if grep -q 'exceeded the maximum execution time' <<<"$messages"; then
               echo "A check ran out of time."
               exit 1
             fi
