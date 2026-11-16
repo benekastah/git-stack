@@ -88,6 +88,12 @@ def is_branch_name(name: str) -> bool:
     return bool(name) and "@{" not in name and REVISION_SYNTAX.isdisjoint(name)
 
 
+def is_object_id(name: str) -> bool:
+    """Whether name is as long as a full object ID (40 hex digits for SHA-1, 64
+    for SHA-256), which, unlike a ref, can't come to name another object."""
+    return len(name) in (40, 64) and all(c in "0123456789abcdef" for c in name)
+
+
 def same_file(a: pathlib.Path, b: pathlib.Path) -> bool:
     """Whether a and b are the same file or directory, however each is spelled:
     on a case-insensitive filesystem (as macOS's and Windows' usually are),
@@ -119,6 +125,14 @@ class GitClient:
         self._common_dir: pathlib.Path | None = None
         self._toplevel: pathlib.Path | None = None
         self._object_id_length: int | None = None
+        # See _object, is_ancestor and merged_tree: what they've found, for the
+        # commits they were asked about, and the cat-file process _object runs
+        # within a snapshot.
+        self._objects: dict[tuple[str, str], str] = {}
+        self._ancestry: dict[tuple[str, str], bool] = {}
+        self._merged_trees: dict[tuple[str, str], str | None] = {}
+        self._cat_file: subprocess.Popen[bytes] | None = None
+        self._cat_file_lock = threading.Lock()
         # See branch_config: whether it has read the config file, and the
         # file's stat when it did (None if there was no file).
         self._config_read = False
@@ -220,6 +234,7 @@ class GitClient:
             if not self._snapshot_depth:
                 self._forget_refs()
                 self._remote_defaults = {}
+                self._stop_cat_file()
 
     def _snapshot_refs(self) -> dict[str, tuple[str, str]] | None:
         """The refs (see snapshot), reading them if they haven't been, or None
@@ -358,6 +373,8 @@ class GitClient:
         remote-tracking branch's full refname, or a local branch's
         <name>@{upstream}, is looked up in the snapshot, if there is one and
         has it (see snapshot)."""
+        if is_object_id(ref):
+            return self._object(ref, "commit")
         branch = ref.removesuffix("@{upstream}")
         # Only read the snapshot if it could answer, e.g. not for HEAD.
         cacheable = is_branch_name(branch) and (branch != ref or ref.startswith(("refs/heads/", "refs/remotes/")))
@@ -379,7 +396,78 @@ class GitClient:
         return self.run("rev-parse", "--verify", f"refs/heads/{branch}")
 
     def is_ancestor(self, ancestor: str, descendant: str) -> bool:
-        return self.ok("merge-base", "--is-ancestor", ancestor, descendant)
+        """Whether ancestor is descendant or one of its ancestors. Within a
+        snapshot, where finding the commits they name costs nothing for a
+        branch, asked once for the same two commits, which don't change."""
+        if not self._snapshot_depth:
+            return self.ok("merge-base", "--is-ancestor", ancestor, descendant)
+        a, d = self.rev(ancestor), self.rev(descendant)
+        if a is None or d is None:
+            return False
+        if (a, d) not in self._ancestry:
+            self._ancestry[a, d] = self.ok("merge-base", "--is-ancestor", a, d)
+        return self._ancestry[a, d]
+
+    def tree(self, rev: str) -> str | None:
+        """The tree of the commit rev names, or None if it names none."""
+        commit = self.rev(rev)
+        return self._object(commit, "tree") if commit is not None else None
+
+    def _object(self, object_id: str, kind: str) -> str | None:
+        """The kind object (e.g. a commit's tree) that object_id names, as
+        `object_id^{kind}`, or None if there's none. Objects don't change, so
+        each is looked up once; within a snapshot, by a `git cat-file
+        --batch-check` that runs until it ends, rather than a process each."""
+        if (known := self._objects.get((object_id, kind))) is not None:
+            return known
+        query = f"{object_id}^{{{kind}}}"
+        if not self._snapshot_depth:
+            found = self.run("rev-parse", "--verify", "--quiet", query, check=False) or None
+        else:
+            with self._cat_file_lock:
+                if self._cat_file is None:
+                    self._cat_file = subprocess.Popen(
+                        self._command("cat-file", "--batch-check=%(objectname)"),
+                        stdin=subprocess.PIPE,
+                        stdout=subprocess.PIPE,
+                    )
+                assert self._cat_file.stdin is not None and self._cat_file.stdout is not None
+                try:
+                    self._cat_file.stdin.write(encode(query) + b"\n")
+                    self._cat_file.stdin.flush()
+                    answer = decode(self._cat_file.stdout.readline()).strip()
+                except OSError:  # e.g. a broken pipe, if it stopped before
+                    answer = ""
+                if not answer:
+                    # So the next lookup starts another.
+                    self._end_cat_file(kill=True)
+                    raise StackError(f"git cat-file stopped while looking up {query}")
+            # Or "<query> missing", or "<query> ambiguous".
+            found = None if " " in answer else answer
+        if found is not None:
+            self._objects[object_id, kind] = found
+        return found
+
+    def _stop_cat_file(self) -> None:
+        """End the `git cat-file` _object started, if it did."""
+        with self._cat_file_lock:
+            self._end_cat_file()
+
+    def _end_cat_file(self, kill: bool = False) -> None:
+        """End the `git cat-file` _object started, if it did (killing it if
+        kill is set), and forget it. The caller holds _cat_file_lock."""
+        process, self._cat_file = self._cat_file, None
+        if process is None:
+            return
+        assert process.stdin is not None and process.stdout is not None
+        if kill:
+            process.kill()
+        try:
+            process.stdin.close()
+        except OSError:  # a broken pipe, if it stopped with a query unread
+            pass
+        process.wait()
+        process.stdout.close()
 
     def author_email(self) -> str | None:
         """The email address git authors commits with, or None if it has none."""
@@ -615,12 +703,25 @@ class GitClient:
         """Whether merging branch into target would change nothing.
 
         This is true after a squash merge even though none of branch's commits are
-        in target's history.
+        in target's history. False if target names no commit.
         """
-        return self.merged_tree(target, branch) == self.run("rev-parse", f"{target}^{{tree}}")
+        tree = self.tree(target)
+        return tree is not None and self.merged_tree(target, branch) == tree
 
     def merged_tree(self, ours: str, theirs: str) -> str | None:
-        """The tree merging theirs into ours gives, or None if it conflicts."""
+        """The tree merging theirs into ours gives, or None if it conflicts (or
+        either names no commit). Within a snapshot (see is_ancestor), asked
+        once for the same two commits."""
+        if not self._snapshot_depth:
+            return self._merge_tree(ours, theirs)
+        a, b = self.rev(ours), self.rev(theirs)
+        if a is None or b is None:
+            return None
+        if (a, b) not in self._merged_trees:
+            self._merged_trees[a, b] = self._merge_tree(a, b)
+        return self._merged_trees[a, b]
+
+    def _merge_tree(self, ours: str, theirs: str) -> str | None:
         result = subprocess.run(
             self._command("merge-tree", "--write-tree", ours, theirs),
             capture_output=True,
@@ -628,9 +729,7 @@ class GitClient:
             errors="surrogateescape",
             check=False,
         )
-        if result.returncode != 0:
-            return None
-        return result.stdout.splitlines()[0]
+        return result.stdout.splitlines()[0] if result.returncode == 0 else None
 
     def merges_with_own_changes(self, *args: str) -> list[str]:
         """The merge commits `git rev-list <args>` lists that change something
@@ -644,7 +743,7 @@ class GitClient:
         merges = []
         for line in self.run("rev-list", "--merges", "--parents", *args).splitlines():
             commit, *parents = line.split()
-            if len(parents) != 2 or self.merged_tree(*parents) != self.run("rev-parse", f"{commit}^{{tree}}"):
+            if len(parents) != 2 or self.merged_tree(*parents) != self.tree(commit):
                 merges.append(commit)
         return merges
 
@@ -717,6 +816,6 @@ class GitClient:
                 if patch.stdout and run("apply", "--cached", "--3way", input=patch.stdout).returncode:
                     return False
                 tree = run("write-tree")
-                if tree.returncode or tree.stdout.decode().strip() != self.run("rev-parse", f"{upstream}^{{tree}}"):
+                if tree.returncode or tree.stdout.decode().strip() != self.tree(upstream):
                     return False
         return True
