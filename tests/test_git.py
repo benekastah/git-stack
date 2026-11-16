@@ -360,13 +360,32 @@ def test_commit_patch_ids_reads_each_commands_patches_with_one_patch_id(repo: Re
     assert [call[0] for call in git_calls].count("patch-id") == 1
 
 
-def test_commit_patch_ids_in_a_sha256_repository(tmp_path: pathlib.Path, repo: Repo) -> None:
+def sha256_repo(tmp_path: pathlib.Path, repo: Repo) -> Repo:
+    """A repository with SHA-256 object IDs, and two commits to a."""
     sha256 = Repo(path=tmp_path / "sha256", origin=repo.origin, forge=repo.forge, tmp=tmp_path)
     repo.git("init", "--quiet", "--object-format=sha256", str(sha256.path))
     sha256.write("a", "one\n")
     sha256.git("add", "a")
     sha256.git("commit", "--quiet", "-m", "one")
     sha256.commit("a", "two\n", "two")
+    return sha256
+
+
+@pytest.mark.parametrize("sha256", [False, True])
+def test_object_id_length(tmp_path: pathlib.Path, repo: Repo, git_calls: list[list[str]], sha256: bool) -> None:
+    path = sha256_repo(tmp_path, repo).path if sha256 else repo.path
+    assert GitClient(path).object_id_length() == (64 if sha256 else 40)
+    git = GitClient(path)
+    with git.snapshot():
+        git.rev("refs/heads/main")
+        git_calls.clear()
+        assert git.object_id_length() == (64 if sha256 else 40)
+    # Taken from the snapshot, which has read the refs.
+    assert git_calls == []
+
+
+def test_commit_patch_ids_in_a_sha256_repository(tmp_path: pathlib.Path, repo: Repo) -> None:
+    sha256 = sha256_repo(tmp_path, repo)
     commands = [("log", "-p", "HEAD~1..HEAD"), ("diff", "HEAD~1", "HEAD")]
 
     assert GitClient(sha256.path).commit_patch_ids(*commands) == [

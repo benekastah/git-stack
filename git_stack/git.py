@@ -661,8 +661,8 @@ class GitClient:
         patches = []
         for i, (command, *rest) in enumerate(commands, 1):
             if command == "diff":
-                # Without a commit line, patch-id would take it as part of the
-                # marker before it.
+                # A diff has no commit line, so give it one, rather than rely on
+                # the blank line after the marker before it to end the marker.
                 patches.append(f"commit {'0' * length}")
             patches.append(self.run("--literal-pathspecs", command, "--no-color", "--no-ext-diff", *rest))
             patches.append(f"commit {i:0{length}x}\n\n{END_MARKER_DIFF}")
@@ -679,9 +679,12 @@ class GitClient:
 
     def object_id_length(self) -> int:
         """How many hex digits the repository's object IDs have: 40 for SHA-1,
-        64 for SHA-256."""
+        64 for SHA-256. Taken from the ref snapshot if it's been read."""
         if self._object_id_length is None:
-            self._object_id_length = 64 if self.run("rev-parse", "--show-object-format") == "sha256" else 40
+            if self._refs:
+                self._object_id_length = len(next(iter(self._refs.values()))[0])
+            else:
+                self._object_id_length = 64 if self.run("rev-parse", "--show-object-format") == "sha256" else 40
         return self._object_id_length
 
     def identity_counts(self, *args: str) -> Counter[str]:
