@@ -54,18 +54,30 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       actions: write
+      checks: read
     steps:
-      # A cancelled run still runs this job, because of always(). Cancelling
-      # it too, which only force-cancel can, marks it cancelled rather than
-      # failed, which blocks a merge just the same. (A fork's pull request
-      # can't, so there it fails.) The steps below don't run in a cancelled
-      # run, so if the force-cancel hasn't stopped this job within a minute,
-      # fail.
+      # A cancelled run still runs this job, because of always(), and if it
+      # was cancelled before this job started, cancelled() is false here, but
+      # the checks' result is 'cancelled'. Cancelling this job too, which only
+      # force-cancel can, marks it cancelled rather than failed, which blocks
+      # a merge just the same. (A fork's pull request can't, so there it
+      # fails.) A check that ran out of time is cancelled too, but that's a
+      # failure, which GitHub says only in the check's annotations. If the
+      # force-cancel hasn't stopped this job within a minute, it fails.
       - name: Cancel this job if the run was cancelled
-        if: cancelled()
+        if: cancelled() || needs.check.result == 'cancelled'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          jobs=$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs" \
+            -q '.jobs[] | select(.conclusion == "cancelled") | .id')
+          for job in $jobs; do
+            if gh api "repos/$GITHUB_REPOSITORY/check-runs/$job/annotations" -q '.[].message' |
+              grep -q 'exceeded the maximum execution time'; then
+              echo "A check ran out of time."
+              exit 1
+            fi
+          done
           gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/force-cancel"
           sleep 60
           exit 1
