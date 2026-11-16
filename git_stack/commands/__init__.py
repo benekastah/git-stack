@@ -21,6 +21,7 @@ DELETE_HELP = "besides untracking merged branches, delete their local branches, 
 
 def add_latest_argument(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
+        "-l",
         "--latest",
         action="store_true",
         help="also move branches stacked directly on the stack's root (e.g. main) onto "

@@ -547,7 +547,7 @@ git stack restack --latest              # also move the stack onto main's latest
   those merges; git-stack refuses to replay it as a linear history.
 - `--onto` retargets only the current branch, onto another local branch. The
   branches stacked on it come along.
-- `--latest` moves the branches on the stack's root onto its latest commit
+- `-l`/`--latest` moves the branches on the stack's root onto its latest commit
   even if they don't conflict with it (and the rest of the stack with them).
 - Merged branches are skipped and their children restacked onto their parent;
   `sync` or `clean` removes them from the stack.
@@ -578,6 +578,7 @@ request in the stack was merged, when `main` changed in a way that conflicts
 with your stack, or when someone else pushed to one of your branches. It
 pushes at the end, so there's nothing to follow it with. To catch up locally
 without touching the remote, use `restack` or `pull`.
+Use `-l` as a short form of `--latest` with `sync`, `pull`, or `restack`.
 
 ```sh
 git stack sync

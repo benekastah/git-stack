@@ -762,9 +762,9 @@ those merges; git\-stack refuses to replay it as a linear history.
 local branch.
 The branches stacked on it come along.
 .IP \(bu 2
-\f[CR]\-\-latest\f[R] moves the branches on the stack\(aqs root onto its
-latest commit even if they don\(aqt conflict with it (and the rest of
-the stack with them).
+\f[CR]\-l\f[R]/\f[CR]\-\-latest\f[R] moves the branches on the
+stack\(aqs root onto its latest commit even if they don\(aqt conflict
+with it (and the rest of the stack with them).
 .IP \(bu 2
 Merged branches are skipped and their children restacked onto their
 parent; \f[CR]sync\f[R] or \f[CR]clean\f[R] removes them from the stack.
@@ -809,6 +809,8 @@ pushed to one of your branches.
 It pushes at the end, so there\(aqs nothing to follow it with.
 To catch up locally without touching the remote, use \f[CR]restack\f[R]
 or \f[CR]pull\f[R].
+Use \f[CR]\-l\f[R] as a short form of \f[CR]\-\-latest\f[R] with
+\f[CR]sync\f[R], \f[CR]pull\f[R], or \f[CR]restack\f[R].
 .IP
 .EX
 git stack sync
