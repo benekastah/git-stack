@@ -24,6 +24,18 @@ def test_restack_moves_whole_stack_after_parent_changes(repo: Repo, client: Stac
     assert all(branch.status is not BranchStatus.NEEDS_RESTACK for branch in client.info())
 
 
+def test_restack_all_orders_parents_before_children(repo: Repo, client: StackClient) -> None:
+    repo.make_stack()
+    repo.git("switch", "--quiet", "pr1")
+    repo.commit("a", "pr1 review fix\n", "pr1 review fix")
+    repo.git("switch", "--quiet", "pr3")
+
+    client.restack_all(["pr3", "pr2"], client.stacks())
+
+    repo.assert_stacked("pr2", "pr1", ["pr2 c1"])
+    repo.assert_stacked("pr3", "pr2", ["pr3 c1"])
+
+
 def test_restack_refuses_to_drop_local_merge_changes(repo: Repo, client: StackClient) -> None:
     client.branch("pr1")
     repo.commit("a", "pr1\n", "pr1")

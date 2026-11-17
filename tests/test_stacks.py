@@ -5,7 +5,7 @@ import pytest
 
 from git_stack.errors import StackError
 from git_stack.stack import StackClient
-from git_stack.stacks import Ownership, StackNode, Stacks
+from git_stack.stacks import Ownership, StackNode, Stacks, dependency_order
 from tests.helpers import Repo
 
 
@@ -20,6 +20,18 @@ def tree() -> Stacks:
             StackNode("r", "release"),
         ]
     )
+
+
+def test_dependency_order_puts_all_bases_before_their_dependents() -> None:
+    assert dependency_order(
+        ["combined", "second", "first", "child"],
+        {"combined": ("first", "second"), "child": ("combined",)},
+    ) == ["first", "second", "combined", "child"]
+
+
+def test_dependency_order_refuses_cycles() -> None:
+    with pytest.raises(StackError, match="cycle in stack metadata"):
+        dependency_order(["a", "b"], {"a": ("b",), "b": ("a",)})
 
 
 def test_walks_the_tree() -> None:

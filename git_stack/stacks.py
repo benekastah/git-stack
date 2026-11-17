@@ -6,10 +6,34 @@ rules for groups and ownership below, then write only that.
 """
 
 import enum
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, replace
 
 from git_stack.errors import StackError
+
+
+def dependency_order(branches: Iterable[str], parents: Mapping[str, Sequence[str]]) -> list[str]:
+    """Order selected branches after their selected dependencies, refusing cycles."""
+    selected = list(dict.fromkeys(branches))
+    remaining = set(selected)
+    visiting: set[str] = set()
+    ordered: list[str] = []
+
+    def visit(branch: str) -> None:
+        if branch not in remaining:
+            return
+        if branch in visiting:
+            raise StackError(f"cycle in stack metadata involving {branch}")
+        visiting.add(branch)
+        for parent in parents.get(branch, ()):
+            visit(parent)
+        visiting.remove(branch)
+        remaining.remove(branch)
+        ordered.append(branch)
+
+    for branch in selected:
+        visit(branch)
+    return ordered
 
 
 class Ownership(enum.Enum):

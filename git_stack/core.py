@@ -10,7 +10,7 @@ from git_stack.check_cache import CheckCache
 from git_stack.errors import BrokenStackError, StackError
 from git_stack.file_lock import file_lock
 from git_stack.git import GitClient
-from git_stack.stacks import Ownership, StackNode, Stacks
+from git_stack.stacks import Ownership, StackNode, Stacks, dependency_order
 
 PARENT_KEY = "stackParent"
 BASE_KEY = "stackBase"
@@ -494,6 +494,7 @@ class StackCore:
         branch that couldn't be restacked."""
         original = self.git.current_branch()
         skipped: set[str] = set()
+        branches = dependency_order(branches, {b: (stacks.parent(b),) for b in stacks})
         for branch in branches:
             parent = stacks.parent(branch)
             if parent in skipped:
