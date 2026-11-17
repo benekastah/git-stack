@@ -808,7 +808,13 @@ def test_clean_json_ends_with_the_error_when_it_fails(stack: Any, capsys: pytest
             ["track", "main"],
             "track",
             [Tracked("pr1", "main", "abc")],
-            {"tracked": [{"branch": "pr1", "parent": "main", "base": "abc"}]},
+            {"tracked": [{"branch": "pr1", "parent": "main", "base": "abc", "additional_parents": []}]},
+        ),
+        (
+            ["track", "--on", "first", "--on", "second"],
+            "track_on",
+            [Tracked("pr1", "first", "abc", ("second",))],
+            {"tracked": [{"branch": "pr1", "parent": "first", "base": "abc", "additional_parents": ["second"]}]},
         ),
         (["untrack"], "untrack", [Untracked("pr1", ("pr2",))], {"untracked": [{"branch": "pr1", "children": ["pr2"]}]}),
         (

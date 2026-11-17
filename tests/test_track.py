@@ -27,16 +27,96 @@ def test_track_on_tracks_one_named_branch(repo: Repo) -> None:
     assert repo.git("branch", "--show-current") == "main"
 
 
-def test_track_on_multiple_bases_refuses_before_changing_metadata(repo: Repo) -> None:
-    repo.git("switch", "--quiet", "-c", "feature")
-    repo.commit("a", "feature\n", "feature")
+def test_track_on_multiple_bases_records_them_without_rewriting(repo: Repo, client: StackClient) -> None:
+    client.branch("first")
+    repo.commit("a", "first\n", "first")
+    client.branch("feature")
+    repo.commit("b", "feature\n", "feature")
+    repo.git("switch", "--quiet", "main")
+    client.branch("second")
+    repo.commit("c", "second\n", "second")
+    repo.git("switch", "--quiet", "feature")
     before = repo.git("rev-parse", "HEAD")
 
-    result = repo.stack("track", "--on", "main", "--on", "other", expect_success=False)
+    repo.stack("track", "--on", "first", "--on", "second")
+
+    assert repo.git("rev-parse", "HEAD") == before
+    assert repo.stack("parents").stdout == "first\nsecond\n"
+    assert client.stacks().dependencies("feature") == ("first", "second")
+
+
+def test_track_on_multiple_bases_rejects_a_cycle_without_changing_metadata(repo: Repo, client: StackClient) -> None:
+    client.branch("feature")
+    repo.commit("a", "feature\n", "feature")
+    client.branch("child")
+    repo.commit("b", "child\n", "child")
+    repo.git("switch", "--quiet", "feature")
+    before = repo.config("feature", "stackParent")
+
+    result = repo.stack("track", "--on", "main", "--on", "child", expect_success=False)
+
+    assert "cycle" in result.stderr
+    assert repo.config("feature", "stackParent") == before
+
+
+def test_track_on_multiple_bases_tracks_an_untracked_branch(repo: Repo, client: StackClient) -> None:
+    client.branch("first")
+    repo.git("switch", "--quiet", "main")
+    client.branch("second")
+    repo.git("switch", "--quiet", "first")
+    repo.git("switch", "--quiet", "-c", "feature")
+    repo.commit("a", "feature\n", "feature")
+
+    repo.stack("track", "--on", "first", "--on", "second")
+
+    assert client.stacks().dependencies("feature") == ("first", "second")
+    assert repo.config("feature", "stackBase") == repo.git("rev-parse", "first")
+
+
+def test_track_cannot_silently_remove_a_secondary_base(repo: Repo, client: StackClient) -> None:
+    client.branch("first")
+    client.branch("feature")
+    repo.git("switch", "--quiet", "main")
+    client.branch("second")
+    repo.git("switch", "--quiet", "feature")
+    repo.stack("track", "--on", "first", "--on", "second")
+
+    result = repo.stack("track", "main", expect_success=False)
+
+    assert "multiple-base" in result.stderr
+    assert client.stacks().dependencies("feature") == ("first", "second")
+
+
+def test_track_multiple_bases_inherits_shared_ownership(repo: Repo, client: StackClient) -> None:
+    client.branch("first")
+    client.branch("feature")
+    client.branch("child")
+    repo.git("switch", "--quiet", "main")
+    client.branch("second")
+    repo.stack("ownership", "shared")
+    repo.git("switch", "--quiet", "feature")
+
+    repo.stack("track", "--on", "first", "--on", "second")
+
+    stacks = client.stacks()
+    assert stacks.is_shared("feature")
+    assert stacks.is_shared("child")
+
+
+def test_restack_onto_a_secondary_base_cannot_discard_dependencies(repo: Repo, client: StackClient) -> None:
+    client.branch("first")
+    client.branch("feature")
+    repo.git("switch", "--quiet", "main")
+    client.branch("second")
+    repo.git("switch", "--quiet", "feature")
+    repo.stack("track", "--on", "first", "--on", "second")
+    before = repo.git("rev-parse", "feature")
+
+    result = repo.stack("restack", "--onto", "second", expect_success=False)
 
     assert "multiple bases" in result.stderr
-    assert repo.git("rev-parse", "HEAD") == before
-    assert not repo.config_exists("feature", "stackParent")
+    assert client.stacks().dependencies("feature") == ("first", "second")
+    assert repo.git("rev-parse", "feature") == before
 
 
 def test_track_on_refuses_more_than_one_target_with_argument_error(repo: Repo) -> None:

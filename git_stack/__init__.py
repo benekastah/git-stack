@@ -2,7 +2,7 @@
 
 Each tracked branch records two things in git config:
 
-  branch.<name>.stackParent  the branch it is stacked on (e.g. pr1, or main)
+  branch.<name>.stackParent  its parent branch, or a versioned list of parents
   branch.<name>.stackBase    the parent commit it was last rebased onto
 
 Knowing the base lets us replay only the branch's own commits with

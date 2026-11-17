@@ -103,6 +103,7 @@ class Tracked:
     branch: str
     parent: str
     base: str
+    additional_parents: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -420,6 +421,7 @@ class StackClient(StackCore):
         # Work out the whole chain before writing anything, so a bad argument
         # doesn't leave the stack half-tracked.
         stacks = self.stacks()
+        self.ensure_track_supported(stacks, branches)
         plan: list[Tracked] = []
         explicit_base = base is not None
         base_arg = base
@@ -441,6 +443,55 @@ class StackClient(StackCore):
             git.config_set(tracked.branch, BASE_KEY, tracked.base)
         self.remember_tracked_upstream(plan[0].branch, explicit_base)
         return plan
+
+    def ensure_track_supported(self, stacks: Stacks, branches: Iterable[str]) -> None:
+        if any(b in stacks and stacks[b].additional_parents for b in branches):
+            raise StackError("changing the bases of a multiple-base branch is not supported yet")
+
+    @exclusive
+    def track_on(self, parents: Sequence[str], branch: str | None, base: str | None = None) -> list[Tracked]:
+        """Record ordered dependencies without changing branch history."""
+        self.ensure_no_operation_in_progress()
+        self.settle_all()
+        git = self.git
+        branch = branch or git.current_branch()
+        branch = self.validate_track_on(branch, parents)
+        stacks = self.stacks()
+        for parent in parents:
+            stacks.ensure_no_cycle(branch, parent)
+        if branch in stacks:
+            if stacks[branch].additional_parents:
+                raise StackError("changing the bases of a multiple-base branch is not supported yet")
+            if stacks.parent(branch) != parents[0] or base is not None:
+                raise StackError("first track the branch on its primary base without --on, then add its other bases")
+            base_sha = self.recorded_base(branch, parents[0])
+        else:
+            base_sha = git.rev(base) if base else self.fork_point(parents[0], branch)
+            if base_sha is None:
+                raise StackError(
+                    f"{base} isn't a commit" if base else f"{branch} has no history in common with {parents[0]}"
+                )
+            if not git.is_ancestor(base_sha, f"refs/heads/{branch}"):
+                raise StackError(f"{base} isn't in {branch}'s history")
+            stacks.reparent(branch, parents[0])
+            git.config_set(branch, BASE_KEY, base_sha)
+        if any(parent in stacks and stacks.is_shared(parent) for parent in parents):
+            stacks.share(branch)
+        stacks.set_additional_parents(branch, parents[1:])
+        self.save(stacks)
+        self.remember_tracked_upstream(branch, base is not None)
+        return [Tracked(branch, parents[0], base_sha, tuple(parents[1:]))]
+
+    def validate_track_on(self, branch: str | None, parents: Sequence[str]) -> str:
+        if branch is None:
+            raise StackError("not on a branch")
+        if not self.git.local_branch_exists(branch):
+            raise StackError(f"{branch} isn't a local branch")
+        if len(set(parents)) != len(parents) or branch in parents:
+            raise StackError("each branch can only appear once")
+        for parent in parents:
+            self.ensure_local_branch_parent(parent)
+        return branch
 
     def remember_tracked_upstream(self, branch: str, explicit_base: bool) -> None:
         """Remember the same-named upstream present at an explicit re-track."""
@@ -1227,6 +1278,8 @@ class StackClient(StackCore):
         original = self.current_checkout()
         if onto:
             branch = self.current_stacked_branch(stacks, "restack", hint="use `git stack track` first")
+            if stacks[branch].additional_parents:
+                raise StackError("restacking branches with multiple bases is not supported yet")
             self.ensure_local_branch_parent(onto)
             stacks.ensure_no_cycle(branch, onto)
             self.ensure_owned(stacks.stack_of(branch), stacks, allow_shared, "restack")

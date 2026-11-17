@@ -26,9 +26,10 @@ man page is generated from it.
   the rules for groups and ownership, without touching the repository.
   `StackCore.stacks()` reads it, a command changes it in memory, and
   `StackCore.save()` writes only what changed. Walk and change the graph through
-  it rather than with a `{branch: parent}` map of your own. The graph model can
-  represent additional bases, but those bases are not yet stored or exposed to
-  commands; replay and operation safety still need to be implemented.
+  it rather than with a `{branch: parent}` map of your own. `stackParent` holds
+  a branch name for a single parent and a versioned ordered list for multiple
+  parents. `track --on` records multiple parents without replaying them; replay
+  and operation safety still need to be implemented.
 - Each command is a module in `git_stack/commands/` with `register`, `run` and
   `show`: `run` does the command and returns a dataclass result, and `show`
   prints it as text. With `--json`, the CLI prints the result as JSON instead

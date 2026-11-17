@@ -122,14 +122,16 @@ def test_reparent_to_an_existing_secondary_base_does_not_duplicate_it() -> None:
     assert stacks.dependencies("combined") == ("b",)
 
 
-def test_save_refuses_multiple_bases_before_writing_metadata(repo: Repo, client: StackClient) -> None:
-    stacks = Stacks([StackNode("combined", "main", additional_parents=("other",))])
-    stacks.set_ownership("combined", Ownership.SHARED)
+def test_save_refuses_cycles_before_writing_metadata(repo: Repo, client: StackClient) -> None:
+    stacks = Stacks()
+    stacks.reparent("first", "main")
+    stacks.reparent("combined", "first")
+    stacks.set_additional_parents("combined", ("combined",))
 
-    with pytest.raises(StackError, match="multiple bases.*not supported"):
+    with pytest.raises(StackError, match="cycle"):
         client.save(stacks)
 
-    assert not repo.config_exists("combined", "stackOwnership")
+    assert not repo.config_exists("first", "stackParent")
 
 
 @pytest.mark.parametrize("method", ["drop", "remove_merged"])

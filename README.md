@@ -215,7 +215,7 @@ git stack create search-ui --group search   # a new stack, in group search
 
 ### `git stack track <parent> [<branch>...] [--base <sha>]`
 
-### `git stack track --on <parent> [<branch>] [--base <sha>]`
+### `git stack track --on <parent> [--on <parent>...] [<branch>] [--base <sha>]`
 
 Track existing branches (default: the current branch) as a stack on `<parent>`,
 each stacked on the one before it.
@@ -234,9 +234,11 @@ git stack track pr1             # move the current branch onto pr1
 git stack track --on main pr1  # track one named branch on main
 ```
 
-The `--on` form tracks at most one branch (the current branch by default).
-Multiple `--on` values are reserved for multiple bases, which aren't supported
-yet; they currently fail without changing anything.
+The `--on` form tracks one branch (the current branch by default). Repeat
+`--on` to record its ordered bases. This records dependencies without changing
+history; replaying multiple bases is not supported yet. To add bases to a
+tracked branch, its first `--on` must be its existing parent. Changing the
+bases of a branch that already has multiple bases is not supported yet.
 
 Each branch's base, the commit it was built on, is where it forked from the
 branch before it (or from `<parent>`). Like `git rebase`, this is found from
@@ -1103,7 +1105,7 @@ What each command's result has, besides `type` and `events`:
 | Command | Result |
 | --- | --- |
 | `create`, `branch` | `branch`, the `parent` it was created on, and its `group` (or `null`) |
-| `track` | `tracked`: each branch's `branch`, `parent` and `base` |
+| `track` | `tracked`: each branch's `branch`, `parent`, `base`, and ordered `additional_parents` |
 | `import` | `stacks`, and `steps`, one for each pull request: its `branch`, the `parent` it merges into, its `number`, and the `action`: `create`, `track`, `already-tracked`, `parent-differs` or `skip`. `base` is the commit a branch it creates or tracks is built on, `tracked_parent` the parent a `parent-differs` branch is tracked on instead, and `reason` why it skipped one; each is `null` otherwise. `other_authors` has the pull request's author if it isn't you (so it needs `-f`), and is empty otherwise. `without_prs` has the same for the branches without a pull request that the pull requests are built on, without `number` or `tracked_parent`, and `create`, `create-root` or `skip`; their `other_authors` are email addresses, and `parent` is `null` for a root or if it couldn't tell which branch one is built on. `remote` is the remote it imported from |
 | `untrack` | `untracked`: each `branch`, and the `children` still stacked on it |
 | `rename` | `old`, `new`, the `children` moved onto it, and the `upstream` it no longer tracks (or `null`) |
@@ -1223,6 +1225,9 @@ the exact parent commit it was built on:
 branch.<name>.stackParent   e.g. pr1
 branch.<name>.stackBase     the pr1 commit pr2 was last rebased onto
 ```
+
+For multiple parents, `stackParent` stores a versioned list in dependency
+order. Existing single-parent values remain unchanged.
 
 Restacking runs `git rebase --onto <parent> <stackBase> <branch>`, which
 replays only the branch's own commits, so PR 1's original commits never

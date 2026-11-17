@@ -1,9 +1,11 @@
 import enum
 import fnmatch
+import json
 from collections import Counter
 from collections.abc import Callable, Generator, Iterable, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
+from typing import cast
 
 from git_stack import events
 from git_stack.check_cache import CheckCache
@@ -13,6 +15,7 @@ from git_stack.git import GitClient
 from git_stack.stacks import Ownership, StackNode, Stacks, dependency_order
 
 PARENT_KEY = "stackParent"
+MULTI_PARENT_PREFIX = "git-stack-multi:v1:"
 BASE_KEY = "stackBase"
 # The last upstream tip the branch caught up with, by pulling it or pushing it.
 # Commits it contains aren't new to the branch, even if the branch has since
@@ -80,6 +83,34 @@ class TrunkUpstream:
     ref: str
     old: str
     new: str
+
+
+def read_parents(branch: str, value: str) -> tuple[str, ...]:
+    """Read legacy single-parent metadata or the versioned ordered parents."""
+    if not value.startswith("git-stack-multi:"):
+        return (value,)
+    try:
+        if not value.startswith(MULTI_PARENT_PREFIX):
+            raise ValueError("unknown version")
+        parents: object = json.loads(value.removeprefix(MULTI_PARENT_PREFIX))
+        if not isinstance(parents, list):
+            raise TypeError("invalid parents")
+        values = cast(list[object], parents)
+        if len(values) < 2 or any(not isinstance(p, str) or not p for p in values):
+            raise ValueError("invalid parents")
+        result = tuple(str(p) for p in values)
+        if len(set(result)) != len(result):
+            raise ValueError("duplicate parents")
+        return result
+    except (ValueError, TypeError) as e:
+        raise StackError(f"{branch}'s multiple-base metadata is invalid; inspect branch.{branch}.{PARENT_KEY}") from e
+
+
+def write_parents(node: StackNode | None) -> str | None:
+    if node is None:
+        return None
+    parents = (node.parent, *node.additional_parents)
+    return node.parent if len(parents) == 1 else MULTI_PARENT_PREFIX + json.dumps(parents, ensure_ascii=True)
 
 
 class Delete(enum.Enum):
@@ -185,16 +216,20 @@ class StackCore:
         """Every tracked branch that still exists, read from git config."""
         existing = self.git.local_branches()
         config = self.git.branch_config()
-        return Stacks(
-            StackNode(
-                branch,
-                parent,
-                config.get((branch, GROUP_KEY.lower())) or None,
-                read_ownership(branch, config.get((branch, OWNERSHIP_KEY.lower()))),
-            )
-            for (branch, key), parent in config.items()
-            if key == PARENT_KEY.lower() and branch in existing
-        )
+        nodes = []
+        for (branch, key), value in config.items():
+            if key == PARENT_KEY.lower() and branch in existing:
+                parents = read_parents(branch, value)
+                nodes.append(
+                    StackNode(
+                        branch,
+                        parents[0],
+                        config.get((branch, GROUP_KEY.lower())) or None,
+                        read_ownership(branch, config.get((branch, OWNERSHIP_KEY.lower()))),
+                        parents[1:],
+                    )
+                )
+        return Stacks(nodes)
 
     def save(self, stacks: Stacks) -> None:
         """Write what changed in stacks since it was read (or last saved) to
@@ -202,8 +237,8 @@ class StackCore:
         tracked, none at all (see forget)."""
         git = self.git
         changes = stacks.changes()
-        if any((old and old.additional_parents) or (new and new.additional_parents) for _, old, new in changes):
-            raise StackError("saving branches with multiple bases is not supported yet")
+        if any(new and new.additional_parents for _, _, new in changes):
+            stacks.roots()  # Validate the whole graph before writing any settings.
         for branch, old, new in changes:
             if new is None:
                 self.forget(branch)
@@ -211,7 +246,7 @@ class StackCore:
             for key, before, after in (
                 (OWNERSHIP_KEY, old and old.ownership and old.ownership.value, new.ownership and new.ownership.value),
                 (GROUP_KEY, old and old.group, new.group),
-                (PARENT_KEY, old and old.parent, new.parent),
+                (PARENT_KEY, write_parents(old), write_parents(new)),
             ):
                 if after == before:
                     continue

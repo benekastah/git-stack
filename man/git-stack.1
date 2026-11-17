@@ -338,7 +338,7 @@ would.
 If the stack is in another group already, it refuses without creating
 the branch.
 .SS \f[CR]git stack track <parent> [<branch>...] [\-\-base <sha>]\f[R]
-.SS \f[CR]git stack track \-\-on <parent> [<branch>] [\-\-base <sha>]\f[R]
+.SS \f[CR]git stack track \-\-on <parent> [\-\-on <parent>...] [<branch>] [\-\-base <sha>]\f[R]
 Track existing branches (default: the current branch) as a stack on
 \f[CR]<parent>\f[R], each stacked on the one before it.
 .PP
@@ -358,10 +358,15 @@ git stack track pr1             \f[I]# move the current branch onto pr1\f[R]
 git stack track \-\-on main pr1  \f[I]# track one named branch on main\f[R]
 .EE
 .PP
-The \f[CR]\-\-on\f[R] form tracks at most one branch (the current branch
-by default).
-Multiple \f[CR]\-\-on\f[R] values are reserved for multiple bases, which
-aren\(aqt supported yet; they currently fail without changing anything.
+The \f[CR]\-\-on\f[R] form tracks one branch (the current branch by
+default).
+Repeat \f[CR]\-\-on\f[R] to record its ordered bases.
+This records dependencies without changing history; replaying multiple
+bases is not supported yet.
+To add bases to a tracked branch, its first \f[CR]\-\-on\f[R] must be
+its existing parent.
+Changing the bases of a branch that already has multiple bases is not
+supported yet.
 .PP
 Each branch\(aqs base, the commit it was built on, is where it forked
 from the branch before it (or from \f[CR]<parent>\f[R]).
@@ -1498,7 +1503,8 @@ T{
 \f[CR]track\f[R]
 T}@T{
 \f[CR]tracked\f[R]: each branch\(aqs \f[CR]branch\f[R],
-\f[CR]parent\f[R] and \f[CR]base\f[R]
+\f[CR]parent\f[R], \f[CR]base\f[R], and ordered
+\f[CR]additional_parents\f[R]
 T}
 T{
 \f[CR]import\f[R]
@@ -1752,6 +1758,10 @@ branch and the exact parent commit it was built on:
 branch.<name>.stackParent   e.g. pr1
 branch.<name>.stackBase     the pr1 commit pr2 was last rebased onto
 .EE
+.PP
+For multiple parents, \f[CR]stackParent\f[R] stores a versioned list in
+dependency order.
+Existing single\-parent values remain unchanged.
 .PP
 Restacking runs
 \f[CR]git rebase \-\-onto <parent> <stackBase> <branch>\f[R], which

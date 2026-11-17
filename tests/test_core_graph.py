@@ -1,8 +1,4 @@
-"""How core selects and protects dependency graphs.
-
-Multiple-base graphs are constructed in memory until storage and replay are
-implemented; these tests don't claim that commands can create them yet.
-"""
+"""How core selects and protects dependency graphs."""
 
 import pytest
 
@@ -39,13 +35,25 @@ def test_core_checks_shared_ownership_on_every_selected_base(client: StackClient
     client.ensure_owned(selected, stacks, allow_shared=True, command="restack")
 
 
-def test_core_does_not_partly_save_a_graph_with_multiple_bases(repo: Repo, client: StackClient) -> None:
-    stacks = graph()
-    stacks.set_ownership("first", Ownership.OWNED)
-    stacks.set_ownership("combined", Ownership.SHARED)
+def test_core_reads_legacy_and_multiple_base_metadata(repo: Repo, client: StackClient) -> None:
+    repo.git("branch", "first")
+    repo.git("branch", "second")
+    repo.git("branch", "combined")
+    stacks = client.stacks()
+    stacks.reparent("first", "main")
+    stacks.reparent("second", "main")
+    stacks.reparent("combined", "first")
+    stacks.set_additional_parents("combined", ("second",))
+    client.save(stacks)
 
-    with pytest.raises(StackError, match="multiple bases.*not supported"):
-        client.save(stacks)
+    assert repo.git("config", "branch.first.stackParent") == "main"
+    assert client.stacks().dependencies("combined") == ("first", "second")
 
-    assert not repo.config_exists("first", "stackOwnership")
-    assert not repo.config_exists("combined", "stackOwnership")
+
+@pytest.mark.parametrize("value", ['git-stack-multi:v1:["first", "first"]', 'git-stack-multi:v2:["first", "second"]'])
+def test_core_refuses_invalid_multiple_base_metadata(repo: Repo, client: StackClient, value: str) -> None:
+    repo.git("branch", "combined")
+    repo.git("config", "branch.combined.stackParent", value)
+
+    with pytest.raises(StackError, match="multiple-base metadata is invalid"):
+        client.stacks()

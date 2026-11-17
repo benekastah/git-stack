@@ -299,6 +299,10 @@ class Stacks:
             replace(node, parent=parent, additional_parents=tuple(p for p in node.additional_parents if p != parent))
         )
 
+    def set_additional_parents(self, branch: str, parents: Sequence[str]) -> None:
+        """Record the remaining ordered dependencies of a tracked branch."""
+        self._set(replace(self._nodes[branch], additional_parents=tuple(parents)))
+
     def share(self, branch: str) -> None:
         """Mark tracked branch, and the branches stacked on it, shared."""
         self.set_ownership(branch, Ownership.SHARED)

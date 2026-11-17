@@ -51,7 +51,7 @@ class TrackResult:
 def run(stack: StackClient, args: Args) -> TrackResult:
     if args.on:
         if len(args.on) > 1:
-            raise StackError("tracking multiple bases is not supported yet")
+            return TrackResult(stack.track_on(args.on, args.parent, base=args.base))
         return TrackResult(stack.track(args.on[0], [args.parent] if args.parent else [], base=args.base))
     if args.parent is None:
         raise StackError("track requires a parent or --on")
@@ -60,4 +60,5 @@ def run(stack: StackClient, args: Args) -> TrackResult:
 
 def show(stack: StackClient, args: Args, result: TrackResult) -> None:
     for tracked in result.tracked:
-        print(f"tracking {tracked.branch} on top of {tracked.parent} (base {tracked.base[:12]})")
+        parents = ", ".join((tracked.parent, *tracked.additional_parents))
+        print(f"tracking {tracked.branch} on top of {parents} (base {tracked.base[:12]})")

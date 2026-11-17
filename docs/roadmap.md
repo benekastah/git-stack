@@ -15,8 +15,8 @@ for them.
 
 The implementation needs to cover these parts together:
 
-- Record the ordered bases and the commits last incorporated from each one.
-  Keep existing single-parent metadata and scripting output compatible.
+- Record the commits last incorporated from each base. Keep existing
+  single-parent metadata and scripting output compatible.
 - Walk dependencies before dependents, including across stacks, and reject
   cycles. Selecting a dependent must include the bases needed to restack it;
   a shared dependency retains its ownership protections.
