@@ -367,26 +367,27 @@ class StackClient(StackCore):
             # tracked on parent with nothing to stack on.
             raise StackError(f"{parent} has no commits yet, so there's nothing to build {name} on; commit to it first")
         self.ensure_name_free_on_remotes(name)
-        # The branch at the bottom of name's stack, which is what's in a group,
-        # or None if that's name itself.
-        bottom = None
+        # Connected bottom branches carry the group's membership.
+        bottoms: list[str] = []
         stacks = self.stacks()
         if group is not None:
             self.ensure_group_name(group)
             if parent in stacks:
-                bottom = stacks.bottom(parent)
-                current = stacks.group(bottom)
-                if current is not None and current != group:
-                    raise StackError(
-                        f"{parent}'s stack is in group {current} already; run `git stack group add --move {group}` "
-                        f"from it to move it, or `git stack group rename {group}` to rename the group"
-                    )
+                bottoms = self.selected_bottoms([parent], [], stacks, "group")
+                for bottom in bottoms:
+                    current = stacks.group(bottom)
+                    if current is not None and current != group:
+                        raise StackError(
+                            f"{bottom}'s stack is in group {current} already; run `git stack group add --move {group}` "
+                            f"from it to move it, or `git stack group rename {group}` to rename the group"
+                        )
         # Without --no-track, branch.autoSetupMerge=inherit (or always) would give
         # name its parent's upstream, which sync and push take as its own.
         git.run(*SWITCH, "--no-track", "--create", name)
         stacks.reparent(name, parent)
         if group is not None:
-            stacks.set_group(bottom or name, group)
+            for bottom in bottoms or [name]:
+                stacks.set_group(bottom, group)
         self.save(stacks)
         git.config_set(name, BASE_KEY, git.tip(name))
         return parent

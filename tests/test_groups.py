@@ -39,6 +39,35 @@ def test_group_add_checks_other_bases_before_moving_a_graph(repo: Repo, client: 
     assert client.stacks().group("second") == "other"
 
 
+def test_branch_group_refuses_a_conflicting_secondary_base_before_creation(repo: Repo, client: StackClient) -> None:
+    client.branch("first")
+    client.branch("combined")
+    repo.git("switch", "--quiet", "main")
+    client.branch("second", group="other")
+    repo.git("switch", "--quiet", "combined")
+    repo.stack("track", "--on", "first", "--on", "second")
+
+    with pytest.raises(StackError, match="other"):
+        client.branch("child", group="new")
+
+    assert not client.git.local_branch_exists("child")
+    assert client.stacks().group("first") is None
+    assert client.stacks().group("second") == "other"
+
+
+def test_branch_group_assigns_every_connected_bottom(repo: Repo, client: StackClient) -> None:
+    client.branch("first")
+    client.branch("combined")
+    repo.git("switch", "--quiet", "main")
+    client.branch("second")
+    repo.git("switch", "--quiet", "combined")
+    repo.stack("track", "--on", "first", "--on", "second")
+
+    client.branch("child", group="together")
+
+    assert client.stacks().group("first") == client.stacks().group("second") == "together"
+
+
 def make_siblings(repo: Repo, client: StackClient, delete_branch: bool = True) -> None:
     """main <- a <- (b, c), pushed, then a squash-merged."""
     client.branch("a")
