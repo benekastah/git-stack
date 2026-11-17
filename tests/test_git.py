@@ -15,7 +15,7 @@ from git_client.testing import GitCall, real_git
 from git_stack.adapters.git import GitAdapter
 from git_stack.core import StackCore
 from git_stack.errors import StackError
-from git_stack.git import GIT_VARIABLE, GitClient, changes_refs, changes_worktrees
+from git_stack.git import GIT_VARIABLE, GitClient, changes_refs, changes_worktrees, same_file
 from tests.helpers import Repo, install_command
 
 
@@ -679,3 +679,37 @@ def test_git_runs_in_the_users_locale_with_its_messages_in_english(
     assert by_command["config branch.main.stackParent"]["GIT_TEXTDOMAINDIR"] is not None
     assert by_command["cat-file --batch-command"]["GIT_TEXTDOMAINDIR"] is not None
     assert by_command["status"]["GIT_TEXTDOMAINDIR"] is None
+
+
+def test_common_dir_at_the_top_of_a_worktree_starts_no_git(repo: Repo, git_calls: list[GitCall]) -> None:
+    repo.git("worktree", "add", "--quiet", "-b", "elsewhere", str(repo.tmp / "elsewhere"))
+
+    assert same_file(GitClient(repo.tmp / "elsewhere").common_dir(), repo.path / ".git")
+    assert git_calls == []
+
+
+def test_common_dir_from_a_subdirectory_asks_git(repo: Repo) -> None:
+    (repo.path / "sub").mkdir()
+
+    assert same_file(GitClient(repo.path / "sub").common_dir(), repo.path / ".git")
+
+
+def test_common_dir_follows_git_dir(repo: Repo, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Where git would look, rather than the .git at the directory: a
+    worktree whose repository GIT_DIR names."""
+    (repo.tmp / "other").mkdir()
+    repo.git("init", "--quiet", str(repo.tmp / "other"))
+    monkeypatch.setenv("GIT_DIR", str(repo.tmp / "other" / ".git"))
+
+    assert same_file(GitClient(repo.path).common_dir(), repo.tmp / "other" / ".git")
+
+
+@pytest.mark.parametrize(
+    "name", ["rebase-merge", "rebase-apply", "CHERRY_PICK_HEAD", "REVERT_HEAD", "sequencer", "MERGE_HEAD"]
+)
+def test_operation_in_progress_sees_each_operations_state(repo: Repo, name: str) -> None:
+    git = GitClient(repo.path)
+    assert not git.operation_in_progress()
+    (repo.path / ".git" / name).touch()
+
+    assert git.operation_in_progress()

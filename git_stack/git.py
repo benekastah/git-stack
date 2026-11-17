@@ -9,7 +9,7 @@ from contextlib import contextmanager
 from typing import TextIO
 
 import git_client
-from git_client import CatFile, Git, GitError
+from git_client import CatFile, Git, GitError, git_common_dir, git_paths
 
 from git_stack.errors import StackError
 
@@ -51,6 +51,9 @@ SWITCH = ("-c", "core.warnAmbiguousRefs=false", "switch", "--quiet")
 MAX_UPSTREAM_PATTERNS_LENGTH = 16384
 # The environment variable that names the git to run, if not the one on PATH.
 GIT_VARIABLE = "GIT_STACK_GIT"
+# git's variables that can make the git directory another than the one at the
+# top of the worktree, which git_common_dir doesn't read.
+GIT_DIR_VARIABLES = frozenset({"GIT_DIR", "GIT_COMMON_DIR"})
 # Characters a branch name can't have, but a revision (e.g. main~1) can.
 REVISION_SYNTAX = frozenset("~^:?*[\\ ")
 
@@ -300,9 +303,14 @@ class GitClient:
         )
 
     def common_dir(self) -> pathlib.Path:
-        """The absolute path of the git directory every worktree shares."""
+        """The absolute path of the git directory every worktree shares: read
+        from the files at the top of a worktree, without git, unless git's
+        variables may name another (see git_client.git_common_dir)."""
         if self._common_dir is None:
-            self._common_dir = pathlib.Path(self.run("rev-parse", "--path-format=absolute", "--git-common-dir"))
+            found = None if GIT_DIR_VARIABLES & os.environ.keys() else git_common_dir(self.directory)
+            self._common_dir = found or pathlib.Path(
+                self.run("rev-parse", "--path-format=absolute", "--git-common-dir")
+            )
         return self._common_dir
 
     def branch_config(self, fresh: bool = False) -> dict[tuple[str, str], str]:
@@ -473,10 +481,8 @@ class GitClient:
         only its sequencer state behind, not CHERRY_PICK_HEAD.
         """
         names = ("rebase-merge", "rebase-apply", "CHERRY_PICK_HEAD", "REVERT_HEAD", "sequencer", "MERGE_HEAD")
-        paths = self.run(
-            "rev-parse", "--path-format=absolute", *(arg for name in names for arg in ("--git-path", name))
-        ).splitlines()
-        return any(pathlib.Path(path).exists() for path in paths)
+        with git_errors():
+            return any(path.exists() for path in git_paths(self._git, *names))
 
     def has_conflicts(self) -> bool:
         """Whether the index has unmerged paths, i.e. a merge stopped on a
