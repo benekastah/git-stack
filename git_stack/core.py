@@ -201,7 +201,10 @@ class StackCore:
         git config: the settings that changed, and for a branch no longer
         tracked, none at all (see forget)."""
         git = self.git
-        for branch, old, new in stacks.changes():
+        changes = stacks.changes()
+        if any((old and old.additional_parents) or (new and new.additional_parents) for _, old, new in changes):
+            raise StackError("saving branches with multiple bases is not supported yet")
+        for branch, old, new in changes:
             if new is None:
                 self.forget(branch)
                 continue
@@ -494,11 +497,14 @@ class StackCore:
         branch that couldn't be restacked."""
         original = self.git.current_branch()
         skipped: set[str] = set()
-        branches = dependency_order(branches, {b: (stacks.parent(b),) for b in stacks})
+        branches = dependency_order(branches, {b: stacks.dependencies(b) for b in stacks})
+        if any(len(stacks.dependencies(branch)) > 1 for branch in branches):
+            raise StackError("restacking branches with multiple bases is not supported yet")
         for branch in branches:
             parent = stacks.parent(branch)
-            if parent in skipped:
-                self.emit(events.ParentSkipped(branch, parent))
+            blocked = next((base for base in stacks.dependencies(branch) if base in skipped), None)
+            if blocked is not None:
+                self.emit(events.ParentSkipped(branch, blocked))
                 skipped.add(branch)
             elif not self.restack_branch(branch, parent, latest):
                 skipped.add(branch)

@@ -1,4 +1,4 @@
-"""The tracked branches, as trees, without touching the repository.
+"""The tracked branches and their dependencies, without touching the repository.
 
 StackCore.stacks reads them from git config, and StackCore.save writes back
 what changed, so a command can work out what to change in memory, with the
@@ -19,20 +19,22 @@ def dependency_order(branches: Iterable[str], parents: Mapping[str, Sequence[str
     visiting: set[str] = set()
     ordered: list[str] = []
 
-    def visit(branch: str) -> None:
-        if branch not in remaining:
-            return
-        if branch in visiting:
-            raise StackError(f"cycle in stack metadata involving {branch}")
-        visiting.add(branch)
-        for parent in parents.get(branch, ()):
-            visit(parent)
-        visiting.remove(branch)
-        remaining.remove(branch)
-        ordered.append(branch)
-
-    for branch in selected:
-        visit(branch)
+    for first in selected:
+        pending = [(first, False)]
+        while pending:
+            branch, visited = pending.pop()
+            if branch not in remaining:
+                continue
+            if visited:
+                visiting.remove(branch)
+                remaining.remove(branch)
+                ordered.append(branch)
+            else:
+                if branch in visiting:
+                    raise StackError(f"cycle in stack metadata involving {branch}")
+                visiting.add(branch)
+                pending.append((branch, True))
+                pending.extend((parent, False) for parent in reversed(parents.get(branch, ())))
     return ordered
 
 
@@ -50,19 +52,20 @@ class Ownership(enum.Enum):
 class StackNode:
     """A tracked branch: the branch it's stacked on, the group of stacks its
     stack is in, if it's at the bottom of one (see core.GROUP_KEY), and its
-    stack's ownership (see core.OWNERSHIP_KEY), if that's been recorded."""
+    stack's ownership (see core.OWNERSHIP_KEY), if that's been recorded.
+    additional_parents are its other bases, in replay order."""
 
     name: str
     parent: str
     group: str | None = None
     ownership: Ownership | None = None
+    additional_parents: tuple[str, ...] = ()
 
 
 class Stacks:
-    """Every tracked branch, by name, each stacked on another tracked branch,
-    or at the bottom of a stack, on its root: an untracked branch (usually
-    main). A root's stacks form a tree, since several branches can be stacked
-    on one.
+    """Tracked branches and their dependency graph. Untracked dependencies
+    are roots (usually main). The primary parent determines the existing
+    single-parent interfaces, such as ancestry and group membership.
 
     Methods take and return branch names, in the order the branches were
     read in, unless they say otherwise. Changes are only made here, until
@@ -91,6 +94,11 @@ class Stacks:
     def parent(self, branch: str) -> str:
         return self._nodes[branch].parent
 
+    def dependencies(self, branch: str) -> tuple[str, ...]:
+        """The branch's primary parent followed by its other bases."""
+        node = self._nodes[branch]
+        return (node.parent, *node.additional_parents)
+
     def parents(self) -> dict[str, str]:
         """{branch: the branch it's stacked on}"""
         return {name: node.parent for name, node in self._nodes.items()}
@@ -109,21 +117,30 @@ class Stacks:
         """The branches stacked on branch, sorted."""
         if self._children is None:
             self._children = {}
-            for name, node in sorted(self._nodes.items()):
-                self._children.setdefault(node.parent, []).append(name)
+            for name in sorted(self._nodes):
+                for parent in dict.fromkeys(self.dependencies(name)):
+                    self._children.setdefault(parent, []).append(name)
         return list(self._children.get(branch, ()))
 
     def descendants(self, branch: str) -> list[str]:
         """The branches stacked on branch, on those, and so on,
         parent-before-child (branch excluded)."""
         order: list[str] = []
-        for child in self.children(branch):
-            order.append(child)
-            order.extend(self.descendants(child))
-        return order
+        seen = {branch}
+
+        pending = list(reversed(self.children(branch)))
+        while pending:
+            child = pending.pop()
+            if child not in seen:
+                seen.add(child)
+                order.append(child)
+                pending.extend(reversed(self.children(child)))
+        selected = [branch, *order] if branch in self._nodes else order
+        ordered = dependency_order(selected, {b: self.dependencies(b) for b in selected})
+        return [b for b in ordered if b != branch]
 
     def ancestry(self, branch: str) -> list[str]:
-        """[branch, its parent, ..., its stack's root]"""
+        """[branch, its primary parent, ..., its stack's primary root]"""
         chain = [branch]
         while chain[-1] in self._nodes:
             parent = self._nodes[chain[-1]].parent
@@ -131,6 +148,21 @@ class Stacks:
                 raise StackError(f"cycle in stack metadata involving {parent}")
             chain.append(parent)
         return chain
+
+    def dependency_ancestry(self, branch: str) -> list[str]:
+        """All of branch's bases and branch, each after its own bases."""
+        pending = [branch]
+        selected: list[str] = []
+        seen: set[str] = set()
+        while pending:
+            current = pending.pop()
+            if current in seen:
+                continue
+            seen.add(current)
+            selected.append(current)
+            if current in self._nodes:
+                pending.extend(self.dependencies(current))
+        return dependency_order(selected, {b: self.dependencies(b) for b in selected if b in self._nodes})
 
     def root(self, branch: str) -> str:
         """The root of branch's stack (usually main)."""
@@ -145,12 +177,14 @@ class Stacks:
         return self._nodes[branch].parent not in self._nodes
 
     def roots(self) -> list[str]:
-        """The roots of every stack, sorted."""
-        return sorted({self.root(branch) for branch in self._nodes})
+        """The untracked dependencies of the graph, sorted."""
+        dependency_order(self._nodes, {b: self.dependencies(b) for b in self._nodes})
+        return sorted({parent for b in self._nodes for parent in self.dependencies(b) if parent not in self._nodes})
 
     def in_order(self) -> list[str]:
         """Every tracked branch, by root, parent-before-child."""
-        return [branch for root in self.roots() for branch in self.descendants(root)]
+        branches = [branch for root in self.roots() for branch in self.descendants(root)]
+        return dependency_order(branches, {b: self.dependencies(b) for b in self._nodes})
 
     def bottoms_in(self, group: str) -> list[str]:
         """The branches at the bottom of a stack in group."""
@@ -165,13 +199,33 @@ class Stacks:
         return [bottom, *sorted(b for b in self.bottoms_in(group) if b != bottom)]
 
     def stack_of(self, branch: str, groups: bool = True) -> list[str]:
-        """The branches in tracked branch's stack, parent-before-child: its
-        bottom branch and everything stacked on that. With groups, also the
-        stacks of the others in the bottom branch's group (see group_bottoms),
-        which may be on other roots."""
+        """The connected tracked branches, each after its dependencies.
+
+        With groups, include the other stacks of each connected bottom branch's
+        group (see group_bottoms), which may be on other roots.
+        """
         bottom = self.bottom(branch)
-        bottoms = self.group_bottoms(bottom) if groups else [bottom]
-        return [b for each in bottoms for b in (each, *self.descendants(each))]
+        selected: list[str] = []
+        seen: set[str] = set()
+
+        def add_stack(base: str) -> None:
+            for member in (base, *self.descendants(base)):
+                if member not in seen:
+                    seen.add(member)
+                    selected.append(member)
+
+        for base in self.group_bottoms(bottom) if groups else [bottom]:
+            add_stack(base)
+        index = 0
+        while index < len(selected):
+            current = selected[index]
+            for parent in self.dependencies(current):
+                if parent in self._nodes and parent not in seen:
+                    other = self.bottom(parent)
+                    for base in self.group_bottoms(other) if groups else [other]:
+                        add_stack(base)
+            index += 1
+        return dependency_order(selected, {b: self.dependencies(b) for b in selected})
 
     def copy(self) -> Stacks:
         """A copy to change without changing this one, e.g. to check a plan."""
@@ -184,7 +238,7 @@ class Stacks:
 
     def ensure_no_cycle(self, branch: str, new_parent: str) -> None:
         """Refuse to stack branch on new_parent if new_parent is on branch."""
-        if branch in self.ancestry(new_parent):
+        if branch in self.dependency_ancestry(new_parent):
             raise StackError(f"{new_parent} is stacked on {branch}; that would create a cycle")
 
     def ensure_group_available_for_merge(self, branch: str) -> None:
@@ -193,7 +247,7 @@ class Stacks:
         would join them to unrelated stacks."""
         if (
             self.is_bottom(branch)
-            and self.children(branch)
+            and any(self.parent(child) == branch for child in self.children(branch))
             and self._nodes[branch].group is None
             and branch in self.groups().values()
         ):
@@ -204,7 +258,7 @@ class Stacks:
 
     def _set(self, node: StackNode) -> None:
         old = self._nodes.get(node.name)
-        if old is None or old.parent != node.parent:
+        if old is None or self.dependencies(node.name) != (node.parent, *node.additional_parents):
             self._children = None
         self._nodes[node.name] = node
 
@@ -237,7 +291,9 @@ class Stacks:
             and (group := self._nodes[self.bottom(old.parent)].group) is not None
         ):
             node = replace(node, group=group)
-        self._set(replace(node, parent=parent))
+        self._set(
+            replace(node, parent=parent, additional_parents=tuple(p for p in node.additional_parents if p != parent))
+        )
 
     def share(self, branch: str) -> None:
         """Mark tracked branch, and the branches stacked on it, shared."""
@@ -255,6 +311,16 @@ class Stacks:
     def set_ownership(self, branch: str, ownership: Ownership | None) -> None:
         self._set(replace(self._nodes[branch], ownership=ownership))
 
+    def rename_dependency(self, old: str, new: str) -> list[str]:
+        """Replace references to a renamed base, keeping their positions."""
+        children = self.children(old)
+        for child in children:
+            parents = tuple(dict.fromkeys(new if p == old else p for p in self.dependencies(child)))
+            if self.parent(child) == old:
+                self.reparent(child, parents[0])
+            self._set(replace(self._nodes[child], additional_parents=parents[1:]))
+        return children
+
     def drop(self, branch: str) -> list[str]:
         """Move the branches stacked on branch onto its parent, and remove
         branch, without the rules remove_merged follows. Returns the moved
@@ -263,12 +329,22 @@ class Stacks:
         For working out what's left once branch is treated as gone (e.g.
         merged) without changing anything: saving it would untrack branch.
         """
-        new_parent = self._nodes[branch].parent
         children = self.children(branch)
         for child in children:
-            self._set(replace(self._nodes[child], parent=new_parent))
+            parents = self._without_dependency(child, branch)
+            self._set(replace(self._nodes[child], parent=parents[0], additional_parents=parents[1:]))
         self._remove(branch)
         return children
+
+    def _without_dependency(self, branch: str, removed: str) -> tuple[str, ...]:
+        """Replace a dependency with its own bases, preserving their order."""
+        return tuple(
+            dict.fromkeys(
+                base
+                for parent in self.dependencies(branch)
+                for base in (self.dependencies(removed) if parent == removed else (parent,))
+            )
+        )
 
     def remove_merged(self, branch: str) -> list[str]:
         """Move the branches stacked on merged branch onto its parent (see
@@ -280,13 +356,16 @@ class Stacks:
         Refuses, changing nothing, as ensure_group_available_for_merge does.
         """
         self.ensure_group_available_for_merge(branch)
-        new_parent = self._nodes[branch].parent
         group = self._nodes[branch].group or branch
         children = self.children(branch)
         for child in children:
-            self.reparent(child, new_parent)
-            if new_parent not in self._nodes:
-                self.set_group(child, group)
+            primary_removed = self.parent(child) == branch
+            parents = self._without_dependency(child, branch)
+            if primary_removed:
+                self.reparent(child, parents[0])
+                if parents[0] not in self._nodes:
+                    self.set_group(child, group)
+            self._set(replace(self._nodes[child], additional_parents=parents[1:]))
         self._remove(branch)
         return children
 

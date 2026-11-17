@@ -6,7 +6,7 @@ from git_stack import events
 from git_stack.errors import StackError
 from git_stack.git import GitClient
 from git_stack.stack import BranchInfo, BranchStatus, StackClient
-from git_stack.stacks import Ownership
+from git_stack.stacks import Ownership, StackNode, Stacks
 from tests.helpers import Repo
 
 
@@ -34,6 +34,29 @@ def test_restack_all_orders_parents_before_children(repo: Repo, client: StackCli
 
     repo.assert_stacked("pr2", "pr1", ["pr2 c1"])
     repo.assert_stacked("pr3", "pr2", ["pr3 c1"])
+
+
+def test_restack_refuses_multiple_bases_before_changing_any_branch(
+    repo: Repo, client: StackClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stacks = Stacks(
+        [
+            StackNode("first", "main"),
+            StackNode("second", "main"),
+            StackNode("combined", "first", additional_parents=("second",)),
+        ]
+    )
+    attempted: list[str] = []
+
+    def restack_branch(branch: str, parent: str, latest: bool = False) -> bool:
+        attempted.append(branch)
+        return True
+
+    monkeypatch.setattr(client, "restack_branch", restack_branch)
+    with pytest.raises(StackError, match="multiple bases.*not supported"):
+        client.restack_all(["combined", "first", "second"], stacks)
+
+    assert attempted == []
 
 
 def test_restack_refuses_to_drop_local_merge_changes(repo: Repo, client: StackClient) -> None:

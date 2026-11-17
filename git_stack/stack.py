@@ -792,9 +792,7 @@ class StackClient(StackCore):
         # The move took old's settings, and so its place in its stack, with
         # it, but the branches stacked on it still name old.
         stacks = self.stacks()
-        children = tuple(stacks.children(old))
-        for child in children:
-            stacks.reparent(child, new)
+        children = tuple(stacks.rename_dependency(old, new))
         self.save(stacks)
         if upstream:
             # Leaving the old upstream would make sync pull from it, and report it

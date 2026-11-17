@@ -34,6 +34,120 @@ def test_dependency_order_refuses_cycles() -> None:
         dependency_order(["a", "b"], {"a": ("b",), "b": ("a",)})
 
 
+def test_dependency_order_handles_a_deep_stack() -> None:
+    branches = [str(i) for i in range(1500)]
+    parents = {branches[i]: (branches[i - 1],) for i in range(1, len(branches))}
+    assert dependency_order(reversed(branches), parents) == branches
+
+
+def test_graph_walk_handles_a_deep_stack() -> None:
+    branches = [str(i) for i in range(1500)]
+    stacks = Stacks(StackNode(branch, "main" if i == 0 else branches[i - 1]) for i, branch in enumerate(branches))
+    assert stacks.descendants("main") == branches
+
+
+def test_multiple_bases_walk_dependents_once_in_dependency_order() -> None:
+    stacks = Stacks(
+        [
+            StackNode("first", "main"),
+            StackNode("second", "main"),
+            StackNode("combined", "first", additional_parents=("second",)),
+            StackNode("child", "combined"),
+        ]
+    )
+
+    assert stacks.dependencies("combined") == ("first", "second")
+    assert stacks.children("second") == ["combined"]
+    assert stacks.descendants("main") == ["first", "second", "combined", "child"]
+
+
+def test_multiple_bases_refuse_a_cycle_through_an_additional_parent() -> None:
+    stacks = Stacks([StackNode("a", "main"), StackNode("b", "main"), StackNode("c", "a", additional_parents=("b",))])
+
+    with pytest.raises(StackError, match="cycle"):
+        stacks.ensure_no_cycle("b", "c")
+
+
+def test_graph_walk_refuses_existing_cycles() -> None:
+    stacks = Stacks([StackNode("a", "b"), StackNode("b", "a")])
+    with pytest.raises(StackError, match="cycle in stack metadata"):
+        stacks.in_order()
+    with pytest.raises(StackError, match="cycle in stack metadata"):
+        stacks.descendants("a")
+
+
+def test_multiple_bases_join_stacks_on_different_roots() -> None:
+    stacks = Stacks(
+        [
+            StackNode("a", "main"),
+            StackNode("b", "release"),
+            StackNode("combined", "a", additional_parents=("b",)),
+            StackNode("child", "combined"),
+        ]
+    )
+
+    assert stacks.roots() == ["main", "release"]
+    assert stacks.in_order() == ["a", "b", "combined", "child"]
+    assert stacks.dependency_ancestry("child") == ["main", "a", "release", "b", "combined", "child"]
+    assert stacks.stack_of("combined") == ["a", "b", "combined", "child"]
+    assert stacks.stack_of("b") == ["b", "a", "combined", "child"]
+
+
+@pytest.mark.parametrize("method", ["drop", "remove_merged"])
+def test_removing_a_secondary_base_preserves_the_primary_parent(method: str) -> None:
+    stacks = Stacks(
+        [StackNode("a", "main"), StackNode("b", "main"), StackNode("combined", "a", additional_parents=("b",))]
+    )
+
+    getattr(stacks, method)("b")
+
+    assert stacks.dependencies("combined") == ("a", "main")
+
+
+def test_renaming_a_secondary_base_preserves_the_primary_parent() -> None:
+    stacks = Stacks([StackNode("a", "main"), StackNode("combined", "a", additional_parents=("old",))])
+
+    assert stacks.rename_dependency("old", "new") == ["combined"]
+
+    assert stacks.dependencies("combined") == ("a", "new")
+
+
+def test_reparent_to_an_existing_secondary_base_does_not_duplicate_it() -> None:
+    stacks = Stacks(
+        [StackNode("a", "main"), StackNode("b", "main"), StackNode("combined", "a", additional_parents=("b",))]
+    )
+
+    stacks.reparent("combined", "b")
+
+    assert stacks.dependencies("combined") == ("b",)
+
+
+def test_save_refuses_multiple_bases_before_writing_metadata(repo: Repo, client: StackClient) -> None:
+    stacks = Stacks([StackNode("combined", "main", additional_parents=("other",))])
+    stacks.set_ownership("combined", Ownership.SHARED)
+
+    with pytest.raises(StackError, match="multiple bases.*not supported"):
+        client.save(stacks)
+
+    assert not repo.config_exists("combined", "stackOwnership")
+
+
+@pytest.mark.parametrize("method", ["drop", "remove_merged"])
+def test_removing_a_multiple_base_branch_preserves_its_other_bases(method: str) -> None:
+    stacks = Stacks(
+        [
+            StackNode("a", "main"),
+            StackNode("b", "main"),
+            StackNode("combined", "a", additional_parents=("b",)),
+            StackNode("child", "combined", additional_parents=("b",)),
+        ]
+    )
+
+    getattr(stacks, method)("combined")
+
+    assert stacks.dependencies("child") == ("a", "b")
+
+
 def test_walks_the_tree() -> None:
     stacks = tree()
 
