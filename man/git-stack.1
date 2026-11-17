@@ -1699,6 +1699,17 @@ Git\-stack reads the temporary branch to find the result, even if you
 switched back after continuing or aborting.
 Other stages can still stop on conflicts.
 .PP
+Use \f[CR]git rebase \-\-skip\f[R] to omit a conflicting commit from a
+secondary base in this replay.
+A later rebuild can try to replay it again.
+If you skip a nonempty commit of the branch itself, git\-stack discards
+the replay and keeps the branch at its original tip.
+.PP
+Git runs its rebase hooks for the temporary stages.
+A hook such as \f[CR]post\-rewrite\f[R] can run before the branch you
+are restacking moves, and aborting the replay leaves any hook side
+effects in place.
+.PP
 If you started with \f[CR]pull\f[R] or \f[CR]sync\f[R],
 \f[CR]git stack restack\f[R] can finish the pending replay locally.
 Rerun the original command with its original arguments to finish the
