@@ -164,6 +164,10 @@ class Stacks:
                 pending.extend(self.dependencies(current))
         return dependency_order(selected, {b: self.dependencies(b) for b in selected if b in self._nodes})
 
+    def has_multiple_base_ancestor(self, branch: str) -> bool:
+        """Whether branch or any tracked dependency has several bases."""
+        return any(len(self.dependencies(b)) > 1 for b in self.dependency_ancestry(branch) if b in self._nodes)
+
     def root(self, branch: str) -> str:
         """The root of branch's stack (usually main)."""
         return self.ancestry(branch)[-1]

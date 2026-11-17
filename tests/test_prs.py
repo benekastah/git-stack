@@ -5,10 +5,56 @@ import pytest
 from git_stack import events, stack_section
 from git_stack.errors import StackError
 from git_stack.stack import BranchStatus, PullRequestAction, PullRequestStep, StackClient
+from git_stack.stacks import StackNode, Stacks
 from tests.helpers import FakeGitHub, Repo
 
 # Without a trailing newline, which git-stack strips like the rest of git's output.
 TEMPLATE = "## What\n\n## Why"
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_prs_skips_multiple_base_branches_and_their_descendants(
+    repo: Repo, gh: FakeGitHub, client: StackClient, monkeypatch: pytest.MonkeyPatch, dry_run: bool
+) -> None:
+    repo.make_stack()
+    client.push()
+    stacks = Stacks(
+        [
+            StackNode("pr1", "main"),
+            StackNode("pr2", "pr1", additional_parents=("main",)),
+            StackNode("pr3", "pr2"),
+        ]
+    )
+    monkeypatch.setattr(client, "stacks", lambda: stacks)
+
+    result = client.prs(dry_run=dry_run)
+
+    assert [pr["headRefName"] for pr in gh.load()["prs"]] == ([] if dry_run else ["pr1"])
+    assert [(step.branch, step.action.value) for step in result.steps] == [
+        ("pr1", "open"),
+        ("pr2", "multiple-bases"),
+        ("pr3", "multiple-bases"),
+    ]
+
+
+def test_prs_does_not_retarget_existing_pull_requests_on_multiple_base_branches(
+    repo: Repo, gh: FakeGitHub, client: StackClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo.make_stack()
+    client.push()
+    client.prs()
+    state = gh.load()
+    state["prs"][1]["baseRefName"] = "main"
+    state["prs"][2]["baseRefName"] = "main"
+    gh.save(state)
+    stacks = Stacks(
+        [StackNode("pr1", "main"), StackNode("pr2", "pr1", additional_parents=("main",)), StackNode("pr3", "pr2")]
+    )
+    monkeypatch.setattr(client, "stacks", lambda: stacks)
+
+    client.prs()
+
+    assert [pr["baseRefName"] for pr in gh.load()["prs"][1:]] == ["main", "main"]
 
 
 def add_template(repo: Repo, path: str, content: str = TEMPLATE) -> None:

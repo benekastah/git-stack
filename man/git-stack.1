@@ -1166,6 +1166,10 @@ An open pull request that isn\(aqt into its branch\(aqs stack parent
 (say it was opened from the link GitHub prints on push, which targets
 \f[CR]main\f[R]) is pointed at it, as \f[CR]push\f[R] does.
 .IP \(bu 2
+Branches with multiple bases and their descendants are skipped,
+including when they already have pull requests.
+Independent base branches can still have pull requests.
+.IP \(bu 2
 Then it adds the stack to the end of each open pull request\(aqs
 description, as a tree from the stack\(aqs root, with that pull request
 marked, and keeps it up to date each time it runs, showing each open one
@@ -1552,8 +1556,9 @@ T{
 T}@T{
 \f[CR]stacks\f[R], and \f[CR]steps\f[R], one for each branch: the
 \f[CR]branch\f[R], its \f[CR]parent\f[R], and the \f[CR]action\f[R]:
-\f[CR]open\f[R], \f[CR]exists\f[R] (it already has a pull request) or
-\f[CR]no\-commits\f[R] (skipped, since it has no commits of its own).
+\f[CR]open\f[R], \f[CR]exists\f[R] (it already has a pull request),
+\f[CR]no\-commits\f[R] (it has no commits of its own), or
+\f[CR]multiple\-bases\f[R] (it depends on multiple bases).
 \f[CR]title\f[R] is an opened pull request\(aqs title, and
 \f[CR]number\f[R] and \f[CR]url\f[R] an opened or existing one\(aqs (an
 existing one has no \f[CR]url\f[R], and a dry run opens none); each is

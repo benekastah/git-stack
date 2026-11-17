@@ -848,6 +848,9 @@ git stack prs
   that isn't into its branch's stack parent (say it was opened from the link
   GitHub prints on push, which targets `main`) is pointed at it, as `push`
   does.
+- Branches with multiple bases and their descendants are skipped, including
+  when they already have pull requests. Independent base branches can still
+  have pull requests.
 - Then it adds the stack to the end of each open pull request's description,
   as a tree from the stack's root, with that pull request marked, and keeps
   it up to date each time it runs, showing each open one on what it's stacked
@@ -1087,7 +1090,7 @@ What each command's result has, besides `type` and `events`:
 | `sync`, `pull` | `stacks`, and `unpushed`, the branches whose remote branch is out of date because they weren't pushed |
 | `clean` | `stacks`: every stack |
 | `push` | `stacks`, `pushed`, the branches it pushed, and with `--prs`, `steps`, as for `prs` (`null` without it, or if it couldn't open pull requests). `error` is why it couldn't, when it pushed but failed, or `null` |
-| `prs` | `stacks`, and `steps`, one for each branch: the `branch`, its `parent`, and the `action`: `open`, `exists` (it already has a pull request) or `no-commits` (skipped, since it has no commits of its own). `title` is an opened pull request's title, and `number` and `url` an opened or existing one's (an existing one has no `url`, and a dry run opens none); each is `null` otherwise |
+| `prs` | `stacks`, and `steps`, one for each branch: the `branch`, its `parent`, and the `action`: `open`, `exists` (it already has a pull request), `no-commits` (it has no commits of its own), or `multiple-bases` (it depends on multiple bases). `title` is an opened pull request's title, and `number` and `url` an opened or existing one's (an existing one has no `url`, and a dry run opens none); each is `null` otherwise |
 | `unrevert` | the `branch` it created, the `parent` it created it on, the `reverts` it reverted, newest first, and the `children` it moved onto it |
 | `parent`, `base` | the `parent` or `base` |
 | `parents` | `parents`, the branch names in replay order |

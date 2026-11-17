@@ -58,6 +58,8 @@ def show_steps(stack: StackClient, steps: list[PullRequestStep], branches: list[
     for step in steps:
         if step.action is PullRequestAction.NO_COMMITS:
             print(f"skipping {step.branch}: it has no commits of its own")
+        elif step.action is PullRequestAction.MULTIPLE_BASES:
+            print(f"skipping {step.branch}: it depends on multiple bases")
         elif step.action is PullRequestAction.OPEN:
             new_links[step.branch] = f"would open: {step.title}" if dry_run else step.url or ""
     if branches:

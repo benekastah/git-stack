@@ -411,6 +411,14 @@ def test_prs_says_when_everything_looks_merged(
     assert capsys.readouterr().out == f"nothing to open: every branch in {where} looks merged\n"
 
 
+def test_prs_explains_why_a_multiple_base_branch_was_skipped(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
+    stack.prs.return_value = PrsResult([PullRequestStep("combined", "first", PullRequestAction.MULTIPLE_BASES)], [])
+
+    main(["prs"], stack=stack)
+
+    assert capsys.readouterr().out == "skipping combined: it depends on multiple bases\n"
+
+
 def test_stack_error_is_printed_and_fails(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
     stack.restack.side_effect = StackError("main isn't in a stack")
 
@@ -767,6 +775,24 @@ def test_clean_json_ends_with_the_error_when_it_fails(stack: Any, capsys: pytest
                         "title": "Add pr1",
                         "number": 12,
                         "url": "https://x/12",
+                    }
+                ],
+            },
+        ),
+        (
+            ["prs"],
+            "prs",
+            PrsResult([PullRequestStep("pr2", "pr1", PullRequestAction.MULTIPLE_BASES)], STACK),
+            {
+                "stacks": to_json(STACK),
+                "steps": [
+                    {
+                        "branch": "pr2",
+                        "parent": "pr1",
+                        "action": "multiple-bases",
+                        "title": None,
+                        "number": None,
+                        "url": None,
                     }
                 ],
             },

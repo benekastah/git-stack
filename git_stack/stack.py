@@ -191,6 +191,7 @@ class PullRequestAction(enum.Enum):
     OPEN = "open"
     EXISTS = "exists"  # it already has a pull request, open or merged
     NO_COMMITS = "no-commits"  # GitHub won't open a pull request without changes
+    MULTIPLE_BASES = "multiple-bases"
 
 
 @dataclass(frozen=True)
@@ -1816,11 +1817,20 @@ class StackClient(StackCore):
         self.settle_all()
         stacks = self.stacks()
         stack = self.selected_stacks(branches, groups, stacks, "open pull requests for")
+        ineligible = {branch for branch in stack if stacks.has_multiple_base_ancestor(branch)}
         remote = remote or self.default_remote(stack, stacks)
         adapter = ensure_github(make_adapter(self, remote, fetch=True), remote)
         adapter.ensure_available()
-        branches = self.skip_merged(stack, stacks, adapter)
+        branches = self.skip_merged([branch for branch in stack if branch not in ineligible], stacks, adapter)
         steps = self.open_pull_requests(branches, stacks, adapter, remote, dry_run, rebuild_stack)
+        by_branch = {step.branch: step for step in steps}
+        steps = [
+            PullRequestStep(branch, stacks.parent(branch), PullRequestAction.MULTIPLE_BASES)
+            if branch in ineligible
+            else by_branch[branch]
+            for branch in stack
+            if branch in ineligible or branch in by_branch
+        ]
         return PrsResult(steps, self.stack_infos(stack, adapter))
 
     def open_pull_requests(
