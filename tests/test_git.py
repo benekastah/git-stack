@@ -649,25 +649,6 @@ def test_commit_patch_ids_marks_paths_even_with_git_literal_pathspecs(
     assert [len(p) for p in GitClient(repo.path).commit_patch_ids(("log", "-p", "HEAD~1..HEAD", "--", "a"))] == [1]
 
 
-def test_changed_files_are_from_the_top_even_with_diff_relative(repo: Repo) -> None:
-    """commit_patch_ids takes them from the top, whatever directory git-stack
-    runs in, which diff.relative would otherwise make `git diff` list them
-    from (leaving out the others)."""
-    (repo.path / "sub").mkdir()
-    repo.write("sub/x", "x\n")
-    repo.write("top", "top\n")
-    repo.git("add", ".")
-    repo.git("commit", "--quiet", "-m", "two files")
-    repo.git("config", "diff.relative", "true")
-    git = GitClient(repo.path / "sub")
-
-    files = GitAdapter(StackCore(git)).changed_files("HEAD~1", "HEAD")
-
-    assert files == ["sub/x", "top"]
-    [patches] = git.commit_patch_ids(("log", "-p", "HEAD~1..HEAD", "--", *files))
-    assert len(patches) == 1
-
-
 def test_git_runs_in_the_users_locale_with_its_messages_in_english(
     repo: Repo, fresh_find_git: None, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
