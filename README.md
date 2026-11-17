@@ -1197,6 +1197,8 @@ the branch at its original tip.
 Git runs its rebase hooks for the temporary stages. A hook such as
 `post-rewrite` can run before the branch you are restacking moves, and
 aborting the replay leaves any hook side effects in place.
+If a `pre-rebase` hook refuses a stage, address the hook failure and rerun
+the original git-stack command. Earlier conflict resolutions are preserved.
 
 If you started with `pull` or `sync`, `git stack restack` can finish the
 pending replay locally. Rerun the original command with its original

@@ -603,6 +603,32 @@ def test_replay_recovers_a_resolved_stage_after_switching_back(repo: Repo, clien
     assert repo.git("branch", "--show-current") == "combined"
 
 
+def test_replay_retries_a_stage_vetoed_by_a_pre_rebase_hook(repo: Repo, client: StackClient, combined: None) -> None:
+    before = repo.git("rev-parse", "combined")
+    repo.git("switch", "-q", "second")
+    repo.commit("a", "conflicting second\n", "conflict")
+    repo.git("switch", "-q", "combined")
+    with pytest.raises(StackError, match="rebase --continue"):
+        client.restack()
+    repo.write("a", "resolved\n")
+    repo.git("add", "a")
+    repo.git("-c", "core.editor=true", "rebase", "--continue")
+    resolved = repo.git("rev-parse", "HEAD")
+
+    repo.add_hook(repo.path, "pre-rebase", "#!/bin/sh\nexit 1\n")
+    with pytest.raises(StackError, match="could not rebase"):
+        client.restack()
+    assert repo.git("rev-parse", "combined") == before
+    pinned = repo.git("for-each-ref", "--format=%(objectname)", replay.PIN_PREFIX).splitlines()
+    (repo.path / ".git" / "hooks" / "pre-rebase").unlink()
+    client.restack()
+
+    assert repo.git("rev-parse", "combined^") == resolved
+    assert resolved in pinned
+    assert repo.git("show", "combined:a") == "resolved"
+    assert repo.git("show", "combined:c") == "combined"
+
+
 def test_replay_keeps_completed_resolution_when_final_checkout_is_blocked(repo: Repo, client: StackClient) -> None:
     client.branch("first")
     repo.commit("a", "first\n", "first")

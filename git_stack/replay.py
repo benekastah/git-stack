@@ -353,6 +353,9 @@ def start_stage(git: GitClient, job: Replay, source: str) -> Replay:
         return job
 
     git.run("switch", "--quiet", "--detach", job.head)
+    # Keep the completed history reachable when the scratch branch is reset
+    # to the next source and Git takes over the checkout.
+    git.run("update-ref", job.refs + "head", job.head)
     git.run("branch", "--force", "--no-track", job.scratch, source)
     job = replace(job, in_stage=True)
     job.save(git)
@@ -379,6 +382,10 @@ def start_stage(git: GitClient, job: Replay, source: str) -> Replay:
         raise StackError(f"rebasing {source[:12]} for {job.branch} did not move the temporary branch")
     if git.operation_in_progress():
         raise stopped_stage(git, job, source)
+    if git.rev(f"refs/heads/{job.scratch}") == source:
+        # Git returned without starting a rebase. Retry this stage instead of
+        # mistaking the unchanged scratch tip for a later user abort.
+        replace(job, in_stage=False).save(git)
     raise StackError(
         f"could not rebase {source[:12]} for {job.branch}; see Git's output, "
         f"then rerun `git stack {job.command}` in this worktree"
