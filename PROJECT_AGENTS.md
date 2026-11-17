@@ -83,13 +83,17 @@ Text meant for people (messages, `info`'s tree) can change.
 ## Tests
 
 - `tests/test_cli.py` checks how each command maps its arguments and prints its
-  result, with a mock `StackClient`; the other tests run git-stack against real
+  result, with a mock `StackClient` (made once, as `create_autospec` is slow,
+  and reset for each test); the other tests run git-stack against real
   repositories (see `tests/helpers.py`), copied for each test from ones
   `repo_templates` builds once. `Repo.stack` runs the command line in
   the test process, which is much quicker than starting one; only
   `tests/test_end_to_end.py` runs it as a separate process (`Repo.stack_process`),
   for what only that checks, like the entry point. A new command or `--json`
-  result needs a case in `test_json_prints_the_result_on_stdout`.
+  result needs a case in `test_json_prints_the_result_on_stdout`. The `gh`
+  fixture's fake GitHub (`tests/fake_gh.py`) answers git-stack's `gh`
+  commands in the test's process too (`InProcessGh`), and as a command for
+  `Repo.stack_process`.
 - The tests load py-git-client's pytest plugin (`git_client.testing`, in
   `tests/conftest.py`): each test's git has a config of its own, none of the
   user's config or git's variables (e.g. a hook's `GIT_DIR`), and runs from a
