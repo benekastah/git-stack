@@ -2011,9 +2011,7 @@ class ImportPlanner:
         if parent == self.default_branch:
             if not git.local_branch_exists(parent):
                 raise StackError(f"{parent}, which it's built on, isn't a local branch")
-            # Where import fast-forwards it to (which a dry run doesn't),
-            # so main's newer commits don't look like the branch's own.
-            return f"refs/remotes/{remote}/{parent}"
+            return self.trunk_ref(parent)
         if git.local_branch_exists(parent):
             return self.trunk_ref(parent)
         if self.plan_without_pr(parent).action is ImportAction.SKIP:

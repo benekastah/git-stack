@@ -1,5 +1,7 @@
 """git stack import, with tests/fake_gh.py standing in for gh."""
 
+import pathlib
+
 import pytest
 
 from git_stack import events
@@ -217,6 +219,20 @@ def test_import_fast_forwards_main_for_a_branch_without_pr_on_it(
     client.import_stacks()
 
     repo.assert_stacked("a", "main", ["a c1"])
+
+
+def test_import_finds_a_base_on_main_where_it_stays_when_it_cant_fast_forward(
+    repo: Repo, gh: FakeGitHub, client: StackClient, tmp_path: pathlib.Path
+) -> None:
+    repo.commit_on_forge("main", "d", "main\n", "main c1")
+    push_branch(repo, "a", "main")  # built on the new origin/main
+    open_pr(repo, gh, 1, "pr1", "a")
+    repo.git("switch", "--quiet", "-c", "elsewhere")
+    repo.git("worktree", "add", "--quiet", str(tmp_path / "other"), "main")  # so import can't move main
+
+    client.import_stacks(force=True)
+
+    assert repo.config("a", "stackBase") == repo.git("rev-parse", "refs/heads/main")
 
 
 def release_behind_origin(repo: Repo) -> None:
