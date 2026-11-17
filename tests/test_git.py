@@ -710,12 +710,13 @@ def test_common_dir_from_a_subdirectory_asks_git(repo: Repo) -> None:
     assert same_file(GitClient(repo.path / "sub").common_dir(), repo.path / ".git")
 
 
-def test_common_dir_follows_git_dir(repo: Repo, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Where git would look, rather than the .git at the directory: a
-    worktree whose repository GIT_DIR names."""
+@pytest.mark.parametrize("variable", ["GIT_DIR", "GIT_COMMON_DIR"])
+def test_common_dir_follows_git_dir(repo: Repo, monkeypatch: pytest.MonkeyPatch, variable: str) -> None:
+    """Where git would look, rather than the .git at the directory: the
+    repository GIT_DIR, or GIT_COMMON_DIR, names."""
     (repo.tmp / "other").mkdir()
     repo.git("init", "--quiet", str(repo.tmp / "other"))
-    monkeypatch.setenv("GIT_DIR", str(repo.tmp / "other" / ".git"))
+    monkeypatch.setenv(variable, str(repo.tmp / "other" / ".git"))
 
     assert same_file(GitClient(repo.path).common_dir(), repo.tmp / "other" / ".git")
 
