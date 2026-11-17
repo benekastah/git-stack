@@ -879,12 +879,6 @@ class StackClient(StackCore):
             git.run("branch", "--unset-upstream", new)
         return Renamed(old, new, children, upstream)
 
-    def ensure_unrevert_supported(self, stacks: Stacks, branches: Sequence[str]) -> None:
-        """Refuse to reshape a graph whose multi-base metadata can't be saved."""
-        affected = {member for branch in branches if branch in stacks for member in stacks.stack_of(branch)}
-        if any(stacks.has_multiple_base_ancestor(branch) for branch in affected):
-            raise StackError("unrevert with multiple bases is not supported yet")
-
     @exclusive
     def unrevert(
         self,
@@ -909,11 +903,8 @@ class StackClient(StackCore):
         git = self.git
         self.ensure_no_operation_in_progress()
         self.ensure_clean_worktree()
-        requested = [*stack, *([from_branch] if from_branch else [])]
-        self.ensure_unrevert_supported(self.stacks(), requested)
         self.settle_all()
         stacks = self.stacks()
-        self.ensure_unrevert_supported(stacks, requested)
         if git.local_branch_exists(name):
             raise StackError(f"{name} already exists; pick another name")
         self.ensure_name_free_on_remotes(name)
@@ -931,6 +922,7 @@ class StackClient(StackCore):
         planned.reparent(name, parent)
         for branch in stack:
             planned.ensure_no_cycle(branch, name)
+            planned.reparent(branch, name)
         commits = self.reverts_to_revert(reverts, parent)
         # The merged branches the stack is leaving, to untrack once nothing is
         # stacked on them, which they'd otherwise be left as forever.
@@ -939,8 +931,8 @@ class StackClient(StackCore):
             old
             for old in dict.fromkeys(stacks.parent(b) for b in stack)
             if old in stacks
-            and all(b in stack for b in stacks.children(old))
-            and adapter.merge_state(old, stacks.parent(old)) is MergeState.REVERTED
+            and not planned.children(old)
+            and self.cleanup_merge_state(old, stacks, adapter, ignore_revert=False) is MergeState.REVERTED
         ]
         # So name, if it's at the bottom of a stack, stays in the group the
         # stack was in, with the other stacks in it.

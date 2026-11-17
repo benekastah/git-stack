@@ -1327,8 +1327,9 @@ revert the given reverts, to bring back the changes of a merged branch
 they reverted, and move the branches given with \f[CR]\-\-stack\f[R]
 onto it.
 .PP
-Reshaping a multiple\-base graph is not supported yet;
-\f[CR]unrevert\f[R] refuses before creating a branch.
+With multiple bases, \f[CR]\-\-stack\f[R] moves the selected
+branches\(aq primary base to the unrevert branch and preserves their
+other dependencies.
 .PP
 \f[B]When would I use it?\f[R] When a pull request was merged and then
 reverted, and you want to bring its changes back, e.g.

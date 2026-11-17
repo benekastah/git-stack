@@ -5,7 +5,7 @@ import pytest
 from git_stack import events
 from git_stack.errors import StackError
 from git_stack.stack import StackClient
-from git_stack.stacks import Ownership, StackNode, Stacks
+from git_stack.stacks import Ownership
 from tests.helpers import Repo
 
 
@@ -21,21 +21,17 @@ def merge_and_revert_pr1(repo: Repo, client: StackClient) -> str:
     return repo.git("rev-parse", "main")
 
 
-def test_unrevert_refuses_multiple_base_graph_before_creating_a_branch(
-    repo: Repo, client: StackClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    repo.make_stack()
-    before = repo.git("rev-parse", "refs/heads/pr2")
-    stacks = Stacks(
-        [StackNode("pr1", "main"), StackNode("pr2", "pr1", additional_parents=("main",)), StackNode("pr3", "pr2")]
-    )
-    monkeypatch.setattr(client, "stacks", lambda: stacks)
+def test_unrevert_replaces_primary_and_keeps_secondary_dependency(repo: Repo, client: StackClient) -> None:
+    revert = merge_and_revert_pr1(repo, client)
+    repo.stack("track", "--on", "pr1", "--on", "main")
 
-    with pytest.raises(StackError, match="multiple bases.*not supported"):
-        client.unrevert("new", ["HEAD"], stack=["pr2"])
+    client.unrevert("restored", [revert], stack=["pr2"])
 
-    assert not repo.git("branch", "--list", "new")
-    assert repo.git("rev-parse", "refs/heads/pr2") == before
+    assert client.stacks().dependencies("pr2") == ("restored", "main")
+    repo.assert_untracked("pr1")
+    assert repo.git("show", "pr2:a") == "pr1 second"
+    assert repo.git("log", "--format=%s", "restored..pr2") == "pr2 c1"
+    assert repo.git("branch", "--show-current") == "restored"
 
 
 def test_unrevert_brings_back_a_branch_and_moves_the_stack_onto_it(

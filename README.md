@@ -961,8 +961,8 @@ Create `<name>` on `--from`, with commits that revert the given reverts, to
 bring back the changes of a merged branch they reverted, and move the
 branches given with `--stack` onto it.
 
-Reshaping a multiple-base graph is not supported yet; `unrevert` refuses
-before creating a branch.
+With multiple bases, `--stack` moves the selected branches' primary base
+to the unrevert branch and preserves their other dependencies.
 
 **When would I use it?** When a pull request was merged and then reverted, and
 you want to bring its changes back, e.g. to fix whatever got it reverted and
