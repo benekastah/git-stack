@@ -828,6 +828,7 @@ git stack ungroup search-ui             # take search-ui's stack back out
   branch's name, since groups are only ever named with `-g`.
 - `rename` refuses a name another group has, so two groups aren't merged by
   mistake. To merge them, run `git stack group add --move <name> -g <other group>`.
+- Group changes involving multiple-base graphs are not supported yet.
 - `info` shows a group once it has two or more stacks.
 
 ### `git stack prs [<branch|glob>...] [-g <group>] [--remote <name>] [-n] [--rebuild-stack]`

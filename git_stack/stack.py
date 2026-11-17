@@ -680,6 +680,18 @@ class StackClient(StackCore):
                 f"branches (e.g. branch, not origin/branch)"
             )
 
+    def ensure_groups_supported(self, stacks: Stacks, bottoms: Iterable[str]) -> None:
+        """Refuse group changes on graphs whose membership isn't supported yet."""
+        affected = {branch for bottom in bottoms for branch in stacks.stack_of(bottom)}
+        if any(stacks.has_multiple_base_ancestor(branch) for branch in affected):
+            raise StackError("group changes with multiple bases are not supported yet")
+
+    def ensure_group_rename_supported(self, stacks: Stacks, old: str | None) -> None:
+        if old is None:
+            current = self.current_stacked_branch(stacks, "rename", hint="name the group to rename")
+            old = stacks.group(stacks.bottom(current))
+        self.ensure_groups_supported(stacks, [b for b, group in stacks.groups().items() if group == old])
+
     @exclusive
     def group_add(
         self, name: str, branches: Sequence[str] = (), groups: Sequence[str] = (), move: bool = False
@@ -693,10 +705,13 @@ class StackClient(StackCore):
         stack in another group, and moving it silently splits that group.
         """
         self.ensure_no_operation_in_progress()
+        initial = self.stacks()
+        self.ensure_groups_supported(initial, self.selected_bottoms(branches, groups, initial, "group"))
         self.settle_all()
         stacks = self.stacks()
         self.ensure_group_name(name)
         bottoms = self.selected_bottoms(branches, groups, stacks, "group")
+        self.ensure_groups_supported(stacks, bottoms)
         if not move:
             moves = [
                 f"{bottom}'s stack, from group {group}"
@@ -720,8 +735,11 @@ class StackClient(StackCore):
         their groups. Returns (bottom branch, its old group) for those that
         were in one."""
         self.ensure_no_operation_in_progress()
+        initial = self.stacks()
+        self.ensure_groups_supported(initial, self.selected_bottoms(branches, groups, initial, "ungroup"))
         self.settle_all()
         stacks = self.stacks()
+        self.ensure_groups_supported(stacks, self.selected_bottoms(branches, groups, stacks, "ungroup"))
         removed: list[tuple[str, str]] = []
         for bottom in self.selected_bottoms(branches, groups, stacks, "ungroup"):
             if (group := stacks.group(bottom)) is not None:
@@ -736,8 +754,10 @@ class StackClient(StackCore):
         Returns old and the branches that were in it. Refuses if a branch is in
         new already, so groups aren't merged by mistake."""
         self.ensure_no_operation_in_progress()
+        self.ensure_group_rename_supported(self.stacks(), old)
         self.settle_all()
         stacks = self.stacks()
+        self.ensure_group_rename_supported(stacks, old)
         if old is None:
             current = self.current_stacked_branch(stacks, "rename", hint="name the group to rename")
             bottom = stacks.bottom(current)
