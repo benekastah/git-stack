@@ -1182,8 +1182,8 @@ doesn\(aqt match.
 Merged pull requests remain in the old stack.
 It refuses if unstacking would also remove an open pull request outside
 the selected stack; a closed one outside it is taken out of the stack
-with the rest, and isn\(aqt linked again, even if it\(aqs reopened
-later.
+with the rest, and isn\(aqt linked again unless it\(aqs reopened and a
+later \f[CR]prs\f[R] links it with its stack.
 If creating the new stack fails, the pull requests remain unstacked;
 rerun \f[CR]prs\f[R] to retry.
 Add \f[CR]\-\-dry\-run\f[R] to see the planned unstack and creation

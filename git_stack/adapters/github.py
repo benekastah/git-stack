@@ -684,7 +684,7 @@ class GitHubAdapter(GitAdapter):
     def unstack(self, number: int, allowed: set[int]) -> None:
         """Take the unmerged pull requests of pull request number's stack on
         GitHub out of it. Merged ones stay in it. Closed ones outside allowed are
-        taken out too, and nothing links them into a stack again."""
+        taken out too, and this doesn't link them in again."""
         fields = self.pull_request_fields([number], STACK_FIELDS)
         stack_field = optional_field(fields[number], "stack", dict)
         if stack_field is None:
