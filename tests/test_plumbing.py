@@ -4,7 +4,24 @@ import pytest
 
 from git_stack.errors import StackError
 from git_stack.stack import StackClient
+from git_stack.stacks import StackNode, Stacks
 from tests.helpers import Repo
+
+
+def test_show_stack_lists_graph_branches_once_in_dependency_order(
+    client: StackClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stacks = Stacks(
+        [
+            StackNode("first", "main"),
+            StackNode("second", "main"),
+            StackNode("combined", "first", additional_parents=("second",)),
+            StackNode("child", "combined"),
+        ]
+    )
+    monkeypatch.setattr(client, "settled_stacks", lambda: stacks)
+
+    assert client.show_stack("child") == ["first", "second", "combined", "child"]
 
 
 def test_parent_of_current_branch(repo: Repo, client: StackClient) -> None:

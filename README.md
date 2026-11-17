@@ -1043,6 +1043,8 @@ git rebase -i $(git stack base)         # reword or reorder them
 
 Print the branches in `<branch>`'s (default: the current branch's) stack,
 bottom first, one per line. The stack's root (e.g. `main`) isn't included.
+In a dependency graph, each tracked branch is printed once, after its tracked
+dependencies.
 
 **When would I use it?** To run something on every branch in a stack, or, with
 `-q`, to check whether a branch is in a stack at all:
