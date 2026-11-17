@@ -567,6 +567,8 @@ git stack restack --latest              # also move the stack onto main's latest
   those merges; git-stack refuses to replay it as a linear history.
 - `--onto` retargets only the current branch, onto another local branch. The
   branches stacked on it come along.
+- Multiple `--onto` values are reserved for multiple bases, which aren't
+  supported yet; they currently fail without changing anything.
 - `-l`/`--latest` moves the branches on the stack's root onto its latest commit
   even if they don't conflict with it (and the rest of the stack with them).
 - Merged branches are skipped and their children restacked onto their parent;

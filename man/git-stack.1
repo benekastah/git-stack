@@ -790,6 +790,10 @@ those merges; git\-stack refuses to replay it as a linear history.
 local branch.
 The branches stacked on it come along.
 .IP \(bu 2
+Multiple \f[CR]\-\-onto\f[R] values are reserved for multiple bases,
+which aren\(aqt supported yet; they currently fail without changing
+anything.
+.IP \(bu 2
 \f[CR]\-l\f[R]/\f[CR]\-\-latest\f[R] moves the branches on the
 stack\(aqs root onto its latest commit even if they don\(aqt conflict
 with it (and the rest of the stack with them).

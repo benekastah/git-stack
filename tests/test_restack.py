@@ -36,6 +36,17 @@ def test_restack_all_orders_parents_before_children(repo: Repo, client: StackCli
     repo.assert_stacked("pr3", "pr2", ["pr3 c1"])
 
 
+def test_restack_multiple_onto_values_refuses_before_changing_branches(repo: Repo, client: StackClient) -> None:
+    repo.make_stack()
+    before = {branch: repo.git("rev-parse", f"refs/heads/{branch}") for branch in ("pr1", "pr2", "pr3")}
+
+    result = repo.stack("restack", "--onto", "pr1", "--onto", "pr2", expect_success=False)
+
+    assert "multiple bases" in result.stderr
+    assert {branch: repo.git("rev-parse", f"refs/heads/{branch}") for branch in before} == before
+    assert repo.config("pr3", "stackParent") == "pr2"
+
+
 def test_restack_refuses_multiple_bases_before_changing_any_branch(
     repo: Repo, client: StackClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
