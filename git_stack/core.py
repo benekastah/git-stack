@@ -315,7 +315,13 @@ class StackCore:
         stacks."""
         if not branches and not groups:
             branches = [self.current_stacked_branch(stacks, command)]
-        return list(dict.fromkeys(stacks.bottom(b) for b in self.named(branches, groups, stacks)))
+        return list(
+            dict.fromkeys(
+                stacks.bottom(member)
+                for branch in self.named(branches, groups, stacks)
+                for member in stacks.stack_of(branch, groups=False)
+            )
+        )
 
     def current_stacked_branch(self, stacks: Stacks, command: str, hint: str | None = None) -> str:
         """Return the current branch, refusing unless it's in a stack.

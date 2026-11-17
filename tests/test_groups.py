@@ -5,34 +5,38 @@ import pytest
 from git_stack.core import Delete
 from git_stack.errors import StackError
 from git_stack.stack import StackClient
-from git_stack.stacks import StackNode, Stacks
 from tests.helpers import Repo
 
 
-@pytest.mark.parametrize("action", ["add", "remove", "rename"])
-def test_group_refuses_unsupported_multi_base_graph_before_changing_membership(
-    repo: Repo, client: StackClient, monkeypatch: pytest.MonkeyPatch, action: str
-) -> None:
-    repo.make_stack()
-    repo.git("config", "branch.pr1.stackGroup", "old")
-    stacks = Stacks(
-        [
-            StackNode("pr1", "main", group="old"),
-            StackNode("pr2", "pr1", additional_parents=("main",)),
-            StackNode("pr3", "pr2"),
-        ]
-    )
-    monkeypatch.setattr(client, "stacks", lambda: stacks)
+@pytest.mark.parametrize("selector", ["first", "second", "combined"])
+def test_group_changes_cover_all_bottoms_of_a_dependency_graph(repo: Repo, client: StackClient, selector: str) -> None:
+    client.branch("first")
+    client.branch("combined")
+    repo.git("switch", "--quiet", "main")
+    client.branch("second")
+    repo.git("switch", "--quiet", "combined")
+    repo.stack("track", "--on", "first", "--on", "second")
 
-    with pytest.raises(StackError, match="multiple bases.*not supported"):
-        if action == "add":
-            client.group_add("new", ["pr3"], move=True)
-        elif action == "remove":
-            client.group_remove(["pr3"])
-        else:
-            client.group_rename("new", "old")
+    assert set(client.group_add("together", [selector])) == {"first", "second"}
+    assert client.stacks().group("first") == client.stacks().group("second") == "together"
+    assert set(client.group_rename("renamed", "together")[1]) == {"first", "second"}
+    assert set(client.group_remove([selector])) == {("first", "renamed"), ("second", "renamed")}
 
-    assert repo.config("pr1", "stackGroup") == "old"
+
+def test_group_add_checks_other_bases_before_moving_a_graph(repo: Repo, client: StackClient) -> None:
+    client.branch("first")
+    client.branch("combined")
+    repo.git("switch", "--quiet", "main")
+    client.branch("second")
+    client.group_add("other")
+    repo.git("switch", "--quiet", "combined")
+    repo.stack("track", "--on", "first", "--on", "second")
+
+    with pytest.raises(StackError, match="--move"):
+        client.group_add("new", ["first"])
+
+    assert client.stacks().group("first") is None
+    assert client.stacks().group("second") == "other"
 
 
 def make_siblings(repo: Repo, client: StackClient, delete_branch: bool = True) -> None:

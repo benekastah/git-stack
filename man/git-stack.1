@@ -1166,7 +1166,10 @@ aren\(aqt merged by mistake.
 To merge them, run
 \f[CR]git stack group add \-\-move <name> \-g <other group>\f[R].
 .IP \(bu 2
-Group changes involving multiple\-base graphs are not supported yet.
+For a multiple\-base graph, adding or removing a group changes all
+connected bottom branches.
+If any is already in another group, \f[CR]add\f[R] requires
+\f[CR]\-\-move\f[R].
 .IP \(bu 2
 \f[CR]info\f[R] shows a group once it has two or more stacks.
 .SS \f[CR]git stack prs [<branch|glob>...] [\-g <group>] [\-\-remote <name>] [\-n] [\-\-rebuild\-stack]\f[R]
