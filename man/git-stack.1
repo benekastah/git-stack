@@ -1409,7 +1409,10 @@ git log \-\-oneline $(git stack parent)..
 .SS \f[CR]git stack bases [<branch>]\f[R]
 Print the recorded base commits for \f[CR]<branch>\f[R] (default: the
 current branch), one per line.
-Recording multiple bases is not supported yet.
+For a multiple\-base branch, these are the source tips incorporated at
+the last completed replay, in dependency order.
+Run \f[CR]git stack restack\f[R] first if the branch has no recorded
+replay.
 .SS \f[CR]git stack base [<branch>]\f[R]
 Print the commit \f[CR]<branch>\f[R] (default: the current branch) was
 last rebased onto: where its own commits start.

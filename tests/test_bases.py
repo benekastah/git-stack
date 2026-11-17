@@ -23,9 +23,21 @@ def test_singular_base_refuses_multiple_parents(client: StackClient, monkeypatch
         client.base("feature")
 
 
-def test_bases_refuses_until_all_boundaries_are_recorded(client: StackClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    stacks = Stacks([StackNode("feature", "first", additional_parents=("second",))])
-    monkeypatch.setattr(client, "settled_stacks", lambda: stacks)
+def test_bases_prints_recorded_source_tips_in_order(repo: Repo, client: StackClient) -> None:
+    client.branch("first")
+    repo.commit("a", "first\n", "first")
+    client.branch("feature")
+    repo.git("switch", "--quiet", "main")
+    client.branch("second")
+    repo.commit("b", "second\n", "second")
+    repo.git("switch", "--quiet", "feature")
+    repo.stack("track", "--on", "first", "--on", "second")
+    result = repo.stack("bases", expect_success=False)
+    assert "git stack restack" in result.stderr
 
-    with pytest.raises(StackError, match="multiple bases.*not supported"):
-        client.bases("feature")
+    client.restack()
+    tips = [repo.git("rev-parse", branch) for branch in ("first", "second")]
+    repo.git("switch", "--quiet", "second")
+    repo.commit("b", "new second\n", "new second")
+
+    assert repo.stack("bases", "feature").stdout.splitlines() == tips

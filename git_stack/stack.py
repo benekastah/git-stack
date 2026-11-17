@@ -1035,9 +1035,14 @@ class StackClient(StackCore):
         """The recorded base commits, in parent order."""
         stacks = self.settled_stacks()
         branch = self.stacked_branch(branch, stacks)
-        if len(stacks.dependencies(branch)) != 1:
-            raise StackError("recording multiple bases is not supported yet")
-        return [self.recorded_base(branch, stacks.parent(branch))]
+        parents = stacks.dependencies(branch)
+        base = self.recorded_base(branch, parents[0])
+        if len(parents) == 1:
+            return [base]
+        tips = (self.git.config_get(branch, replay.TIPS) or "").split()
+        if len(tips) != len(parents):
+            raise StackError(f"{branch}'s base tips have not all been recorded; run `git stack restack {branch}`")
+        return tips
 
     @snapshot
     def show_stack(self, branch: str | None = None) -> list[str]:

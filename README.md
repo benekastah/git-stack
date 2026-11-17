@@ -1032,7 +1032,9 @@ git log --oneline $(git stack parent)..
 ### `git stack bases [<branch>]`
 
 Print the recorded base commits for `<branch>` (default: the current branch),
-one per line. Recording multiple bases is not supported yet.
+one per line. For a multiple-base branch, these are the source tips incorporated
+at the last completed replay, in dependency order. Run `git stack restack`
+first if the branch has no recorded replay.
 
 ### `git stack base [<branch>]`
 
