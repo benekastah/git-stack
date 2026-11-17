@@ -575,7 +575,7 @@ class StackCore:
         self.finish_replay(job)
         return True
 
-    def finish_replay(self, job: replay.Replay) -> None:
+    def finish_replay(self, job: replay.Replay) -> bool:
         """Resume a queued replay and persist its boundary after publication."""
         git = self.git
         result = replay.run(git, job)
@@ -600,6 +600,7 @@ class StackCore:
                 git.config_unset(result.branch, replay.TIPS)
         self.restore_checkout(job.original)
         job.clear(git)
+        return result is not None
 
     def unpulled_commits(self, branch: str, parent: str, upstream_tip: str) -> list[str]:
         """Non-merge commits on upstream_tip that branch doesn't have, oldest first.
@@ -615,7 +616,8 @@ class StackCore:
         git = self.git
         tip = git.tip(branch)
         known = [tip, *git.reflog_tips(branch)]
-        for ref in (f"refs/heads/{parent}", self.pulled_tip(branch)):
+        incorporated = (git.config_get(branch, replay.TIPS) or "").split()
+        for ref in (f"refs/heads/{parent}", self.pulled_tip(branch), *incorporated):
             commit = git.rev(ref) if ref else None
             if commit:
                 known.append(commit)

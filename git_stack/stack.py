@@ -37,7 +37,7 @@ def exclusive[Client: StackCore, **Params, Result](
     @functools.wraps(method)
     def locked(client: Client, /, *args: Params.args, **kwargs: Params.kwargs) -> Result:
         with client.exclusive(), client.git.snapshot():
-            if method.__name__ != "restack" and replay.pending(client.git) is not None:
+            if method.__name__ not in {"restack", "sync"} and replay.pending(client.git) is not None:
                 raise StackError("a multi-base replay is pending; rerun `git stack restack` in the original worktree")
             return method(client, *args, **kwargs)
 
@@ -1403,10 +1403,10 @@ class StackClient(StackCore):
         command = SyncCommand.SYNC if push else SyncCommand.PULL
         self.ensure_no_operation_in_progress()
         self.ensure_clean_worktree()
+        if (job := replay.pending(self.git)) is not None and not self.finish_replay(job):
+            return SyncResult([], self.branch_infos(self.stacks(), GitAdapter(self)))
         initial_stacks = self.stacks()
         initial_stack, _ = self.sync_selection(branches, groups, initial_stacks, remote, only_remote, command)
-        if any(initial_stacks.has_multiple_base_ancestor(branch) for branch in initial_stack):
-            raise StackError(f"{command.value} with multiple bases is not supported yet")
         if only_remote:
             for branch in initial_stack:
                 if self.git.config_get(branch, "remote") == remote:
@@ -1419,7 +1419,7 @@ class StackClient(StackCore):
         )
         stack, upstream_remotes = self.sync_selection(branches, groups, stacks, remote, only_remote, command)
         self.ensure_ignorable_reverts(ignore_reverts, stack, "the stacks being synced")
-        roots = {stacks.root(b) for b in stack}
+        roots = {base for b in stack for base in stacks.dependency_ancestry(b) if base not in stacks}
         roots_to_update = {root for root in roots if not only_remote or self.git.config_get(root, "remote") == remote}
         root_remotes = self.upstream_remotes(roots_to_update)
         push_remote = remote if only_remote else self.stack_remote(upstream_remotes, root_remotes)
@@ -1457,8 +1457,12 @@ class StackClient(StackCore):
         # Parent-before-child, so by the time we reach a branch its parent is
         # final: merged branches have been removed (and their children reparented
         # in stacks), and the rest have been restacked and pulled.
+        graph = any(stacks.has_multiple_base_ancestor(branch) for branch in stack)
         for branch in stack:
             self.sync_branch(branch, adapter, state)
+        if graph and push and state.blocked:
+            self.restore_checkout(state.original)
+            raise StackError(f"nothing was pushed because {', '.join(state.blocked)} could not be updated")
 
         self.restore_checkout(state.original)
         self.push_branches(
@@ -1524,14 +1528,18 @@ class StackClient(StackCore):
         """Untrack branch if it was merged, and otherwise bring it up to date (see
         sync_unmerged), unless its parent was skipped."""
         parent = state.stacks.parent(branch)
-        if parent in state.skipped:
-            self.emit(events.ParentSkipped(branch, parent))
+        blocked = next((base for base in state.stacks.dependencies(branch) if base in state.skipped), None)
+        if blocked is not None:
+            self.emit(events.ParentSkipped(branch, blocked))
             state.skipped.add(branch)
-            if parent in state.blocked:
+            if blocked in state.blocked:
                 state.blocked.append(branch)
             return
-        merge_state = adapter.merge_state(branch, parent, ignore_revert=branch in state.ignore_reverts)
+        merge_state = self.sync_merge_state(branch, adapter, state)
         if merge_state is MergeState.MERGED:
+            if any(state.stacks.has_multiple_base_ancestor(child) for child in state.stacks.children(branch)):
+                # Retain a merged source until cleanup can explicitly replace its graph edges.
+                return
             outside = [b for b in state.stacks.children(branch) if b not in state.scope]
             if outside:
                 raise StackError(
@@ -1558,6 +1566,15 @@ class StackClient(StackCore):
             state.skipped.add(branch)
         else:
             self.sync_unmerged(branch, parent, state)
+
+    def sync_merge_state(self, branch: str, adapter: GitAdapter, state: SyncState) -> MergeState:
+        stacks = state.stacks
+        ignore_revert = branch in state.ignore_reverts
+        if stacks.has_multiple_base_ancestor(branch):
+            if not ignore_revert and any(adapter.reverted(branch, base) for base in stacks.dependencies(branch)):
+                return MergeState.REVERTED
+            return MergeState.NOT_MERGED
+        return adapter.merge_state(branch, stacks.parent(branch), ignore_revert=ignore_revert)
 
     def reverted(self, branch: str, stacks: Stacks, adapter: GitAdapter) -> events.Reverted:
         """The warning that branch, which stacks says is stacked on its parent,
@@ -1587,10 +1604,11 @@ class StackClient(StackCore):
             )
         if git.upstream_gone(branch):
             self.emit(events.UpstreamGone(branch, parent))
-        self.take_upstream_rebase(branch, parent, state.remote, allow_rewritten=state.rewritten_upstream)
+        if not state.stacks.has_multiple_base_ancestor(branch):
+            self.take_upstream_rebase(branch, parent, state.remote, allow_rewritten=state.rewritten_upstream)
         self.ensure_upstream_not_rewritten(branch, parent, state.remote, state.rewritten_upstream, state.command)
         try:
-            restacked = self.restack_branch(branch, parent, state.latest)
+            restacked = self.restack_dependency(branch, state.stacks, state.latest)
         except BrokenStackError as e:
             self.emit(events.BrokenBranch(branch, str(e)))
             restacked = False
@@ -1601,6 +1619,7 @@ class StackClient(StackCore):
                 state.blocked.append(branch)
             return
         if not self.pull_upstream(branch, parent, state.remote, state.pull_tracked_upstream, state.command):
+            state.skipped.add(branch)
             state.blocked.append(branch)
             return
         upstream_tip = git.rev(f"{branch}@{{upstream}}")

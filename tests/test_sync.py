@@ -11,44 +11,36 @@ from git_stack.core import Delete
 from git_stack.errors import StackError
 from git_stack.git import GitClient
 from git_stack.stack import BranchStatus, StackClient
-from git_stack.stacks import Ownership, StackNode, Stacks
+from git_stack.stacks import Ownership
 from tests.helpers import Repo
 
 
-def test_sync_refuses_multiple_base_graph_before_changing_any_branch(
-    repo: Repo, client: StackClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    repo.make_stack()
+@pytest.mark.parametrize("command", ["pull", "sync"])
+def test_sync_processes_every_base_and_tracks_remote_work(repo: Repo, client: StackClient, command: str) -> None:
+    client.branch("first")
+    repo.commit("a", "first\n", "first")
+    client.branch("combined")
+    repo.commit("c", "own\n", "own")
+    repo.git("switch", "--quiet", "main")
+    client.branch("second")
+    repo.commit("b", "second\n", "second")
+    repo.git("switch", "--quiet", "combined")
+    repo.stack("track", "--on", "first", "--on", "second")
+    client.restack()
     client.push()
-    before = {b: repo.git("rev-parse", f"refs/heads/{b}") for b in ("main", "pr1", "pr2", "pr3")}
-    stacks = Stacks(
-        [StackNode("pr1", "main"), StackNode("pr2", "pr1", additional_parents=("main",)), StackNode("pr3", "pr2")]
-    )
-    monkeypatch.setattr(client, "stacks", lambda: stacks)
+    repo.git("fetch", "--quiet", cwd=repo.forge)
+    repo.git("switch", "--quiet", "-c", "second", "origin/second", cwd=repo.forge)
+    (repo.forge / "b").write_text("second updated\n")
+    repo.git("commit", "-qam", "second updated", cwd=repo.forge)
+    repo.git("push", "--quiet", "origin", "second", cwd=repo.forge)
+    remote_before = repo.git("rev-parse", "combined", cwd=repo.origin)
 
-    with pytest.raises(StackError, match="multiple bases.*not supported"):
-        client.sync()
+    repo.stack(command)
 
-    assert {b: repo.git("rev-parse", f"refs/heads/{b}") for b in before} == before
-    assert repo.git("branch", "--show-current") == "pr3"
-
-
-def test_pull_refuses_multiple_base_graph_before_changing_any_branch(
-    repo: Repo, client: StackClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    repo.make_stack()
-    client.push()
-    before = {b: repo.git("rev-parse", f"refs/heads/{b}") for b in ("main", "pr1", "pr2", "pr3")}
-    stacks = Stacks(
-        [StackNode("pr1", "main"), StackNode("pr2", "pr1", additional_parents=("main",)), StackNode("pr3", "pr2")]
-    )
-    monkeypatch.setattr(client, "stacks", lambda: stacks)
-
-    with pytest.raises(StackError, match="multiple bases.*not supported"):
-        client.sync(["pr2"], push=False)
-
-    assert {b: repo.git("rev-parse", f"refs/heads/{b}") for b in before} == before
-    assert repo.git("branch", "--show-current") == "pr3"
+    assert repo.git("show", "combined:b") == "second updated"
+    assert repo.git("show", "combined:c") == "own"
+    expected = repo.git("rev-parse", "combined") if command == "sync" else remote_before
+    assert repo.git("rev-parse", "combined", cwd=repo.origin) == expected
 
 
 def test_sync_refuses_unseen_upstream_merge_commits(repo: Repo, client: StackClient) -> None:
