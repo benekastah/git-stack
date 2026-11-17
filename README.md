@@ -689,6 +689,9 @@ Fetch and update the selected stacks locally. It can
 fast-forward local roots, untrack merged branches, and restack or pull into
 local branches; `-d local` also deletes merged local branches, and `-l`/`--latest` works as for `sync`. It does not push or delete remote branches. Unseen upstream
 merge commits need manual inspection and integration before pulling.
+
+Pulling a stack that depends on multiple bases is not supported yet; `pull`
+refuses before changing branches.
 For stacks whose branches track different remotes, select one with `--remote`.
 When the upstream has unseen commits and its history was rewritten (or its
 previous tip is unknown), `pull` and `sync` refuse to guess whether those

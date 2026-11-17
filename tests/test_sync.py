@@ -33,6 +33,24 @@ def test_sync_refuses_multiple_base_graph_before_changing_any_branch(
     assert repo.git("branch", "--show-current") == "pr3"
 
 
+def test_pull_refuses_multiple_base_graph_before_changing_any_branch(
+    repo: Repo, client: StackClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo.make_stack()
+    client.push()
+    before = {b: repo.git("rev-parse", f"refs/heads/{b}") for b in ("main", "pr1", "pr2", "pr3")}
+    stacks = Stacks(
+        [StackNode("pr1", "main"), StackNode("pr2", "pr1", additional_parents=("main",)), StackNode("pr3", "pr2")]
+    )
+    monkeypatch.setattr(client, "stacks", lambda: stacks)
+
+    with pytest.raises(StackError, match="multiple bases.*not supported"):
+        client.sync(["pr2"], push=False)
+
+    assert {b: repo.git("rev-parse", f"refs/heads/{b}") for b in before} == before
+    assert repo.git("branch", "--show-current") == "pr3"
+
+
 def test_sync_refuses_unseen_upstream_merge_commits(repo: Repo, client: StackClient) -> None:
     client.branch("pr1")
     repo.commit("a", "local\n", "local")

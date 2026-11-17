@@ -961,6 +961,9 @@ local branches, and \f[CR]\-l\f[R]/\f[CR]\-\-latest\f[R] works as for
 It does not push or delete remote branches.
 Unseen upstream merge commits need manual inspection and integration
 before pulling.
+.PP
+Pulling a stack that depends on multiple bases is not supported yet;
+\f[CR]pull\f[R] refuses before changing branches.
 For stacks whose branches track different remotes, select one with
 \f[CR]\-\-remote\f[R].
 When the upstream has unseen commits and its history was rewritten (or
