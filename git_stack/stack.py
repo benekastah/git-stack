@@ -20,6 +20,7 @@ from git_stack.core import (
     SyncCommand,
     TrunkUpstream,
 )
+from git_stack.dependency_plan import DependencyPlan, blocked_base
 from git_stack.errors import BrokenStackError, StackError
 from git_stack.git import DEFAULT_REMOTE, SWITCH
 from git_stack.json_fields import json_name
@@ -296,6 +297,7 @@ class SyncState:
 
     original: str
     stacks: Stacks
+    plan: DependencyPlan
     remote: str
     delete: Delete | None
     latest: bool
@@ -303,11 +305,9 @@ class SyncState:
     ignore_reverts: frozenset[str] = frozenset()
     pull_tracked_upstream: bool = False
     rewritten_upstream: bool = False
-    scope: frozenset[str] = frozenset()
     protected: frozenset[str] = frozenset()
     command: SyncCommand = SyncCommand.SYNC
     no_verify: bool = False
-    roots: frozenset[str] = frozenset()
     skipped: set[str] = field(default_factory=set)
     blocked: list[str] = field(default_factory=list)
     pushable: list[str] = field(default_factory=list)
@@ -1257,7 +1257,7 @@ class StackClient(StackCore):
         preserved = {dependency for branch in ineligible for dependency in stacks.dependency_ancestry(branch)}
         for branch in branches:
             parent = stacks.parent(branch)
-            blocked = next((base for base in stacks.dependencies(branch) if base in skipped), None)
+            blocked = blocked_base(branch, stacks, skipped)
             if blocked is not None:
                 self.emit(events.ParentSkipped(branch, blocked))
                 skipped.add(branch)
@@ -1392,7 +1392,7 @@ class StackClient(StackCore):
             self.upstream_remotes(branches), self.upstream_remotes({stacks.root(b) for b in branches})
         )
 
-    def protected_sync_destinations(self, branches: list[str], roots: set[str], remote: str) -> set[str]:
+    def protected_sync_destinations(self, branches: list[str], roots: Iterable[str], remote: str) -> set[str]:
         """Those of branches whose upstream is remote's default branch, or the
         remote branch of one of roots, which only --force pushes to. Fails if
         any of them tracks remote and the server can't say what its default
@@ -1481,29 +1481,36 @@ class StackClient(StackCore):
         )
         stack, upstream_remotes = self.sync_selection(branches, groups, stacks, remote, only_remote, command)
         self.ensure_ignorable_reverts(ignore_reverts, stack, "the stacks being synced")
-        roots = {base for b in stack for base in stacks.dependency_ancestry(b) if base not in stacks}
-        roots_to_update = {root for root in roots if not only_remote or self.git.config_get(root, "remote") == remote}
+        plan = DependencyPlan.select(stacks, stack)
+        roots_to_update = {
+            root for root in plan.roots if not only_remote or self.git.config_get(root, "remote") == remote
+        }
         root_remotes = self.upstream_remotes(roots_to_update)
         push_remote = remote if only_remote else self.stack_remote(upstream_remotes, root_remotes)
-        protected = self.protected_sync_destinations(stack, roots, push_remote) if push and not force else set[str]()
+        protected = (
+            self.protected_sync_destinations(stack, plan.roots, push_remote) if push and not force else set[str]()
+        )
         original = self.current_checkout()
         adapter = self.checked_adapter(push_remote)
         remotes = {push_remote} | upstream_remotes | root_remotes | ({remote} if only_remote else set[str]())
         for name in sorted(remotes, key=lambda name: (name != remote, name)):
             self.fetch(name)
         if self.move_off_deleted_parents(stack, stacks, adapter, push_remote):
-            roots = {stacks.root(b) for b in stack}
-            roots_to_update = {r for r in roots if not only_remote or self.git.config_get(r, "remote") == remote}
+            plan = DependencyPlan.select(stacks, stack)
+            roots_to_update = {
+                r for r in plan.roots if not only_remote or self.git.config_get(r, "remote") == remote
+            }
             for name in sorted(self.upstream_remotes(roots_to_update) - remotes):
                 self.fetch(name)
             if push and not force:
-                protected = self.protected_sync_destinations(stack, roots, push_remote)
+                protected = self.protected_sync_destinations(stack, plan.roots, push_remote)
         # A group's stacks can be on different roots.
         self.fast_forward_trunks(sorted(roots_to_update))
 
         state = SyncState(
             original,
             stacks,
+            plan,
             push_remote,
             delete,
             latest,
@@ -1511,17 +1518,15 @@ class StackClient(StackCore):
             frozenset(ignore_reverts),
             pull_tracked_upstream,
             rewritten_upstream,
-            frozenset(stack),
             frozenset(protected),
             command,
             no_verify,
-            roots=frozenset(roots),
         )
         # Parent-before-child, so by the time we reach a branch its parent is
         # final: merged branches have been removed (and their children reparented
         # in stacks), and the rest have been restacked and pulled.
         graph = any(stacks.has_multiple_base_ancestor(branch) for branch in stack)
-        for branch in stack:
+        for branch in plan.order:
             self.sync_branch(branch, adapter, state)
         if graph and push and state.blocked:
             self.restore_checkout(state.original)
@@ -1591,7 +1596,7 @@ class StackClient(StackCore):
         """Untrack branch if it was merged, and otherwise bring it up to date (see
         sync_unmerged), unless its parent was skipped."""
         parent = state.stacks.parent(branch)
-        blocked = next((base for base in state.stacks.dependencies(branch) if base in state.skipped), None)
+        blocked = blocked_base(branch, state.stacks, state.skipped)
         if blocked is not None:
             self.emit(events.ParentSkipped(branch, blocked))
             state.skipped.add(branch)
@@ -1603,7 +1608,7 @@ class StackClient(StackCore):
             if self.retain_merged_dependency(branch, state.stacks):
                 # Retain a merged source until cleanup can explicitly replace its graph edges.
                 return
-            outside = [b for b in state.stacks.children(branch) if b not in state.scope]
+            outside = [b for b in state.stacks.children(branch) if b not in state.plan.scope]
             if outside:
                 raise StackError(
                     f"can't untrack {branch}: it has children outside the selected remote: {', '.join(outside)}"
@@ -1616,7 +1621,7 @@ class StackClient(StackCore):
                 allow_different_upstream=True,
                 confirmed=confirmed,
                 no_verify=state.no_verify,
-                protected_roots=state.roots,
+                protected_roots=state.plan.roots,
             ):
                 state.skipped.add(branch)
             elif branch == state.original:
@@ -1739,12 +1744,12 @@ class StackClient(StackCore):
             # The current branch may be the root a branch moved onto. The move
             # is saved already, which is right whether or not this refuses.
             self.ensure_clean_worktree_for_clean(stacks, delete)
-        self.fast_forward_trunks(stacks.roots())
+        plan = DependencyPlan.select(stacks, stacks.in_order())
+        self.fast_forward_trunks(sorted(plan.roots))
 
         # Parent-before-child, so a branch whose parent was merged is checked
         # against its new parent.
-        order = stacks.in_order()
-        for branch in order:
+        for branch in plan.order:
             parent = stacks.parent(branch)
             if git.rev(f"refs/heads/{parent}") is None:
                 self.emit(events.ParentMissing(branch, parent, git.config_get(branch, BASE_KEY)))
@@ -1753,7 +1758,7 @@ class StackClient(StackCore):
             if state is MergeState.MERGED:
                 confirmed = stacks.has_multiple_base_ancestor(branch) or adapter.merge_confirmed(branch, parent)
                 removed = self.untrack_merged(
-                    branch, stacks, delete, confirmed=confirmed, no_verify=no_verify, protected_roots=roots
+                    branch, stacks, delete, confirmed=confirmed, no_verify=no_verify, protected_roots=plan.roots
                 )
                 if removed and branch == original:
                     original = self.current_checkout()
@@ -1762,7 +1767,7 @@ class StackClient(StackCore):
             elif state is MergeState.REVERTED:
                 self.emit(self.reverted(branch, stacks, adapter))
         self.restore_checkout(original)
-        return self.stack_infos(order, adapter)
+        return self.stack_infos(plan.order, adapter)
 
     def ensure_clean_worktree_for_clean(self, stacks: Stacks, delete: Delete | None) -> None:
         """Refuse uncommitted changes that clean could get in the way of: only

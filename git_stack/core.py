@@ -6,15 +6,15 @@ from collections import Counter
 from collections.abc import Callable, Generator, Iterable, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
-from itertools import islice
 from typing import cast
 
 from git_stack import events, replay
 from git_stack.check_cache import CheckCache
+from git_stack.dependency_plan import DependencyPlan, blocked_base
 from git_stack.errors import BrokenStackError, StackError
 from git_stack.file_lock import file_lock
 from git_stack.git import GitClient
-from git_stack.stacks import Ownership, StackNode, Stacks, dependency_order
+from git_stack.stacks import Ownership, StackNode, Stacks
 
 PARENT_KEY = "stackParent"
 MULTI_PARENT_PREFIX = "git-stack-multi:v1:"
@@ -546,8 +546,8 @@ class StackCore:
         branch that couldn't be restacked."""
         original = self.current_checkout()
         skipped: set[str] = set()
-        branches = dependency_order(branches, {b: stacks.dependencies(b) for b in stacks})
-        for branch in branches:
+        plan = DependencyPlan.select(stacks, branches)
+        for branch in plan.order:
             parents = stacks.dependencies(branch)
             if len(parents) > 1:
                 for parent in parents:
@@ -555,17 +555,13 @@ class StackCore:
                         raise BrokenStackError(f"{branch}'s base {parent} is missing")
                 base = self.recorded_base(branch, parents[0])
                 replay.commits(self.git, self.git.tip(branch), (base,), branch)
-        for index, branch in enumerate(branches):
-            blocked = next((base for base in stacks.dependencies(branch) if base in skipped), None)
+        for index, branch in enumerate(plan.order):
+            blocked = blocked_base(branch, stacks, skipped)
             if blocked is not None:
                 self.emit(events.ParentSkipped(branch, blocked))
                 skipped.add(branch)
             else:
-                remaining = (
-                    candidate
-                    for candidate in islice(branches, index + 1, None)
-                    if not skipped or skipped.isdisjoint(stacks.dependency_ancestry(candidate))
-                )
+                remaining = plan.remaining(index, stacks, skipped)
                 if not self.restack_dependency(branch, stacks, latest, original, remaining):
                     skipped.add(branch)
         self.restore_checkout(original)
