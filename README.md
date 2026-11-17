@@ -1461,7 +1461,7 @@ runs `dev.py static`, `dev.py types-other-platforms` and `dev.py coverage`
 once, on Linux, and `dev.py tests` on Linux, macOS and Windows with the oldest
 and newest Python git-stack supports (and on Linux, every Python between), for
 every push to `main` and every pull request into `main` (a stacked pull
-request, into another's branch, gets CI once it targets `main`). On macOS and
+request, into another's branch, gets CI once it targets `main` and is pushed). On macOS and
 Windows, the tests are split over several jobs (`dev.py tests --shard I/N`),
 so each finishes within CI's 5-minute limit. A new push to a pull request, or
 to `main`, cancels the run on the older commit, and so does merging or closing
