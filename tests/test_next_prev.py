@@ -43,6 +43,25 @@ def test_next_refuses_at_the_end_of_the_stack(repo: Repo, client: StackClient) -
         client.next()
 
 
+def test_next_lists_dependents_when_one_uses_the_current_branch_as_a_secondary_base(
+    repo: Repo, client: StackClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client.branch("first")
+    stacks = Stacks(
+        [
+            StackNode("first", "main"),
+            StackNode("child", "first"),
+            StackNode("combined", "other", additional_parents=("first",)),
+        ]
+    )
+    monkeypatch.setattr(client, "settled_stacks", lambda: stacks)
+
+    with pytest.raises(StackError, match="child, combined.*git switch"):
+        client.next()
+
+    assert repo.git("branch", "--show-current") == "first"
+
+
 def test_prev_switches_to_parent(repo: Repo, client: StackClient) -> None:
     repo.make_stack()
 
