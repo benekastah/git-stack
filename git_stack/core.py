@@ -236,14 +236,14 @@ class StackCore:
     def save(self, stacks: Stacks) -> None:
         """Write what changed in stacks since it was read (or last saved) to
         git config: the settings that changed, and for a branch no longer
-        tracked, none at all (see forget)."""
+        tracked, only the copy origins its dependents may still need."""
         git = self.git
         changes = stacks.changes()
         if any(new and new.additional_parents for _, _, new in changes):
             stacks.roots()  # Validate the whole graph before writing any settings.
         for branch, old, new in changes:
             if new is None:
-                self.forget(branch)
+                self.forget(branch, keep_copies=bool(stacks.children(branch)))
                 continue
             for key, before, after in (
                 (OWNERSHIP_KEY, old and old.ownership and old.ownership.value, new.ownership and new.ownership.value),
@@ -907,14 +907,14 @@ class StackCore:
                 git.run("update-ref", f"refs/heads/{root}", new, old)
             self.emit(events.FastForwarded(root, upstream))
 
-    def forget(self, branch: str) -> None:
-        """Remove all of branch's stack metadata: each of its settings that
-        starts with "stack", as all of git-stack's do (and older versions'
-        did). Read afresh rather than from the cache (see
-        GitClient.branch_config), so none is left behind."""
+    def forget(self, branch: str, *, keep_copies: bool = False) -> None:
+        """Remove tracking metadata, keeping copy origins for a surviving base."""
         for name, key in list(self.git.branch_config(fresh=True)):
-            if name == branch and key.startswith("stack"):
-                self.git.config_unset(branch, key)
+            if name != branch or not key.startswith("stack"):
+                continue
+            if keep_copies and key == replay.COPIES.lower():
+                continue
+            self.git.config_unset(branch, key)
         self.checks.forget(branch)
 
     def remove_merged(self, branch: str, stacks: Stacks, delete: bool) -> None:

@@ -524,6 +524,8 @@ Nothing is untracked unless every branch is tracked.
 In a multiple\-base graph, each remaining dependent keeps the untracked
 branch as a base; the untracked branch becomes a root for those
 dependencies.
+Git\-stack keeps the information needed to recognize changes already
+copied from that base.
 .SS \f[CR]git stack rename [<old>] <new>\f[R]
 Rename a branch (default: the current one) and keep the branches stacked
 on it on it.

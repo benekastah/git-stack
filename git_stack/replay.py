@@ -227,17 +227,26 @@ def unique_sources(
     Historical patch equivalence alone is insufficient: another base may
     have independently applied the same patch and then reverted it.
     """
-    origins = {aliases.get(commit, commit) for commit in candidates}
+    candidate_origins = {
+        commit: source
+        for commit in candidates
+        if (source := aliases.get(commit)) and unchanged_patch(git, source, commit)
+    }
+    origins = {candidate_origins.get(commit, commit) for commit in candidates}
     represented = {
         source
         for copy, source in aliases.items()
-        if source in origins and any(git.is_ancestor(copy, tip) for tip in previous)
+        if source in origins
+        and any(git.is_ancestor(copy, tip) for tip in previous)
+        and unchanged_patch(git, source, copy)
     }
     return [
         commit
         for commit in candidates
-        if aliases.get(commit, commit) not in represented
-        and not (commit in aliases and any(git.is_ancestor(aliases[commit], tip) for tip in previous))
+        if candidate_origins.get(commit, commit) not in represented
+        and not (
+            commit in candidate_origins and any(git.is_ancestor(candidate_origins[commit], tip) for tip in previous)
+        )
     ]
 
 
@@ -250,7 +259,9 @@ def advance(git: GitClient, replay: Replay, picked_tip: str) -> Replay:
     if replay.secondary and picked_tip != replay.head:
         source = replay.secondary[0]
         if source != picked_tip and unchanged_patch(git, source, picked_tip):
-            origin = copy_origins(git).get(source, source)
+            origin = copy_origins(git).get(source)
+            if origin is None or not unchanged_patch(git, origin, source):
+                origin = source
             copies += (picked_tip, origin)
     return replace(
         replay,
@@ -263,10 +274,10 @@ def advance(git: GitClient, replay: Replay, picked_tip: str) -> Replay:
 
 
 def unchanged_patch(git: GitClient, source: str, result: str) -> bool:
-    before, after = git.commit_patch_ids(
-        ("log", "-1", "-p", "--unified=0", source), ("log", "-1", "-p", "--unified=0", result)
-    )
-    return bool(before and after and before[0][0] == after[0][0])
+    """Compare the resulting tree with applying the source change verbatim."""
+    if git.rev(source) is None or git.rev(result) is None:
+        return False
+    return git.is_rebased_copy(f"{source}^", source, f"{result}^", result)
 
 
 def continued(git: GitClient, replay: Replay, head: str) -> bool:

@@ -353,6 +353,8 @@ git stack untrack 'spike-*'             # every tracked spike-* branch
 - Nothing is untracked unless every branch is tracked.
 - In a multiple-base graph, each remaining dependent keeps the untracked
   branch as a base; the untracked branch becomes a root for those dependencies.
+  Git-stack keeps the information needed to recognize changes already copied
+  from that base.
 
 ### `git stack rename [<old>] <new>`
 

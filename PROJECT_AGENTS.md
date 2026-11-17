@@ -33,7 +33,8 @@ man page is generated from it.
   recorded base is the boundary before the branch's own commits, and
   `stackReplayTips` holds the source tips in dependency order.
   `stackReplayCopies` associates unchanged secondary copies with their original
-  commits. The ref transaction checks the branch and source tips before
+  commits. Verify a copy by comparing the resulting tree after applying its
+  source patch. Preserve copy records when an untracked branch is still a base. The ref transaction checks the branch and source tips before
   publishing, and leaves a receipt for recovery if metadata writes are interrupted.
   `DependencyPlan` snapshots the operation's order, selected branches and roots
   before ref or metadata changes can alter the graph. `replay.finish` handles

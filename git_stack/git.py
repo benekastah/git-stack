@@ -787,11 +787,17 @@ class GitClient:
                     "--full-index",
                     "--no-color",
                     "--no-ext-diff",
+                    "--no-textconv",
                     commit,
                 )
                 if patch.returncode:
                     raise StackError(f"couldn't read changes in {commit}")
-                if patch.stdout and run("-C", top, "apply", "--cached", "--3way", input=patch.stdout).returncode:
+                if (
+                    patch.stdout
+                    and run(
+                        "-C", top, "apply", "--cached", "--3way", "--whitespace=nowarn", input=patch.stdout
+                    ).returncode
+                ):
                     return False
                 tree = run("write-tree")
                 if tree.returncode or tree.stdout.decode().strip() != self.tree(upstream):

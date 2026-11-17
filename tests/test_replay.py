@@ -155,7 +155,10 @@ def test_replay_preserves_own_patch_when_a_replaceable_base_has_it(
     assert repo.git("show", "combined:c") == "combined"
 
 
-def test_replay_deduplicates_a_shared_source_in_a_nested_graph(repo: Repo, client: StackClient) -> None:
+@pytest.mark.parametrize("untrack_source", [False, True])
+def test_replay_deduplicates_a_shared_source_in_a_nested_graph(
+    repo: Repo, client: StackClient, untrack_source: bool
+) -> None:
     client.branch("secondary")
     repo.commit("a", "secondary\n", "secondary")
     client.branch("first")
@@ -171,6 +174,15 @@ def test_replay_deduplicates_a_shared_source_in_a_nested_graph(repo: Repo, clien
     repo.stack("track", "--on", "first", "--on", "mixed")
 
     client.restack()
+
+    if untrack_source:
+        client.untrack(["mixed"])
+        repo.git("switch", "-q", "first")
+        repo.write("d", "unrelated\n")
+        repo.git("add", "d")
+        repo.git("commit", "-qm", "unrelated")
+        repo.git("switch", "-q", "final")
+        client.restack()
 
     assert repo.git("show", "final:a") == "secondary amended"
     assert repo.git("show", "final:b") == "other"
@@ -475,3 +487,33 @@ def test_replay_refuses_manually_emptied_own_commit(repo: Repo, client: StackCli
     assert repo.git("branch", "--show-current") == "combined"
     client.restack(onto="first")
     assert repo.git("show", "combined:c") == "combined"
+
+
+@pytest.mark.parametrize("legacy_copy", [False, True])
+def test_replay_does_not_deduplicate_a_conflict_resolution_that_changed_indentation(
+    repo: Repo, client: StackClient, legacy_copy: bool
+) -> None:
+    repo.commit("a", "x=1\n", "baseline")
+    repo.git("switch", "-qc", "first")
+    repo.commit("a", " x=1\n", "indent first")
+    repo.git("switch", "-qc", "second", "main")
+    repo.commit("a", "x=3\n", "change second")
+    repo.git("switch", "-qc", "mixed", "first")
+    repo.stack("track", "--on", "first", "--on", "second")
+    with pytest.raises(StackError, match="cherry-pick --continue"):
+        client.restack()
+    repo.write("a", "    x=3\n")
+    repo.git("add", "a")
+    repo.git("-c", "core.editor=true", "cherry-pick", "--continue")
+    client.restack()
+
+    if legacy_copy:
+        copy, source = (repo.git("rev-parse", ref) for ref in ("mixed", "second"))
+        repo.git("config", "branch.mixed.stackReplayCopies", f"{copy} {source}")
+    client.branch("final")
+    repo.stack("track", "--on", "mixed", "--on", "second")
+    before = repo.git("rev-parse", "final")
+    with pytest.raises(StackError, match="cherry-pick --continue"):
+        client.restack()
+
+    assert repo.git("rev-parse", "final") == before
