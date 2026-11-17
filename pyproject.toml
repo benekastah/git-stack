@@ -8,7 +8,8 @@ license-files = ["LICENSE"]
 authors = [{ name = "Paul Harper", email = "benekastah@gmail.com" }]
 requires-python = ">=3.11"
 dependencies = [
-    "py-git-client @ git+https://github.com/benekastah/py-git-client@v0.0.1",
+    # v0.0.1, by its commit: a tag can move, and pip, pipx and `uv tool install` don't read uv.lock.
+    "py-git-client @ git+https://github.com/benekastah/py-git-client@fdd2a9f2d88c6e6f52ebff99c13212d67a056811",
 ]
 
 [project.scripts]

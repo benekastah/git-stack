@@ -51,9 +51,11 @@ man page is generated from it.
 - git-stack's only runtime dependency is py-git-client, which has none of its
   own. Add no other: use the standard library, and add dev dependencies to
   `pyproject.toml`'s `dev` group. py-git-client isn't on PyPI, so
-  `dependencies` names it by its git URL and tag (`uv add --raw-sources`),
-  which pip and pipx read too, unlike uv's `[tool.uv.sources]`; `uv.lock`
-  pins the commit. To take a new release, change the tag and run `uv lock`.
+  `dependencies` names it by its git URL and a release's full commit, with
+  the release's tag in a comment (`uv add --raw-sources`): pip and pipx read
+  that, unlike uv's `[tool.uv.sources]`, and don't read `uv.lock`, so a tag,
+  which can move, could install code CI never ran. To take a new release,
+  change the commit and the comment, and run `uv lock`.
 
 ## Don't break output formats
 
