@@ -600,37 +600,28 @@ class StackCore:
         return True
 
     def finish_replay(self, job: replay.Replay) -> bool:
-        """Resume a queued replay and persist its boundary after publication."""
+        return replay.finish(self.git, job, self.record_replay, self.restore_checkout)
+
+    def record_replay(self, result: replay.Replay) -> None:
+        """Persist the graph and own-commit boundary of a published replay."""
         git = self.git
-        result = replay.run(git, job)
-        if result is not None:
-            try:
-                replay.publish(git, result)
-            except StackError:
-                if not result.was_published(git):
-                    self.restore_checkout(result.original)
-                    result.clear(git)
-                raise
-            stacks = self.stacks()
-            if stacks.dependencies(result.branch) != result.parents:
-                stacks.reparent(result.branch, result.parents[0])
-                stacks.set_additional_parents(result.branch, result.parents[1:])
-                if any(parent in stacks and stacks.is_shared(parent) for parent in result.parents):
-                    stacks.share(result.branch)
-                self.save(stacks)
-            git.config_set(result.branch, BASE_KEY, result.boundary)
-            if len(result.parents) > 1:
-                git.config_set(result.branch, replay.TIPS, " ".join(result.tips))
-            else:
-                git.config_unset(result.branch, replay.TIPS)
-            if result.copies:
-                git.config_set(result.branch, replay.COPIES, " ".join(result.copies))
-            else:
-                git.config_unset(result.branch, replay.COPIES)
-            git.config_unset(result.branch, replay.STALE)
-        self.restore_checkout(job.original)
-        job.clear(git)
-        return result is not None
+        stacks = self.stacks()
+        if stacks.dependencies(result.branch) != result.parents:
+            stacks.reparent(result.branch, result.parents[0])
+            stacks.set_additional_parents(result.branch, result.parents[1:])
+            if any(parent in stacks and stacks.is_shared(parent) for parent in result.parents):
+                stacks.share(result.branch)
+            self.save(stacks)
+        git.config_set(result.branch, BASE_KEY, result.boundary)
+        if len(result.parents) > 1:
+            git.config_set(result.branch, replay.TIPS, " ".join(result.tips))
+        else:
+            git.config_unset(result.branch, replay.TIPS)
+        if result.copies:
+            git.config_set(result.branch, replay.COPIES, " ".join(result.copies))
+        else:
+            git.config_unset(result.branch, replay.COPIES)
+        git.config_unset(result.branch, replay.STALE)
 
     def unpulled_commits(self, branch: str, parent: str, upstream_tip: str) -> list[str]:
         """Non-merge commits on upstream_tip that branch doesn't have, oldest first.

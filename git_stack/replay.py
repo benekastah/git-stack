@@ -1,6 +1,7 @@
 """Build a combined base on detached HEAD and publish it after all picks succeed."""
 
 import json
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, replace
 from typing import cast
 from uuid import uuid4
@@ -337,3 +338,29 @@ def run(git: GitClient, replay: Replay) -> Replay | None:
             raise StackError(f"could not apply {commit[:12]} while replaying {replay.branch}")
         replay = advance(git, replay, git.run("rev-parse", "HEAD"))
         replay.save(git)
+
+
+def finish(
+    git: GitClient,
+    job: Replay,
+    record: Callable[[Replay], None],
+    restore_checkout: Callable[[str], None],
+) -> bool:
+    """Publish the replay, then record its metadata before clearing the journal.
+
+    A failure after the ref transaction must keep the journal and its receipt
+    so the same metadata can be recorded on the next run.
+    """
+    result = run(git, job)
+    if result is not None:
+        try:
+            publish(git, result)
+        except StackError:
+            if not result.was_published(git):
+                restore_checkout(result.original)
+                result.clear(git)
+            raise
+        record(result)
+    restore_checkout(job.original)
+    job.clear(git)
+    return result is not None

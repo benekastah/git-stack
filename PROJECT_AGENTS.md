@@ -36,7 +36,9 @@ man page is generated from it.
   commits. The ref transaction checks the branch and source tips before
   publishing, and leaves a receipt for recovery if metadata writes are interrupted.
   `DependencyPlan` snapshots the operation's order, selected branches and roots
-  before ref or metadata changes can alter the graph.
+  before ref or metadata changes can alter the graph. `replay.finish` handles
+  recovery and publication, then calls `StackCore.record_replay` to update
+  stack metadata before it clears the journal.
 - Each command is a module in `git_stack/commands/` with `register`, `run` and
   `show`: `run` does the command and returns a dataclass result, and `show`
   prints it as text. With `--json`, the CLI prints the result as JSON instead
