@@ -589,13 +589,13 @@ git stack restack --latest              # also move the stack onto main's latest
   keeps the first base as the starting point, replays the other bases in
   order, then replays the branch's own commits. Retargeting leaves the
   destination branches untouched.
-- If a multi-base replay stops, resolve it with `git cherry-pick --continue`
-  or back out with `git cherry-pick --abort`, then rerun `git stack restack`
-  in the same worktree. The branch ref moves only after its replay finishes.
-  Replay stops if an own commit becomes empty because a base supplies its
-  patch. Abort the pick instead of following Git's suggestion to make an
-  empty commit. If you make one anyway, git-stack discards the replay and
-  restores the original branch, keeping the original patch.
+- If a multi-base replay stops, resolve it with `git rebase --continue`
+  or back out with `git rebase --abort`, then rerun the same git-stack
+  command in the same worktree with the same arguments. Git-stack leaves
+  the branch at its original tip until all stages of its replay finish.
+  If an own commit becomes empty because a base supplies its patch, abort
+  the rebase. Git-stack rejects the replay if you skip that commit or
+  continue with an empty replacement.
 - `-l`/`--latest` moves the branches on the stack's root onto its latest commit
   even if they don't conflict with it (and the rest of the stack with them).
 - Merged branches are skipped and their children restacked onto their parent;
@@ -1160,17 +1160,20 @@ If a rebase, cherry-pick or revert stops on a conflict, resolve it and run
 then rerun the git-stack command to finish the rest of the stack. The new
 parent and base (and the pulled upstream commits) are recorded only if the
 operation actually completed. To recognize a manually completed restack,
-git-stack uses the branch's reflog. If that entry is unavailable, inspect the
+git-stack uses the branch's reflog for a single-base rebase. If that entry is unavailable, inspect the
 branch and re-track it with `git stack track <parent> --base <sha>`.
-For multi-base replay, git-stack temporarily checks out individual commits
-without moving the named branch. Resolve or abort the pick in that same
-worktree, then rerun the git-stack command to return to your original
-checkout. After `git cherry-pick --abort`, a checkout recorded in the HEAD
-reflog can also let git-stack recognize the abort if you already switched
-back. Leave the checkout in place after `--continue` until git-stack
-publishes the replay. If you already switched away and git-stack recognizes
-the resolved commit in the reflog, it prints the exact checkout command to
-return to it and the git-stack command to rerun.
+
+For a multi-base restack, Git rebases source commits on a temporary branch.
+The branch you are restacking moves only after the replay finishes.
+Resolve and stage any conflicts, then run `git rebase --continue`, or run
+`git rebase --abort`. Rerun the original git-stack command with the same
+arguments in the same worktree. Git-stack reads the temporary branch to
+find the result, even if you switched back after continuing or aborting.
+Other stages can still stop on conflicts.
+
+If you started with `pull` or `sync`, `git stack restack` can finish the
+pending replay locally. Rerun the original command with its original
+arguments to finish the full pull or sync.
 
 For a pull, each upstream commit must be accounted for, even when commits share
 an author, date, and subject; a skipped commit is not counted as pulled.
@@ -1178,9 +1181,10 @@ an author, date, and subject; a skipped commit is not counted as pulled.
 `restack` and `sync` refuse to start with uncommitted changes, but not
 with untracked files. If one is in the way of a commit being replayed, git
 stops without a conflict and says which file. Move or delete it, then run
-`git rebase --continue`, or for a pull, `git cherry-pick --abort` (git's
-`--continue` would skip the commit that couldn't be applied) and rerun
-`git stack sync`.
+`git rebase --continue` if Git stopped in a rebase. If Git stopped while
+cherry-picking upstream changes, run `git cherry-pick --abort` because
+continuing would skip the commit that couldn't be applied. Rerun the original
+git-stack command with the same arguments.
 
 ## Branches checked out in other worktrees
 

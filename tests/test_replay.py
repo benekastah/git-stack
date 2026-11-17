@@ -57,7 +57,7 @@ def test_replay_conflict_continue_or_abort(
         repo.git("config", "core.logAllRefUpdates", "false")
         (repo.path / ".git" / "logs" / "HEAD").unlink()
 
-    with pytest.raises(StackError, match="cherry-pick --continue"):
+    with pytest.raises(StackError, match="rebase --continue"):
         client.restack()
     assert repo.git("rev-parse", "combined") == tip
     assert repo.config("combined", "stackBase") == base
@@ -65,12 +65,13 @@ def test_replay_conflict_continue_or_abort(
     if resume:
         repo.write("a", "resolved\n")
         repo.git("add", "a")
-        repo.git("-c", "core.editor=true", "cherry-pick", "--continue")
+        repo.git("-c", "core.editor=true", "rebase", "--continue")
     else:
-        repo.git("cherry-pick", "--abort")
+        repo.git("rebase", "--abort")
     client.restack()
 
     assert repo.git("branch", "--show-current") == "combined"
+    assert not repo.git("branch", "--list", "git-stack-replay/*")
     if resume:
         assert repo.git("show", "combined:a") == "resolved"
         assert repo.git("log", "-1", "--format=%s", "combined") == "own change"
@@ -124,11 +125,11 @@ def test_replay_resumes_descendants_after_a_conflict(repo: Repo, client: StackCl
     repo.commit("a", "conflicting second\n", "conflicting second")
     repo.git("switch", "--quiet", "child")
 
-    with pytest.raises(StackError, match="cherry-pick --continue"):
+    with pytest.raises(StackError, match="rebase --continue"):
         client.restack()
     repo.write("a", "resolved\n")
     repo.git("add", "a")
-    repo.git("-c", "core.editor=true", "cherry-pick", "--continue")
+    repo.git("-c", "core.editor=true", "rebase", "--continue")
 
     client.restack()
 
@@ -149,7 +150,7 @@ def test_replay_preserves_own_patch_when_a_replaceable_base_has_it(
         client.restack()
 
     assert repo.git("rev-parse", "combined") == original
-    repo.git("cherry-pick", "--abort")
+    repo.git("rebase", "--abort")
     client.restack()
     client.restack(onto="first")
     assert repo.git("show", "combined:c") == "combined"
@@ -312,18 +313,18 @@ def test_replay_keeps_secondary_patch_reverted_in_primary_history(repo: Repo, cl
     assert repo.git("show", "combined:c") == "combined"
 
 
-def test_replay_recovers_after_pick_before_journal_write(
+def test_replay_recovers_after_rebase_before_journal_write(
     repo: Repo, client: StackClient, combined: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     save = replay.Replay.save
 
-    def interrupt_after_pick(record: replay.Replay, git: GitClient) -> None:
-        if not record.in_pick and record.head != record.tips[0]:
+    def interrupt_after_rebase(record: replay.Replay, git: GitClient) -> None:
+        if not record.in_stage and record.head != record.tips[0]:
             monkeypatch.setattr(replay.Replay, "save", save)
             raise StackError("simulated interruption")
         save(record, git)
 
-    monkeypatch.setattr(replay.Replay, "save", interrupt_after_pick)
+    monkeypatch.setattr(replay.Replay, "save", interrupt_after_rebase)
     with pytest.raises(StackError, match="simulated interruption"):
         client.restack()
 
@@ -348,12 +349,12 @@ def test_replay_resume_preserves_an_earlier_worktree_skip(repo: Repo, client: St
     repo.git("switch", "--quiet", "second")
     repo.commit("a", "conflicting second\n", "conflicting second")
     repo.git("switch", "--quiet", "after")
-    with pytest.raises(StackError, match="cherry-pick --continue"):
+    with pytest.raises(StackError, match="rebase --continue"):
         client.restack(latest=True)
     assert any(isinstance(event, events.NotRestackedInOtherWorktree) for event in repo.emitted)
     repo.write("a", "resolved\n")
     repo.git("add", "a")
-    repo.git("-c", "core.editor=true", "cherry-pick", "--continue")
+    repo.git("-c", "core.editor=true", "rebase", "--continue")
 
     client.restack()
 
@@ -407,11 +408,11 @@ def test_replay_resumes_projected_merge_in_another_group_member(
     repo.commit("a", "conflicting secondary\n", "conflicting secondary")
     repo.git("switch", "--quiet", "combined")
 
-    with pytest.raises(StackError, match="cherry-pick --continue"):
+    with pytest.raises(StackError, match="rebase --continue"):
         client.restack(groups=["together"], latest=True)
     repo.write("a", "resolved\n")
     repo.git("add", "a")
-    repo.git("-c", "core.editor=true", "cherry-pick", "--continue")
+    repo.git("-c", "core.editor=true", "rebase", "--continue")
 
     client.restack()
 
@@ -458,10 +459,10 @@ def test_replay_recovers_after_aborting_and_switching_back(repo: Repo, client: S
     repo.commit("a", "conflicting second\n", "conflict")
     repo.git("switch", "-q", "combined")
     before = repo.git("rev-parse", "combined")
-    with pytest.raises(StackError, match="cherry-pick --continue"):
+    with pytest.raises(StackError, match="rebase --continue"):
         client.restack()
 
-    repo.git("cherry-pick", "--abort")
+    repo.git("rebase", "--abort")
     repo.git("switch", "-q", "combined")
     client.restack()
 
@@ -478,7 +479,8 @@ def test_replay_refuses_manually_emptied_own_commit(repo: Repo, client: StackCli
     with pytest.raises(StackError, match="own commit"):
         client.restack()
 
-    repo.git("commit", "--allow-empty", "--no-edit")
+    repo.git("commit", "--allow-empty", "-C", before)
+    repo.git("-c", "core.editor=true", "rebase", "--continue")
     with pytest.raises(StackError, match="own commit.*empty"):
         client.restack()
 
@@ -500,11 +502,11 @@ def test_replay_does_not_deduplicate_a_conflict_resolution_that_changed_indentat
     repo.commit("a", "x=3\n", "change second")
     repo.git("switch", "-qc", "mixed", "first")
     repo.stack("track", "--on", "first", "--on", "second")
-    with pytest.raises(StackError, match="cherry-pick --continue"):
+    with pytest.raises(StackError, match="rebase --continue"):
         client.restack()
     repo.write("a", "    x=3\n")
     repo.git("add", "a")
-    repo.git("-c", "core.editor=true", "cherry-pick", "--continue")
+    repo.git("-c", "core.editor=true", "rebase", "--continue")
     client.restack()
 
     if legacy_copy:
@@ -513,7 +515,7 @@ def test_replay_does_not_deduplicate_a_conflict_resolution_that_changed_indentat
     client.branch("final")
     repo.stack("track", "--on", "mixed", "--on", "second")
     before = repo.git("rev-parse", "final")
-    with pytest.raises(StackError, match="cherry-pick --continue"):
+    with pytest.raises(StackError, match="rebase --continue"):
         client.restack()
 
     assert repo.git("rev-parse", "final") == before
@@ -529,29 +531,52 @@ def test_replay_conflict_names_the_command_to_resume(
 
     result = repo.stack(command, expect_success=False)
 
-    assert "`git cherry-pick --continue`" in result.stderr
-    assert "`git cherry-pick --abort`" in result.stderr
+    assert "`git rebase --continue`" in result.stderr
+    assert "`git rebase --abort`" in result.stderr
     assert f"`git stack {command}`" in result.stderr
     assert "before switching branches" in result.stderr
 
 
-def test_replay_prints_how_to_return_to_a_resolved_pick(repo: Repo, client: StackClient, combined: None) -> None:
+def test_replay_recovers_a_resolved_stage_after_switching_back(repo: Repo, client: StackClient, combined: None) -> None:
     repo.git("switch", "-q", "second")
     repo.commit("a", "conflicting second\n", "conflict")
     repo.git("switch", "-q", "combined")
-    with pytest.raises(StackError, match="cherry-pick --continue"):
+    with pytest.raises(StackError, match="rebase --continue"):
         client.restack()
     repo.write("a", "resolved\n")
     repo.git("add", "a")
-    repo.git("-c", "core.editor=true", "cherry-pick", "--continue")
-    resolved = repo.git("rev-parse", "HEAD")
+    repo.git("-c", "core.editor=true", "rebase", "--continue")
     repo.git("switch", "-q", "combined")
 
-    result = repo.stack("restack", expect_success=False)
-    assert f"`git switch --detach {resolved}`" in result.stderr
-    assert "`git stack restack`" in result.stderr
-
-    repo.git("switch", "-q", "--detach", resolved)
     client.restack()
     assert repo.git("show", "combined:a") == "resolved"
     assert repo.git("branch", "--show-current") == "combined"
+
+
+@pytest.mark.parametrize("resume", [True, False])
+def test_own_stage_recovery_accepts_an_edited_resolution_message(
+    repo: Repo, client: StackClient, combined: None, resume: bool
+) -> None:
+    original = repo.git("rev-parse", "combined")
+    repo.git("switch", "-q", "first")
+    repo.commit("c", "conflicting primary\n", "primary edit")
+    repo.git("switch", "-q", "combined")
+    with pytest.raises(StackError, match="rebase --continue"):
+        client.restack()
+    assert repo.git("rev-parse", "combined") == original
+
+    if resume:
+        repo.write("c", "resolved own change\n")
+        repo.git("add", "c")
+        repo.git("commit", "-m", "updated resolution message")
+        repo.git("-c", "core.editor=true", "rebase", "--continue")
+    else:
+        repo.git("rebase", "--abort")
+    client.restack()
+
+    assert repo.git("branch", "--show-current") == "combined"
+    if resume:
+        assert repo.git("log", "-1", "--format=%s", "combined") == "updated resolution message"
+        assert repo.git("show", "combined:b") == "second"
+    else:
+        assert repo.git("rev-parse", "combined") == original

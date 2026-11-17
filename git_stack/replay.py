@@ -1,4 +1,4 @@
-"""Build a combined base on detached HEAD and publish it after all picks succeed."""
+"""Build a combined base on a scratch branch and publish it after all stages succeed."""
 
 import json
 from collections.abc import Callable
@@ -34,17 +34,22 @@ class Replay:
     own: tuple[str, ...]
     head: str
     boundary: str = ""
-    in_pick: bool = False
+    in_stage: bool = False
     ready: bool = False
     remaining: tuple[PlannedBranch, ...] = ()
     latest: bool = False
     token: str = ""
     copies: tuple[str, ...] = ()
     command: str = "restack"
+    method: str = "rebase"
 
     @property
     def refs(self) -> str:
         return PIN_PREFIX + self.token + "/"
+
+    @property
+    def scratch(self) -> str:
+        return f"git-stack-replay/{self.token}"
 
     def was_published(self, git: GitClient) -> bool:
         return git.rev(self.refs + "published") == self.head
@@ -53,6 +58,8 @@ class Replay:
         git.write_config(PENDING, json.dumps(asdict(self), ensure_ascii=True))
 
     def clear(self, git: GitClient) -> None:
+        if git.local_branch_exists(self.scratch):
+            git.run("branch", "--quiet", "--delete", "--force", self.scratch)
         git.write_config("--unset", PENDING)
         refs = git.run("for-each-ref", "--format=%(refname)", PIN_PREFIX).splitlines()
         if refs:
@@ -103,13 +110,14 @@ def parse_pending(git: GitClient, fields: dict[str, object]) -> Replay:
         strings("own"),
         string("head"),
         string("boundary"),
-        boolean("in_pick"),
+        boolean("in_stage" if "in_stage" in fields else "in_pick"),
         boolean("ready"),
         decode_remaining(fields["remaining"]),
         boolean("latest"),
         string("token"),
         strings("copies"),
         string("command") if "command" in fields else "restack",
+        string("method") if "method" in fields else "cherry-pick",
     )
     validate_pending(git, job)
     return job
@@ -140,6 +148,8 @@ def decode_remaining(value: object) -> tuple[PlannedBranch, ...]:
 
 
 def validate_pending(git: GitClient, job: Replay) -> None:
+    if job.method not in {"rebase", "cherry-pick"}:
+        raise ValueError("invalid replay method")
     if job.command not in {"restack", "pull", "sync"}:
         raise ValueError("invalid replay command")
     if len(job.token) != 32 or not all(c in "0123456789abcdef" for c in job.token):
@@ -257,25 +267,25 @@ def unique_sources(
     ]
 
 
-def advance(git: GitClient, replay: Replay, picked_tip: str) -> Replay:
-    if not replay.secondary and git.tree(replay.head) == git.tree(picked_tip):
+def advance(git: GitClient, replay: Replay, tip: str) -> Replay:
+    if not replay.secondary and git.tree(replay.head) == git.tree(tip):
         source = replay.own[0]
         if git.tree(source) != git.tree(f"{source}^"):
             raise EmptyOwnCommit(f"own commit {source[:12]} became empty; replay was discarded and the branch was kept")
     copies = replay.copies
-    if replay.secondary and picked_tip != replay.head:
+    if replay.secondary and tip != replay.head:
         source = replay.secondary[0]
-        if source != picked_tip and unchanged_patch(git, source, picked_tip):
+        if source != tip and unchanged_patch(git, source, tip):
             origin = copy_origins(git).get(source)
             if origin is None or not unchanged_patch(git, origin, source):
                 origin = source
-            copies += (picked_tip, origin)
+            copies += (tip, origin)
     return replace(
         replay,
-        head=picked_tip,
+        head=tip,
         secondary=replay.secondary[1:] if replay.secondary else (),
         own=replay.own if replay.secondary else replay.own[1:],
-        in_pick=False,
+        in_stage=False,
         copies=copies,
     )
 
@@ -285,46 +295,6 @@ def unchanged_patch(git: GitClient, source: str, result: str) -> bool:
     if git.rev(source) is None or git.rev(result) is None:
         return False
     return git.is_rebased_copy(f"{source}^", source, f"{result}^", result)
-
-
-def continued(git: GitClient, replay: Replay, head: str) -> bool:
-    commit = (replay.secondary or replay.own)[0]
-    if git.run("show", "-s", "--format=%P", head) != replay.head or git.identity_counts(
-        "-1", head
-    ) != git.identity_counts("-1", commit):
-        return False
-    if not git.ok("reflog", "exists", "HEAD"):
-        return True
-    entries = git.run("log", "--walk-reflogs", "--format=%H%x00%gs", "HEAD").splitlines()
-    for entry in entries:
-        tip, _, action = entry.partition("\0")
-        if tip == head and action.startswith(("commit (cherry-pick):", "cherry-pick:")):
-            return True
-        if tip == replay.head and not action.startswith("checkout:"):
-            return False
-    return False
-
-
-def pick(git: GitClient, commit: str, replay: Replay) -> bool:
-    if git.passthrough("cherry-pick", "--allow-empty", commit):
-        return True
-    # Git versions before 2.45 lack --empty=drop. Only skip when Git's pick
-    # produced an empty change, with no unresolved paths or staged amendments.
-    return (
-        git.rev("CHERRY_PICK_HEAD") == commit
-        and not git.run("status", "--porcelain", "--untracked-files=no")
-        and skip_empty(git, commit, replay)
-    )
-
-
-def skip_empty(git: GitClient, commit: str, replay: Replay) -> bool:
-    if not replay.secondary:
-        raise StackError(
-            f"own commit {commit[:12]} is already supplied by a base. "
-            f"Run `git cherry-pick --abort`, then rerun `git stack {replay.command}` in this worktree "
-            "before switching branches."
-        )
-    return git.passthrough("cherry-pick", "--skip")
 
 
 def publish(git: GitClient, replay: Replay) -> None:
@@ -355,83 +325,99 @@ def publish(git: GitClient, replay: Replay) -> None:
     )
 
 
-def prepare(git: GitClient, replay: Replay) -> Replay | None:
-    """Finish the worktree phases. Return None after an aborted pick."""
-    head = git.rev("HEAD")
-    if str(git.toplevel()) != replay.worktree:
-        raise StackError(f"resume the pending replay in {replay.worktree}")
-    if replay.ready:
-        return replay
-    if replay.in_pick:
-        if git.current_branch() is not None:
-            # A switch after aborting leaves the pick's starting commit as
-            # the prior HEAD. A switch after a successful pick does not.
-            return after_checkout(git, replay)
-        if head == replay.head:
-            return None
-        if head is None or not continued(git, replay, head):
-            raise StackError("HEAD does not match the pending replay's cherry-pick")
-        replay = advance(git, replay, head)
-        replay.save(git)
-    if git.current_branch() is not None or head != replay.head:
-        if replay.head != replay.tips[0] or (git.current_branch() or head) != replay.original:
-            raise StackError("HEAD does not match the pending replay")
-        git.run("switch", "--quiet", "--detach", replay.head)
-    return replay
+def resume_stage(git: GitClient, job: Replay) -> Replay | None:
+    """Read the temporary branch that Git updates when its rebase finishes."""
+    source = (job.secondary or job.own)[0]
+    tip = git.rev(f"refs/heads/{job.scratch}")
+    if tip == source:
+        # An abort leaves the scratch branch at the source. A successful
+        # stage with the original parent is handled directly without a rebase.
+        return None
+    if tip is None or (tip != job.head and git.run("show", "-s", "--format=%P", tip) != job.head):
+        raise StackError(f"the temporary branch for replaying {job.branch} moved unexpectedly")
+    job = advance(git, job, tip)
+    job.save(git)
+    return job
 
 
-def after_checkout(git: GitClient, replay: Replay) -> None:
-    action = git.run("log", "-1", "--format=%gs", "-g", "HEAD")
-    if action.startswith("checkout:") and (previous := git.rev("HEAD@{1}")) is not None:
-        if previous == replay.head:
-            return
-        if continued(git, replay, previous):
-            raise StackError(
-                f"the pending replay's checkout has changed. Run `git switch --detach {previous}`, "
-                f"then rerun `git stack {replay.command}` with the same arguments in this worktree"
-            )
+def start_stage(git: GitClient, job: Replay, source: str) -> Replay:
+    # With no change of parent, keep the existing commit. In all other
+    # cases, the scratch tip identifies completion even without a reflog.
+    if git.rev(f"{source}^") == job.head:
+        job = advance(git, job, source)
+        job.save(git)
+        return job
+
+    git.run("switch", "--quiet", "--detach", job.head)
+    git.run("branch", "--force", "--no-track", job.scratch, source)
+    job = replace(job, in_stage=True)
+    job.save(git)
+    # Explicitly replay the one planned commit. The queue may be sparse
+    # because an earlier base can already carry some of the source commits.
+    if git.passthrough(
+        "rebase",
+        "--merge",
+        "--no-update-refs",
+        "--no-autostash",
+        "--no-autosquash",
+        "--no-rebase-merges",
+        "--no-fork-point",
+        "--reapply-cherry-picks",
+        "--keep-empty",
+        "--empty=drop" if job.secondary else "--empty=ask",
+        "--onto",
+        job.head,
+        f"{source}^",
+        job.scratch,
+    ):
+        if (result := resume_stage(git, job)) is not None:
+            return result
+        raise StackError(f"rebasing {source[:12]} for {job.branch} did not move the temporary branch")
+    if git.operation_in_progress():
+        raise stopped_stage(git, job, source)
     raise StackError(
-        "the pending replay's detached checkout has changed. Inspect `git reflog` for the replay commit, "
-        f"return to that commit with `git switch --detach <commit>`, then rerun `git stack {replay.command}`"
+        f"could not rebase {source[:12]} for {job.branch}; see Git's output, "
+        f"then rerun `git stack {job.command}` in this worktree"
     )
 
 
-def run(git: GitClient, replay: Replay) -> Replay | None:
-    prepared = prepare(git, replay)
-    if prepared is None or prepared.ready:
-        return prepared
-    replay = prepared
+def run(git: GitClient, job: Replay) -> Replay | None:
+    if str(git.toplevel()) != job.worktree:
+        raise StackError(f"resume the pending replay in {job.worktree}")
+    if job.method != "rebase":
+        raise StackError("this replay started with cherry-pick; finish it with the git-stack version that started it")
+    if job.in_stage:
+        pending = resume_stage(git, job)
+        if pending is None:
+            return None
+        job = pending
+    if job.ready:
+        return job
     while True:
-        if not replay.secondary and not replay.boundary:
-            replay = replace(replay, boundary=replay.head)
-            replay.save(git)
-        queue = replay.secondary or replay.own
+        if not job.secondary and not job.boundary:
+            job = replace(job, boundary=job.head)
+            job.save(git)
+        queue = job.secondary or job.own
         if not queue:
-            replay = replace(replay, ready=True)
-            replay.save(git)
-            return replay
-        commit = queue[0]
-        replay = replace(replay, in_pick=True)
-        replay.save(git)
-        if not pick(git, commit, replay):
-            if git.operation_in_progress():
-                raise stopped_pick(git, replay, commit)
-            raise StackError(f"could not apply {commit[:12]} while replaying {replay.branch}")
-        replay = advance(git, replay, git.run("rev-parse", "HEAD"))
-        replay.save(git)
+            job = replace(job, ready=True)
+            job.save(git)
+            return job
+        job = start_stage(git, job, queue[0])
 
 
-def stopped_pick(git: GitClient, replay: Replay, commit: str) -> StackError:
+def stopped_stage(git: GitClient, job: Replay, commit: str) -> StackError:
     if git.has_conflicts():
         instructions = (
-            "Resolve the conflicts, stage the resolved files, and run `git cherry-pick --continue`, "
-            "or run `git cherry-pick --abort`."
+            "Resolve the conflicts, stage the resolved files, and run `git rebase --continue`, "
+            "or run `git rebase --abort`."
         )
+    elif not job.secondary and git.rev("REBASE_HEAD") == commit:
+        instructions = "If Git reports an empty own commit, run `git rebase --abort` to preserve its change."
     else:
-        instructions = "Run `git cherry-pick --abort` and address the Git error above before retrying."
+        instructions = "Address the Git error above, then run `git rebase --continue` or `git rebase --abort`."
     return StackError(
-        f"replaying {replay.branch} stopped at {commit[:12]}. {instructions} "
-        f"Then rerun `git stack {replay.command}` with the same arguments in this worktree "
+        f"replaying {job.branch} stopped at {commit[:12]}. {instructions} "
+        f"Then rerun `git stack {job.command}` with the same arguments in this worktree "
         "before switching branches."
     )
 
@@ -455,6 +441,8 @@ def finish(
         raise
     if result is not None:
         try:
+            if not result.was_published(git):
+                git.run("switch", "--quiet", "--detach", result.head)
             publish(git, result)
         except StackError:
             if not result.was_published(git):

@@ -48,4 +48,6 @@ of a newer one may then apply it over what the older one did since (e.g. a
 `track` onto another parent). Finish a stopped restack with the version
 that started it, or a newer one that understands its recovery record.
 Multi-base replay uses a separate `stack.pendingReplay` journal. Versions
-without multi-base replay support cannot finish it.
+without multi-base replay support cannot finish it. If a replay was started
+with the earlier cherry-pick workflow, use that version to continue or abort
+it before upgrading to a version that stages multi-base replay with rebase.

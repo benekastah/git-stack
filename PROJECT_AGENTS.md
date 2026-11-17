@@ -29,7 +29,9 @@ man page is generated from it.
   it rather than with a `{branch: parent}` map of your own. `stackParent` holds
   a branch name for a single parent and a versioned ordered list for multiple
   parents. `track --on` records dependencies. `git_stack/replay.py` builds
-  their combined history on detached HEAD and journals progress. The
+  their combined history by rebasing commits on a temporary branch and journals
+  progress. Git updates the temporary ref after each completed stage, so a
+  recovery can read the result without relying on commit messages or a reflog. The
   recorded base is the boundary before the branch's own commits, and
   `stackReplayTips` holds the source tips in dependency order.
   `stackReplayCopies` associates unchanged secondary copies with their original
