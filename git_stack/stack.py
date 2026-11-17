@@ -585,7 +585,10 @@ class StackClient(StackCore):
         # named are kept as they were looked up.
         prs = {pr.number: pr for pr in named.values() if pr is not None and not pr.fork}
         authors = {author} if author else ({"@me"} if mine else set[str]())
-        authors |= {pr.author for pr in named.values() if pr is not None and pr.author}
+        # The lookups said who the gh user is, whose are searched for as @me.
+        authors |= {
+            "@me" if pr.author == adapter.viewer else pr.author for pr in named.values() if pr is not None and pr.author
+        }
         try:
             for login in sorted(authors):
                 self.emit(events.LookingUpPullRequests(None if login == "@me" else login))

@@ -456,6 +456,17 @@ def test_import_refuses_a_named_pr_from_a_fork(repo: Repo, gh: FakeGitHub, clien
         client.import_stacks(prs=["2"], force=True)
 
 
+@pytest.mark.parametrize("branches", [[], ["mine"]])
+def test_import_looks_up_a_named_pr_of_the_users_as_theirs(
+    repo: Repo, gh: FakeGitHub, client: StackClient, branches: list[str]
+) -> None:
+    open_pr(repo, gh, 1, "mine", "main")
+
+    client.import_stacks(branches=branches, prs=["1"])
+
+    assert [e for e in repo.emitted if isinstance(e, events.LookingUpPullRequests)] == [events.LookingUpPullRequests()]
+
+
 def test_import_says_whose_pull_requests_it_looks_up(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
     open_pr(repo, gh, 1, "mine", "main")
     open_pr(repo, gh, 2, "api", "main", author="someone")
