@@ -14,7 +14,10 @@ man page is generated from it.
 - `GitClient` runs git through [py-git-client](https://github.com/benekastah/py-git-client)
   (`git_client`), which git-stack shares with git-recommit and move-forward:
   its `Git` starts each process, the quickest way each system allows (and
-  finds git, `$GIT_STACK_GIT` or the one on PATH), its `CatFile` is the
+  finds git, `$GIT_STACK_GIT` or the one on PATH), in the user's locale
+  (`UserLocaleGit`, so hooks and credential helpers don't run under
+  `LC_ALL=C`; a command whose message git-stack reads, such as the config
+  write's `ConfigLockedError`, asks for `LC_ALL=C` itself), its `CatFile` is the
   snapshot's long-lived `git cat-file`, and its batched reads (`refs`,
   `config`, `patch_ids`) and error classes (e.g. `ConfigLockedError`) are
   git-stack's. What git-stack adds stays in `GitClient`: the snapshot and its

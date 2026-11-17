@@ -617,3 +617,16 @@ def test_commit_patch_ids_marks_paths_even_with_git_literal_pathspecs(
     monkeypatch.setenv("GIT_LITERAL_PATHSPECS", "1")
 
     assert [len(p) for p in GitClient(repo.path).commit_patch_ids(("log", "-p", "HEAD~1..HEAD", "--", "a"))] == [1]
+
+
+def test_hooks_run_in_the_users_locale(repo: Repo, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Not the C locale py-git-client gives a git whose output it reads,
+    which a hook (or credential helper, or ssh) would inherit: e.g. Ruby's
+    default encoding is then US-ASCII, which can't read UTF-8 files."""
+    monkeypatch.setenv("LC_ALL", "C.UTF-8")
+    repo.git("branch", "other")
+    repo.add_hook(repo.path, "post-checkout", '#!/bin/sh\nprintf %s "$LC_ALL" > .git/hook-locale\n')
+
+    GitClient(repo.path).switch("other")
+
+    assert (repo.path / ".git" / "hook-locale").read_text(encoding="utf-8") == "C.UTF-8"
