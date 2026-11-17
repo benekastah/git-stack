@@ -365,6 +365,9 @@ changing history.
 For an already tracked branch, this preserves the boundary where its own
 commits begin.
 Run \f[CR]git stack restack\f[R] to incorporate the new set of bases.
+To repair that boundary after a manual rebase, repeat the existing
+\f[CR]\-\-on\f[R] values and pass the commit immediately before your own
+changes with \f[CR]\-\-base\f[R].
 .PP
 Each branch\(aqs base, the commit it was built on, is where it forked
 from the branch before it (or from \f[CR]<parent>\f[R]).

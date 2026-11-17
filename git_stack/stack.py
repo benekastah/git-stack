@@ -463,11 +463,7 @@ class StackClient(StackCore):
         for parent in parents:
             stacks.ensure_no_cycle(branch, parent)
         if branch in stacks:
-            base_sha = self.recorded_base(branch, stacks.parent(branch))
-            if base is not None and git.rev(base) != base_sha:
-                raise StackError(
-                    "changing dependencies must preserve the recorded boundary before the branch's own commits"
-                )
+            base_sha = self.track_boundary(stacks, branch, parents, base)
             if stacks.dependencies(branch) != tuple(parents):
                 git.config_unset(branch, replay.TIPS)
                 stacks.reparent(branch, parents[0])
@@ -487,6 +483,24 @@ class StackClient(StackCore):
         self.save(stacks)
         self.remember_tracked_upstream(branch, base is not None)
         return [Tracked(branch, parents[0], base_sha, tuple(parents[1:]))]
+
+    def track_boundary(self, stacks: Stacks, branch: str, parents: Sequence[str], base: str | None) -> str:
+        """An explicit boundary repairs history when dependencies stay the same."""
+        git = self.git
+        if base is None or stacks.dependencies(branch) != tuple(parents):
+            current = self.recorded_base(branch, stacks.parent(branch))
+            if base is not None and git.rev(base) != current:
+                raise StackError(
+                    "changing dependencies must preserve the recorded boundary before the branch's own commits"
+                )
+            return current
+        boundary = git.rev(base)
+        if boundary is None or not git.is_ancestor(boundary, f"refs/heads/{branch}"):
+            raise StackError(f"{base} isn't in {branch}'s history")
+        if boundary != git.config_get(branch, BASE_KEY):
+            git.config_unset(branch, replay.TIPS)
+            git.config_set(branch, BASE_KEY, boundary)
+        return boundary
 
     def validate_track_on(self, branch: str | None, parents: Sequence[str]) -> str:
         if branch is None:

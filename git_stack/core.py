@@ -1,6 +1,7 @@
 import enum
 import fnmatch
 import json
+import shlex
 from collections import Counter
 from collections.abc import Callable, Generator, Iterable, Sequence
 from contextlib import contextmanager
@@ -450,9 +451,15 @@ class StackCore:
         """Return branch's base, checking that it is still in the branch's history."""
         base = self.git.config_get(branch, BASE_KEY)
         if base is None or not self.git.is_ancestor(base, f"refs/heads/{branch}"):
+            recorded = self.git.config_get(branch, PARENT_KEY)
+            parents = read_parents(branch, recorded) if recorded else (parent,)
+            if len(parents) > 1:
+                options = " ".join(f"--on {shlex.quote(p)}" for p in parents)
+                repair = f"git stack track {options} --base <sha> {shlex.quote(branch)}"
+            else:
+                repair = f"git stack track {shlex.quote(parent)} --base <sha>"
             raise BrokenStackError(
-                f"{branch}'s recorded base isn't in its history (was it rebased by hand?); "
-                f"fix it with `git stack track {parent} --base <sha>`"
+                f"{branch}'s recorded base isn't in its history (was it rebased by hand?); fix it with `{repair}`"
             )
         return base
 

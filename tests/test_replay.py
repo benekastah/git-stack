@@ -238,3 +238,17 @@ def test_revert_advice_names_the_base_that_reverted_the_branch(repo: Repo, clien
     assert f"{revert[:12]} --from second" in result.stderr
     assert "--stack child" not in result.stderr
     assert repo.git("rev-parse", "combined") == original
+
+
+def test_track_repairs_boundary_after_manual_rebase(repo: Repo, client: StackClient, combined: None) -> None:
+    client.restack()
+    boundary = repo.config("combined", "stackBase")
+    primary = repo.git("rev-parse", "first")
+    repo.git("rebase", "--onto", primary, boundary)
+
+    result = repo.stack("restack", expect_success=False)
+    assert "track --on first --on second --base" in result.stderr
+    repo.stack("track", "--on", "first", "--on", "second", "--base", primary)
+    client.restack()
+
+    assert repo.git("log", "--reverse", "--format=%s", "first..combined") == "second\nown change"
