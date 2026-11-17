@@ -351,7 +351,7 @@ class GitClient:
         """key's value, as `git config --get` gives it (the last, and "" for
         a key with none), or None if it's unset. Read with the branch config
         (see branch_config), so it's no git call of its own, and read again
-        as it is."""
+        when it is: once .git/config changes."""
         self.branch_config()
         values = self._config.get(config_key(key))
         return None if values is None else values[-1] or ""
@@ -415,7 +415,7 @@ class GitClient:
 
     def tip(self, branch: str) -> str:
         """The commit local branch points at. Fails if branch doesn't exist.
-        Within a snapshot that hasn't it, asked of the snapshot's cat-file."""
+        Within a snapshot that doesn't have it, asked of the snapshot's cat-file."""
         if (refs := self._snapshot_refs()) is not None and (entry := refs.get(f"refs/heads/{branch}")):
             return entry[0]
         if self._snapshot_depth:

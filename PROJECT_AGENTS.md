@@ -21,7 +21,7 @@ man page is generated from it.
   (`git_client`), which git-stack shares with git-recommit and move-forward:
   its `Git` starts each process, the quickest way each system allows (and
   finds git, `$GIT_STACK_GIT` or the one on PATH), in the user's locale but
-  with git's messages in English, which it reads them in; its `CatFile` is the
+  with git's own messages in English, so it can read them; its `CatFile` is the
   snapshot's long-lived `git cat-file`, and its batched reads (`refs`,
   `config`, `patch_ids`) and error classes (e.g. `ConfigLockedError`) are
   git-stack's. What git-stack adds stays in `GitClient`: the snapshot and its
