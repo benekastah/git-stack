@@ -569,8 +569,9 @@ class GitClient:
         return any(pathlib.Path(path).exists() for path in paths)
 
     def has_conflicts(self) -> bool:
-        """Whether the index has unmerged paths, i.e. a merge stopped on a conflict."""
-        return bool(self.run("diff", "--name-only", "--diff-filter=U"))
+        """Whether the index has unmerged paths, i.e. a merge stopped on a
+        conflict, anywhere in the worktree, even with diff.relative set."""
+        return bool(self.run("diff", "--no-relative", "--name-only", "--diff-filter=U"))
 
     def worktree_of(self, branch: str) -> pathlib.Path | None:
         """The path of the worktree branch is checked out in, if any, or that a
@@ -821,8 +822,11 @@ class GitClient:
 
     def commit_patch_ids(self, *commands: Sequence[str]) -> list[list[tuple[str, str]]]:
         """For each of commands, (patch-id, commit) for each commit that
-        `git <command>` prints, in the order it prints them. For a diff, the
-        commit is all zeros.
+        `git <command>` prints, in the order it prints them, with every file's
+        changes, even with diff.relative set. For a diff, the commit is all
+        zeros. Paths after `--` are files as git lists them (e.g. `git diff
+        --name-only`): from the top of the worktree, whatever directory git
+        runs in, and taken literally, even with GIT_LITERAL_PATHSPECS set.
 
         Each command runs, but one `git patch-id` reads them all: after each
         command's output comes a patch of our own, whose commit (1, 2, ...)
@@ -831,11 +835,17 @@ class GitClient:
         length = self.object_id_length()
         patches = []
         for i, (command, *rest) in enumerate(commands, 1):
+            if "--" in rest:
+                end = rest.index("--") + 1
+                rest = [*rest[:end], *(f":(top,literal){path}" for path in rest[end:])]
             if command == "diff":
                 # A diff has no commit line, so give it one, rather than rely on
                 # the blank line after the marker before it to end the marker.
                 patches.append(f"commit {'0' * length}")
-            patches.append(self.run("--literal-pathspecs", command, "--no-color", "--no-ext-diff", *rest))
+            # --no-literal-pathspecs: GIT_LITERAL_PATHSPECS would turn off the marks.
+            patches.append(
+                self.run("--no-literal-pathspecs", command, "--no-color", "--no-ext-diff", "--no-relative", *rest)
+            )
             patches.append(f"commit {i:0{length}x}\n\n{END_MARKER_DIFF}")
         results: list[list[tuple[str, str]]] = [[]]
         for line in self.run("patch-id", "--stable", input="\n".join(patches) + "\n").splitlines():
@@ -875,6 +885,9 @@ class GitClient:
             return False
         with tempfile.TemporaryDirectory(prefix="git-stack-index-") as directory:
             env = {**os.environ, "GIT_INDEX_FILE": str(pathlib.Path(directory) / "index")}
+            # Where git apply runs: in a subdirectory, it leaves out the paths
+            # outside it.
+            top = str(self.toplevel())
 
             def run(*args: str, input: bytes | None = None) -> subprocess.CompletedProcess[bytes]:
                 return subprocess.run(
@@ -884,10 +897,20 @@ class GitClient:
             if run("read-tree", new_base).returncode:
                 raise StackError("couldn't prepare an index to check the upstream rebase")
             for (commit, _), (upstream, _) in zip(ours, theirs, strict=True):
-                patch = run("show", "--format=", "--binary", "--full-index", "--no-color", "--no-ext-diff", commit)
+                # Every file's changes, even with diff.relative set.
+                patch = run(
+                    "show",
+                    "--format=",
+                    "--no-relative",
+                    "--binary",
+                    "--full-index",
+                    "--no-color",
+                    "--no-ext-diff",
+                    commit,
+                )
                 if patch.returncode:
                     raise StackError(f"couldn't read changes in {commit}")
-                if patch.stdout and run("apply", "--cached", "--3way", input=patch.stdout).returncode:
+                if patch.stdout and run("-C", top, "apply", "--cached", "--3way", input=patch.stdout).returncode:
                     return False
                 tree = run("write-tree")
                 if tree.returncode or tree.stdout.decode().strip() != self.tree(upstream):

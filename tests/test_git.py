@@ -10,6 +10,8 @@ from typing import Any
 
 import pytest
 
+from git_stack.adapters.git import GitAdapter
+from git_stack.core import StackCore
 from git_stack.errors import StackError
 from git_stack.git import GitClient, changes_refs, changes_worktrees, git_program, same_file
 from tests.conftest import GIT_EXEC_PATH, GIT_REPOSITORY_VARIABLES
@@ -602,3 +604,104 @@ def test_snapshot_doesnt_keep_a_rebase_read_while_it_was_forgotten(repo: Repo, m
         git.rebasing_in(repo.path)
 
     assert reads == [repo.path] * 2
+
+
+def test_has_conflicts_sees_one_at_the_top_from_a_subdirectory_with_diff_relative(repo: Repo) -> None:
+    """diff.relative would have `git diff` list only the subdirectory's paths."""
+    repo.git("switch", "--quiet", "-c", "other")
+    repo.commit("a", "other\n", "other")
+    repo.git("switch", "--quiet", "main")
+    repo.commit("a", "main\n", "main")
+    subprocess.run([git_program(), "-C", str(repo.path), "merge", "--quiet", "other"], capture_output=True, check=False)
+    (repo.path / "sub").mkdir()
+    repo.git("config", "diff.relative", "true")
+
+    assert GitClient(repo.path / "sub").has_conflicts()
+
+
+@pytest.mark.parametrize("relative", [False, True])
+def test_is_rebased_copy_replays_every_file_from_a_subdirectory(repo: Repo, relative: bool) -> None:
+    """Run from a subdirectory, `git apply` would leave out the changes
+    outside it, and with diff.relative, so would `git show`; then the replay
+    wouldn't match."""
+    base = repo.git("rev-parse", "HEAD")
+    (repo.path / "sub").mkdir()
+    repo.write("sub/x", "x\n")
+    repo.write("a", "changed\n")
+    repo.git("add", ".")
+    repo.git("commit", "--quiet", "-m", "change")
+    local = repo.git("rev-parse", "HEAD")
+    repo.git("switch", "--quiet", "--detach", base)
+    repo.commit("b", "moved on\n", "moved on")
+    new_base = repo.git("rev-parse", "HEAD")
+    repo.git("cherry-pick", "--quiet", local)
+    rebased = repo.git("rev-parse", "HEAD")
+    repo.git("config", "diff.relative", str(relative).lower())
+
+    assert GitClient(repo.path / "sub").is_rebased_copy(base, local, new_base, rebased)
+
+
+def test_changes_something_sees_changes_at_the_top_from_a_subdirectory_with_diff_relative(repo: Repo) -> None:
+    """diff.relative would have `git diff --quiet` look only at the
+    subdirectory's files."""
+    repo.client.branch("pr1")
+    repo.commit("a", "pr1\n", "pr1 c1")
+    (repo.path / "sub").mkdir()
+    repo.git("config", "diff.relative", "true")
+
+    assert GitAdapter(StackCore(GitClient(repo.path / "sub"))).changes_something("pr1")
+
+
+def test_commit_patch_ids_reads_every_file_from_a_subdirectory_with_diff_relative(repo: Repo) -> None:
+    """diff.relative would have `git log -p` and `git diff` leave out the
+    files outside the subdirectory, so the patches wouldn't be the commits'."""
+    base = repo.git("rev-parse", "HEAD")
+    repo.commit("a", "changed\n", "change a")
+    (repo.path / "sub").mkdir()
+    commands = [("log", "-p", f"{base}..HEAD"), ("diff", base, "HEAD")]
+    from_top = GitClient(repo.path).commit_patch_ids(*commands)
+    repo.git("config", "diff.relative", "true")
+
+    assert [len(patches) for patches in from_top] == [1, 1]
+    assert GitClient(repo.path / "sub").commit_patch_ids(*commands) == from_top
+
+
+@pytest.mark.parametrize("relative", [False, True])
+def test_changed_files_name_the_files_patch_ids_compare_from_a_subdirectory(repo: Repo, relative: bool) -> None:
+    """changed_files lists files from the top, which commit_patch_ids takes
+    as paths from the top, whatever directory git-stack runs in (with
+    diff.relative, `git diff` would list them from it, leaving out the
+    others), and literally, even with characters a pathspec reads as a
+    pattern."""
+    base = repo.git("rev-parse", "HEAD")
+    (repo.path / "sub").mkdir()
+    repo.write("sub/x", "x\n")
+    repo.write("[ab]", "brackets\n")
+    repo.write("a", "changed\n")
+    repo.git("add", ".")
+    repo.git("commit", "--quiet", "-m", "three files")
+    repo.commit("b", "changed\n", "change b")
+    top = GitClient(repo.path)
+    [from_top] = top.commit_patch_ids(("log", "-p", f"{base}..HEAD"))
+    # Only the commit that has it, and only its changes there.
+    [brackets] = top.commit_patch_ids(("log", "-p", f"{base}..HEAD", "--", "[ab]"))
+    repo.git("config", "diff.relative", str(relative).lower())
+    git = GitClient(repo.path / "sub")
+
+    files = GitAdapter(StackCore(git)).changed_files(base, "HEAD")
+
+    assert files == ["[ab]", "a", "b", "sub/x"]
+    assert git.commit_patch_ids(("log", "-p", f"{base}..HEAD", "--", *files)) == [from_top]
+    assert len(brackets) == 1
+    assert git.commit_patch_ids(("log", "-p", f"{base}..HEAD", "--", "[ab]")) == [brackets]
+
+
+def test_commit_patch_ids_marks_paths_even_with_git_literal_pathspecs(
+    repo: Repo, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """GIT_LITERAL_PATHSPECS, which a user may export, would turn off the
+    :(top,literal) its paths are marked with, making them names of no file."""
+    repo.commit("a", "changed\n", "change a")
+    monkeypatch.setenv("GIT_LITERAL_PATHSPECS", "1")
+
+    assert [len(p) for p in GitClient(repo.path).commit_patch_ids(("log", "-p", "HEAD~1..HEAD", "--", "a"))] == [1]
