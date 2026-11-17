@@ -620,6 +620,10 @@ class StackCore:
                 git.config_set(result.branch, replay.TIPS, " ".join(result.tips))
             else:
                 git.config_unset(result.branch, replay.TIPS)
+            if result.copies:
+                git.config_set(result.branch, replay.COPIES, " ".join(result.copies))
+            else:
+                git.config_unset(result.branch, replay.COPIES)
             git.config_unset(result.branch, replay.STALE)
         self.restore_checkout(job.original)
         job.clear(git)

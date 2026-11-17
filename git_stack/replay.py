@@ -11,6 +11,7 @@ from git_stack.git import GitClient, is_object_id
 PENDING = "stack.pendingReplay"
 TIPS = "stackReplayTips"
 STALE = "stackReplayStale"
+COPIES = "stackReplayCopies"
 PIN_PREFIX = "refs/git-stack/replay/"
 
 
@@ -32,6 +33,7 @@ class Replay:
     remaining: tuple[str, ...] = ()
     latest: bool = False
     token: str = ""
+    copies: tuple[str, ...] = ()
 
     @property
     def refs(self) -> str:
@@ -105,6 +107,7 @@ def parse_pending(git: GitClient, fields: dict[str, object]) -> Replay:
         strings("remaining"),
         boolean("latest"),
         string("token"),
+        strings("copies"),
     )
     validate_pending(git, job)
     return job
@@ -145,13 +148,14 @@ def plan(
 ) -> Replay:
     tips = tuple(git.tip(parent) for parent in parents)
     secondary: list[str] = []
+    aliases = copy_origins(git)
     for i, (parent, tip) in enumerate(zip(parents, tips, strict=True)):
         if i == 0:
             continue
         if not any(git.ok("merge-base", tip, previous) for previous in tips[:i]):
             raise StackError(f"{parent} has no shared history with the preceding bases of {branch}")
         pending_commits = commits(git, tip, tips[:i], parent)
-        secondary.extend(unique_patches(git, tip, tips[:i], pending_commits))
+        secondary.extend(unique_sources(git, tips[:i], pending_commits, aliases))
     before = git.tip(branch)
     return Replay(
         branch,
@@ -170,25 +174,62 @@ def plan(
     )
 
 
-def unique_patches(git: GitClient, tip: str, previous: tuple[str, ...], candidates: tuple[str, ...]) -> list[str]:
-    """Exclude patch-equivalent copies contributed by earlier bases."""
-    unique = set(candidates)
-    for earlier in previous:
-        if not unique:
-            break
-        divergent = git.run("rev-list", "--cherry-pick", "--right-only", "--no-merges", f"{earlier}...{tip}", "--")
-        unique.intersection_update(divergent.splitlines())
-    return [commit for commit in candidates if commit in unique]
+def copy_origins(git: GitClient) -> dict[str, str]:
+    """Maps unmodified replay copies to their exact source commits."""
+    aliases: dict[str, str] = {}
+    for (_, key), value in git.branch_config().items():
+        if key == COPIES.lower():
+            pairs = value.split()
+            for copy, source in zip(pairs[::2], pairs[1::2], strict=False):
+                if is_object_id(copy) and is_object_id(source):
+                    aliases[copy] = source
+    return aliases
 
 
-def advance(replay: Replay, picked_tip: str) -> Replay:
+def unique_sources(
+    git: GitClient, previous: tuple[str, ...], candidates: tuple[str, ...], aliases: dict[str, str]
+) -> list[str]:
+    """Exclude copies of sources already represented by earlier bases.
+
+    Historical patch equivalence alone is insufficient: another base may
+    have independently applied the same patch and then reverted it.
+    """
+    origins = {aliases.get(commit, commit) for commit in candidates}
+    represented = {
+        source
+        for copy, source in aliases.items()
+        if source in origins and any(git.is_ancestor(copy, tip) for tip in previous)
+    }
+    return [
+        commit
+        for commit in candidates
+        if aliases.get(commit, commit) not in represented
+        and not (commit in aliases and any(git.is_ancestor(aliases[commit], tip) for tip in previous))
+    ]
+
+
+def advance(git: GitClient, replay: Replay, picked_tip: str) -> Replay:
+    copies = replay.copies
+    if replay.secondary and picked_tip != replay.head:
+        source = replay.secondary[0]
+        if source != picked_tip and unchanged_patch(git, source, picked_tip):
+            origin = copy_origins(git).get(source, source)
+            copies += (picked_tip, origin)
     return replace(
         replay,
         head=picked_tip,
         secondary=replay.secondary[1:] if replay.secondary else (),
         own=replay.own if replay.secondary else replay.own[1:],
         in_pick=False,
+        copies=copies,
     )
+
+
+def unchanged_patch(git: GitClient, source: str, result: str) -> bool:
+    before, after = git.commit_patch_ids(
+        ("log", "-1", "-p", "--unified=0", source), ("log", "-1", "-p", "--unified=0", result)
+    )
+    return bool(before and after and before[0][0] == after[0][0])
 
 
 def continued(git: GitClient, replay: Replay, head: str) -> bool:
@@ -197,7 +238,7 @@ def continued(git: GitClient, replay: Replay, head: str) -> bool:
         git.run("show", "-s", "--format=%P", head) == replay.head
         and (
             not git.ok("reflog", "exists", "HEAD")
-            or git.run("log", "-1", "--format=%gs", "-g", "HEAD").startswith("commit (cherry-pick):")
+            or git.run("log", "-1", "--format=%gs", "-g", "HEAD").startswith(("commit (cherry-pick):", "cherry-pick:"))
         )
         and git.identity_counts("-1", head) == git.identity_counts("-1", commit)
     )
@@ -261,7 +302,7 @@ def prepare(git: GitClient, replay: Replay) -> Replay | None:
             return None
         if head is None or not continued(git, replay, head):
             raise StackError("HEAD does not match the pending replay's cherry-pick")
-        replay = advance(replay, head)
+        replay = advance(git, replay, head)
         replay.save(git)
     if git.current_branch() is not None or head != replay.head:
         if replay.head != replay.tips[0] or (git.current_branch() or head) != replay.original:
@@ -294,5 +335,5 @@ def run(git: GitClient, replay: Replay) -> Replay | None:
                     "`git cherry-pick --continue`, or run `git cherry-pick --abort`, then rerun the stack command"
                 )
             raise StackError(f"could not apply {commit[:12]} while replaying {replay.branch}")
-        replay = advance(replay, git.run("rev-parse", "HEAD"))
+        replay = advance(git, replay, git.run("rev-parse", "HEAD"))
         replay.save(git)

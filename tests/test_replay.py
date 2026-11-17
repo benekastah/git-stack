@@ -290,3 +290,41 @@ def test_replay_skips_combined_branch_checked_out_in_another_worktree(
     assert repo.git("rev-parse", "combined") == before
     assert repo.git("rev-parse", "HEAD", cwd=worktree) == before
     assert isinstance(repo.emitted[-1], events.NotRestackedInOtherWorktree)
+
+
+def test_replay_keeps_secondary_patch_reverted_in_primary_history(repo: Repo, client: StackClient) -> None:
+    repo.git("switch", "-qc", "second")
+    repo.commit("b", "live secondary\n", "secondary")
+    source = repo.git("rev-parse", "second")
+    repo.git("switch", "-qc", "first", "main")
+    repo.git("cherry-pick", source)
+    repo.git("commit", "--amend", "-qm", "earlier equivalent change")
+    repo.git("revert", "--no-edit", "HEAD")
+    client.branch("combined")
+    repo.commit("c", "combined\n", "own change")
+    repo.stack("track", "--on", "first", "--on", "second")
+
+    client.restack()
+
+    assert repo.git("show", "combined:b") == "live secondary"
+    assert repo.git("show", "combined:c") == "combined"
+
+
+def test_replay_recovers_after_pick_before_journal_write(
+    repo: Repo, client: StackClient, combined: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    save = replay.Replay.save
+
+    def interrupt_after_pick(record: replay.Replay, git: GitClient) -> None:
+        if not record.in_pick and record.head != record.tips[0]:
+            monkeypatch.setattr(replay.Replay, "save", save)
+            raise StackError("simulated interruption")
+        save(record, git)
+
+    monkeypatch.setattr(replay.Replay, "save", interrupt_after_pick)
+    with pytest.raises(StackError, match="simulated interruption"):
+        client.restack()
+
+    client.restack()
+
+    assert repo.git("log", "--reverse", "--format=%s", "first..combined") == "second\nown change"
