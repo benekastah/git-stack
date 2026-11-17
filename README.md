@@ -1415,10 +1415,10 @@ It's safe to rerun, e.g. when `pyproject.toml` changes, to pick up a new
 command-line entry point.
 
 If `~/.local/bin` already has `git-stack` from another clone (or installed
-another way), or the man page's link is another clone's, `dev.py install`
-stops and says so, changing nothing: `dev.py install --replace` takes them
-over (except, on Windows, another install's `git-stack.exe`, which you
-uninstall). A link to a clone that's since been deleted it just replaces. It
+another way), or the man page's link is another clone's or install's,
+`dev.py install` stops and says so, changing nothing: `dev.py install
+--replace` takes them over (except, on Windows, another install's
+`git-stack.exe`, which you uninstall). A link to a clone that's since been deleted it just replaces. It
 won't install a clone in a temporary directory (the system's, `/tmp` or
 `/var/tmp`), which would leave the command broken once it's deleted: there,
 run `python3 dev.py venv` and `git config core.hooksPath git_hooks`, and use

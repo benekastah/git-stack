@@ -19,6 +19,9 @@ def dev(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     monkeypatch.syspath_prepend(str(ROOT))
     import dev
 
+    # The clone running the tests may be a scratch one in a temporary directory, which
+    # install refuses outright; the tests' installs go to a home of their own.
+    monkeypatch.setattr(dev, "_temporary", lambda names: None)
     return dev
 
 
