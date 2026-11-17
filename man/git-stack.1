@@ -1161,10 +1161,10 @@ descriptions, showing the whole stack.
 Merged pull requests can\(aqt be taken out of a stack on GitHub, so if
 some are in one that doesn\(aqt match (e.g.
 in another order, or ending with a merged pull request that a new one
-isn\(aqt based on), it leaves them, using description sections instead,
-and for a stack that\(aqs a chain, warns, suggesting
-\f[CR]\-\-rebuild\-stack\f[R], which only a chain can be linked again
-by.
+isn\(aqt based on), it leaves them, using description sections instead.
+If the local stack is a chain, it also warns and suggests
+\f[CR]\-\-rebuild\-stack\f[R], which can\(aqt relink a stack that
+branches out.
 GitHub doesn\(aqt change the base of a pull request in a stack either.
 When a stack is reshaped (e.g.
 a branch is put in its middle), \f[CR]push\f[R], \f[CR]sync\f[R], and

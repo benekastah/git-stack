@@ -845,9 +845,9 @@ git stack prs
   whole stack. Merged pull requests can't
   be taken out of a stack on GitHub, so if some are in one that doesn't match
   (e.g. in another order, or ending with a merged pull request that a new
-  one isn't based on), it leaves them, using description sections instead,
-  and for a stack that's a chain, warns, suggesting `--rebuild-stack`, which
-  only a chain can be linked again by. GitHub doesn't change
+  one isn't based on), it leaves them, using description sections instead.
+  If the local stack is a chain, it also warns and suggests `--rebuild-stack`,
+  which can't relink a stack that branches out. GitHub doesn't change
   the base of a pull request in a stack either. When a stack is reshaped
   (e.g. a branch is put in its middle), `push`, `sync`, and `prs` refuse to
   unstack it to change those bases unless given `--rebuild-stack`. It refuses
