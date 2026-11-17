@@ -929,7 +929,17 @@ class StackClient(StackCore):
     def parent(self, branch: str | None = None) -> str:
         """The branch that branch (default: the current branch) is stacked on."""
         stacks = self.settled_stacks()
-        return stacks.parent(self.stacked_branch(branch, stacks))
+        branch = self.stacked_branch(branch, stacks)
+        parents = stacks.dependencies(branch)
+        if len(parents) != 1:
+            raise StackError(f"{branch} has multiple parents; run `git stack parents {branch}`")
+        return parents[0]
+
+    @snapshot
+    def parents(self, branch: str | None = None) -> list[str]:
+        """The branch's parents, in replay order."""
+        stacks = self.settled_stacks()
+        return list(stacks.dependencies(self.stacked_branch(branch, stacks)))
 
     @snapshot
     def base(self, branch: str | None = None) -> str:

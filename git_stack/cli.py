@@ -13,6 +13,7 @@ from git_stack.commands import (
     next_branch,
     ownership,
     parent,
+    parents,
     prev_branch,
     prs,
     pull,
@@ -50,6 +51,7 @@ COMMANDS = (
     prs,
     unrevert,
     parent,
+    parents,
     base,
     show_stack,
 )

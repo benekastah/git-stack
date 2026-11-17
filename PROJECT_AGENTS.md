@@ -69,7 +69,7 @@ so these are interfaces:
   (e.g. `json_name("stacks")`). So renaming or removing a field of an event or
   result, or an `event_type`, breaks scripts, even when it's only a refactor.
 - **`info --json`**, which prints a single list, for compatibility.
-- **The scripting commands** (`parent`, `base`, `show-stack`), which print one
+- **The scripting commands** (`parent`, `parents`, `base`, `show-stack`), which print one
   thing per line, and `show-stack --quiet`'s exit status.
 - **Exit statuses**: 0 on success, 1 when a command fails, and 2 (from
   argparse) for arguments it doesn't understand.

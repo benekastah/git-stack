@@ -954,9 +954,16 @@ is the result of a restack or pull you finished by hand after a conflict.
 
 Every command can also print JSON; see [JSON output](#json-output).
 
+### `git stack parents [<branch>]`
+
+Print the branches that `<branch>` (default: the current branch) is stacked
+on, one per line in replay order.
+
 ### `git stack parent [<branch>]`
 
 Print the branch that `<branch>` (default: the current branch) is stacked on.
+This singular command is deprecated; use `parents`. It refuses a branch with
+multiple parents.
 
 **When would I use it?** To compare a branch with what it's built on, the way
 its pull request does:
@@ -1061,6 +1068,7 @@ What each command's result has, besides `type` and `events`:
 | `prs` | `stacks`, and `steps`, one for each branch: the `branch`, its `parent`, and the `action`: `open`, `exists` (it already has a pull request) or `no-commits` (skipped, since it has no commits of its own). `title` is an opened pull request's title, and `number` and `url` an opened or existing one's (an existing one has no `url`, and a dry run opens none); each is `null` otherwise |
 | `unrevert` | the `branch` it created, the `parent` it created it on, the `reverts` it reverted, newest first, and the `children` it moved onto it |
 | `parent`, `base` | the `parent` or `base` |
+| `parents` | `parents`, the branch names in replay order |
 | `show-stack` | `branches`, bottom first (`--quiet` can't be combined with `--json`) |
 
 `stacks` is the stacks the command covered, as `info --json` lists them.

@@ -1306,9 +1306,14 @@ The only thing they write, like every command, is the result of a
 restack or pull you finished by hand after a conflict.
 .PP
 Every command can also print JSON; see JSON output.
+.SS \f[CR]git stack parents [<branch>]\f[R]
+Print the branches that \f[CR]<branch>\f[R] (default: the current
+branch) is stacked on, one per line in replay order.
 .SS \f[CR]git stack parent [<branch>]\f[R]
 Print the branch that \f[CR]<branch>\f[R] (default: the current branch)
 is stacked on.
+This singular command is deprecated; use \f[CR]parents\f[R].
+It refuses a branch with multiple parents.
 .PP
 \f[B]When would I use it?\f[R] To compare a branch with what it\(aqs
 built on, the way its pull request does:
@@ -1538,6 +1543,11 @@ T{
 \f[CR]parent\f[R], \f[CR]base\f[R]
 T}@T{
 the \f[CR]parent\f[R] or \f[CR]base\f[R]
+T}
+T{
+\f[CR]parents\f[R]
+T}@T{
+\f[CR]parents\f[R], the branch names in replay order
 T}
 T{
 \f[CR]show\-stack\f[R]
