@@ -1,6 +1,7 @@
 """GitClient's reading of branch config and refs, which it caches."""
 
 import json
+import os
 import pathlib
 import subprocess
 import sys
@@ -9,7 +10,7 @@ from typing import Any
 import git_client
 import pytest
 from git_client import Arg, Git, GitError
-from git_client.testing import real_git
+from git_client.testing import GitCall, real_git
 
 from git_stack.adapters.git import GitAdapter
 from git_stack.core import StackCore
@@ -18,12 +19,17 @@ from git_stack.git import GIT_VARIABLE, GitClient, changes_refs, changes_worktre
 from tests.helpers import Repo, install_command
 
 
-def test_git_client_runs_git_stack_git(repo: Repo, fresh_find_git: None, monkeypatch: pytest.MonkeyPatch) -> None:
-    # After repo, whose client has found git already.
-    monkeypatch.setenv(GIT_VARIABLE, str(repo.tmp / "no-git-here"))
+def test_git_client_runs_git_stack_git(
+    repo: Repo, fresh_find_git: None, monkeypatch: pytest.MonkeyPatch, git_calls: list[GitCall]
+) -> None:
+    # After repo, whose client has found git already. The tests' git, spelled
+    # as nothing else names it.
+    program = os.path.join(os.path.dirname(real_git()), ".", os.path.basename(real_git()))
+    monkeypatch.setenv(GIT_VARIABLE, program)
 
-    with pytest.raises(FileNotFoundError):
-        GitClient(repo.path).run("status")
+    GitClient(repo.path).run("status")
+
+    assert [call.program for call in git_calls] == [program]
 
 
 # The command line reports StackErrors as git-stack's own; any other error,
@@ -77,7 +83,7 @@ def test_config_get_handles_dots_in_branch_names_and_any_key_case(repo: Repo) ->
     assert GitClient(repo.path).config_get("release.1.2", "STACKPARENT") == "main"
 
 
-def test_snapshot_reads_refs_once(repo: Repo, git_calls: list[list[str]]) -> None:
+def test_snapshot_reads_refs_once(repo: Repo, git_calls: list[GitCall]) -> None:
     git = GitClient(repo.path)
     main = repo.git("rev-parse", "main")
     # As a command has, to know which upstreams to read.
@@ -96,7 +102,7 @@ def test_snapshot_reads_refs_once(repo: Repo, git_calls: list[list[str]]) -> Non
     assert [call[0] for call in git_calls] == ["for-each-ref"]
 
 
-def test_snapshot_asks_git_about_refs_it_doesnt_have(repo: Repo, git_calls: list[list[str]]) -> None:
+def test_snapshot_asks_git_about_refs_it_doesnt_have(repo: Repo, git_calls: list[GitCall]) -> None:
     """On a case-insensitive filesystem, git can find a ref under a name that
     differs in case, which the snapshot can't."""
     repo.git("branch", "feature")
@@ -109,7 +115,7 @@ def test_snapshot_asks_git_about_refs_it_doesnt_have(repo: Repo, git_calls: list
         assert (git.local_branch_exists("Feature"), git.rev("refs/heads/Feature")) == outside
 
 
-def test_snapshot_isnt_read_for_refs_it_cant_answer(repo: Repo, git_calls: list[list[str]]) -> None:
+def test_snapshot_isnt_read_for_refs_it_cant_answer(repo: Repo, git_calls: list[GitCall]) -> None:
     git = GitClient(repo.path)
     with git.snapshot():
         git.rev("HEAD")
@@ -133,9 +139,7 @@ def test_snapshot_reads_refs_again_after_git_changes_them(repo: Repo) -> None:
         assert git.rev("new@{upstream}") == git.tip("main")
 
 
-def test_snapshot_outlives_stack_metadata_writes_but_not_upstream_changes(
-    repo: Repo, git_calls: list[list[str]]
-) -> None:
+def test_snapshot_outlives_stack_metadata_writes_but_not_upstream_changes(repo: Repo, git_calls: list[GitCall]) -> None:
     git = GitClient(repo.path)
     repo.git("branch", "--no-track", "new")
     git.branch_config()
@@ -233,7 +237,7 @@ def test_a_repository_without_a_config_file_works(repo: Repo) -> None:
     assert git.config_get("main", "stackParent") == "trunk"
 
 
-def test_snapshot_reads_only_the_remote_branches_upstreams_are(repo: Repo, git_calls: list[list[str]]) -> None:
+def test_snapshot_reads_only_the_remote_branches_upstreams_are(repo: Repo, git_calls: list[GitCall]) -> None:
     """A clone can have tens of thousands of remote branches; the others are
     asked of git as they're needed."""
     repo.git("push", "--quiet", "origin", "main:other")
@@ -248,7 +252,7 @@ def test_snapshot_reads_only_the_remote_branches_upstreams_are(repo: Repo, git_c
 
 
 def test_snapshot_reads_every_remote_branch_when_upstreams_are_too_many_to_name(
-    repo: Repo, git_calls: list[list[str]]
+    repo: Repo, git_calls: list[GitCall]
 ) -> None:
     """Naming them all could make a command line longer than Windows allows."""
     main = repo.git("rev-parse", "main")
@@ -285,7 +289,7 @@ def test_snapshot_reads_an_upstream_with_an_unusual_refspec(repo: Repo) -> None:
         assert git.rev("mirrored@{upstream}") == git.tip("main")
 
 
-def test_snapshot_reads_worktrees_and_the_remotes_default_branch_once(repo: Repo, git_calls: list[list[str]]) -> None:
+def test_snapshot_reads_worktrees_and_the_remotes_default_branch_once(repo: Repo, git_calls: list[GitCall]) -> None:
     git = GitClient(repo.path)
     with git.snapshot():
         for _ in range(3):
@@ -316,7 +320,7 @@ def test_changes_worktrees(args: tuple[str, ...], changes: bool) -> None:
     assert changes_worktrees(args) is changes
 
 
-def test_snapshot_keeps_the_worktrees_while_no_head_moves(repo: Repo, git_calls: list[list[str]]) -> None:
+def test_snapshot_keeps_the_worktrees_while_no_head_moves(repo: Repo, git_calls: list[GitCall]) -> None:
     git = GitClient(repo.path)
     with git.snapshot():
         assert git.worktree_of("main") is not None
@@ -339,7 +343,7 @@ def test_switching_forgets_the_worktrees(repo: Repo) -> None:
         assert git.worktree_of("other") is not None
 
 
-def test_snapshot_reads_the_current_branch_with_the_refs(repo: Repo, git_calls: list[list[str]]) -> None:
+def test_snapshot_reads_the_current_branch_with_the_refs(repo: Repo, git_calls: list[GitCall]) -> None:
     git = GitClient(repo.path)
     # As a command has, to know which upstreams to read.
     git.branch_config()
@@ -390,7 +394,7 @@ def separate_patch_ids(repo: Repo, *command: str) -> list[tuple[str, str]]:
     return [(patch_id, commit) for patch_id, commit in (line.split() for line in result.stdout.decode().splitlines())]
 
 
-def test_commit_patch_ids_reads_each_commands_patches_with_one_patch_id(repo: Repo, git_calls: list[list[str]]) -> None:
+def test_commit_patch_ids_reads_each_commands_patches_with_one_patch_id(repo: Repo, git_calls: list[GitCall]) -> None:
     base = repo.git("rev-parse", "HEAD")
     repo.commit("a", "one\n", "one")
     repo.git("commit", "--quiet", "--allow-empty", "-m", "empty")
@@ -436,7 +440,7 @@ def test_commit_patch_ids_in_a_sha256_repository(tmp_path: pathlib.Path, repo: R
 
 
 def test_snapshot_looks_up_objects_with_one_cat_file(
-    repo: Repo, git_calls: list[list[str]], monkeypatch: pytest.MonkeyPatch
+    repo: Repo, git_calls: list[GitCall], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     repo.commit("a", "one\n", "one")
     repo.commit("a", "two\n", "two")
@@ -469,9 +473,7 @@ def test_snapshot_looks_up_objects_with_one_cat_file(
     assert all(process.stdout is not None and process.stdout.closed for process in started)
 
 
-def test_snapshot_asks_about_the_same_commits_once_but_sees_a_branch_move(
-    repo: Repo, git_calls: list[list[str]]
-) -> None:
+def test_snapshot_asks_about_the_same_commits_once_but_sees_a_branch_move(repo: Repo, git_calls: list[GitCall]) -> None:
     repo.git("branch", "other")
     git = GitClient(repo.path)
     with git.snapshot():
@@ -494,7 +496,7 @@ def test_nothing_is_contained_in_a_branch_that_doesnt_exist(repo: Repo) -> None:
         assert not git.contained_in("refs/heads/main", "refs/heads/nope")
 
 
-def test_snapshot_reads_a_reflog_once_until_its_branch_moves(repo: Repo, git_calls: list[list[str]]) -> None:
+def test_snapshot_reads_a_reflog_once_until_its_branch_moves(repo: Repo, git_calls: list[GitCall]) -> None:
     git = GitClient(repo.path)
     with git.snapshot():
         first = git.reflog_tips("main")
@@ -508,7 +510,7 @@ def test_snapshot_reads_a_reflog_once_until_its_branch_moves(repo: Repo, git_cal
 
 
 def test_snapshot_doesnt_keep_a_reflog_read_while_it_was_forgotten(
-    repo: Repo, git_calls: list[list[str]], monkeypatch: pytest.MonkeyPatch
+    repo: Repo, git_calls: list[GitCall], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     git = GitClient(repo.path)
     run = git.run
