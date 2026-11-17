@@ -4,8 +4,115 @@ import pytest
 
 from git_stack import events
 from git_stack.errors import StackError
-from git_stack.stack import StackClient
-from tests.helpers import Repo
+from git_stack.stack import PullRequestAction, StackClient
+from git_stack.stacks import StackNode, Stacks
+from tests.helpers import FakeGitHub, Repo
+
+
+def test_push_prs_pushes_multiple_base_branches_without_opening_their_prs(
+    repo: Repo, gh: FakeGitHub, client: StackClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo.make_stack()
+    client.push()
+    repo.commit("c", "pr3 updated\n", "pr3 updated")
+    stacks = Stacks(
+        [StackNode("pr1", "main"), StackNode("pr2", "pr1", additional_parents=("main",)), StackNode("pr3", "pr2")]
+    )
+    monkeypatch.setattr(client, "stacks", lambda: stacks)
+
+    result = client.push(prs=True)
+
+    assert repo.remote_subject("pr3") == "pr3 updated"
+    assert [pr["headRefName"] for pr in gh.load()["prs"]] == ["pr1"]
+    assert result.steps is not None
+    assert [(step.branch, step.action) for step in result.steps] == [
+        ("pr1", PullRequestAction.OPEN),
+        ("pr2", PullRequestAction.MULTIPLE_BASES),
+        ("pr3", PullRequestAction.MULTIPLE_BASES),
+    ]
+
+
+def test_push_does_not_retarget_existing_prs_for_multiple_base_dependencies(
+    repo: Repo, gh: FakeGitHub, client: StackClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo.make_stack()
+    client.push()
+    client.prs()
+    state = gh.load()
+    state["prs"][1]["baseRefName"] = "main"
+    state["prs"][2]["baseRefName"] = "main"
+    gh.save(state)
+    repo.commit("c", "pr3 updated\n", "pr3 updated")
+    stacks = Stacks(
+        [StackNode("pr1", "main"), StackNode("pr2", "pr1", additional_parents=("main",)), StackNode("pr3", "pr2")]
+    )
+    monkeypatch.setattr(client, "stacks", lambda: stacks)
+
+    client.push()
+
+    assert repo.remote_subject("pr3") == "pr3 updated"
+    assert [pr["baseRefName"] for pr in gh.load()["prs"][1:]] == ["main", "main"]
+
+
+def test_push_keeps_multiple_base_pr_exclusion_when_a_base_is_dropped(
+    repo: Repo, gh: FakeGitHub, client: StackClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo.make_stack()
+    client.push()
+    stacks = Stacks(
+        [StackNode("pr1", "main"), StackNode("pr2", "pr1", additional_parents=("main",)), StackNode("pr3", "pr2")]
+    )
+    monkeypatch.setattr(client, "stacks", lambda: stacks)
+
+    def skip_merged(branches: object, graph: Stacks, adapter: object) -> list[str]:
+        graph.drop("pr1")
+        return ["pr2", "pr3"]
+
+    monkeypatch.setattr(client, "skip_merged", skip_merged)
+    result = client.push(prs=True)
+
+    assert gh.load()["prs"] == []
+    assert result.steps is not None
+    assert [step.action for step in result.steps] == [PullRequestAction.MULTIPLE_BASES] * 2
+
+
+def test_push_protects_a_secondary_root_as_a_push_destination(
+    repo: Repo, client: StackClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo.git("branch", "release", "refs/heads/main")
+    repo.git("push", "--quiet", "origin", "release")
+    client.branch("feature")
+    repo.commit("a", "feature\n", "feature")
+    repo.git("branch", "--set-upstream-to", "origin/release", "feature")
+    before = repo.git("rev-parse", "refs/heads/release", cwd=repo.origin)
+    stacks = Stacks([StackNode("feature", "main", additional_parents=("release",))])
+    monkeypatch.setattr(client, "stacks", lambda: stacks)
+
+    with pytest.raises(StackError, match="--force"):
+        client.push()
+
+    assert repo.git("rev-parse", "refs/heads/release", cwd=repo.origin) == before
+
+
+def test_push_rechecks_roots_after_settling(repo: Repo, client: StackClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo.git("branch", "release", "refs/heads/main")
+    repo.git("push", "--quiet", "origin", "release")
+    client.branch("feature")
+    repo.commit("a", "feature\n", "feature")
+    repo.git("branch", "--set-upstream-to", "origin/release", "feature")
+    before = repo.git("rev-parse", "refs/heads/release", cwd=repo.origin)
+    current = [Stacks([StackNode("feature", "main")])]
+    monkeypatch.setattr(client, "stacks", lambda: current[0])
+    monkeypatch.setattr(
+        client,
+        "settle_all",
+        lambda: current.__setitem__(0, Stacks([StackNode("feature", "main", additional_parents=("release",))])),
+    )
+
+    with pytest.raises(StackError, match="--force"):
+        client.push()
+
+    assert repo.git("rev-parse", "refs/heads/release", cwd=repo.origin) == before
 
 
 @pytest.mark.parametrize("command", ["push", "sync"])

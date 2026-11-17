@@ -1119,11 +1119,17 @@ class StackClient(StackCore):
         out too, with the branches stacked on them, as sync does."""
         remaining: list[str] = []
         skipped: set[str] = set()
+        branches = list(branches)
+        ineligible = {branch for branch in branches if stacks.has_multiple_base_ancestor(branch)}
         for branch in branches:
             parent = stacks.parent(branch)
-            if parent in skipped:
-                self.emit(events.ParentSkipped(branch, parent))
+            blocked = next((base for base in stacks.dependencies(branch) if base in skipped), None)
+            if blocked is not None:
+                self.emit(events.ParentSkipped(branch, blocked))
                 skipped.add(branch)
+                continue
+            if branch in ineligible:
+                remaining.append(branch)
                 continue
             state = adapter.merge_state(branch, parent)
             if state is MergeState.MERGED:
@@ -1608,7 +1614,7 @@ class StackClient(StackCore):
         remotes = self.upstream_remotes(stack)
         if len(remotes) > 1:
             raise StackError("can't push branches on multiple remotes atomically; select one with --remote")
-        roots = {stacks.root(b) for b in stack}
+        roots = set(stacks.restricted(stack).roots())
         push_remote = remote if only_remote else self.stack_remote(remotes, self.upstream_remotes(roots))
         self.ensure_sync_destination(stack, roots, push_remote, force, "push")
         if only_remote:
@@ -1623,12 +1629,15 @@ class StackClient(StackCore):
         remotes = self.upstream_remotes(stack)
         if not stack or len(remotes) > 1 or (remotes and push_remote not in remotes):
             raise StackError("the selected upstreams changed while settling; retry the push")
+        self.ensure_sync_destination(stack, set(stacks.restricted(stack).roots()), push_remote, force, "push")
         adapter = self.checked_adapter(push_remote)
         github = adapter if prs and isinstance(adapter, GitHubAdapter) else None
+        ineligible = frozenset(branch for branch in stack if stacks.has_multiple_base_ancestor(branch))
         branches = self.skip_merged(stack, stacks, adapter)
         if not force:
             for b in branches:
-                self.take_upstream_rebase(b, stacks.parent(b), push_remote)
+                if b not in ineligible:
+                    self.take_upstream_rebase(b, stacks.parent(b), push_remote)
         pushed = self.push_branches(
             branches,
             stacks,
@@ -1639,9 +1648,12 @@ class StackClient(StackCore):
             rebuild_stack=rebuild_stack,
             use_upstreams=True,
             no_verify=no_verify,
+            ineligible=ineligible,
         )
         steps = (
-            self.open_pull_requests(pushed, stacks, github, push_remote, rebuild_stack=rebuild_stack)
+            self.open_pull_requests(
+                pushed, stacks, github, push_remote, rebuild_stack=rebuild_stack, ineligible=ineligible
+            )
             if github and pushed
             else None
         )
@@ -1690,6 +1702,7 @@ class StackClient(StackCore):
         scope: list[str] | None = None,
         use_upstreams: bool = False,
         no_verify: bool = False,
+        ineligible: frozenset[str] = frozenset(),
     ) -> list[str]:
         """Force-push (with lease) branches, which must be unmerged, in one atomic
         push, then let the adapter update their pull requests (see
@@ -1717,8 +1730,16 @@ class StackClient(StackCore):
                 f"push would fail, so nothing was pushed or changed; if the remote has new commits, run "
                 f"`git stack sync` and try again:\n{why}"
             )
+        pr_branches = [
+            branch for branch in branches if branch not in ineligible and not stacks.has_multiple_base_ancestor(branch)
+        ]
+        pr_scope = (
+            [branch for branch in scope if branch not in ineligible and not stacks.has_multiple_base_ancestor(branch)]
+            if scope is not None
+            else None
+        )
         try:
-            adapter.before_push(branches, stacks, rebuild_stack, scope, opening)
+            adapter.before_push(pr_branches, stacks, rebuild_stack, pr_scope, opening)
         except StackError as e:
             raise StackError(
                 f"updating pull requests failed, so nothing was pushed (set {ADAPTER_SETTING} "
@@ -1737,7 +1758,7 @@ class StackClient(StackCore):
             if (identity := self.upstream_identity(b)) is not None:
                 git.config_set(b, PULLED_UPSTREAM_KEY, identity)
         try:
-            adapter.after_push(branches, stacks, opening, rebuild_stack, scope)
+            adapter.after_push(pr_branches, stacks, opening, rebuild_stack, pr_scope)
         except StackError as e:
             raise StackError(
                 f"pushed, but updating pull requests failed (set {ADAPTER_SETTING} to git to stop using GitHub): {e}"
@@ -1821,16 +1842,11 @@ class StackClient(StackCore):
         remote = remote or self.default_remote(stack, stacks)
         adapter = ensure_github(make_adapter(self, remote, fetch=True), remote)
         adapter.ensure_available()
-        branches = self.skip_merged([branch for branch in stack if branch not in ineligible], stacks, adapter)
-        steps = self.open_pull_requests(branches, stacks, adapter, remote, dry_run, rebuild_stack)
-        by_branch = {step.branch: step for step in steps}
-        steps = [
-            PullRequestStep(branch, stacks.parent(branch), PullRequestAction.MULTIPLE_BASES)
-            if branch in ineligible
-            else by_branch[branch]
-            for branch in stack
-            if branch in ineligible or branch in by_branch
-        ]
+        eligible = self.skip_merged([branch for branch in stack if branch not in ineligible], stacks, adapter)
+        branches = [branch for branch in stack if branch in ineligible or branch in eligible]
+        steps = self.open_pull_requests(
+            branches, stacks, adapter, remote, dry_run, rebuild_stack, frozenset(ineligible)
+        )
         return PrsResult(steps, self.stack_infos(stack, adapter))
 
     def open_pull_requests(
@@ -1841,17 +1857,24 @@ class StackClient(StackCore):
         remote: str,
         dry_run: bool = False,
         rebuild_stack: bool = False,
+        ineligible: frozenset[str] = frozenset(),
     ) -> list[PullRequestStep]:
         """Do what prs does for branches, which must be unmerged,
         parent-before-child. Returns a PullRequestStep for each."""
         git = self.git
-        self.ensure_on_remote(branches, sorted({stacks.root(b) for b in branches}), remote)
+        eligible = [
+            branch for branch in branches if branch not in ineligible and not stacks.has_multiple_base_ancestor(branch)
+        ]
+        self.ensure_on_remote(eligible, sorted({stacks.root(b) for b in eligible}), remote)
         prs = adapter.pull_requests()
-        allowed = {prs[b].number for b in branches if b in prs and prs[b].state is GitHubState.OPEN}
+        allowed = {prs[b].number for b in eligible if b in prs and prs[b].state is GitHubState.OPEN}
         template = adapter.pull_request_template() or ""
         steps: list[PullRequestStep] = []
         for b in branches:
             parent = stacks.parent(b)
+            if b in ineligible or stacks.has_multiple_base_ancestor(b):
+                steps.append(PullRequestStep(b, parent, PullRequestAction.MULTIPLE_BASES))
+                continue
             pr = prs.get(b)
             if pr is not None:
                 if not dry_run:
@@ -1876,8 +1899,8 @@ class StackClient(StackCore):
                 ) from e
             steps.append(PullRequestStep(b, parent, PullRequestAction.OPEN, title=title, number=number, url=url))
             allowed.add(number)
-        if branches and (not dry_run or rebuild_stack):
-            self.update_stack_sections(branches, stacks, adapter, rebuild_stack, dry_run)
+        if eligible and (not dry_run or rebuild_stack):
+            self.update_stack_sections(eligible, stacks, adapter, rebuild_stack, dry_run)
         return steps
 
     def update_stack_sections(

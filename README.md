@@ -767,6 +767,10 @@ git stack push --prs            # then open pull requests, as `git stack prs` do
   [Rebased on the remote](#rebased-on-the-remote)). `--force` pushes over it.
 - The branches are pushed in one atomic push: if any of them can't be pushed
   (e.g. because its remote branch changed since your last fetch), none are.
+- A branch depending on multiple bases is pushed, but `push` does not create
+  or retarget its pull request. This also applies to its descendants. Those
+  branches aren't automatically moved to a rebased remote branch; `push`
+  refuses unpulled remote changes unless `--force` is given.
 - Refuses to push a branch whose remote branch was deleted, since that's
   usually a merged pull request `sync` hasn't seen yet. If it wasn't, run
   `git branch --unset-upstream <branch>` to push it again.

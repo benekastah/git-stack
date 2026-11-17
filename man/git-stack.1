@@ -1064,6 +1064,13 @@ The branches are pushed in one atomic push: if any of them can\(aqt be
 pushed (e.g.
 because its remote branch changed since your last fetch), none are.
 .IP \(bu 2
+A branch depending on multiple bases is pushed, but \f[CR]push\f[R] does
+not create or retarget its pull request.
+This also applies to its descendants.
+Those branches aren\(aqt automatically moved to a rebased remote branch;
+\f[CR]push\f[R] refuses unpulled remote changes unless
+\f[CR]\-\-force\f[R] is given.
+.IP \(bu 2
 Refuses to push a branch whose remote branch was deleted, since
 that\(aqs usually a merged pull request \f[CR]sync\f[R] hasn\(aqt seen
 yet.
