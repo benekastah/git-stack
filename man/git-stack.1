@@ -820,6 +820,10 @@ If a multi\-base replay stops, resolve it with
 \f[CR]git cherry\-pick \-\-abort\f[R], then rerun
 \f[CR]git stack restack\f[R] in the same worktree.
 The branch ref moves only after its replay finishes.
+Replay stops if an own commit becomes empty because a base supplies its
+patch.
+Keeping the branch unchanged preserves that patch if the base is later
+removed or rewritten.
 .IP \(bu 2
 \f[CR]\-l\f[R]/\f[CR]\-\-latest\f[R] moves the branches on the
 stack\(aqs root onto its latest commit even if they don\(aqt conflict

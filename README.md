@@ -586,6 +586,9 @@ git stack restack --latest              # also move the stack onto main's latest
 - If a multi-base replay stops, resolve it with `git cherry-pick --continue`
   or back out with `git cherry-pick --abort`, then rerun `git stack restack`
   in the same worktree. The branch ref moves only after its replay finishes.
+  Replay stops if an own commit becomes empty because a base supplies its
+  patch. Keeping the branch unchanged preserves that patch if the base is
+  later removed or rewritten.
 - `-l`/`--latest` moves the branches on the stack's root onto its latest commit
   even if they don't conflict with it (and the rest of the stack with them).
 - Merged branches are skipped and their children restacked onto their parent;

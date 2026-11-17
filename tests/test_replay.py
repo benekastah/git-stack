@@ -41,13 +41,19 @@ def test_replay_rebuilds_from_rewritten_base(repo: Repo, client: StackClient, co
     assert repo.git("branch", "--show-current") == "combined"
 
 
-@pytest.mark.parametrize("resume", [True, False])
-def test_replay_conflict_continue_or_abort(repo: Repo, client: StackClient, combined: None, resume: bool) -> None:
+@pytest.mark.parametrize(("resume", "reflog"), [(True, True), (False, True), (True, False)])
+def test_replay_conflict_continue_or_abort(
+    repo: Repo, client: StackClient, combined: None, resume: bool, reflog: bool
+) -> None:
     repo.git("switch", "--quiet", "second")
     repo.commit("a", "conflicting second\n", "conflicting second")
     repo.git("switch", "--quiet", "combined")
     tip = repo.git("rev-parse", "combined")
     base = repo.config("combined", "stackBase")
+
+    if not reflog:
+        repo.git("config", "core.logAllRefUpdates", "false")
+        (repo.path / ".git" / "logs" / "HEAD").unlink()
 
     with pytest.raises(StackError, match="cherry-pick --continue"):
         client.restack()
@@ -137,3 +143,21 @@ def test_replay_resumes_descendants_after_a_conflict(repo: Repo, client: StackCl
     assert repo.git("merge-base", "--is-ancestor", "combined", "child") == ""
     assert repo.git("show", "child:a") == "resolved"
     assert repo.git("branch", "--show-current") == "child"
+
+
+def test_replay_preserves_own_patch_when_a_replaceable_base_has_it(
+    repo: Repo, client: StackClient, combined: None
+) -> None:
+    original = repo.git("rev-parse", "combined")
+    repo.git("switch", "--quiet", "second")
+    repo.git("cherry-pick", original)
+    repo.git("switch", "--quiet", "combined")
+
+    with pytest.raises(StackError, match="own commit"):
+        client.restack()
+
+    assert repo.git("rev-parse", "combined") == original
+    repo.git("cherry-pick", "--abort")
+    client.restack()
+    client.restack(onto="first")
+    assert repo.git("show", "combined:c") == "combined"

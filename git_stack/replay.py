@@ -182,12 +182,15 @@ def continued(git: GitClient, replay: Replay, head: str) -> bool:
     commit = (replay.secondary or replay.own)[0]
     return (
         git.run("show", "-s", "--format=%P", head) == replay.head
-        and git.run("log", "-1", "--format=%gs", "-g", "HEAD").startswith("commit (cherry-pick):")
+        and (
+            not git.ok("reflog", "exists", "HEAD")
+            or git.run("log", "-1", "--format=%gs", "-g", "HEAD").startswith("commit (cherry-pick):")
+        )
         and git.identity_counts("-1", head) == git.identity_counts("-1", commit)
     )
 
 
-def pick(git: GitClient, commit: str) -> bool:
+def pick(git: GitClient, commit: str, secondary: bool) -> bool:
     if git.passthrough("cherry-pick", "--allow-empty", commit):
         return True
     # Git versions before 2.45 lack --empty=drop. Only skip when Git's pick
@@ -195,8 +198,17 @@ def pick(git: GitClient, commit: str) -> bool:
     return (
         git.rev("CHERRY_PICK_HEAD") == commit
         and not git.run("status", "--porcelain", "--untracked-files=no")
-        and git.passthrough("cherry-pick", "--skip")
+        and skip_empty(git, commit, secondary)
     )
+
+
+def skip_empty(git: GitClient, commit: str, secondary: bool) -> bool:
+    if not secondary:
+        raise StackError(
+            f"own commit {commit[:12]} is already supplied by a base. "
+            "Run `git cherry-pick --abort` and rerun restack before changing the dependencies."
+        )
+    return git.passthrough("cherry-pick", "--skip")
 
 
 def publish(git: GitClient, replay: Replay) -> None:
@@ -242,7 +254,6 @@ def prepare(git: GitClient, replay: Replay) -> Replay | None:
         if replay.head != replay.tips[0] or (git.current_branch() or head) != replay.original:
             raise StackError("HEAD does not match the pending replay")
         git.run("switch", "--quiet", "--detach", replay.head)
-
     return replay
 
 
@@ -263,7 +274,7 @@ def run(git: GitClient, replay: Replay) -> Replay | None:
         commit = queue[0]
         replay = replace(replay, in_pick=True)
         replay.save(git)
-        if not pick(git, commit):
+        if not pick(git, commit, bool(replay.secondary)):
             if git.operation_in_progress():
                 raise StackError(
                     f"replaying {replay.branch} stopped at {commit[:12]}. Resolve the conflict and run "
