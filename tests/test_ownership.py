@@ -5,27 +5,24 @@ import pytest
 from git_stack.core import Delete
 from git_stack.errors import StackError
 from git_stack.stack import StackClient
-from git_stack.stacks import Ownership, StackNode, Stacks
+from git_stack.stacks import Ownership
 from tests.helpers import Repo
 
 
-def test_ownership_refuses_multiple_base_graph_before_changing_any_member(
-    repo: Repo, client: StackClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    repo.make_stack()
-    stacks = Stacks(
-        [
-            StackNode("pr1", "main"),
-            StackNode("pr2", "pr1", ownership=Ownership.SHARED, additional_parents=("main",)),
-            StackNode("pr3", "pr2", ownership=Ownership.SHARED),
-        ]
-    )
-    monkeypatch.setattr(client, "stacks", lambda: stacks)
+@pytest.mark.parametrize("selector", ["first", "second", "combined", "child"])
+def test_ownership_changes_the_whole_connected_graph(repo: Repo, client: StackClient, selector: str) -> None:
+    client.branch("first")
+    client.branch("combined")
+    client.branch("child")
+    repo.git("switch", "--quiet", "main")
+    client.branch("second")
+    repo.git("switch", "--quiet", "combined")
+    repo.stack("track", "--on", "first", "--on", "second")
 
-    with pytest.raises(StackError, match="multiple bases.*not supported"):
-        client.set_ownership(Ownership.SHARED)
-
-    assert not repo.config_exists("pr1", "stackOwnership")
+    assert set(client.set_ownership(Ownership.SHARED, [selector])) == {"first", "second", "combined", "child"}
+    assert all(client.stacks().is_shared(branch) for branch in ("first", "second", "combined", "child"))
+    client.set_ownership(Ownership.OWNED, [selector])
+    assert all(not client.stacks().is_shared(branch) for branch in ("first", "second", "combined", "child"))
 
 
 @pytest.mark.parametrize("command", ["restack", "sync", "push"])
