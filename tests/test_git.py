@@ -647,19 +647,6 @@ def test_commit_patch_ids_marks_paths_even_with_git_literal_pathspecs(
     assert [len(p) for p in GitClient(repo.path).commit_patch_ids(("log", "-p", "HEAD~1..HEAD", "--", "a"))] == [1]
 
 
-def test_hooks_run_in_the_users_locale(repo: Repo, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Not the C locale py-git-client gives a git whose output it reads,
-    which a hook (or credential helper, or ssh) would inherit: e.g. Ruby's
-    default encoding is then US-ASCII, which can't read UTF-8 files."""
-    monkeypatch.setenv("LC_ALL", "C.UTF-8")
-    repo.git("branch", "other")
-    repo.add_hook(repo.path, "post-checkout", '#!/bin/sh\nprintf %s "$LC_ALL" > .git/hook-locale\n')
-
-    GitClient(repo.path).switch("other")
-
-    assert (repo.path / ".git" / "hook-locale").read_text(encoding="utf-8") == "C.UTF-8"
-
-
 def test_changed_files_are_from_the_top_even_with_diff_relative(repo: Repo) -> None:
     """commit_patch_ids takes them from the top, whatever directory git-stack
     runs in, which diff.relative would otherwise make `git diff` list them
@@ -679,13 +666,14 @@ def test_changed_files_are_from_the_top_even_with_diff_relative(repo: Repo) -> N
     assert len(patches) == 1
 
 
-def test_git_runs_in_c_where_git_stack_reads_its_english(
+def test_git_runs_in_the_users_locale_with_its_messages_in_english(
     repo: Repo, fresh_find_git: None, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """ConfigLockedError is read from what git config says, in English; and
-    the cat-file's errors are classified by git_client, from its English. Any
-    other command runs in the user's locale (see
-    test_hooks_run_in_the_users_locale)."""
+    """Every command keeps the user's locale, which the hooks, credential
+    helpers and ssh git runs inherit (in C, Ruby's default encoding is
+    US-ASCII, which can't read UTF-8 files). git's own messages, which
+    git_client reads (e.g. ConfigLockedError's, or the cat-file's), are in
+    English through GIT_TEXTDOMAINDIR instead; passthrough's are the user's."""
     install_command(tmp_path / "bin", "fake-git", "tests.fake_git")
     log = tmp_path / "git-log.jsonl"
     monkeypatch.setenv("FAKE_GIT_LOG", str(log))
@@ -699,11 +687,12 @@ def test_git_runs_in_c_where_git_stack_reads_its_english(
     git.config_set("main", "stackParent", "trunk")
     with git.snapshot():
         assert git.tree(git.tip("main")) is not None
-    git.run("status")
+    git.passthrough("status")
 
     calls = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
     # By the command and its first argument, after `-C <directory>`.
-    locale = {" ".join(call["args"][2:4]): call["LC_ALL"] for call in calls}
-    assert locale["config branch.main.stackParent"] == "C"
-    assert locale["cat-file --batch-command"] == "C"
-    assert locale["status"] == "C.UTF-8"
+    by_command = {" ".join(call["args"][2:4]): call for call in calls}
+    assert {call["LC_ALL"] for call in calls} == {"C.UTF-8"}
+    assert by_command["config branch.main.stackParent"]["GIT_TEXTDOMAINDIR"] is not None
+    assert by_command["cat-file --batch-command"]["GIT_TEXTDOMAINDIR"] is not None
+    assert by_command["status"]["GIT_TEXTDOMAINDIR"] is None

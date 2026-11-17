@@ -5,12 +5,12 @@ import tempfile
 import threading
 import time
 from collections import Counter
-from collections.abc import Generator, Mapping, Sequence
+from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from typing import TextIO
 
 import git_client
-from git_client import CatFile, ConfigLockedError, EnvValue, Git, GitError
+from git_client import CatFile, ConfigLockedError, Git, GitError
 
 from git_stack.errors import StackError
 
@@ -132,19 +132,6 @@ def git_errors() -> Generator[None]:
         raise StackError(str(e)) from e
 
 
-class UserLocaleGit(Git):
-    """A Git whose commands all run in the user's locale, never with the
-    LC_ALL=C Git gives a command whose output it reads: the hooks, credential
-    helpers and ssh git runs would inherit it (e.g. Ruby's default encoding
-    is then US-ASCII, which can't read UTF-8 files), and git's messages are
-    for the user to read. A command whose message git-stack reads asks for
-    LC_ALL=C itself (see GitClient.write_config)."""
-
-    def environment(self, env: Mapping[str, EnvValue] | None = None, *, english: bool = False) -> dict[str, str]:
-        del english
-        return super().environment(env)
-
-
 class GitClient:
     """Runs git in directory, as `git -C <directory>` does: $GIT_STACK_GIT if
     set, otherwise the git on PATH (see git_client.find_git), started through
@@ -153,7 +140,7 @@ class GitClient:
     def __init__(self, directory: str | os.PathLike[str] = ".") -> None:
         self.directory = pathlib.Path(directory)
         try:
-            self._git = UserLocaleGit(self.directory, env_var=GIT_VARIABLE)
+            self._git = Git(self.directory, env_var=GIT_VARIABLE)
         except (FileNotFoundError, ValueError) as e:
             # find_git's: no git on PATH, or on Windows, a batch file.
             raise StackError(str(e)) from e
@@ -165,8 +152,7 @@ class GitClient:
         self._objects: dict[tuple[str, str], str] = {}
         self._ancestry: dict[tuple[str, str], bool] = {}
         self._merged_trees: dict[tuple[str, str], str | None] = {}
-        # In English, as git_client reads it: cat-file runs nothing of the user's.
-        self._cat_file = CatFile(Git(self.directory, program=self._git.program))
+        self._cat_file = CatFile(self._git)
         # See branch_config: whether it has read the config file, and the
         # file's stat when it did (None if there was no file).
         self._config_read = False
@@ -383,8 +369,7 @@ class GitClient:
         error: GitError | None = None
         while True:
             try:
-                # In English, which ConfigLockedError is read from.
-                self._git.run("config", *args, env={"LC_ALL": "C"})
+                self._git.run("config", *args)
                 error = None
             except ConfigLockedError as e:
                 error = e
@@ -751,12 +736,8 @@ class GitClient:
         commit is all zeros. Paths after `--` are files as git lists them
         (e.g. `git diff --name-only`): from the top of the worktree, and
         taken literally."""
-        marked = []
-        for command in commands:
-            end = command.index("--") + 1 if "--" in command else len(command)
-            marked.append([*command[:end], *(f":(top,literal){path}" for path in command[end:])])
         with git_errors():
-            return git_client.patch_ids(self._git, *marked)
+            return git_client.patch_ids(self._git, *commands, paths_from_top=True)
 
     def identity_counts(self, *args: str) -> Counter[str]:
         """Count commit identities, including repeated author, date and subject."""

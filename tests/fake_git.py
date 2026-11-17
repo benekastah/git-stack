@@ -1,5 +1,5 @@
 """Stands in for git in tests, as $GIT_STACK_GIT: appends the command it was
-run as, and its $LC_ALL, to $FAKE_GIT_LOG as a JSON line, then runs
+run as, its $LC_ALL and its $GIT_TEXTDOMAINDIR, to $FAKE_GIT_LOG as a JSON line, then runs
 $REAL_GIT with the same arguments, stdin and output."""
 
 import json
@@ -10,7 +10,16 @@ import sys
 
 def main() -> None:
     with open(os.environ["FAKE_GIT_LOG"], "a", encoding="utf-8") as log:
-        log.write(json.dumps({"args": sys.argv[1:], "LC_ALL": os.environ.get("LC_ALL")}) + "\n")
+        log.write(
+            json.dumps(
+                {
+                    "args": sys.argv[1:],
+                    "LC_ALL": os.environ.get("LC_ALL"),
+                    "GIT_TEXTDOMAINDIR": os.environ.get("GIT_TEXTDOMAINDIR"),
+                }
+            )
+            + "\n"
+        )
     sys.exit(subprocess.run([os.environ["REAL_GIT"], *sys.argv[1:]], check=False).returncode)
 
 
