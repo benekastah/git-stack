@@ -609,9 +609,11 @@ class StackCore:
         if stacks.dependencies(result.branch) != result.parents:
             stacks.reparent(result.branch, result.parents[0])
             stacks.set_additional_parents(result.branch, result.parents[1:])
-            if any(parent in stacks and stacks.is_shared(parent) for parent in result.parents):
-                stacks.share(result.branch)
-            self.save(stacks)
+        # A previous attempt may have written the parents and stopped
+        # before marking the descendants shared.
+        if any(parent in stacks and stacks.is_shared(parent) for parent in result.parents):
+            stacks.share(result.branch)
+        self.save(stacks)
         git.config_set(result.branch, BASE_KEY, result.boundary)
         if len(result.parents) > 1:
             git.config_set(result.branch, replay.TIPS, " ".join(result.tips))

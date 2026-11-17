@@ -415,3 +415,31 @@ def test_replay_resumes_projected_merge_in_another_group_member(
 
     assert client.stacks().dependencies("z-child") == ("main",)
     assert repo.git("log", "--format=%s", "main..z-child") == "z-child"
+
+
+def test_replay_retries_shared_ownership_after_metadata_failure(
+    repo: Repo, client: StackClient, combined: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client.branch("child")
+    repo.git("switch", "--quiet", "main")
+    client.branch("shared-source")
+    repo.commit("b", "shared\n", "shared")
+    repo.stack("ownership", "shared")
+    repo.git("switch", "--quiet", "combined")
+
+    original_config_set = client.git.config_set
+
+    def fail_child_ownership_once(branch: str, key: str, value: str) -> None:
+        if branch == "child" and key == "stackOwnership":
+            monkeypatch.setattr(client.git, "config_set", original_config_set)
+            raise StackError("simulated interruption")
+        original_config_set(branch, key, value)
+
+    monkeypatch.setattr(client.git, "config_set", fail_child_ownership_once)
+    with pytest.raises(StackError, match="simulated interruption"):
+        client.restack(onto=("first", "shared-source"), allow_shared=True)
+    assert client.stacks().dependencies("combined") == ("first", "shared-source")
+
+    client.restack()
+
+    assert client.stacks().is_shared("child")
