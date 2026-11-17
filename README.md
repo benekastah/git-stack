@@ -839,7 +839,8 @@ git stack prs
   the base of a pull request in a stack either. When a stack is reshaped
   (e.g. a branch is put in its middle), `push`, `sync`, and `prs` refuse to
   unstack it to change those bases unless given `--rebuild-stack`. It refuses
-  if the GitHub stack includes unmerged PRs outside the selected local stacks.
+  if the GitHub stack includes open PRs outside the selected local stacks;
+  closed and merged PRs do not block rebuilding.
   Run `prs` to
   link them again, or use `push --prs --rebuild-stack` to do both together.
   `sync` may already have changed local branches before it reaches this check.
@@ -852,7 +853,7 @@ git stack prs
   Use `git stack prs --rebuild-stack` to unstack the selected pull requests on
   GitHub and create a new stack when the existing stack doesn't match. Merged
   pull requests remain in the old stack. It refuses if unstacking would also
-  remove an unmerged pull request outside the selected stack. If creating the
+  remove an open pull request outside the selected stack. If creating the
   new stack fails, the pull requests remain unstacked; rerun `prs` to retry.
   Add `--dry-run` to see the planned unstack and creation without changing them.
 
