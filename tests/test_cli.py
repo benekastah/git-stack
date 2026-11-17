@@ -44,11 +44,22 @@ STACK = [
 STACK_TREE = "main\n└── pr1 *\n"
 
 
-@pytest.fixture
-def stack() -> Any:
-    """A mock StackClient whose methods check their arguments against the real ones."""
+@pytest.fixture(scope="session")
+def autospec_stack() -> Any:
+    """A mock StackClient whose methods check their arguments against the real
+    ones, made once: create_autospec takes about 50ms, most of this file's
+    time if each test made its own."""
     stack = create_autospec(StackClient, instance=True)
     stack.git = create_autospec(GitClient, instance=True)
+    return stack
+
+
+@pytest.fixture
+def stack(autospec_stack: Any) -> Any:
+    """autospec_stack, as no test has used it: with no calls recorded, and
+    these return values."""
+    stack = autospec_stack
+    stack.reset_mock(return_value=True, side_effect=True)
     stack.git.run.return_value = ""
     stack.git.config_value.return_value = None  # every setting unset
     stack.branch.return_value = "main"
