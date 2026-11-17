@@ -729,6 +729,7 @@ def test_sync_moves_a_branch_whose_parent_was_merged_and_deleted_onto_its_prs_ba
     assert client.stacks().parents() == {"pr2": "main", "pr3": "pr2"}
     repo.assert_stacked("pr2", "main", ["pr2 c1"])
     repo.assert_stacked("pr3", "pr2", ["pr3 c1"])
+    assert repo.git("rev-parse", "refs/heads/main") == repo.git("rev-parse", "refs/remotes/origin/main")
     assert events.MovedOffDeletedParent("pr2", "pr1", "main") in emitted
 
 
@@ -742,6 +743,18 @@ def test_clean_untracks_merged_branches_whose_parent_was_merged_and_deleted(
 
     assert client.stacks().parents() == {"pr3": "main"}
     assert repo.git("rev-parse", "refs/heads/main") == repo.git("rev-parse", "refs/remotes/origin/main")
+
+
+def test_clean_refuses_uncommitted_changes_on_the_root_a_branch_moved_onto(
+    repo: Repo, gh: FakeGitHub, client: StackClient
+) -> None:
+    repo.make_stack()
+    merge_pr1_and_delete_it_everywhere(repo, gh)
+    repo.git("switch", "--quiet", "main")
+    repo.write("a", "uncommitted\n")
+
+    with pytest.raises(StackError, match="you have uncommitted changes"):
+        client.clean()
 
 
 def test_sync_leaves_a_branch_whose_deleted_parent_is_still_on_the_remote(

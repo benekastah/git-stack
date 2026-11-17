@@ -1471,7 +1471,8 @@ class StackClient(StackCore):
         adapter = self.checked_adapter(remote)
         self.fetch(remote)
         if self.move_off_deleted_parents(list(stacks), stacks, adapter, remote):
-            # The current branch may be the root a branch moved onto.
+            # The current branch may be the root a branch moved onto. The move
+            # is saved already, which is right whether or not this refuses.
             self.ensure_clean_worktree_for_clean(stacks, delete)
         self.fast_forward_trunks(stacks.roots())
 
