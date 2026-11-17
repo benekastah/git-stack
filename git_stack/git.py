@@ -210,11 +210,12 @@ class GitClient:
             self._ran(args)
 
     def ok(self, *args: str) -> bool:
-        """Run git and report whether it succeeded: unlike git_client's ok,
-        any failure is a no."""
-        result = self._git.process(*args, capture_output=True, stdout=subprocess.DEVNULL)
-        self._ran(args)
-        return result.returncode == 0
+        """Run git and report whether it succeeded: any failure is a no (see
+        git_client's succeeds)."""
+        try:
+            return self._git.succeeds(*args)
+        finally:
+            self._ran(args)
 
     def passthrough(self, *args: str) -> bool:
         """Run git with output going straight to the terminal (stdout to
