@@ -138,6 +138,11 @@ def commits(git: GitClient, tip: str, excluding: tuple[str, ...], name: str) -> 
     return tuple(result)
 
 
+def require_direct_target(git: GitClient, branch: str) -> None:
+    if git.ok("symbolic-ref", "--quiet", f"refs/heads/{branch}"):
+        raise StackError(f"cannot replay {branch}: its branch ref is a symbolic ref")
+
+
 def plan(
     git: GitClient,
     branch: str,
@@ -147,6 +152,7 @@ def plan(
     remaining: tuple[str, ...] = (),
     latest: bool = False,
 ) -> Replay:
+    require_direct_target(git, branch)
     tips = tuple(git.tip(parent) for parent in parents)
     secondary: list[str] = []
     aliases = copy_origins(git)
@@ -267,6 +273,7 @@ def skip_empty(git: GitClient, commit: str, secondary: bool) -> bool:
 
 
 def publish(git: GitClient, replay: Replay) -> None:
+    require_direct_target(git, replay.branch)
     ref = f"refs/heads/{replay.branch}"
     current = git.run("rev-parse", "--verify", ref)
     if replay.was_published(git):
@@ -285,7 +292,11 @@ def publish(git: GitClient, replay: Replay) -> None:
         "-m",
         "git-stack: replay bases",
         "--stdin",
-        input=f"update {ref} {replay.head} {replay.before}\ncreate {replay.refs}published {replay.head}\n{inputs}",
+        # Never overwrite another branch by following a symbolic ref.
+        input=(
+            f"option no-deref\nupdate {ref} {replay.head} {replay.before}\n"
+            f"create {replay.refs}published {replay.head}\n{inputs}"
+        ),
     )
 
 

@@ -372,3 +372,16 @@ def test_restack_onto_does_not_treat_a_prospective_base_as_a_merge(
     assert "own commit" in result.stderr
     assert client.stacks().dependencies("combined") == ("first", "second")
     assert repo.git("rev-parse", "combined") == before
+
+
+def test_replay_refuses_a_symbolic_target_ref(repo: Repo, client: StackClient, combined: None) -> None:
+    before = repo.git("rev-parse", "combined")
+    repo.git("branch", "unrelated", "combined")
+    repo.git("switch", "--quiet", "first")
+    repo.git("symbolic-ref", "refs/heads/combined", "refs/heads/unrelated")
+
+    with pytest.raises(StackError, match="symbolic ref"):
+        client.restack(["combined"])
+
+    assert repo.git("rev-parse", "unrelated") == before
+    assert repo.git("symbolic-ref", "refs/heads/combined") == "refs/heads/unrelated"
