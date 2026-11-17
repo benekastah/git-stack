@@ -344,6 +344,7 @@ git stack untrack 'spike-*'             # every tracked spike-* branch
 - To stop tracking a branch that was merged, use `sync` or `clean`, which also
   move its children down.
 - Nothing is untracked unless every branch is tracked.
+- Untracking a branch in a multiple-base graph is not supported yet.
 
 ### `git stack rename [<old>] <new>`
 

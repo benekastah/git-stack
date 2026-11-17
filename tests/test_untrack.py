@@ -4,7 +4,24 @@ import pytest
 
 from git_stack.errors import StackError
 from git_stack.stack import StackClient, Untracked
+from git_stack.stacks import StackNode, Stacks
 from tests.helpers import Repo
+
+
+def test_untrack_refuses_multiple_base_graph_before_removing_metadata(
+    repo: Repo, client: StackClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo.make_stack()
+    stacks = Stacks(
+        [StackNode("pr1", "main"), StackNode("pr2", "pr1", additional_parents=("main",)), StackNode("pr3", "pr2")]
+    )
+    monkeypatch.setattr(client, "stacks", lambda: stacks)
+
+    with pytest.raises(StackError, match="multiple bases.*not supported"):
+        client.untrack(["pr1"])
+
+    assert repo.config("pr1", "stackParent") == "main"
+    assert repo.config("pr2", "stackParent") == "pr1"
 
 
 def test_untrack_current_branch_keeps_it(repo: Repo, client: StackClient) -> None:

@@ -785,6 +785,13 @@ class StackClient(StackCore):
         if not name or any(c.isspace() for c in name):
             raise StackError(f"{name!r} can't be a group name: it can't be empty, or have spaces in it")
 
+    def ensure_untrack_supported(self, stacks: Stacks, selectors: Sequence[str]) -> None:
+        """Refuse untracking until connected multi-base metadata can be saved."""
+        selected = [branch for selector in selectors for branch in self.matching(selector, stacks)]
+        affected = {member for branch in selected for member in stacks.stack_of(branch)}
+        if any(stacks.has_multiple_base_ancestor(branch) for branch in affected):
+            raise StackError("untrack with multiple bases is not supported yet")
+
     @exclusive
     def untrack(self, branches: Iterable[str] = ()) -> list[Untracked]:
         """Stop tracking branches (default: the current branch), each a branch
@@ -796,11 +803,14 @@ class StackClient(StackCore):
         doesn't leave some of them untracked.
         """
         self.ensure_no_operation_in_progress()
+        initial = self.stacks()
+        selectors = list(branches) or [
+            self.current_stacked_branch(initial, "untrack", hint="name the branches to untrack")
+        ]
+        self.ensure_untrack_supported(initial, selectors)
         self.settle_all()
         stacks = self.stacks()
-        selectors = list(branches) or [
-            self.current_stacked_branch(stacks, "untrack", hint="name the branches to untrack")
-        ]
+        self.ensure_untrack_supported(stacks, selectors)
         branches = [branch for selector in selectors for branch in self.matching(selector, stacks)]
         # Children untracked along with their parent aren't still stacked on it.
         untracked = [
