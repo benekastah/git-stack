@@ -1815,7 +1815,7 @@ class StackClient(StackCore):
         remotes = self.upstream_remotes(stack)
         if len(remotes) > 1:
             raise StackError("can't push branches on multiple remotes atomically; select one with --remote")
-        roots = set(stacks.restricted(stack).roots())
+        roots = self.protected_push_roots(stacks, stack)
         push_remote = remote if only_remote else self.stack_remote(remotes, self.upstream_remotes(roots))
         self.ensure_sync_destination(stack, roots, push_remote, force, "push")
         if only_remote:
@@ -1830,7 +1830,7 @@ class StackClient(StackCore):
         remotes = self.upstream_remotes(stack)
         if not stack or len(remotes) > 1 or (remotes and push_remote not in remotes):
             raise StackError("the selected upstreams changed while settling; retry the push")
-        self.ensure_sync_destination(stack, set(stacks.restricted(stack).roots()), push_remote, force, "push")
+        self.ensure_sync_destination(stack, self.protected_push_roots(stacks, stack), push_remote, force, "push")
         adapter = self.checked_adapter(push_remote)
         github = adapter if prs and isinstance(adapter, GitHubAdapter) else None
         ineligible = frozenset(branch for branch in stack if stacks.has_multiple_base_ancestor(branch))
@@ -1865,6 +1865,10 @@ class StackClient(StackCore):
             self.branch_infos(stacks.restricted(stack), adapter) if only_remote else self.stack_infos(stack, adapter)
         )
         return PushResult(pushed, shown, steps, error)
+
+    def protected_push_roots(self, stacks: Stacks, branches: Sequence[str]) -> set[str]:
+        """Protect roots behind excluded dependencies and the excluded branches themselves."""
+        return set(stacks.restricted(branches).roots()).union(DependencyPlan.select(stacks, branches).roots)
 
     def push_refspecs(
         self, branches: list[str], stacks: Stacks, remote: str, force: bool, use_upstreams: bool

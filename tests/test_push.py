@@ -404,3 +404,24 @@ def test_push_skips_reverted_branch_and_its_children(
     assert events.Reverted("pr1", "main", (repo.git("rev-parse", "main"),), ("pr2",)) in emitted
     assert events.ParentSkipped("pr2", "pr1") in emitted
     assert repo.remote_subject("pr2") == "pr2 c1"
+
+
+def test_filtered_push_still_protects_the_root_of_an_excluded_dependency(repo: Repo, client: StackClient) -> None:
+    repo.git("branch", "maintenance", "main")
+    repo.git("push", "-q", "origin", "maintenance:stable")
+    repo.git("branch", "--set-upstream-to=origin/stable", "maintenance")
+    repo.git("switch", "-q", "maintenance")
+    client.branch("second")
+    repo.git("remote", "add", "vendor", str(repo.origin))
+    repo.git("push", "-qu", "vendor", "second")
+    repo.git("switch", "-q", "main")
+    client.branch("combined")
+    repo.commit("c", "own\n", "own")
+    repo.stack("track", "--on", "main", "--on", "second")
+    repo.git("branch", "--set-upstream-to=origin/stable", "combined")
+    before = repo.git("rev-parse", "refs/heads/stable", cwd=repo.origin)
+
+    with pytest.raises(StackError, match="--force"):
+        client.push(remote="origin", only_remote=True)
+
+    assert repo.git("rev-parse", "refs/heads/stable", cwd=repo.origin) == before
