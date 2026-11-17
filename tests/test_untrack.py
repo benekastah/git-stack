@@ -4,24 +4,29 @@ import pytest
 
 from git_stack.errors import StackError
 from git_stack.stack import StackClient, Untracked
-from git_stack.stacks import StackNode, Stacks
 from tests.helpers import Repo
 
 
-def test_untrack_refuses_multiple_base_graph_before_removing_metadata(
-    repo: Repo, client: StackClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    repo.make_stack()
-    stacks = Stacks(
-        [StackNode("pr1", "main"), StackNode("pr2", "pr1", additional_parents=("main",)), StackNode("pr3", "pr2")]
-    )
-    monkeypatch.setattr(client, "stacks", lambda: stacks)
+@pytest.mark.parametrize("branch", ["first", "second", "combined"])
+def test_untrack_preserves_graph_dependencies_and_branch_tips(repo: Repo, client: StackClient, branch: str) -> None:
+    client.branch("first")
+    client.branch("combined")
+    client.branch("child")
+    repo.git("switch", "--quiet", "main")
+    client.branch("second")
+    repo.git("switch", "--quiet", "combined")
+    repo.stack("track", "--on", "first", "--on", "second")
+    branches = ("first", "second", "combined", "child")
+    tips = {name: repo.git("rev-parse", name) for name in branches}
 
-    with pytest.raises(StackError, match="multiple bases.*not supported"):
-        client.untrack(["pr1"])
+    client.untrack([branch])
 
-    assert repo.config("pr1", "stackParent") == "main"
-    assert repo.config("pr2", "stackParent") == "pr1"
+    repo.assert_untracked(branch)
+    assert {name: repo.git("rev-parse", name) for name in branches} == tips
+    stacks = client.stacks()
+    assert stacks.dependencies("child") == ("combined",)
+    if branch != "combined":
+        assert stacks.dependencies("combined") == ("first", "second")
 
 
 def test_untrack_current_branch_keeps_it(repo: Repo, client: StackClient) -> None:
