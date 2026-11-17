@@ -18,6 +18,7 @@ from git_stack.core import (
     Delete,
     StackCore,
     SyncCommand,
+    TrunkUpstream,
 )
 from git_stack.errors import BrokenStackError, StackError
 from git_stack.git import DEFAULT_REMOTE, SWITCH
@@ -1876,6 +1877,9 @@ class ImportPlanner:
         self.without_prs: dict[str, ImportStepWithoutPr] = {}
         # Branches whose plan is being worked out, to catch a cycle.
         self.visiting: set[str] = set()
+        # {trunk: its upstream, and where import fast-forwards it to}, as
+        # trunk_ref works them out.
+        self.trunks: dict[str, tuple[TrunkUpstream | None, str | None]] = {}
 
     def plan_all(self) -> list[ImportStep]:
         """An ImportStep for each pull request, parents before children."""
@@ -2036,9 +2040,15 @@ class ImportPlanner:
         as its own, or later be restacked without them.
         """
         git, local = self.git, f"refs/heads/{branch}"
-        if branch in self.stacks or (upstream := self.stack.trunk_upstream(branch)) is None:
+        if branch in self.stacks:
             return local
-        if (target := self.stack.fast_forward_target(branch)) is not None:
+        if branch not in self.trunks:
+            found = self.stack.trunk_upstream(branch)
+            self.trunks[branch] = (found, self.stack.fast_forward_target(branch, found))
+        upstream, target = self.trunks[branch]
+        if upstream is None:
+            return local
+        if target is not None:
             return target
         built_on = git.run("merge-base", upstream.new, built, check=False)
         if not built_on or git.is_ancestor(built_on, local):

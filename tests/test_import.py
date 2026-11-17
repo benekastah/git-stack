@@ -3,6 +3,7 @@
 import pathlib
 
 import pytest
+from git_client.testing import GitCall
 
 from git_stack import events
 from git_stack.errors import StackError
@@ -256,6 +257,21 @@ def test_import_skips_a_branch_without_pr_built_on_a_newer_trunk_checked_out_els
     assert [(s.branch, s.action) for s in result.without_prs] == [("a", ImportAction.SKIP)]
     assert "checked out in" in (result.without_prs[0].reason or "")
     assert actions(result.steps) == [("pr1", ImportAction.SKIP)]
+
+
+def test_import_asks_for_a_trunks_upstream_once_while_planning(
+    repo: Repo, gh: FakeGitHub, client: StackClient, tmp_path: pathlib.Path, git_calls: list[GitCall]
+) -> None:
+    for number in (1, 2, 3):
+        open_pr(repo, gh, number, f"pr{number}", "main")
+    repo.commit_on_forge("main", "d", "main\n", "main c1")
+    main_in_another_worktree(repo, tmp_path / "other")
+    git_calls.clear()
+
+    client.import_stacks()
+
+    # Once while planning, and once more to fast-forward it, which it can't.
+    assert [call[:3] for call in git_calls].count(["rev-parse", "--abbrev-ref", "main@{upstream}"]) == 2
 
 
 def test_import_skips_a_pr_built_on_a_trunk_that_diverged(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:

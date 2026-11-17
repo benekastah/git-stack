@@ -751,11 +751,11 @@ class StackCore:
             return None
         return TrunkUpstream(upstream, upstream_ref, old, new)
 
-    def fast_forward_target(self, root: str) -> str | None:
-        """The ref of root's upstream, if fast_forward_trunks would move root
-        to it, or None if it would leave root where it is."""
+    def fast_forward_target(self, root: str, upstream: TrunkUpstream | None) -> str | None:
+        """The ref of root's upstream (as trunk_upstream gives it), if
+        fast_forward_trunks would move root to it, or None if it would leave
+        root where it is."""
         git = self.git
-        upstream = self.trunk_upstream(root)
         if upstream is None or not git.is_ancestor(upstream.old, upstream.new):
             return None
         if root != git.current_branch() and git.worktree_of(root) is not None:
