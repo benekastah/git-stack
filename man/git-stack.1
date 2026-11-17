@@ -806,10 +806,8 @@ See How it works.
 A branch with merge commits must be restacked manually while preserving
 those merges; git\-stack refuses to replay it as a linear history.
 .IP \(bu 2
-A multiple\-base branch can be restacked when every secondary base is
-already an ancestor of both its recorded base and the primary base\(aqs
-current tip.
-Replaying other secondary bases is not supported yet and is refused.
+Restacking a multiple\-base graph is not supported yet; the command
+refuses before rewriting any of its branches.
 .IP \(bu 2
 \f[CR]\-\-onto\f[R] retargets only the current branch, onto another
 local branch.

@@ -1260,6 +1260,8 @@ class StackClient(StackCore):
         else:
             selected = self.selected_stacks(branches, groups, stacks, "restack")
             self.ensure_owned(selected, stacks, allow_shared, "restack")
+        if any(stacks.has_multiple_base_ancestor(branch) for branch in selected):
+            raise StackError("restacking branches with multiple bases is not supported yet")
         adapter = make_adapter(self, self.default_remote(selected, stacks), fetch=False)
         to_restack = self.skip_merged(selected, stacks, adapter)
         self.restack_all(to_restack, stacks, latest)

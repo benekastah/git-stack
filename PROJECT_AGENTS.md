@@ -28,9 +28,8 @@ man page is generated from it.
   `StackCore.save()` writes only what changed. Walk and change the graph through
   it rather than with a `{branch: parent}` map of your own. `stackParent` holds
   a branch name for a single parent and a versioned ordered list for multiple
-  parents. `track --on` records multiple parents without replaying them.
-  `restack` supports secondary bases already in the recorded and current primary
-  bases; replaying other secondary bases still needs to be implemented.
+  parents. `track --on` records multiple parents without replaying them; restack
+  refuses multiple-base graphs until replay and recovery are implemented.
 - Each command is a module in `git_stack/commands/` with `register`, `run` and
   `show`: `run` does the command and returns a dataclass result, and `show`
   prints it as text. With `--json`, the CLI prints the result as JSON instead

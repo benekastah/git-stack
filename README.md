@@ -577,9 +577,8 @@ git stack restack --latest              # also move the stack onto main's latest
   [How it works](#how-it-works).
 - A branch with merge commits must be restacked manually while preserving
   those merges; git-stack refuses to replay it as a linear history.
-- A multiple-base branch can be restacked when every secondary base is already
-  an ancestor of both its recorded base and the primary base's current tip.
-  Replaying other secondary bases is not supported yet and is refused.
+- Restacking a multiple-base graph is not supported yet; the command refuses
+  before rewriting any of its branches.
 - `--onto` retargets only the current branch, onto another local branch. The
   branches stacked on it come along.
 - Multiple `--onto` values are reserved for multiple bases, which aren't

@@ -539,35 +539,18 @@ class StackCore:
         original = self.git.current_branch()
         skipped: set[str] = set()
         branches = dependency_order(branches, {b: stacks.dependencies(b) for b in stacks})
-        for branch in branches:
-            self.ensure_incorporated_bases(branch, stacks)
+        if any(len(stacks.dependencies(branch)) > 1 for branch in branches):
+            raise StackError("restacking branches with multiple bases is not supported yet")
         for branch in branches:
             parent = stacks.parent(branch)
             blocked = next((base for base in stacks.dependencies(branch) if base in skipped), None)
             if blocked is not None:
                 self.emit(events.ParentSkipped(branch, blocked))
                 skipped.add(branch)
-            else:
-                self.ensure_incorporated_bases(branch, stacks)
-                if not self.restack_branch(branch, parent, latest):
-                    skipped.add(branch)
+            elif not self.restack_branch(branch, parent, latest):
+                skipped.add(branch)
         if original and self.git.current_branch() != original:
             self.git.switch(original)
-
-    def ensure_incorporated_bases(self, branch: str, stacks: Stacks) -> None:
-        """Allow the single-base rebase only if the other bases are already in it."""
-        parents = stacks.dependencies(branch)
-        if len(parents) == 1:
-            return
-        base = self.git.config_get(branch, BASE_KEY)
-        primary = self.git.rev(f"refs/heads/{parents[0]}")
-        if base and primary:
-            tips = [self.git.rev(f"refs/heads/{parent}") for parent in parents[1:]]
-            if all(tip and self.git.is_ancestor(tip, base) and self.git.is_ancestor(tip, primary) for tip in tips):
-                return
-        raise StackError(
-            "restacking branches with multiple bases is not supported yet unless all are already incorporated"
-        )
 
     def unpulled_commits(self, branch: str, parent: str, upstream_tip: str) -> list[str]:
         """Non-merge commits on upstream_tip that branch doesn't have, oldest first.
