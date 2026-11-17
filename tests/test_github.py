@@ -801,6 +801,24 @@ def test_sync_leaves_a_branch_whose_deleted_parent_wasnt_merged(
     assert client.stacks().parents() == {"pr2": "pr1", "pr3": "pr2"}
 
 
+def test_sync_leaves_a_branch_whose_deleted_parent_only_shares_its_name_with_a_merged_one(
+    repo: Repo, gh: FakeGitHub, client: StackClient
+) -> None:
+    old_main = repo.git("rev-parse", "refs/heads/main")
+    gh.add_pr(number=1, state="MERGED", headRefName="pr1", headRefOid=old_main, baseRefName="main", mergeCommit=None)
+    repo.make_stack()
+    client.push()
+    repo.git("push", "--quiet", "origin", ":pr1", cwd=repo.forge)
+    # Retargeted by hand, abandoning today's pr1.
+    gh.add_pr(number=2, state="OPEN", headRefName="pr2", headRefOid=repo.git("rev-parse", "pr2"), baseRefName="main")
+    repo.git("switch", "--quiet", "pr3")
+    repo.git("branch", "--quiet", "-D", "pr1")
+
+    client.sync()
+
+    assert client.stacks().parents() == {"pr2": "pr1", "pr3": "pr2"}
+
+
 def test_sync_leaves_a_branch_whose_deleted_parent_is_still_on_the_remote(
     repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event]
 ) -> None:

@@ -511,32 +511,40 @@ class GitHubAdapter(GitAdapter):
         """The local branch of the one branch's pull request merges into now,
         if parent's pull request into it was merged: GitHub retargets the pull
         requests on a merged branch when it's deleted. A pull request
-        retargeted by hand, over a parent that wasn't merged, doesn't count."""
+        retargeted by hand, over a parent that wasn't merged, doesn't count,
+        nor does a merged pull request of an earlier branch of parent's name:
+        its head must contain branch's base, the parent's commit branch was
+        built on."""
+        git = self.git
         pr = self.pull_requests().get(branch)
-        if pr is None or pr.base == parent:
+        base = git.config_get(branch, BASE_KEY)
+        if pr is None or pr.base == parent or base is None:
             return None
         try:
-            merged = pr.base in self.merged_bases(parent)
+            merged = self.merged_heads(parent, pr.base)
         except StackError:
             return None
-        return self.local_branch_of(pr.base) if merged else None
+        if not any(git.is_ancestor(base, head) if git.rev(head) else head == base for head in merged):
+            return None
+        return self.local_branch_of(pr.base)
 
-    def merged_bases(self, head: str) -> set[str]:
-        """The branches the merged pull requests from head, a branch in the
-        repository, were merged into."""
+    def merged_heads(self, head: str, base: str) -> list[str]:
+        """The head commits of the pull requests from head, a branch in the
+        repository, merged into base."""
         query = (
             "query($owner: String!, $name: String!, $h0: String!) { repository(owner: $owner, name: $name) "
             f"{{ h0: pullRequests(headRefName: $h0, states: MERGED, first: {PRS_PER_BRANCH}, "
-            "orderBy: {field: UPDATED_AT, direction: DESC}) { nodes { baseRefName isCrossRepository } } } }"
+            "orderBy: {field: UPDATED_AT, direction: DESC}) "
+            "{ nodes { baseRefName headRefOid isCrossRepository } } } }"
         )
         args = ["api", "graphql", "--hostname", self.host, "-f", f"owner={self.owner}", "-f", f"name={self.name}"]
         args += ["-f", f"h0={head}", "-f", f"query={query}"]
         repository = field(field(parse_json(self.gh(*args)), "data", dict), "repository", dict)
-        return {
-            field(pr, "baseRefName", str)
+        return [
+            field(pr, "headRefOid", str)
             for pr in field(field(repository, "h0", dict), "nodes", list)
-            if not field(pr, "isCrossRepository", bool)
-        }
+            if not field(pr, "isCrossRepository", bool) and field(pr, "baseRefName", str) == base
+        ]
 
     def local_branch_of(self, name: str) -> str | None:
         """The local branch of name, a branch on remote: the one whose
