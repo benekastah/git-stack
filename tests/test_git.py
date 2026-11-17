@@ -5,8 +5,9 @@ import pathlib
 import subprocess
 from typing import Any
 
+import git_client
 import pytest
-from git_client import Arg, Git
+from git_client import Arg, Git, GitError
 from git_client.testing import real_git
 
 from git_stack.adapters.git import GitAdapter
@@ -24,14 +25,40 @@ def test_git_client_runs_git_stack_git(repo: Repo, fresh_find_git: None, monkeyp
         GitClient(repo.path).run("status")
 
 
-def test_a_git_error_is_a_stack_error(tmp_path: pathlib.Path) -> None:
-    """The command line reports StackErrors as git-stack's own; any other
-    error would print a traceback."""
+# The command line reports StackErrors as git-stack's own; any other error,
+# such as git_client's GitError, would print a traceback. So each read
+# through git_client is a StackError when git fails.
+
+
+def test_a_failing_cat_file_is_a_stack_error(tmp_path: pathlib.Path) -> None:
     git = GitClient(tmp_path)
     with pytest.raises(StackError, match="not a git repository"), git.snapshot():
-        git.local_branches()
-    with pytest.raises(StackError, match="not a git repository"), git.snapshot():
         git.tree("0" * 40)
+
+
+def test_failing_to_read_the_refs_is_a_stack_error(repo: Repo, monkeypatch: pytest.MonkeyPatch) -> None:
+    def failing(*args: Any, **kwargs: Any) -> None:
+        raise GitError(["for-each-ref"], 128, "fatal: refs broke")
+
+    monkeypatch.setattr(git_client, "refs", failing)
+    git = GitClient(repo.path)
+    with pytest.raises(StackError, match="refs broke"), git.snapshot():
+        git.local_branches()
+
+
+def test_a_broken_config_is_a_stack_error(repo: Repo) -> None:
+    git = GitClient(repo.path)
+    # Found before the config breaks, as git can't find it after.
+    git.common_dir()
+    (repo.path / ".git" / "config").write_text("[broken\n", encoding="utf-8")
+
+    with pytest.raises(StackError, match="bad config"):
+        git.branch_config()
+
+
+def test_failing_to_read_patch_ids_is_a_stack_error(repo: Repo) -> None:
+    with pytest.raises(StackError, match="nope"):
+        GitClient(repo.path).commit_patch_ids(("log", "-p", "nope"))
 
 
 def test_config_get_sees_changes_made_by_other_processes(repo: Repo) -> None:
