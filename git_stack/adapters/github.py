@@ -34,7 +34,8 @@ PRS_PER_BRANCH = 10
 # case-insensitively. GitHub doesn't say which wins if there are several.
 TEMPLATE_DIRECTORIES = (".github", "", "docs")
 TEMPLATE_NAMES = ("pull_request_template.md", "pull_request_template.txt")
-# Whether prs links each linear stack's pull requests into a stack on GitHub
+# Whether prs links each linear stack's pull requests into a stack on GitHub,
+# or adds to one that's still a path through a stack that branches out
 # (default: true), where the repository has GitHub's stacked pull requests.
 GITHUB_STACKS_SETTING = "stack.githubStacks"
 # A pull request's stack on GitHub, as GraphQL gives it. GitHub only allows a
@@ -832,10 +833,12 @@ class GitHubAdapter(GitAdapter):
         with fewer than two pull requests, counting those, gets no section, and
         one it has is removed.
 
-        If branches are a chain of open pull requests, each on the one before,
-        they're linked into a stack on GitHub first (see link_github_stack).
-        Once they're all in one, which GitHub shows on each pull request
-        itself, they get no section, and the ones they have are removed.
+        The paths of open pull requests to have in stacks on GitHub (see
+        github_stack_paths) are linked into them first (see
+        link_github_stack). Once a path's pull requests are all in one,
+        which GitHub shows on each pull request itself, they get no section,
+        and the ones they have are removed. The other pull requests' sections
+        show the whole stack.
         """
         prs = self.pull_requests()
         root = stacks.parent(branches[0])
@@ -860,24 +863,45 @@ class GitHubAdapter(GitAdapter):
             tree[number] = parent
             tree[parent] = root
         shown = sum(isinstance(n, int) for n in tree) >= 2
-        chain = [to_update[b] for b in branches] if is_chain(branches, stacks, root, to_update) else []
         github_stacks = {
             n: GitHubStack.from_json(stack) if (stack := optional_field(pr, "stack", dict)) is not None else None
             for n, pr in fields.items()
         }
+        paths = github_stack_paths(branches, stacks, root, to_update, github_stacks)
+        # Only a linear stack is linked again once a retarget unstacks it, as
+        # nothing else is left to say which path to link.
+        chain = [to_update[b] for b in branches] if paths == [branches] else []
         if dry_run and rebuild_stack and self.plan_retargets(to_update, prs, stacks, github_stacks, chain):
             return
-        linked = shown and len(chain) > 1 and self.link_github_stack(chain, github_stacks, rebuild_stack, dry_run)
+        linked = (
+            self.link_github_stacks(
+                [[to_update[b] for b in path] for path in paths], github_stacks, rebuild_stack, dry_run
+            )
+            if shown
+            else set[int]()
+        )
         if dry_run:
             return
         for number in to_update.values():
             body = bodies[number]
-            if linked or not shown:
+            if number in linked or not shown:
                 new_body = stack_section.remove(body)
             else:
                 new_body = stack_section.replace(body, stack_section.render(root, tree, set(merged.values()), number))
             if new_body != body:
                 self.gh("pr", "edit", str(number), "--repo", self.repo, "--body-file", "-", input=new_body)
+
+    def link_github_stacks(
+        self, chains: list[list[int]], stacks: dict[int, GitHubStack | None], rebuild_stack: bool, dry_run: bool
+    ) -> set[int]:
+        """Link each of chains of two or more pull requests into a stack on
+        GitHub (see link_github_stack). Returns the pull requests in those
+        that are all in one."""
+        linked = set[int]()
+        for chain in chains:
+            if len(chain) > 1 and self.link_github_stack(chain, {n: stacks[n] for n in chain}, rebuild_stack, dry_run):
+                linked.update(chain)
+        return linked
 
     def plan_retargets(
         self,
@@ -1057,10 +1081,44 @@ class GitHubAdapter(GitAdapter):
         )
 
 
-def is_chain(branches: list[str], stacks: Stacks, root: str, open_prs: dict[str, int]) -> bool:
-    """Whether branches, parent-before-child, each have an open pull request
-    (in open_prs) and are each stacked on the one before, the first on root."""
-    return all(b in open_prs and stacks.parent(b) == (branches[i - 1] if i else root) for i, b in enumerate(branches))
+def github_stack_paths(
+    branches: list[str],
+    stacks: Stacks,
+    root: str,
+    open_prs: dict[str, int],
+    github_stacks: dict[int, GitHubStack | None],
+) -> list[list[str]]:
+    """The paths of branches, parent-before-child on root, to have in stacks
+    on GitHub (see link_github_stack): each a list of branches with open pull
+    requests (open_prs), each stacked on the one before, the first on root.
+
+    If branches are such a path, it's the only one, whichever stacks on
+    GitHub their pull requests are in. Otherwise, each stack on GitHub
+    (github_stacks, each open pull request's, if it's in one) whose open pull
+    requests are such a path still fits, and gives one, followed by the
+    branches that can join its top: each the only one of branches stacked on
+    the one before, with an open pull request. A tree with no such stack has
+    no path, since nothing says which of its paths to link.
+    """
+
+    def is_path(path: list[str]) -> bool:
+        return all(b in open_prs and stacks.parent(b) == (path[i - 1] if i else root) for i, b in enumerate(path))
+
+    if is_path(branches):
+        return [branches]
+    branch_of = {n: b for b, n in open_prs.items()}
+    paths: list[list[str]] = []
+    for stack in {s.number: s for s in github_stacks.values() if s is not None}.values():
+        numbers = [n for n, state in stack.entries if state is GitHubState.OPEN]
+        if not numbers or any(n not in branch_of for n in numbers):
+            continue
+        path = [branch_of[n] for n in numbers]
+        if not is_path(path):
+            continue
+        while len(above := [b for b in stacks.children(path[-1]) if b in branches]) == 1 and above[0] in open_prs:
+            path.append(above[0])
+        paths.append(path)
+    return paths
 
 
 def github_repo(git: GitClient, remote: str) -> tuple[str, str, str] | None:

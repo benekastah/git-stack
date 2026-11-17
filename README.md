@@ -835,7 +835,12 @@ git stack prs
   of the one they're in. Once they're all in one, GitHub shows the stack on
   each pull request, so they get no stack in their descriptions, and the
   ones they had are removed. A stack that branches out, or a group's stacks,
-  can't be one stack on GitHub, so they keep theirs. Merged pull requests can't
+  can't be one stack on GitHub, so they aren't linked. But a stack on GitHub
+  is kept while its open pull requests are still a path through the local
+  stack, from its root, each on the one before (e.g. once a branch is
+  added beside one in it): new pull requests, each the only one on the one
+  before, join its top, and the others keep their descriptions, showing the
+  whole stack. Merged pull requests can't
   be taken out of a stack on GitHub, so if some are in one that doesn't match
   (e.g. in another order, or ending with a merged pull request that a new
   one isn't based on), it warns and leaves them, using description sections
@@ -1235,7 +1240,8 @@ With the GitHub adapter:
   is first pushed targets the default branch instead; the next `prs` or
   `push` retargets a pull request opened from it.) Where the repository has
   stacked pull requests, `prs` also links each stack that's a chain into a
-  stack on GitHub.
+  stack on GitHub, and keeps one that's still a path through a stack that
+  branches out.
 - A pull request that GitHub says was merged counts as merged once its merge
   commit is in the local parent branch (`sync` fetches it), even if the parent
   changed the merged lines since, or the merge changed them.

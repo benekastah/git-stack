@@ -598,6 +598,140 @@ def test_prs_doesnt_link_a_branching_stack_on_github(repo: Repo, gh: FakeGitHub,
     assert body(gh, 1) == stack("- `main`", "  - #1 👈", "    - #2", "    - #3")
 
 
+def test_push_keeps_a_github_stack_that_is_still_a_path_through_a_branching_stack(
+    repo: Repo, gh: FakeGitHub, client: StackClient
+) -> None:
+    gh.enable_stacks()
+    repo.make_stack()
+    client.push(prs=True)
+    repo.git("switch", "--quiet", "pr2")
+    client.branch("pr3b")
+    repo.commit("b", "pr3b\n", "pr3b c1")
+
+    client.push(prs=True, rebuild_stack=True)
+
+    assert gh.stacks() == [[1, 2, 3]]
+    # GitHub shows the stack on the pull requests in it; the others show the
+    # whole tree.
+    assert [body(gh, n) for n in (1, 2, 3)] == ["", "", ""]
+    assert body(gh, 4) == stack("- `main`", "  - #1", "    - #2", "      - #3", "      - #4 👈")
+
+
+def test_prs_adds_only_children_to_the_top_of_a_github_stack_in_a_branching_stack(
+    repo: Repo, gh: FakeGitHub, client: StackClient
+) -> None:
+    gh.enable_stacks()
+    repo.make_stack()
+    client.push(prs=True)
+    repo.git("switch", "--quiet", "pr1")
+    client.branch("pr2b")  # #7, off the GitHub stack
+    repo.commit("b", "pr2b\n", "pr2b c1")
+    repo.git("switch", "--quiet", "pr3")
+    client.branch("pr4")  # #4, pr3's only child
+    repo.commit("c", "pr4\n", "pr4 c1")
+    client.branch("pr5a")  # #5 and #6, a fork
+    repo.commit("c", "pr5a\n", "pr5a c1")
+    repo.git("switch", "--quiet", "pr4")
+    client.branch("pr5b")
+    repo.commit("c", "pr5b\n", "pr5b c1")
+    client.push()
+
+    client.prs()
+
+    assert gh.stacks() == [[1, 2, 3, 4]]
+    assert [body(gh, n) for n in (1, 2, 3, 4)] == ["", "", "", ""]
+    assert all(stack_section.START in body(gh, n) for n in (5, 6, 7))
+
+
+def test_prs_keeps_a_github_stack_whose_bottom_merged_in_a_branching_stack(
+    repo: Repo, gh: FakeGitHub, client: StackClient
+) -> None:
+    gh.enable_stacks()
+    repo.make_stack()
+    client.push(prs=True)
+    merge(repo, gh, client, "pr1", 1)
+    repo.git("switch", "--quiet", "pr2")
+    client.branch("pr3b")
+    repo.commit("b", "pr3b\n", "pr3b c1")
+    client.push()
+
+    client.prs()
+
+    assert gh.stacks() == [[1, 2, 3]]
+    assert [body(gh, n) for n in (2, 3)] == ["", ""]
+    assert stack_section.START in body(gh, 4)
+
+
+def test_prs_keeps_the_github_stack_of_each_stack_in_a_group(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+    client.branch("x1", group="g")
+    repo.commit("a", "x1\n", "x1 c1")
+    client.branch("x2")
+    repo.commit("a", "x2\n", "x2 c1")
+    repo.git("switch", "--quiet", "main")
+    client.branch("y1", group="g")
+    repo.commit("b", "y1\n", "y1 c1")
+    client.branch("y2")
+    repo.commit("b", "y2\n", "y2 c1")
+    client.push(prs=True)
+    gh.enable_stacks([1, 2], [3, 4])
+
+    client.prs()
+
+    assert gh.stacks() == [[1, 2], [3, 4]]
+    assert [body(gh, n) for n in (1, 2, 3, 4)] == ["", "", "", ""]
+
+
+def test_push_unstacks_a_github_stack_that_no_longer_fits_a_branching_stack(
+    repo: Repo, gh: FakeGitHub, client: StackClient
+) -> None:
+    gh.enable_stacks()
+    repo.make_stack()
+    client.push(prs=True)
+    repo.git("switch", "--quiet", "pr2")
+    client.branch("pr3b")
+    repo.commit("b", "pr3b\n", "pr3b c1")
+    repo.git("switch", "--quiet", "pr2")
+    client.branch("pr2b")  # put in the middle of the GitHub stack, under pr3
+    repo.commit("b", "pr2b\n", "pr2b c1")
+    repo.git("switch", "--quiet", "pr3")
+    client.restack(onto="pr2b")
+
+    with pytest.raises(StackError, match="--rebuild-stack"):
+        client.push(prs=True)
+    assert gh.stacks() == [[1, 2, 3]]
+
+    client.push(prs=True, rebuild_stack=True)
+
+    # Which path of the tree to link is up to the user (see docs/roadmap.md).
+    assert gh.stacks() == []
+    assert all(stack_section.START in body(gh, n) for n in (1, 2, 3, 4, 5))
+
+
+def test_prs_rebuild_dry_run_changes_nothing_in_a_branching_stack(
+    repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event]
+) -> None:
+    gh.enable_stacks()
+    repo.make_stack()
+    client.push(prs=True)
+    repo.git("switch", "--quiet", "pr2")
+    client.branch("pr3b")
+    repo.commit("b", "pr3b\n", "pr3b c1")
+    repo.git("switch", "--quiet", "pr3")
+    client.branch("pr4")
+    repo.commit("c", "pr4\n", "pr4 c1")
+    repo.git("config", "stack.githubStacks", "false")
+    client.push(prs=True)
+    repo.git("config", "--unset", "stack.githubStacks")
+    before = gh.load()
+
+    client.prs(rebuild_stack=True, dry_run=True)
+
+    after = gh.load()
+    assert (after["prs"], after["stacks"]) == (before["prs"], before["stacks"])
+    # As for a linear stack, rebuilding puts the new pull request on top.
+    assert events.GitHubStackRebuildPlanned((1000,), (1, 2, 3, 4)) in emitted
+
+
 def test_prs_doesnt_link_on_github_when_turned_off(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
     gh.enable_stacks()
     repo.git("config", "stack.githubStacks", "false")

@@ -1149,7 +1149,13 @@ Once they\(aqre all in one, GitHub shows the stack on each pull request,
 so they get no stack in their descriptions, and the ones they had are
 removed.
 A stack that branches out, or a group\(aqs stacks, can\(aqt be one stack
-on GitHub, so they keep theirs.
+on GitHub, so they aren\(aqt linked.
+But a stack on GitHub is kept while its open pull requests are still a
+path through the local stack, from its root, each on the one before
+(e.g.
+once a branch is added beside one in it): new pull requests, each the
+only one on the one before, join its top, and the others keep their
+descriptions, showing the whole stack.
 Merged pull requests can\(aqt be taken out of a stack on GitHub, so if
 some are in one that doesn\(aqt match (e.g.
 in another order, or ending with a merged pull request that a new one
@@ -1760,7 +1766,8 @@ parents too, and keeps the stack in each open one\(aqs description.
 default branch instead; the next \f[CR]prs\f[R] or \f[CR]push\f[R]
 retargets a pull request opened from it.)
 Where the repository has stacked pull requests, \f[CR]prs\f[R] also
-links each stack that\(aqs a chain into a stack on GitHub.
+links each stack that\(aqs a chain into a stack on GitHub, and keeps one
+that\(aqs still a path through a stack that branches out.
 .IP \(bu 2
 A pull request that GitHub says was merged counts as merged once its
 merge commit is in the local parent branch (\f[CR]sync\f[R] fetches it),
