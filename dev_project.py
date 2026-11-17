@@ -5,7 +5,7 @@
     python dev.py pre-commit-man     # what the pre-commit hook runs after dev.py pre-commit
 
 `install` also links the man page into ~/.local/share/man/man1 (an editable install doesn't
-install it) and makes `git blame` skip the commits in .git-blame-ignore-revs.
+install it; `install_links`) and makes `git blame` skip the commits in .git-blame-ignore-revs.
 """
 
 import shutil
@@ -53,11 +53,21 @@ def pre_commit_man(_: list[str]) -> None:
     subprocess.run(["git", "add", "--", str(PAGE.relative_to(ROOT))], cwd=ROOT, check=True)
 
 
+def _man_dir() -> Path:
+    return Path.home() / ".local" / "share" / "man" / "man1"
+
+
+def install_links() -> list[tuple[Path, Path]]:
+    """The man page's link, where `man` looks, for `install` to make with the command's (none
+    on Windows, which has no `man`)."""
+    return [] if WINDOWS else [(_man_dir() / PAGE.name, PAGE)]
+
+
 def after_install() -> None:
-    """Link the man page where `man` looks (not on Windows, which has no `man`), and make
-    `git blame` in this clone skip the commits in .git-blame-ignore-revs."""
+    """Warn if `man` won't find the man page `install` linked, and make `git blame` in this
+    clone skip the commits in .git-blame-ignore-revs."""
     if not WINDOWS:
-        _link_man_page()
+        _check_man_path()
     # `git blame` fails if the file is missing (e.g. with an older commit checked out), unless
     # this git supports marking the path :(optional).
     prefix = ":(optional)" if _git_has_optional_paths() else ""
@@ -85,21 +95,13 @@ def _git_has_optional_paths() -> bool:
     return probe.returncode == 0
 
 
-def _link_man_page() -> None:
-    man_dir = Path.home() / ".local" / "share" / "man" / "man1"
-    man_dir.mkdir(parents=True, exist_ok=True)
-    link = man_dir / PAGE.name
-    if link.exists() and not link.is_symlink():
-        sys.exit(f"install: {link} exists and isn't a link; move it out of the way and rerun")
-    link.unlink(missing_ok=True)
-    link.symlink_to(PAGE)
-    print(f"linked {link} -> {PAGE}")
+def _check_man_path() -> None:
     found = shutil.which("man") is not None and (
         subprocess.run(["man", "-w", "git-stack"], capture_output=True, check=False).returncode == 0
     )
     if not found:
         print(
-            f"warning: man doesn't search {man_dir.parent}, so git stack --help won't find the man page;"
+            f"warning: man doesn't search {_man_dir().parent}, so git stack --help won't find the man page;"
             ' add export MANPATH="$HOME/.local/share/man:" to your shell\'s startup file',
             file=sys.stderr,
         )
