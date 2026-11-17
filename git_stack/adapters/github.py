@@ -835,10 +835,10 @@ class GitHubAdapter(GitAdapter):
 
         The paths of open pull requests to have in stacks on GitHub (see
         github_stack_paths) are linked into them first (see
-        link_github_stack). Once a path's pull requests are all in one,
-        which GitHub shows on each pull request itself, they get no section,
-        and the ones they have are removed. The other pull requests' sections
-        show the whole stack.
+        link_github_stack). The pull requests in such a stack (all of a
+        path's, or its bottom ones when linking is off), which GitHub shows
+        on each pull request itself, get no section, and the ones they have
+        are removed. The other pull requests' sections show the whole stack.
         """
         prs = self.pull_requests()
         root = stacks.parent(branches[0])
@@ -895,8 +895,9 @@ class GitHubAdapter(GitAdapter):
         self, chains: list[list[int]], stacks: dict[int, GitHubStack | None], rebuild_stack: bool, dry_run: bool
     ) -> set[int]:
         """Link each of chains of two or more pull requests into a stack on
-        GitHub (see link_github_stack). Returns the pull requests in those
-        that are all in one."""
+        GitHub (see link_github_stack). Returns the pull requests that are in
+        a stack on GitHub of their path's bottom ones (see
+        link_github_stack)."""
         linked = set[int]()
         for chain in chains:
             if len(chain) > 1:
