@@ -29,7 +29,7 @@ def make_adapter(core: StackCore, remote: str, fetch: bool) -> GitAdapter:
     fetch says whether the adapter may fetch from remote. It's False for
     commands that otherwise don't fetch (info and restack).
     """
-    value = core.git.run("config", "--get", ADAPTER_SETTING, check=False)
+    value = core.git.config_value(ADAPTER_SETTING)
     try:
         setting = Adapter(value) if value else None
     except ValueError:

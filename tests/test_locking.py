@@ -72,7 +72,7 @@ def test_config_write_waits_while_another_process_has_config_locked(repo: Repo, 
         unlocked.set()
         config_lock.unlink()
 
-    threading.Timer(0.3, unlock).start()
+    threading.Timer(0.1, unlock).start()
 
     client.git.config_set("pr1", "stackBase", "x")
 
@@ -84,7 +84,9 @@ def test_config_write_waits_while_another_process_has_config_locked(repo: Repo, 
 def test_config_write_gives_up_once_config_stays_locked(
     repo: Repo, client: StackClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(git, "CONFIG_LOCK_TIMEOUT", 0.2)
+    """As a StackError, which the command line reports as its own. git_client
+    tries it again while the lock is held (see Git.write_config)."""
+    monkeypatch.setattr(git, "CONFIG_LOCK_TIMEOUT", 0)
     repo.git("config", "core.configLockTimeout", "0")
     (repo.path / ".git" / "config.lock").touch()
 

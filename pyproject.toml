@@ -6,8 +6,11 @@ readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Paul Harper", email = "benekastah@gmail.com" }]
-requires-python = ">=3.11"
-dependencies = []
+requires-python = ">=3.15"
+dependencies = [
+    # v0.0.2, by its commit: a tag can move, and pip, pipx and `uv tool install` don't read uv.lock.
+    "py-git-client @ git+https://github.com/benekastah/py-git-client@a1b4b0f15ae740c17db2d5fca4684aeaae6a8d54",
+]
 
 [project.scripts]
 git-stack = "git_stack.cli:main"
@@ -45,7 +48,7 @@ addopts = ["--numprocesses", "auto"]
 
 [tool.ruff]
 line-length = 120
-target-version = "py311"
+target-version = "py315"
 # dev.py runs under an older Python too, to say it's too old: keep it to syntax that parses there.
 per-file-target-version = { "dev.py" = "py311" }
 # Leave out dev.py even when named, as the pre-commit hook names files.
@@ -85,7 +88,7 @@ include = [
     "dev_project.py",
 ]
 typeCheckingMode = "strict"
-pythonVersion = "3.11"
+pythonVersion = "3.15"
 # One system at a time, so a call another system lacks (e.g. fcntl's on Windows) is reported:
 # `dev.py types-other-platforms` runs it as if on Windows and macOS too.
 pythonPlatform = "Linux"

@@ -14,7 +14,7 @@ from git_stack.adapters.git import PullRequestLink, PullRequestState
 from git_stack.cli import main
 from git_stack.core import CURRENT_GROUP, Delete
 from git_stack.errors import StackError
-from git_stack.git import GitClient
+from git_stack.git import GIT_VARIABLE, GitClient
 from git_stack.json_fields import to_json
 from git_stack.stack import (
     BranchInfo,
@@ -44,12 +44,24 @@ STACK = [
 STACK_TREE = "main\n└── pr1 *\n"
 
 
-@pytest.fixture
-def stack() -> Any:
-    """A mock StackClient whose methods check their arguments against the real ones."""
+@pytest.fixture(scope="session")
+def autospec_stack() -> Any:
+    """A mock StackClient whose methods check their arguments against the real
+    ones, made once: create_autospec takes about 50ms, most of this file's
+    time if each test made its own."""
     stack = create_autospec(StackClient, instance=True)
     stack.git = create_autospec(GitClient, instance=True)
-    stack.git.run.return_value = ""  # e.g. git config --get of an unset setting
+    return stack
+
+
+@pytest.fixture
+def stack(autospec_stack: Any) -> Any:
+    """autospec_stack, as no test has used it: with no calls recorded, and
+    these return values."""
+    stack = autospec_stack
+    stack.reset_mock(return_value=True, side_effect=True)
+    stack.git.run.return_value = ""
+    stack.git.config_value.return_value = None  # every setting unset
     stack.branch.return_value = "main"
     stack.track.return_value = []
     stack.import_stacks.return_value = ImportResult([], [])
@@ -494,7 +506,7 @@ def test_info_colors_non_current_branch_needing_restack(stack: Any, capsys: pyte
 
 
 def test_info_can_draw_each_stack_with_its_root_at_the_bottom(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
-    stack.git.run.side_effect = lambda *args, check=True: "root-at-bottom" if "stack.orientation" in args else ""
+    stack.git.config_value.side_effect = lambda key: "root-at-bottom" if key == "stack.orientation" else None
     stack.info.return_value = [
         BranchInfo("main", None, None, current=False),
         BranchInfo("pr1", "main", BranchStatus.UP_TO_DATE, current=False),
@@ -508,7 +520,7 @@ def test_info_can_draw_each_stack_with_its_root_at_the_bottom(stack: Any, capsys
 
 
 def test_info_refuses_an_unknown_orientation(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
-    stack.git.run.side_effect = lambda *args, check=True: "sideways" if "stack.orientation" in args else ""
+    stack.git.config_value.side_effect = lambda key: "sideways" if key == "stack.orientation" else None
     stack.info.return_value = [BranchInfo("main", None, None, current=False)]
 
     assert main(["info"], stack=stack) == 1
@@ -938,3 +950,18 @@ def test_show_stack_outside_a_stack_says_so(stack: Any, capsys: pytest.CaptureFi
 def test_show_stack_takes_quiet_or_json_but_not_both(stack: Any) -> None:
     with pytest.raises(SystemExit):
         main(["show-stack", "--quiet", "--json"], stack=stack)
+
+
+@pytest.mark.usefixtures("fresh_find_git")
+def test_no_git_is_an_error_not_a_traceback(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.delenv(GIT_VARIABLE)
+    monkeypatch.setenv("PATH", str(tmp_path))
+
+    assert main(["info"]) == 1
+    assert capsys.readouterr().err == "git stack: git isn't in any directory on PATH; $GIT_STACK_GIT can name it\n"
+    assert main(["parent", "--json"]) == 1
+    error = json.loads(capsys.readouterr().out)
+    assert error["type"] == "error"
+    assert "git isn't in any directory on PATH" in error["message"]

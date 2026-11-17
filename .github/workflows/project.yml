@@ -58,25 +58,3 @@ jobs:
         with:
           python-version: ${{ fromJSON(inputs.context).min_python }}
       - run: uv run --no-project python dev.py types-other-platforms
-
-  # The tests with the Pythons between the oldest and newest, which ci.yml's tests job runs:
-  # on Linux only, whose runners are quick and many. A matrix can't be a range of the context's
-  # Pythons, so keep this list in step with min_python and newest_python in
-  # .copier-answers.yml.
-  tests-other-pythons:
-    if: fromJSON(inputs.context).code
-    strategy:
-      fail-fast: false
-      matrix:
-        python: ["3.12", "3.13", "3.14"]
-    name: ubuntu-latest, Python ${{ matrix.python }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 2
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/setup
-        with:
-          python-version: ${{ matrix.python }}
-      - run: uv run --no-project python dev.py tests

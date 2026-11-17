@@ -5,7 +5,6 @@ import os
 import sys
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import TypeAlias
 
 from git_stack.adapters.git import PullRequestState
 from git_stack.commands import Subparsers, add_stack_arguments
@@ -52,7 +51,7 @@ STATUS_COLORS = {
     BranchStatus.PARENT_MISSING: "31",  # red
 }
 
-Paint: TypeAlias = Callable[[str, str], str]
+type Paint = Callable[[str, str], str]
 
 
 class Args(argparse.Namespace):
@@ -97,7 +96,7 @@ def use_color(stack: StackClient) -> bool:
 def orientation(stack: StackClient) -> Orientation:
     """Which way up to draw each stack, as ORIENTATION_SETTING says (default:
     root at the top)."""
-    setting = stack.git.run("config", "--get", ORIENTATION_SETTING, check=False)
+    setting = stack.git.config_value(ORIENTATION_SETTING)
     if not setting:
         return Orientation.ROOT_AT_TOP
     try:

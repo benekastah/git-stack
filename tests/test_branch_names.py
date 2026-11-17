@@ -2,15 +2,17 @@
 have too: git takes a bare name for a tag before a branch, warning that it's
 ambiguous. Each test tags every branch name, then fails on that warning."""
 
+import os
 import subprocess
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from typing import Any
 
 import pytest
+from git_client import Arg, CatFile, Git, decode
 
 from git_stack.core import Delete
 from git_stack.stack import BranchStatus, StackClient
-from tests.helpers import FakeGitHub, GitCommand, Repo, mark_git_commands
+from tests.helpers import FakeGitHub, Repo
 
 
 @pytest.fixture
@@ -19,22 +21,29 @@ def no_ambiguous_names(monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFix
     ambiguous, in the output it captures or in what it lets through to the
     terminal (e.g. a rebase's)."""
     warnings: list[str] = []
-    real: Callable[..., Any] = subprocess.run
-    mark_git_commands(monkeypatch)
+    process = Git.process
 
-    def run(args: list[str], *rest: Any, **kwargs: Any) -> Any:
-        result = real(args, *rest, **kwargs)
-        if isinstance(args, GitCommand):
-            stderr = result.stderr or ""
-            text = stderr.decode("utf-8", "replace") if isinstance(stderr, bytes) else stderr
-            # What it let through to the terminal, e.g. a rebase's.
-            text += capfd.readouterr().err
-            warnings.extend(
-                f"{line} (git {' '.join(args[3:])})" for line in text.splitlines() if "is ambiguous" in line
-            )
+    def checked(self: Git, *args: Arg, **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
+        result = process(self, *args, **kwargs)
+        # What it captured, and what it let through to the terminal, e.g. a rebase's.
+        text = decode(result.stderr or b"") + capfd.readouterr().err
+        command = " ".join(map(os.fsdecode, args))
+        warnings.extend(f"{line} (git {command})" for line in text.splitlines() if "is ambiguous" in line)
         return result
 
-    monkeypatch.setattr(subprocess, "run", run)
+    def asked_of_rev_parse(method: Any) -> Any:
+        def ask(self: CatFile, name: str, *args: Any, **kwargs: Any) -> Any:
+            # cat-file keeps its warnings to itself, so ask rev-parse too, which says them.
+            assert isinstance(self.git, Git)
+            checked(self.git, "rev-parse", "--verify", "--quiet", name)
+            return method(self, name, *args, **kwargs)
+
+        return ask
+
+    # Every git process GitClient starts, and every name it asks its cat-file.
+    monkeypatch.setattr(Git, "process", checked)
+    monkeypatch.setattr(CatFile, "resolve", asked_of_rev_parse(CatFile.resolve))
+    monkeypatch.setattr(CatFile, "verify", asked_of_rev_parse(CatFile.verify))
     yield
     assert warnings == []
 

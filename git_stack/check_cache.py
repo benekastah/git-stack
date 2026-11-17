@@ -57,7 +57,7 @@ class CheckCache:
     def _read(self) -> dict[str, dict[str, str]]:
         try:
             entries = json.loads(self.path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+        except OSError, ValueError:
             return {}
         if not isinstance(entries, dict):
             return {}

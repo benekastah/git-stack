@@ -4,6 +4,7 @@ from collections.abc import Callable
 from typing import Any
 
 import pytest
+from git_client.testing import GitCall
 
 from git_stack import events
 from git_stack.core import Delete
@@ -40,7 +41,7 @@ def test_sync_refuses_unseen_upstream_merge_commits(repo: Repo, client: StackCli
 
 
 def test_sync_reads_each_branchs_unpulled_commits_once(
-    repo: Repo, client: StackClient, git_calls: list[list[str]]
+    repo: Repo, client: StackClient, git_calls: list[GitCall]
 ) -> None:
     """Before pulling, and again before pushing, with nothing changed between."""
     repo.make_stack()

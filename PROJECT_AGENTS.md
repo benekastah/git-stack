@@ -5,12 +5,29 @@ made from python-template; where the two disagree, this file wins. Keep this fil
 the shape of the code or a rule here changes. The README is the user documentation, and the
 man page is generated from it.
 
+## Making a change
+
+- **In rapid development**: bundle related changes into PRs worth a CI run (see AGENTS.md).
+  Remove this rule, under this name, once others depend on a release and most changes are
+  fixes.
+
 ## Shape of the code
 
 - `git_stack/stack.py` (`StackClient`) and `git_stack/core.py` (`StackCore`) do
   the work. `git_stack/git.py` (`GitClient`) runs git; the adapters in
   `git_stack/adapters/` say which branches were merged, locally or by asking
   GitHub.
+- `GitClient` runs git through [py-git-client](https://github.com/benekastah/py-git-client)
+  (`git_client`), which git-stack shares with git-recommit and move-forward:
+  its `Git` starts each process, the quickest way each system allows (and
+  finds git, `$GIT_STACK_GIT` or the one on PATH), in the user's locale but
+  with git's own messages in English, so it can read them; its `CatFile` is the
+  snapshot's long-lived `git cat-file`, and its batched reads (`refs`,
+  `config`, `patch_ids`) and error classes (e.g. `ConfigLockedError`) are
+  git-stack's. What git-stack adds stays in `GitClient`: the snapshot and its
+  caches, `check=False`, and turning a `GitError` into a `StackError` (see
+  `git_errors`), which the command line reports as its own. Change how git is
+  started or read in py-git-client, not here.
 - `git_stack/stacks.py` (`Stacks`) holds the tracked branches as trees, with
   the rules for groups and ownership, without touching the repository.
   `StackCore.stacks()` reads it, a command changes it in memory, and
@@ -35,8 +52,14 @@ man page is generated from it.
   the code compares members rather than strings, and adding a value happens in
   one place. Give it the values the outside world uses, so JSON output, which
   prints an enum as its value, doesn't change.
-- git-stack has no runtime dependencies. Keep it that way: use the standard
-  library, and add dev dependencies to `pyproject.toml`'s `dev` group.
+- git-stack's only runtime dependency is py-git-client, which has none of its
+  own. Add no other: use the standard library, and add dev dependencies to
+  `pyproject.toml`'s `dev` group. py-git-client isn't on PyPI, so
+  `dependencies` names it by its git URL and a release's full commit, with
+  the release's tag in a comment (`uv add --raw-sources`): pip and pipx read
+  that, unlike uv's `[tool.uv.sources]`, and don't read `uv.lock`, so a tag,
+  which can move, could install code CI never ran. To take a new release,
+  change the commit and the comment, and run `uv lock`.
 
 ## Don't break output formats
 
@@ -66,12 +89,24 @@ Text meant for people (messages, `info`'s tree) can change.
 ## Tests
 
 - `tests/test_cli.py` checks how each command maps its arguments and prints its
-  result, with a mock `StackClient`; the other tests run git-stack against real
-  repositories (see `tests/helpers.py`). `Repo.stack` runs the command line in
+  result, with a mock `StackClient` (made once, as `create_autospec` is slow,
+  and reset for each test); the other tests run git-stack against real
+  repositories (see `tests/helpers.py`), copied for each test from ones
+  `repo_templates` builds once. `Repo.stack` runs the command line in
   the test process, which is much quicker than starting one; only
   `tests/test_end_to_end.py` runs it as a separate process (`Repo.stack_process`),
   for what only that checks, like the entry point. A new command or `--json`
-  result needs a case in `test_json_prints_the_result_on_stdout`.
+  result needs a case in `test_json_prints_the_result_on_stdout`. The `gh`
+  fixture's fake GitHub (`tests/fake_gh.py`) answers git-stack's `gh`
+  commands in the test's process too (`InProcessGh`), and as a command for
+  `Repo.stack_process`.
+- The tests load py-git-client's pytest plugin (`git_client.testing`, in
+  `tests/conftest.py`): each test's git has a config of its own, none of the
+  user's config or git's variables (e.g. a hook's `GIT_DIR`), and runs from a
+  directory outside any repository, so a git run without naming its
+  repository fails rather than reach the clone the tests were started in.
+  Code that names `ROOT` (`dev.py`, `dev_project.py`) still runs there. `git_calls` lists the git processes
+  git-stack starts; the tests' own (`Repo.git`) aren't in it.
 - The man page, `man/git-stack.1`, is generated from the README, and a test
   fails if it's out of date: the pre-commit hook regenerates it (or run
   `python3 dev.py man`).
@@ -110,9 +145,8 @@ Keep these when resolving a `copier update`'s conflicts:
   in `dev`, Ruff's line length, extra rules, `force-exclude` and `dev.py`'s
   exclusions, and basedpyright's `include` and relaxed rules.
 - CI: `.github/workflows/project.yml` runs the man page check (on docs-only
-  changes too), the type checks as if on Windows and macOS, and the tests with
-  the Pythons between the oldest and newest, on Linux. `ci.yml` has two edits
-  of git-stack's, each commented: the tests job sets up the Windows Dev Drive
-  (`.github/actions/fast-temp`), and the time limits. `tests/conftest.py` gives
-  CI 8 test workers. `.github/workflows/measure.yml` is git-stack's own.
+  changes too) and the type checks as if on Windows and macOS. `ci.yml` has two
+  edits of git-stack's, each commented: the tests job sets up the Windows Dev
+  Drive (`.github/actions/fast-temp`), and the time limits. `tests/conftest.py`
+  gives CI 8 test workers. `.github/workflows/measure.yml` is git-stack's own.
 - The extra lines in `.gitattributes` and `.gitignore`.

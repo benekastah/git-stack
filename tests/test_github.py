@@ -4,12 +4,13 @@ import pathlib
 import subprocess
 
 import pytest
+from git_client.testing import real_git
 
 from git_stack import events
 from git_stack.adapters.git import PullRequestLink, PullRequestState
 from git_stack.adapters.github import PullRequest, github_repo
 from git_stack.errors import StackError
-from git_stack.git import GitClient, git_program
+from git_stack.git import GitClient
 from git_stack.stack import BranchStatus, StackClient
 from tests.helpers import FakeGitHub, Repo, install_command
 
@@ -662,7 +663,7 @@ def test_sync_untracks_merged_pr_whose_later_merge_added_nothing_its_parent_lack
     repo.git("fetch", "--quiet")
     repo.git("switch", "--quiet", "pr1")
     subprocess.run(
-        [git_program(), "-C", str(repo.path), "merge", "--quiet", "origin/main"], capture_output=True, check=False
+        [real_git(), "-C", str(repo.path), "merge", "--quiet", "origin/main"], capture_output=True, check=False
     )
     repo.git("checkout", "--theirs", "a")
     repo.git("add", "a")

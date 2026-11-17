@@ -9,12 +9,11 @@ everything the command reports.
 """
 
 import argparse
-from typing import TypeAlias
 
 from git_stack.core import CURRENT_GROUP, Delete
 
 # argparse doesn't export the type of add_subparsers()'s result.
-Subparsers: TypeAlias = "argparse._SubParsersAction[argparse.ArgumentParser]"  # pyright: ignore[reportPrivateUsage]
+type Subparsers = "argparse._SubParsersAction[argparse.ArgumentParser]"  # pyright: ignore[reportPrivateUsage]
 
 DELETE_HELP = "besides untracking merged branches, delete their local branches, their remote branches, or both"
 

@@ -1340,11 +1340,13 @@ export GIT_STACK_GIT="$(git --exec-path)/git"
 ```
 
 A wrapper that needs to see what git-stack does (e.g. the commits a restack
-rewrites) then won't.
+rewrites) then won't. On Windows, `GIT_STACK_GIT` has to name an `.exe`:
+git-stack refuses a batch file (`.bat` or `.cmd`), which would run in cmd.exe,
+where characters a branch name can have (`&`, `|`, `%`) mean something else.
 
 ## Install
 
-Runs on Linux, macOS and Windows. Requires Python 3.11+ and git 2.38+. The
+Runs on Linux, macOS and Windows. Requires Python 3.15+ and git 2.38+. The
 GitHub integration also needs [`gh`](https://cli.github.com), logged in with
 `gh auth login`.
 
@@ -1361,6 +1363,12 @@ Either one puts `git-stack` on your `PATH` (run `pipx ensurepath` or
 `uv tool update-shell` if it isn't), so git runs it as `git stack`. To install
 a specific branch, tag or commit, add `@<ref>` to the URL. To update to the
 latest version, run `pipx upgrade git-stack` or `uv tool upgrade git-stack`.
+
+pipx installs with its own default Python, so if that's older, name a 3.15
+(`pipx install --python python3.15 git+https://github.com/benekastah/git-stack`).
+An install made with an older Python, by either one, fails to upgrade: move it
+to 3.15 once with `pipx reinstall --python python3.15 git-stack` or
+`uv tool upgrade --python 3.15 git-stack`.
 
 ### The man page
 
@@ -1449,7 +1457,9 @@ if you change the dependencies in `pyproject.toml`, it updates `uv.lock` too;
 commit both. CI installs from `uv.lock` and fails if it's out of date.
 Dependabot proposes new versions weekly. Arguments are passed to pytest, so
 `python3 dev.py check -k sync` runs only the tests whose names contain `sync`.
-git-stack itself still has no runtime dependencies.
+git-stack's only runtime dependency is
+[py-git-client](https://github.com/benekastah/py-git-client), which has none of
+its own.
 
 The tests run in parallel, with one worker per CPU (pytest-xdist's
 `--numprocesses auto`; in CI, 8). Set `PYTEST_XDIST_AUTO_NUM_WORKERS` to use another

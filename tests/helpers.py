@@ -13,14 +13,17 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import pytest
+from git_client import CLOSE_FDS
+from git_client.testing import real_git
 
 from git_stack import cli, events
-from git_stack.git import CLOSE_FDS, GitClient, git_program
+from git_stack.git import GitClient
 from git_stack.stack import BranchInfo, StackClient
+from tests import fake_gh
 
 
 @contextmanager
-def captured_output() -> Generator[list[str], None, None]:
+def captured_output() -> Generator[list[str]]:
     """Capture what this process, and the processes it starts, write to stdout
     and stderr, as [stdout, stderr], filled in on leaving. Their file
     descriptors are pointed at files for the duration, and sys.stdout and
@@ -76,24 +79,14 @@ def install_command(bin_dir: pathlib.Path, name: str, module: str) -> None:
         command.chmod(0o755)
 
 
-class GitCommand(list[str]):
-    """A git command line GitClient built, as mark_git_commands makes it."""
-
-
-def mark_git_commands(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Make GitClient's git command lines GitCommands, to tell its git
-    processes apart from the tests' own, which run the same git with -C too."""
-    build = GitClient._command  # pyright: ignore[reportPrivateUsage]
-    monkeypatch.setattr(GitClient, "_command", lambda self, *args: GitCommand(build(self, *args)))
-
-
 @dataclass
 class Repo:
     """A clone (path) of a bare repository (origin), plus a second clone of it
     (forge) standing in for GitHub's merge button.
 
     git, git stack and client run in path, with the isolated environment the
-    repo fixture sets. emitted collects client's events.
+    repo fixture sets. emitted collects client's events. The tests' own git
+    commands (git) start no git_client.Git, so git_calls leaves them out.
     """
 
     path: pathlib.Path
@@ -107,9 +100,9 @@ class Repo:
 
     def git(self, *args: str, cwd: pathlib.Path | None = None) -> str:
         # With -C rather than cwd, which would keep Python from using posix_spawn
-        # (see CLOSE_FDS).
+        # (see git_client.CLOSE_FDS).
         result = subprocess.run(
-            [git_program(), "-C", str(cwd or self.path), *args],
+            [real_git(), "-C", str(cwd or self.path), *args],
             capture_output=True,
             encoding="utf-8",
             close_fds=CLOSE_FDS,
@@ -268,7 +261,7 @@ class Repo:
     def config_exists(self, branch: str, key: str) -> bool:
         return (
             subprocess.run(
-                [git_program(), "-C", str(self.path), "config", f"branch.{branch}.{key}"],
+                [real_git(), "-C", str(self.path), "config", f"branch.{branch}.{key}"],
                 capture_output=True,
                 close_fds=CLOSE_FDS,
                 check=False,
@@ -294,6 +287,38 @@ class Repo:
         assert self.config(branch, "stackParent") == parent
         assert self.config(branch, "stackBase") == self.git("rev-parse", parent)
         assert self.own_commits(branch, parent) == subjects
+
+
+class InProcessGh:
+    """The subprocess module, but for running gh, which tests/fake_gh.py's
+    run answers in this process, as the gh command it stands in for would."""
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(subprocess, name)
+
+    @staticmethod
+    def run(
+        args: list[str],
+        *,
+        input: bytes | str | None = None,
+        encoding: str | None = None,
+        check: bool = False,
+        **kwargs: Any,
+    ) -> Any:
+        if args[0] != "gh":
+            return subprocess.run(args, input=input, encoding=encoding, check=check, **kwargs)
+        # Only the ways git-stack runs gh: its output captured, with or without input.
+        assert kwargs == {"capture_output": True}, kwargs
+        stdin = input.encode(encoding or "utf-8") if isinstance(input, str) else input or b""
+        status, out, err = fake_gh.run(args[1:], lambda: stdin)
+        result: subprocess.CompletedProcess[Any] = (
+            subprocess.CompletedProcess(args, status, out, err)
+            if encoding is None
+            else subprocess.CompletedProcess(args, status, out.decode(encoding), err.decode(encoding))
+        )
+        if check:
+            result.check_returncode()
+        return result
 
 
 @dataclass
