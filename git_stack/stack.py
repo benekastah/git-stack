@@ -825,6 +825,12 @@ class StackClient(StackCore):
             git.run("branch", "--unset-upstream", new)
         return Renamed(old, new, children, upstream)
 
+    def ensure_unrevert_supported(self, stacks: Stacks, branches: Sequence[str]) -> None:
+        """Refuse to reshape a graph whose multi-base metadata can't be saved."""
+        affected = {member for branch in branches if branch in stacks for member in stacks.stack_of(branch)}
+        if any(stacks.has_multiple_base_ancestor(branch) for branch in affected):
+            raise StackError("unrevert with multiple bases is not supported yet")
+
     @exclusive
     def unrevert(
         self,
@@ -849,8 +855,11 @@ class StackClient(StackCore):
         git = self.git
         self.ensure_no_operation_in_progress()
         self.ensure_clean_worktree()
+        requested = [*stack, *([from_branch] if from_branch else [])]
+        self.ensure_unrevert_supported(self.stacks(), requested)
         self.settle_all()
         stacks = self.stacks()
+        self.ensure_unrevert_supported(stacks, requested)
         if git.local_branch_exists(name):
             raise StackError(f"{name} already exists; pick another name")
         self.ensure_name_free_on_remotes(name)
