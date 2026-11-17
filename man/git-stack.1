@@ -841,6 +841,9 @@ Repeat \f[CR]\-\-onto\f[R] to replace the current branch\(aqs ordered
 bases.
 Restack keeps the first base as the starting point, replays the other
 bases in order, then replays the branch\(aqs own commits.
+When tracked bases share a root such as \f[CR]main\f[R], the first base
+supplies the root history and each secondary contributes the changes
+from its stack above its root fork.
 Retargeting leaves the destination branches untouched.
 .IP \(bu 2
 If a multi\-base replay stops, resolve it with

@@ -192,6 +192,7 @@ def plan(
     remaining: tuple[PlannedBranch, ...] = (),
     latest: bool = False,
     *,
+    root_forks: dict[str, str],
     command: str = "restack",
 ) -> Replay:
     require_direct_target(git, branch)
@@ -203,7 +204,10 @@ def plan(
             continue
         if not any(git.ok("merge-base", tip, previous) for previous in tips[:i]):
             raise StackError(f"{parent} has no shared history with the preceding bases of {branch}")
-        pending_commits = commits(git, tip, tips[:i], parent)
+        excluded = tips[:i]
+        if fork := root_forks.get(parent):
+            excluded += (fork,)
+        pending_commits = commits(git, tip, excluded, parent)
         secondary.extend(unique_sources(git, tips[:i], pending_commits, aliases))
     before = git.tip(branch)
     return Replay(

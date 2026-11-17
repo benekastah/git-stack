@@ -43,6 +43,49 @@ def test_replay_rebuilds_from_rewritten_base(repo: Repo, client: StackClient, co
     assert repo.git("branch", "--show-current") == "combined"
 
 
+@pytest.mark.parametrize("shape", ["one-branch", "linear-stack", "multiple-bases"])
+def test_replay_excludes_main_history_from_a_newer_secondary_base(repo: Repo, client: StackClient, shape: str) -> None:
+    client.branch("first")
+    repo.commit("a", "first\n", "first")
+    first = repo.git("rev-parse", "first")
+    client.branch("combined")
+    repo.commit("c", "combined\n", "own change")
+    repo.git("switch", "-q", "main")
+    repo.write("trunk-only", "from main\n")
+    repo.git("add", "trunk-only")
+    repo.git("commit", "-qm", "unrelated main update")
+    client.branch("second")
+    repo.commit("b", "second\n", "secondary change")
+    secondary = "second"
+    if shape == "linear-stack":
+        client.branch("top")
+        repo.write("extra", "from top\n")
+        repo.git("add", "extra")
+        repo.git("commit", "-qm", "extra change")
+        secondary = "top"
+    elif shape == "multiple-bases":
+        repo.git("switch", "-q", "main")
+        client.branch("side")
+        repo.write("extra", "from side\n")
+        repo.git("add", "extra")
+        repo.git("commit", "-qm", "extra change")
+        repo.git("switch", "-q", "second")
+        client.restack(onto=("main", "side"))
+    source_tip = repo.git("rev-parse", secondary)
+    repo.git("switch", "-q", "combined")
+
+    client.restack(onto=("first", secondary))
+
+    expected = {
+        "one-branch": "secondary change\nown change",
+        "linear-stack": "secondary change\nextra change\nown change",
+        "multiple-bases": "extra change\nsecondary change\nown change",
+    }
+    assert repo.git("log", "--reverse", "--format=%s", "first..combined") == expected[shape]
+    assert repo.git("rev-parse", "first") == first
+    assert repo.git("rev-parse", secondary) == source_tip
+
+
 @pytest.mark.parametrize(("resume", "reflog"), [(True, True), (False, True), (True, False)])
 def test_replay_conflict_continue_or_abort(
     repo: Repo, client: StackClient, combined: None, resume: bool, reflog: bool

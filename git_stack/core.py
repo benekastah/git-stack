@@ -595,11 +595,40 @@ class StackCore:
             self.emit(events.NotRestackedInOtherWorktree(branch, str(worktree)))
             return False
         self.restore_checkout(original)
-        job = replay.plan(git, branch, parents, base, original, tuple(remaining), latest, command=command)
+        job = replay.plan(
+            git,
+            branch,
+            parents,
+            base,
+            original,
+            tuple(remaining),
+            latest,
+            root_forks=self.replay_root_forks(stacks, parents),
+            command=command,
+        )
         self.emit(events.Restacking(branch, parents[0]))
         job.pin(git)
         self.finish_replay(job)
         return True
+
+    def replay_root_forks(self, stacks: Stacks, parents: tuple[str, ...]) -> dict[str, str]:
+        """Find the shared root history underneath each tracked secondary stack."""
+        forks: dict[str, str] = {}
+        root = stacks.root(parents[0])
+        for parent in parents[1:]:
+            ancestry = stacks.ancestry(parent)
+            if len(ancestry) < 2 or ancestry[-1] != root:
+                continue
+            bottom = ancestry[-2]
+            # A multi-base bottom records the combined boundary as its base.
+            # Its first replay tip is the root commit before those changes.
+            tips = (self.git.config_get(bottom, replay.TIPS) or "").split()
+            boundary = self.git.rev(tips[0]) if tips else None
+            boundary = boundary or self.recorded_base(bottom, root)
+            # Only exclude history we can attribute to this root.
+            if fork := self.git.run("merge-base", f"refs/heads/{root}", boundary, check=False):
+                forks[parent] = fork
+        return forks
 
     def finish_replay(self, job: replay.Replay) -> bool:
         return replay.finish(self.git, job, self.record_replay, self.restore_checkout)

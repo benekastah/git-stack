@@ -603,8 +603,10 @@ git stack restack --latest              # also move the stack onto main's latest
   branches stacked on it come along.
 - Repeat `--onto` to replace the current branch's ordered bases. Restack
   keeps the first base as the starting point, replays the other bases in
-  order, then replays the branch's own commits. Retargeting leaves the
-  destination branches untouched.
+  order, then replays the branch's own commits. When tracked bases share a
+  root such as `main`, the first base supplies the root history and each
+  secondary contributes the changes from its stack above its root fork.
+  Retargeting leaves the destination branches untouched.
 - If a multi-base replay stops, resolve it with `git rebase --continue`
   or back out with `git rebase --abort`, then rerun the same git-stack
   command in the same worktree with the same arguments. Git-stack leaves

@@ -30,7 +30,9 @@ man page is generated from it.
   a branch name for a single parent and a versioned ordered list for multiple
   parents. `track --on` records dependencies. `git_stack/replay.py` builds
   their combined history by rebasing commits on a temporary branch and journals
-  progress. Git updates the temporary ref after each completed stage, so a
+  progress. For tracked secondary bases on the primary root, `StackCore`
+  supplies the secondary stacks' root forks so replay excludes root history.
+  Git updates the temporary ref after each completed stage, so a
   recovery can read the result without relying on commit messages or a reflog. The
   recorded base is the boundary before the branch's own commits, and
   `stackReplayTips` holds the source tips in dependency order.
