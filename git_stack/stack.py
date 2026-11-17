@@ -307,6 +307,7 @@ class SyncState:
     protected: frozenset[str] = frozenset()
     command: SyncCommand = SyncCommand.SYNC
     no_verify: bool = False
+    roots: frozenset[str] = frozenset()
     skipped: set[str] = field(default_factory=set)
     blocked: list[str] = field(default_factory=list)
     pushable: list[str] = field(default_factory=list)
@@ -1504,6 +1505,7 @@ class StackClient(StackCore):
             frozenset(protected),
             command,
             no_verify,
+            roots=frozenset(roots),
         )
         # Parent-before-child, so by the time we reach a branch its parent is
         # final: merged branches have been removed (and their children reparented
@@ -1604,6 +1606,7 @@ class StackClient(StackCore):
                 allow_different_upstream=True,
                 confirmed=confirmed,
                 no_verify=state.no_verify,
+                protected_roots=state.roots,
             ):
                 state.skipped.add(branch)
             elif branch == state.original:
@@ -1739,10 +1742,10 @@ class StackClient(StackCore):
             state = self.cleanup_merge_state(branch, stacks, adapter, branch in ignore_reverts)
             if state is MergeState.MERGED:
                 confirmed = stacks.has_multiple_base_ancestor(branch) or adapter.merge_confirmed(branch, parent)
-                if (
-                    self.untrack_merged(branch, stacks, delete, confirmed=confirmed, no_verify=no_verify)
-                    and branch == original
-                ):
+                removed = self.untrack_merged(
+                    branch, stacks, delete, confirmed=confirmed, no_verify=no_verify, protected_roots=roots
+                )
+                if removed and branch == original:
                     original = self.current_checkout()
             elif state is MergeState.MERGED_WITH_NEW_COMMITS:
                 self.emit(events.MergedWithNewCommits(branch, parent))

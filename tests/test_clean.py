@@ -283,3 +283,25 @@ def test_clean_invalidates_base_listing_when_secondary_is_replaced(repo: Repo, c
 
     assert client.stacks().dependencies("combined") == ("first", "main")
     assert "git stack restack" in repo.stack("bases", expect_success=False).stderr
+
+
+def test_clean_protects_secondary_root_upstream_after_removing_the_graph(repo: Repo, client: StackClient) -> None:
+    repo.git("branch", "release-local", "main")
+    client.branch("a-graph")
+    repo.commit("a", "graph change\n", "graph change")
+    repo.stack("track", "--on", "main", "--on", "release-local")
+    client.restack()
+    client.push()
+    repo.git("switch", "--quiet", "main")
+    client.branch("topic")
+    repo.commit("b", "topic\n", "topic")
+    client.push()
+    repo.git("branch", "--set-upstream-to=origin/topic", "release-local")
+    repo.merge_on_forge("a-graph", delete_branch=False)
+    repo.merge_on_forge("topic", delete_branch=False)
+
+    client.clean(delete=Delete.REMOTE)
+
+    repo.assert_untracked("a-graph")
+    repo.assert_untracked("topic")
+    assert repo.git("rev-parse", "refs/heads/topic", cwd=repo.origin)

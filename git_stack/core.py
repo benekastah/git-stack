@@ -974,6 +974,7 @@ class StackCore:
         allow_different_upstream: bool = False,
         confirmed: bool = True,
         no_verify: bool = False,
+        protected_roots: Iterable[str] = (),
     ) -> bool:
         """Stop tracking merged branch, deleting what delete says, and moving its children onto its parent (see remove_merged).
         Returns False, leaving branch alone, if its remote branch couldn't be
@@ -997,7 +998,10 @@ class StackCore:
             return True
         upstream = git.run("rev-parse", "--abbrev-ref", f"{branch}@{{upstream}}")
         remote_name, ref, tip = remote
-        roots = {f"refs/heads/{git.remote_branch_name(root, remote_name)}" for root in stacks.roots()}
+        roots = {
+            f"refs/heads/{git.remote_branch_name(root, remote_name)}"
+            for root in set(stacks.roots()).union(protected_roots)
+        }
         if ref in roots:
             self.remove_merged(branch, stacks, delete_local)
             return True
