@@ -4,7 +4,26 @@ import pytest
 
 from git_stack.errors import StackError
 from git_stack.stack import BranchInfo, BranchStatus, StackClient
+from git_stack.stacks import StackNode, Stacks
 from tests.helpers import Repo
+
+
+def test_rename_refuses_an_unsupported_multi_base_graph_before_moving_a_branch(
+    repo: Repo, client: StackClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo.make_stack()
+    before = repo.git("rev-parse", "refs/heads/pr1")
+    stacks = Stacks(
+        [StackNode("pr1", "main"), StackNode("pr2", "pr1", additional_parents=("main",)), StackNode("pr3", "pr2")]
+    )
+    monkeypatch.setattr(client, "stacks", lambda: stacks)
+
+    with pytest.raises(StackError, match="multiple bases.*not supported"):
+        client.rename("renamed", "pr1")
+
+    assert repo.git("rev-parse", "refs/heads/pr1") == before
+    assert not repo.git("branch", "--list", "renamed")
+    assert repo.config("pr2", "stackParent") == "pr1"
 
 
 def test_rename_keeps_branch_and_children_in_stack(repo: Repo, client: StackClient) -> None:

@@ -360,6 +360,8 @@ git stack rename add-api api-v2
 ```
 
 - Like `create`, refuses a new name a remote already has a branch of.
+- It refuses to rename a branch in a multiple-base graph until those
+  dependencies can be stored safely.
 - Its remote branch isn't renamed, and its pull request stays with the old
   name. The renamed branch's upstream is unset, so the next `git stack push`
   pushes it under the new name, and you have to open its pull request again.

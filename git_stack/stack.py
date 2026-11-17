@@ -789,6 +789,13 @@ class StackClient(StackCore):
         self.save(stacks)
         return untracked
 
+    def ensure_rename_supported(self, branch: str, stacks: Stacks) -> None:
+        """Refuse a rename whose graph cannot yet be saved safely."""
+        starts = [branch] if branch in stacks else stacks.children(branch)
+        affected = {member for start in starts for member in stacks.stack_of(start)}
+        if any(stacks.has_multiple_base_ancestor(member) for member in affected):
+            raise StackError("renaming branches with multiple bases is not supported yet")
+
     @exclusive
     def rename(self, new: str, old: str | None = None) -> Renamed:
         """Rename old (default: the current branch) to new, keeping the branches
@@ -796,12 +803,14 @@ class StackClient(StackCore):
         """
         git = self.git
         self.ensure_no_operation_in_progress()
-        self.settle_all()
         old = old or git.current_branch()
         if old is None:
             raise StackError("not on a branch; name the branch to rename")
         if not git.local_branch_exists(old):
             raise StackError(f"{old} isn't a local branch")
+        self.ensure_rename_supported(old, self.stacks())
+        self.settle_all()
+        self.ensure_rename_supported(old, self.stacks())
         self.ensure_name_free_on_remotes(new)
         upstream = git.run("rev-parse", "--abbrev-ref", f"{old}@{{upstream}}", check=False) or None
         git.run("branch", "--move", old, new)
