@@ -32,6 +32,9 @@ man page is generated from it.
   their combined history on detached HEAD and journals progress. The
   recorded base is the boundary before the branch's own commits, and
   `stackReplayTips` holds the source tips in dependency order.
+  `stackReplayCopies` associates unchanged secondary copies with their original
+  commits. The ref transaction checks the branch and source tips before
+  publishing, and leaves a receipt for recovery if metadata writes are interrupted.
 - Each command is a module in `git_stack/commands/` with `register`, `run` and
   `show`: `run` does the command and returns a dataclass result, and `show`
   prints it as text. With `--json`, the CLI prints the result as JSON instead

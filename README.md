@@ -232,6 +232,8 @@ git stack track main            # stack the current branch on main
 git stack track main pr1 pr2 pr3
 git stack track pr1             # move the current branch onto pr1
 git stack track --on main pr1  # track one named branch on main
+git stack track --on first --on second combined
+git stack restack combined
 ```
 
 The `--on` form tracks one branch (the current branch by default). Repeat
@@ -1247,9 +1249,13 @@ branch.<name>.stackBase     the pr1 commit pr2 was last rebased onto
 ```
 
 For multiple parents, `stackParent` stores a versioned list in dependency
-order. Existing single-parent values remain unchanged.
+order. After replay, `stackBase` is the combined commit immediately before
+the branch's own commits, and `stackReplayTips` records which source commits
+were incorporated. Replay also records the original source of unchanged
+copies so nested graphs can identify shared commits. Existing single-parent
+values remain unchanged.
 
-Restacking runs `git rebase --onto <parent> <stackBase> <branch>`, which
+For a single parent, restacking runs `git rebase --onto <parent> <stackBase> <branch>`, which
 replays only the branch's own commits, so PR 1's original commits never
 collide with the squashed version in `main`.
 

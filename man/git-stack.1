@@ -356,6 +356,8 @@ git stack track main            \f[I]# stack the current branch on main\f[R]
 git stack track main pr1 pr2 pr3
 git stack track pr1             \f[I]# move the current branch onto pr1\f[R]
 git stack track \-\-on main pr1  \f[I]# track one named branch on main\f[R]
+git stack track \-\-on first \-\-on second combined
+git stack restack combined
 .EE
 .PP
 The \f[CR]\-\-on\f[R] form tracks one branch (the current branch by
@@ -1793,9 +1795,14 @@ branch.<name>.stackBase     the pr1 commit pr2 was last rebased onto
 .PP
 For multiple parents, \f[CR]stackParent\f[R] stores a versioned list in
 dependency order.
+After replay, \f[CR]stackBase\f[R] is the combined commit immediately
+before the branch\(aqs own commits, and \f[CR]stackReplayTips\f[R]
+records which source commits were incorporated.
+Replay also records the original source of unchanged copies so nested
+graphs can identify shared commits.
 Existing single\-parent values remain unchanged.
 .PP
-Restacking runs
+For a single parent, restacking runs
 \f[CR]git rebase \-\-onto <parent> <stackBase> <branch>\f[R], which
 replays only the branch\(aqs own commits, so PR 1\(aqs original commits
 never collide with the squashed version in \f[CR]main\f[R].
