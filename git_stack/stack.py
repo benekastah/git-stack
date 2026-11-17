@@ -1914,21 +1914,8 @@ class ImportPlanner:
             others = self.other_author(pr, local)
         except StackError as e:
             return self.skip(pr, str(e))
-        if parent in self.by_head:
-            if parent in self.visiting:
-                return self.skip(pr, "the pull requests it's based on are based on it")
-            if self.plan(self.by_head[parent]).action is ImportAction.SKIP:
-                return self.skip(pr, f"{parent}, which it merges into, was skipped")
-            parent_ref = (
-                f"refs/heads/{parent}" if git.local_branch_exists(parent) else f"refs/remotes/{remote}/{parent}"
-            )
-        elif git.local_branch_exists(parent):
-            parent_ref = self.trunk_ref(parent)
-        elif (without_pr := self.plan_without_pr(parent)).action in (ImportAction.CREATE, ImportAction.CREATE_ROOT):
-            parent_ref = f"refs/remotes/{remote}/{parent}"
-        else:
-            return self.skip(pr, f"{parent}, which it merges into, isn't a local branch ({without_pr.reason})")
         try:
+            parent_ref = self.merges_into_ref(parent, branch if local else remote_ref)
             self.stacks.ensure_no_cycle(branch, parent)
         except StackError as e:
             return self.skip(pr, str(e))
@@ -1938,6 +1925,23 @@ class ImportPlanner:
         self.stacks.reparent(branch, parent)
         action = ImportAction.TRACK if local else ImportAction.CREATE
         return ImportStep(branch, parent, pr.number, action, base=base, other_authors=others)
+
+    def merges_into_ref(self, parent: str, built: str) -> str:
+        """The ref of parent, which a pull request of built (a ref) merges
+        into, after planning it if it's to be created. Raises StackError if the
+        pull request has to be skipped for it."""
+        git, remote = self.git, self.remote
+        if parent in self.by_head:
+            if parent in self.visiting:
+                raise StackError("the pull requests it's based on are based on it")
+            if self.plan(self.by_head[parent]).action is ImportAction.SKIP:
+                raise StackError(f"{parent}, which it merges into, was skipped")
+            return f"refs/heads/{parent}" if git.local_branch_exists(parent) else f"refs/remotes/{remote}/{parent}"
+        if git.local_branch_exists(parent):
+            return self.trunk_ref(parent, built)
+        if (without_pr := self.plan_without_pr(parent)).action in (ImportAction.CREATE, ImportAction.CREATE_ROOT):
+            return f"refs/remotes/{remote}/{parent}"
+        raise StackError(f"{parent}, which it merges into, isn't a local branch ({without_pr.reason})")
 
     def other_author(self, pr: OpenPullRequest, local: bool) -> list[str]:
         """pr's author, unless it's the gh user. Raises StackError if that means
@@ -1984,7 +1988,7 @@ class ImportPlanner:
         except StackError as e:
             return ImportStepWithoutPr(branch, None, ImportAction.SKIP, reason=str(e))
         try:
-            parent_ref = self.built_on_ref(parent)
+            parent_ref = self.built_on_ref(parent, remote_ref)
             others = self.other_authors(parent, parent_ref, remote_ref)
             if others and not self.allow_others:
                 raise StackError(f"it has commits by {', '.join(others)}; import it with -f")
@@ -1997,10 +2001,10 @@ class ImportPlanner:
         self.stacks.reparent(branch, parent)
         return ImportStepWithoutPr(branch, parent, ImportAction.CREATE, base=base, other_authors=others)
 
-    def built_on_ref(self, parent: str) -> str:
-        """The ref of parent, which a branch without a pull request is built
-        on, after planning it if it's to be created. Raises StackError if it
-        won't be a local branch."""
+    def built_on_ref(self, parent: str, built: str) -> str:
+        """The ref of parent, which built, the ref of a branch without a pull
+        request, is built on, after planning it if it's to be created. Raises
+        StackError if it won't be a local branch, or see trunk_ref."""
         git, remote = self.git, self.remote
         if parent in self.visiting:
             raise StackError(f"{parent}, which it's built on, is built on it")
@@ -2011,20 +2015,42 @@ class ImportPlanner:
         if parent == self.default_branch:
             if not git.local_branch_exists(parent):
                 raise StackError(f"{parent}, which it's built on, isn't a local branch")
-            return self.trunk_ref(parent)
+            return self.trunk_ref(parent, built)
         if git.local_branch_exists(parent):
-            return self.trunk_ref(parent)
+            return self.trunk_ref(parent, built)
         if self.plan_without_pr(parent).action is ImportAction.SKIP:
             raise StackError(f"{parent}, which it's built on, was skipped")
         return f"refs/remotes/{remote}/{parent}"
 
-    def trunk_ref(self, branch: str) -> str:
-        """The ref of local branch as import leaves it: if it's untracked (a
-        trunk, e.g. main), import fast-forwards it to its upstream when it
-        tracks a branch on it, so a stale trunk doesn't make bases too old."""
-        if branch not in self.stacks and (upstream := self.stack.fast_forward_target(branch)) is not None:
-            return upstream
-        return f"refs/heads/{branch}"
+    def trunk_ref(self, branch: str, built: str) -> str:
+        """The ref of local branch, which built (a ref) is built on, as import
+        leaves it: if it's untracked (a trunk, e.g. main), import fast-forwards
+        it to its upstream when it tracks a branch on it, so a stale trunk
+        doesn't make bases too old.
+
+        Raises StackError if built has commits of the upstream that the trunk
+        lacks, and the trunk can't be fast-forwarded (it's checked out in
+        another worktree, or diverged): tracked on it, built would count them
+        as its own, or later be restacked without them.
+        """
+        git, local = self.git, f"refs/heads/{branch}"
+        if branch in self.stacks or (upstream := self.stack.trunk_upstream(branch)) is None:
+            return local
+        if (target := self.stack.fast_forward_target(branch)) is not None:
+            return target
+        built_on = git.run("merge-base", upstream.new, built, check=False)
+        if not built_on or git.is_ancestor(built_on, local):
+            return local
+        if not git.is_ancestor(upstream.old, upstream.new):
+            raise StackError(
+                f"it's built on {upstream.name}, which {branch} has diverged from; bring {branch} in line with "
+                "it, then import again"
+            )
+        path = git.worktree_of(branch)
+        raise StackError(
+            f"{branch} is behind {upstream.name}, which it's built on, but checked out in {path}; run "
+            f"`git -C {path} merge --ff-only`, then import again"
+        )
 
     def other_authors(self, parent: str, parent_ref: str, remote_ref: str) -> list[str]:
         """The email addresses of the authors besides the user of the commits

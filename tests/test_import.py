@@ -221,18 +221,66 @@ def test_import_fast_forwards_main_for_a_branch_without_pr_on_it(
     repo.assert_stacked("a", "main", ["a c1"])
 
 
-def test_import_finds_a_base_on_main_where_it_stays_when_it_cant_fast_forward(
+def main_in_another_worktree(repo: Repo, path: pathlib.Path) -> None:
+    """Check main out in another worktree, so import can't move it."""
+    repo.git("switch", "--quiet", "-c", "elsewhere")
+    repo.git("worktree", "add", "--quiet", str(path), "main")
+
+
+def test_import_skips_a_pr_built_on_a_newer_trunk_checked_out_elsewhere(
+    repo: Repo, gh: FakeGitHub, client: StackClient, tmp_path: pathlib.Path
+) -> None:
+    repo.commit_on_forge("main", "d", "main\n", "main c1")
+    open_pr(repo, gh, 1, "pr1", "main")  # built on the new origin/main
+    main_in_another_worktree(repo, tmp_path / "other")
+
+    step = client.import_stacks().steps[0]
+
+    assert step.action is ImportAction.SKIP
+    assert step.reason is not None
+    assert step.reason.startswith("main is behind origin/main, which it's built on, but checked out in ")
+    assert step.reason.endswith("merge --ff-only`, then import again")
+    assert "pr1" not in client.stacks()
+
+
+def test_import_skips_a_branch_without_pr_built_on_a_newer_trunk_checked_out_elsewhere(
     repo: Repo, gh: FakeGitHub, client: StackClient, tmp_path: pathlib.Path
 ) -> None:
     repo.commit_on_forge("main", "d", "main\n", "main c1")
     push_branch(repo, "a", "main")  # built on the new origin/main
     open_pr(repo, gh, 1, "pr1", "a")
-    repo.git("switch", "--quiet", "-c", "elsewhere")
-    repo.git("worktree", "add", "--quiet", str(tmp_path / "other"), "main")  # so import can't move main
+    main_in_another_worktree(repo, tmp_path / "other")
 
-    client.import_stacks(force=True)
+    result = client.import_stacks(force=True)
 
-    assert repo.config("a", "stackBase") == repo.git("rev-parse", "refs/heads/main")
+    assert [(s.branch, s.action) for s in result.without_prs] == [("a", ImportAction.SKIP)]
+    assert "checked out in" in (result.without_prs[0].reason or "")
+    assert actions(result.steps) == [("pr1", ImportAction.SKIP)]
+
+
+def test_import_skips_a_pr_built_on_a_trunk_that_diverged(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+    repo.commit_on_forge("main", "d", "main\n", "main c1")
+    open_pr(repo, gh, 1, "pr1", "main")  # built on the new origin/main
+    repo.commit("b", "local\n", "local main c1")
+
+    step = client.import_stacks().steps[0]
+
+    assert (step.action, step.reason) == (
+        ImportAction.SKIP,
+        "it's built on origin/main, which main has diverged from; bring main in line with it, then import again",
+    )
+
+
+def test_import_tracks_a_pr_on_a_stale_trunk_checked_out_elsewhere_if_it_needs_none_of_whats_new(
+    repo: Repo, gh: FakeGitHub, client: StackClient, tmp_path: pathlib.Path
+) -> None:
+    open_pr(repo, gh, 1, "pr1", "main")  # built on main as it is locally
+    repo.commit_on_forge("main", "d", "main\n", "main c1")
+    main_in_another_worktree(repo, tmp_path / "other")
+
+    client.import_stacks()
+
+    repo.assert_stacked("pr1", "main", ["pr1 c1"])
 
 
 def release_behind_origin(repo: Repo) -> None:
