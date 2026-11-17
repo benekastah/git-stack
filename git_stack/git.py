@@ -569,8 +569,9 @@ class GitClient:
         return any(pathlib.Path(path).exists() for path in paths)
 
     def has_conflicts(self) -> bool:
-        """Whether the index has unmerged paths, i.e. a merge stopped on a conflict."""
-        return bool(self.run("diff", "--name-only", "--diff-filter=U"))
+        """Whether the index has unmerged paths, i.e. a merge stopped on a
+        conflict, anywhere in the worktree, even with diff.relative set."""
+        return bool(self.run("diff", "--no-relative", "--name-only", "--diff-filter=U"))
 
     def worktree_of(self, branch: str) -> pathlib.Path | None:
         """The path of the worktree branch is checked out in, if any, or that a
@@ -884,7 +885,17 @@ class GitClient:
             if run("read-tree", new_base).returncode:
                 raise StackError("couldn't prepare an index to check the upstream rebase")
             for (commit, _), (upstream, _) in zip(ours, theirs, strict=True):
-                patch = run("show", "--format=", "--binary", "--full-index", "--no-color", "--no-ext-diff", commit)
+                # Every file's changes, even with diff.relative set.
+                patch = run(
+                    "show",
+                    "--format=",
+                    "--no-relative",
+                    "--binary",
+                    "--full-index",
+                    "--no-color",
+                    "--no-ext-diff",
+                    commit,
+                )
                 if patch.returncode:
                     raise StackError(f"couldn't read changes in {commit}")
                 # From the top: run in a subdirectory, git apply leaves out the

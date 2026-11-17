@@ -604,9 +604,24 @@ def test_snapshot_doesnt_keep_a_rebase_read_while_it_was_forgotten(repo: Repo, m
     assert reads == [repo.path] * 2
 
 
-def test_is_rebased_copy_replays_every_file_from_a_subdirectory(repo: Repo) -> None:
+def test_has_conflicts_sees_one_at_the_top_from_a_subdirectory_with_diff_relative(repo: Repo) -> None:
+    """diff.relative would have `git diff` list only the subdirectory's paths."""
+    repo.git("switch", "--quiet", "-c", "other")
+    repo.commit("a", "other\n", "other")
+    repo.git("switch", "--quiet", "main")
+    repo.commit("a", "main\n", "main")
+    subprocess.run([git_program(), "-C", str(repo.path), "merge", "--quiet", "other"], capture_output=True, check=False)
+    (repo.path / "sub").mkdir()
+    repo.git("config", "diff.relative", "true")
+
+    assert GitClient(repo.path / "sub").has_conflicts()
+
+
+@pytest.mark.parametrize("relative", [False, True])
+def test_is_rebased_copy_replays_every_file_from_a_subdirectory(repo: Repo, relative: bool) -> None:
     """Run from a subdirectory, `git apply` would leave out the changes
-    outside it; then the replay wouldn't match."""
+    outside it, and with diff.relative, so would `git show`; then the replay
+    wouldn't match."""
     base = repo.git("rev-parse", "HEAD")
     (repo.path / "sub").mkdir()
     repo.write("sub/x", "x\n")
@@ -619,5 +634,6 @@ def test_is_rebased_copy_replays_every_file_from_a_subdirectory(repo: Repo) -> N
     new_base = repo.git("rev-parse", "HEAD")
     repo.git("cherry-pick", "--quiet", local)
     rebased = repo.git("rev-parse", "HEAD")
+    repo.git("config", "diff.relative", str(relative).lower())
 
     assert GitClient(repo.path / "sub").is_rebased_copy(base, local, new_base, rebased)
