@@ -538,8 +538,8 @@ git stack rename add\-api api\-v2
 Like \f[CR]create\f[R], refuses a new name a remote already has a branch
 of.
 .IP \(bu 2
-It refuses to rename a branch in a multiple\-base graph until those
-dependencies can be stored safely.
+In a multiple\-base graph, every dependency on the branch is updated,
+including dependencies where it is not the first base.
 .IP \(bu 2
 Its remote branch isn\(aqt renamed, and its pull request stays with the
 old name.
