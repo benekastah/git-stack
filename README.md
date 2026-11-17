@@ -257,6 +257,22 @@ entry, it's their merge-base.
 - Nothing is written unless every branch can be tracked, so a bad argument
   doesn't leave the stack half-tracked.
 
+#### When to use multiple bases
+
+- Use multiple bases when you need to build or test work that depends on
+  several parallel branches. Each base should work on its own and be safe
+  to merge in any order. For example, a client that uses two independently
+  useful API additions can build on both while their PRs are in review.
+- Use a linear stack when one base needs changes from another or when
+  combining the bases repeatedly causes conflicts. Restacking normally
+  rebases commits from later bases. Conflicts are the signal to reconsider
+  the structure. Keep the base order stable across restacks, since the first
+  base anchors the history and later bases are applied in order.
+- Use the combined branch for integration, and open PRs for the independent
+  base branches. You can push the combined branch, but git-stack skips PRs
+  for it and its descendants. Once the dependencies merge, restack the work
+  you want to review onto a single base.
+
 ### `git stack import [<branch>...] [--pr <number|url>]... [--author <login>] [--remote <name>] [-n | -f]`
 
 Track open pull requests on GitHub, drafts included, as stacks: each pull
