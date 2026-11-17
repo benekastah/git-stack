@@ -3,6 +3,7 @@
 import json
 import pathlib
 import subprocess
+import sys
 from typing import Any
 
 import git_client
@@ -14,7 +15,7 @@ from git_stack.adapters.git import GitAdapter
 from git_stack.core import StackCore
 from git_stack.errors import StackError
 from git_stack.git import GIT_VARIABLE, GitClient, changes_refs, changes_worktrees
-from tests.helpers import Repo
+from tests.helpers import Repo, install_command
 
 
 def test_git_client_runs_git_stack_git(repo: Repo, fresh_find_git: None, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -676,3 +677,33 @@ def test_changed_files_are_from_the_top_even_with_diff_relative(repo: Repo) -> N
     assert files == ["sub/x", "top"]
     [patches] = git.commit_patch_ids(("log", "-p", "HEAD~1..HEAD", "--", *files))
     assert len(patches) == 1
+
+
+def test_git_runs_in_c_where_git_stack_reads_its_english(
+    repo: Repo, fresh_find_git: None, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ConfigLockedError is read from what git config says, in English; and
+    the cat-file's errors are classified by git_client, from its English. Any
+    other command runs in the user's locale (see
+    test_hooks_run_in_the_users_locale)."""
+    install_command(tmp_path / "bin", "fake-git", "tests.fake_git")
+    log = tmp_path / "git-log.jsonl"
+    monkeypatch.setenv("FAKE_GIT_LOG", str(log))
+    monkeypatch.setenv("REAL_GIT", real_git())
+    monkeypatch.setenv(
+        GIT_VARIABLE, str(tmp_path / "bin" / ("fake-git.exe" if sys.platform == "win32" else "fake-git"))
+    )
+    monkeypatch.setenv("LC_ALL", "C.UTF-8")
+    git = GitClient(repo.path)
+
+    git.config_set("main", "stackParent", "trunk")
+    with git.snapshot():
+        assert git.tree(git.tip("main")) is not None
+    git.run("status")
+
+    calls = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+    # By the command and its first argument, after `-C <directory>`.
+    locale = {" ".join(call["args"][2:4]): call["LC_ALL"] for call in calls}
+    assert locale["config branch.main.stackParent"] == "C"
+    assert locale["cat-file --batch-command"] == "C"
+    assert locale["status"] == "C.UTF-8"
