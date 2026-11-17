@@ -65,6 +65,7 @@ class BranchStatus(enum.Enum):
     MERGED = "merged"
     MERGED_WITH_NEW_COMMITS = "merged-with-new-commits"
     REVERTED = "reverted"
+    UNKNOWN = "unknown"
 
 
 @dataclass(frozen=True)
@@ -81,6 +82,20 @@ class BranchInfo:
     current: bool
     pull_request: PullRequestLink | None = field(default=None, metadata=json_name("pr"))
     group: str | None = None
+    additional_parents: tuple[str, ...] = ()
+
+
+def info_order(stacks: Stacks) -> list[str]:
+    """List each root and branch once, with dependencies before dependents."""
+    ordered: list[str] = []
+    seen_roots: set[str] = set()
+    for branch in stacks.in_order():
+        for parent in stacks.dependencies(branch):
+            if parent not in stacks and parent not in seen_roots:
+                ordered.append(parent)
+                seen_roots.add(parent)
+        ordered.append(branch)
+    return ordered
 
 
 @dataclass(frozen=True)
@@ -1023,6 +1038,8 @@ class StackClient(StackCore):
         current = git.current_branch()
 
         def status(branch: str) -> BranchStatus:
+            if len(stacks.dependencies(branch)) > 1:
+                return BranchStatus.UNKNOWN
             parent = stacks.parent(branch)
             parent_tip = git.rev(f"refs/heads/{parent}")
             if parent_tip is None:
@@ -1054,19 +1071,21 @@ class StackClient(StackCore):
             b: g for b, g in stacks.groups().items() if stacks.is_bottom(b) and len(stacks.group_bottoms(b)) > 1
         }
         result: list[BranchInfo] = []
-        for root in stacks.roots():
-            result.append(BranchInfo(root, None, None, root == current))
-            result.extend(
-                BranchInfo(
-                    b,
-                    stacks.parent(b),
-                    statuses[b],
-                    b == current,
-                    adapter.pull_request_link(b),
-                    shown_groups.get(b),
+        for b in info_order(stacks):
+            if b not in stacks:
+                result.append(BranchInfo(b, None, None, b == current))
+            else:
+                result.append(
+                    BranchInfo(
+                        b,
+                        stacks.parent(b),
+                        statuses[b],
+                        b == current,
+                        adapter.pull_request_link(b),
+                        shown_groups.get(b),
+                        stacks[b].additional_parents,
+                    )
                 )
-                for b in stacks.descendants(root)
-            )
         return result
 
     def stack_infos(self, branches: Iterable[str], adapter: GitAdapter) -> list[BranchInfo]:

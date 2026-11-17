@@ -415,6 +415,9 @@ git stack info
   <sha>` that moves it onto the branch the parent was merged into.
 - `group <name>`: the stacks below it are in the group `<name>` (see
   [Groups](#groups)).
+- A branch with several parents appears under each parent. Its descendants
+  appear under each occurrence too. `(status unavailable)` means git-stack
+  cannot yet determine its multiple-base status.
 - With the [GitHub adapter](#github), each branch's pull request (open or
   merged) is linked in a column at the end of its line: blue if it's open,
   grey if it's a draft, and magenta if it was merged.
@@ -436,7 +439,8 @@ git stack info
   each branch, each stack's root first, parent before child. `parent` and
   `status` are `null` for a root, and `status` is one of `up-to-date`,
   `needs-restack`, `merged`, `merged-with-new-commits`, `reverted` or
-  `parent-missing`.
+  `parent-missing` or `unknown`. `additional_parents` lists any parents after
+  `parent`, in replay order; it is empty for a single-base branch or root.
   `group` is the group of a branch on a stack's root, when `info` shows it
   (once the group has two or more stacks), or `null`.
   `pr` is the branch's pull request's `number`, `url` and `state` (`open`,

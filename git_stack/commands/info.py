@@ -18,6 +18,7 @@ NOTES: dict[BranchStatus, str | None] = {
     BranchStatus.MERGED: "(merged)",
     BranchStatus.MERGED_WITH_NEW_COMMITS: "(merged, with new commits)",
     BranchStatus.REVERTED: "(merged, then reverted)",
+    BranchStatus.UNKNOWN: "(status unavailable)",
 }
 ORIENTATION_SETTING = "stack.orientation"
 
@@ -48,6 +49,7 @@ STATUS_COLORS = {
     BranchStatus.MERGED: "36",  # cyan
     BranchStatus.MERGED_WITH_NEW_COMMITS: "33",
     BranchStatus.REVERTED: "33",
+    BranchStatus.UNKNOWN: "33",
     BranchStatus.PARENT_MISSING: "31",  # red
 }
 
@@ -178,6 +180,8 @@ def tree_children(branches: list[BranchInfo]) -> dict[str | GroupHeader, list[Br
             children.setdefault(header, []).append(branch)
         else:
             children.setdefault(branch.parent, []).append(branch)
+        for parent in branch.additional_parents:
+            children.setdefault(parent, []).append(branch)
     return children
 
 

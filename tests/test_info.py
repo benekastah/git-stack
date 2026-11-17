@@ -8,7 +8,45 @@ from git_client.testing import GitCall
 from git_stack.core import CURRENT_GROUP
 from git_stack.errors import StackError
 from git_stack.stack import BranchInfo, BranchStatus, StackClient
+from git_stack.stacks import StackNode, Stacks
 from tests.helpers import Repo
+
+
+def test_info_lists_a_multiple_base_branch_once_with_all_its_parents(
+    repo: Repo, client: StackClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo.make_stack()
+    stacks = Stacks(
+        [
+            StackNode("pr1", "main"),
+            StackNode("pr2", "main"),
+            StackNode("pr3", "pr1", additional_parents=("pr2",)),
+        ]
+    )
+    monkeypatch.setattr(client, "settled_stacks", lambda: stacks)
+
+    branches = client.info(offline=True)
+
+    assert [branch.name for branch in branches] == ["main", "pr1", "pr2", "pr3"]
+    combined = next(branch for branch in branches if branch.name == "pr3")
+    assert combined.parent == "pr1"
+    assert combined.additional_parents == ("pr2",)
+    assert combined.status is BranchStatus.UNKNOWN
+
+
+def test_info_lists_a_shared_dependent_once_across_roots(
+    repo: Repo, client: StackClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo.make_stack()
+    repo.git("branch", "release", "refs/heads/main")
+    stacks = Stacks(
+        [StackNode("pr1", "main"), StackNode("pr2", "release"), StackNode("pr3", "pr1", additional_parents=("pr2",))]
+    )
+    monkeypatch.setattr(client, "settled_stacks", lambda: stacks)
+
+    branches = client.info(offline=True)
+
+    assert [b.name for b in branches] == ["main", "pr1", "release", "pr2", "pr3"]
 
 
 def test_info_lists_every_stack_parent_before_child(repo: Repo, client: StackClient) -> None:

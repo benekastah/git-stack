@@ -604,6 +604,11 @@ it onto the branch the parent was merged into.
 \f[CR]group <name>\f[R]: the stacks below it are in the group
 \f[CR]<name>\f[R] (see Groups).
 .IP \(bu 2
+A branch with several parents appears under each parent.
+Its descendants appear under each occurrence too.
+\f[CR](status unavailable)\f[R] means git\-stack cannot yet determine
+its multiple\-base status.
+.IP \(bu 2
 With the GitHub adapter, each branch\(aqs pull request (open or merged)
 is linked in a column at the end of its line: blue if it\(aqs open, grey
 if it\(aqs a draft, and magenta if it was merged.
@@ -638,7 +643,9 @@ child.
 and \f[CR]status\f[R] is one of \f[CR]up\-to\-date\f[R],
 \f[CR]needs\-restack\f[R], \f[CR]merged\f[R],
 \f[CR]merged\-with\-new\-commits\f[R], \f[CR]reverted\f[R] or
-\f[CR]parent\-missing\f[R].
+\f[CR]parent\-missing\f[R] or \f[CR]unknown\f[R].
+\f[CR]additional_parents\f[R] lists any parents after \f[CR]parent\f[R],
+in replay order; it is empty for a single\-base branch or root.
 \f[CR]group\f[R] is the group of a branch on a stack\(aqs root, when
 \f[CR]info\f[R] shows it (once the group has two or more stacks), or
 \f[CR]null\f[R].

@@ -916,7 +916,6 @@ def test_info_json_lists_every_branch(stack: Any, capsys: pytest.CaptureFixture[
             group="pr0",
         ),
     ]
-
     main(["info", "--json"], stack=stack)
 
     assert json.loads(capsys.readouterr().out) == [
@@ -927,6 +926,7 @@ def test_info_json_lists_every_branch(stack: Any, capsys: pytest.CaptureFixture[
             "current": False,
             "group": None,
             "pr": None,
+            "additional_parents": [],
         },
         {
             "name": "pr1",
@@ -935,8 +935,28 @@ def test_info_json_lists_every_branch(stack: Any, capsys: pytest.CaptureFixture[
             "current": True,
             "group": "pr0",
             "pr": {"number": 12, "url": "https://github.com/acme/widgets/pull/12", "state": "open"},
+            "additional_parents": [],
         },
     ]
+
+
+def test_info_draws_a_branch_under_each_base(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
+    stack.info.return_value = [
+        BranchInfo("main", None, None, current=False),
+        BranchInfo("first", "main", BranchStatus.UP_TO_DATE, current=False),
+        BranchInfo("second", "main", BranchStatus.UP_TO_DATE, current=False),
+        BranchInfo("combined", "first", BranchStatus.UP_TO_DATE, current=True, additional_parents=("second",)),
+    ]
+
+    main(["info"], stack=stack)
+
+    assert capsys.readouterr().out == ("main\n├── first\n│   └── combined *\n└── second\n    └── combined *\n")
+
+    main(["info", "--json"], stack=stack)
+    data = json.loads(capsys.readouterr().out)
+    assert [item["name"] for item in data] == ["main", "first", "second", "combined"]
+    assert data[-1]["parent"] == "first"
+    assert data[-1]["additional_parents"] == ["second"]
 
 
 @pytest.mark.parametrize(
