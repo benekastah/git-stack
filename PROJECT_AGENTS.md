@@ -5,12 +5,6 @@ made from python-template; where the two disagree, this file wins. Keep this fil
 the shape of the code or a rule here changes. The README is the user documentation, and the
 man page is generated from it.
 
-## Making a change
-
-- **In rapid development**: bundle related changes into PRs worth a CI run (see AGENTS.md).
-  Remove this rule, under this name, once others depend on a release and most changes are
-  fixes.
-
 ## Shape of the code
 
 - `git_stack/stack.py` (`StackClient`) and `git_stack/core.py` (`StackCore`) do
