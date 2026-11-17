@@ -24,6 +24,7 @@ import json
 import os
 import re
 import sys
+from collections.abc import Callable
 from typing import Any
 
 PR_FIELDS = (
@@ -276,17 +277,26 @@ def timestamp(tick: int) -> str:
     return f"2026-01-01T{tick // 3600:02d}:{tick // 60 % 60:02d}:{tick % 60:02d}Z"
 
 
+# Reads what gh was given on standard input, for the command run() is
+# running; only called for a command that reads it, as gh would.
+_stdin: Callable[[], bytes] = bytes
+
+
 def read_stdin() -> str:
     """Standard input exactly as given, UTF-8, as gh reads it: no \r\n is
     turned into \n, so the tests see any that git-stack sends."""
-    return sys.stdin.buffer.read().decode("utf-8")
+    return _stdin().decode("utf-8")
 
 
-def main() -> None:
+def run(args: list[str], stdin: Callable[[], bytes] = bytes) -> tuple[int, bytes, bytes]:
+    """`gh <args>` with stdin, against the state at $FAKE_GH_STATE: its exit
+    status, stdout and stderr. The tests' gh fixture runs it in their own
+    process, rather than starting Python for each gh command (see main)."""
+    global _stdin
+    _stdin = stdin
     path = os.environ["FAKE_GH_STATE"]
     with open(path) as f:
         state = json.load(f)
-    args = sys.argv[1:]
     state["calls"].append(args)
     failing = (
         args[0] in state["fail"]
@@ -303,10 +313,18 @@ def main() -> None:
     with open(path, "w") as f:
         json.dump(state, f)
     if error is not None:
-        sys.exit(error)
-    if out is not None:
-        # As UTF-8, as gh writes, whatever the locale's encoding.
-        sys.stdout.buffer.write(out.encode("utf-8") + b"\n")
+        return 1, b"", error.encode("utf-8") + b"\n"
+    # As UTF-8, as gh writes, whatever the locale's encoding.
+    return 0, b"" if out is None else out.encode("utf-8") + b"\n", b""
+
+
+def main() -> None:
+    """gh, as a command (see tests.helpers.install_command), for the tests
+    that run git-stack as a process of its own."""
+    status, out, err = run(sys.argv[1:], sys.stdin.buffer.read)
+    sys.stdout.buffer.write(out)
+    sys.stderr.buffer.write(err)
+    sys.exit(status)
 
 
 if __name__ == "__main__":

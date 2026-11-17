@@ -9,9 +9,10 @@ pytest.register_assert_rewrite("git_client.testing")
 from git_client.testing import RepoTemplates, real_git
 
 from git_stack import events
+from git_stack.adapters import github
 from git_stack.git import GIT_VARIABLE
 from git_stack.stack import StackClient
-from tests.helpers import FakeGitHub, Repo, install_command
+from tests.helpers import FakeGitHub, InProcessGh, Repo, install_command
 
 # py-git-client's plugin gives every test (session fixtures included) a git
 # config of its own, and keeps the user's config and git's variables (e.g. a
@@ -85,7 +86,11 @@ def repo(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, repo_templates
 @pytest.fixture
 def gh(repo: Repo, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> FakeGitHub:
     """Make repo look like a GitHub repository, with tests/fake_gh.py as gh."""
+    # For git-stack run as a process of its own; in this one, the adapter
+    # runs fake_gh in the test's process (see InProcessGh), which is much
+    # quicker than starting Python for each gh command.
     install_command(tmp_path / "bin", "gh", "tests.fake_gh")
+    monkeypatch.setattr(github, "subprocess", InProcessGh())
     gh = FakeGitHub(tmp_path / "gh-state.json")
     gh.save({"prs": [], "calls": [], "fail": []})
     monkeypatch.setenv("FAKE_GH_STATE", str(gh.state_path))

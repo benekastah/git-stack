@@ -19,6 +19,7 @@ from git_client.testing import real_git
 from git_stack import cli, events
 from git_stack.git import GitClient
 from git_stack.stack import BranchInfo, StackClient
+from tests import fake_gh
 
 
 @contextmanager
@@ -286,6 +287,24 @@ class Repo:
         assert self.config(branch, "stackParent") == parent
         assert self.config(branch, "stackBase") == self.git("rev-parse", parent)
         assert self.own_commits(branch, parent) == subjects
+
+
+class InProcessGh:
+    """The subprocess module, but for running gh, which tests/fake_gh.py's
+    run answers in this process, as the gh command it stands in for would."""
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(subprocess, name)
+
+    @staticmethod
+    def run(args: list[str], *, input: bytes | str | None = None, encoding: str | None = None, **kwargs: Any) -> Any:
+        if args[0] != "gh":
+            return subprocess.run(args, input=input, encoding=encoding, **kwargs)  # noqa: PLW1510 (the caller's check)
+        stdin = input.encode(encoding or "utf-8") if isinstance(input, str) else input or b""
+        status, out, err = fake_gh.run(args[1:], lambda: stdin)
+        if encoding is None:
+            return subprocess.CompletedProcess(args, status, out, err)
+        return subprocess.CompletedProcess(args, status, out.decode(encoding), err.decode(encoding))
 
 
 @dataclass
