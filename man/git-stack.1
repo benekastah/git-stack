@@ -827,8 +827,10 @@ If a multi\-base replay stops, resolve it with
 The branch ref moves only after its replay finishes.
 Replay stops if an own commit becomes empty because a base supplies its
 patch.
-Keeping the branch unchanged preserves that patch if the base is later
-removed or rewritten.
+Abort the pick instead of following Git\(aqs suggestion to make an empty
+commit.
+If you make one anyway, git\-stack discards the replay and restores the
+original branch, keeping the original patch.
 .IP \(bu 2
 \f[CR]\-l\f[R]/\f[CR]\-\-latest\f[R] moves the branches on the
 stack\(aqs root onto its latest commit even if they don\(aqt conflict
@@ -1683,6 +1685,16 @@ To recognize a manually completed restack, git\-stack uses the
 branch\(aqs reflog.
 If that entry is unavailable, inspect the branch and re\-track it with
 \f[CR]git stack track <parent> \-\-base <sha>\f[R].
+For multi\-base replay, git\-stack temporarily checks out individual
+commits without moving the named branch.
+Resolve or abort the pick in that same worktree, then rerun the
+git\-stack command to return to your original checkout.
+After \f[CR]git cherry\-pick \-\-abort\f[R], a checkout recorded in the
+HEAD reflog can also let git\-stack recognize the abort if you already
+switched back.
+Leave the checkout in place after \f[CR]\-\-continue\f[R] until
+git\-stack publishes the replay.
+.PP
 For a pull, each upstream commit must be accounted for, even when
 commits share an author, date, and subject; a skipped commit is not
 counted as pulled.
@@ -1707,8 +1719,10 @@ A branch that needs restacking is skipped, along with the branches
 stacked on it.
 A branch that\(aqs already up to date isn\(aqt a problem.
 .IP \(bu 2
-\f[CR]sync\f[R] doesn\(aqt push a branch it skipped for this reason, and
-fails once it has pushed the rest.
+For a single\-base stack, \f[CR]sync\f[R] pushes the rest and then
+reports branches blocked by another worktree.
+If the selection includes a multiple\-base graph, a blocked update
+prevents the entire push.
 .IP \(bu 2
 \f[CR]sync\f[R] and \f[CR]pull\f[R] don\(aqt pull new commits from its
 upstream into it.

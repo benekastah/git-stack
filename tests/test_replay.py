@@ -439,3 +439,39 @@ def test_replay_retries_shared_ownership_after_metadata_failure(
     client.restack()
 
     assert client.stacks().is_shared("child")
+
+
+def test_replay_recovers_after_aborting_and_switching_back(repo: Repo, client: StackClient, combined: None) -> None:
+    repo.git("switch", "-q", "second")
+    repo.commit("a", "conflicting second\n", "conflict")
+    repo.git("switch", "-q", "combined")
+    before = repo.git("rev-parse", "combined")
+    with pytest.raises(StackError, match="cherry-pick --continue"):
+        client.restack()
+
+    repo.git("cherry-pick", "--abort")
+    repo.git("switch", "-q", "combined")
+    client.restack()
+
+    assert replay.pending(client.git) is None
+    assert repo.git("rev-parse", "combined") == before
+    assert repo.git("branch", "--show-current") == "combined"
+
+
+def test_replay_refuses_manually_emptied_own_commit(repo: Repo, client: StackClient, combined: None) -> None:
+    before = repo.git("rev-parse", "combined")
+    repo.git("switch", "-q", "second")
+    repo.git("cherry-pick", before)
+    repo.git("switch", "-q", "combined")
+    with pytest.raises(StackError, match="own commit"):
+        client.restack()
+
+    repo.git("commit", "--allow-empty", "--no-edit")
+    with pytest.raises(StackError, match="own commit.*empty"):
+        client.restack()
+
+    assert replay.pending(client.git) is None
+    assert repo.git("rev-parse", "combined") == before
+    assert repo.git("branch", "--show-current") == "combined"
+    client.restack(onto="first")
+    assert repo.git("show", "combined:c") == "combined"

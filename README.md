@@ -591,8 +591,9 @@ git stack restack --latest              # also move the stack onto main's latest
   or back out with `git cherry-pick --abort`, then rerun `git stack restack`
   in the same worktree. The branch ref moves only after its replay finishes.
   Replay stops if an own commit becomes empty because a base supplies its
-  patch. Keeping the branch unchanged preserves that patch if the base is
-  later removed or rewritten.
+  patch. Abort the pick instead of following Git's suggestion to make an
+  empty commit. If you make one anyway, git-stack discards the replay and
+  restores the original branch, keeping the original patch.
 - `-l`/`--latest` moves the branches on the stack's root onto its latest commit
   even if they don't conflict with it (and the rest of the stack with them).
 - Merged branches are skipped and their children restacked onto their parent;
@@ -1159,6 +1160,14 @@ parent and base (and the pulled upstream commits) are recorded only if the
 operation actually completed. To recognize a manually completed restack,
 git-stack uses the branch's reflog. If that entry is unavailable, inspect the
 branch and re-track it with `git stack track <parent> --base <sha>`.
+For multi-base replay, git-stack temporarily checks out individual commits
+without moving the named branch. Resolve or abort the pick in that same
+worktree, then rerun the git-stack command to return to your original
+checkout. After `git cherry-pick --abort`, a checkout recorded in the HEAD
+reflog can also let git-stack recognize the abort if you already switched
+back. Leave the checkout in place after `--continue` until git-stack
+publishes the replay.
+
 For a pull, each upstream commit must be accounted for, even when commits share
 an author, date, and subject; a skipped commit is not counted as pulled.
 
@@ -1178,8 +1187,9 @@ such a branch alone, with a warning, and carries on with the rest:
 
 - A branch that needs restacking is skipped, along with the branches stacked
   on it. A branch that's already up to date isn't a problem.
-- `sync` doesn't push a branch it skipped for this reason, and fails once it
-  has pushed the rest.
+- For a single-base stack, `sync` pushes the rest and then reports branches
+  blocked by another worktree. If the selection includes a multiple-base
+  graph, a blocked update prevents the entire push.
 - `sync` and `pull` don't pull new commits from its upstream into it.
 - `sync -d local` and `clean -d local` stop tracking it once it's merged, but
   don't delete it.

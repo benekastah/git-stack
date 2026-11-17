@@ -46,4 +46,6 @@ A restack that stops on a conflict is recorded in one setting,
 rebase with an older git-stack leaves that record behind, and the next run
 of a newer one may then apply it over what the older one did since (e.g. a
 `track` onto another parent). Finish a stopped restack with the version
-that started it, or a newer one.
+that started it, or a newer one that understands its recovery record.
+Multi-base replay uses a separate `stack.pendingReplay` journal. Versions
+without multi-base replay support cannot finish it.

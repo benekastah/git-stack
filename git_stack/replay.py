@@ -17,6 +17,10 @@ COPIES = "stackReplayCopies"
 PIN_PREFIX = "refs/git-stack/replay/"
 
 
+class EmptyOwnCommit(StackError):
+    """An originally nonempty own commit was replayed with no changes."""
+
+
 @dataclass(frozen=True)
 class Replay:
     branch: str
@@ -238,6 +242,10 @@ def unique_sources(
 
 
 def advance(git: GitClient, replay: Replay, picked_tip: str) -> Replay:
+    if not replay.secondary and git.tree(replay.head) == git.tree(picked_tip):
+        source = replay.own[0]
+        if git.tree(source) != git.tree(f"{source}^"):
+            raise EmptyOwnCommit(f"own commit {source[:12]} became empty; replay was discarded and the branch was kept")
     copies = replay.copies
     if replay.secondary and picked_tip != replay.head:
         source = replay.secondary[0]
@@ -331,6 +339,11 @@ def prepare(git: GitClient, replay: Replay) -> Replay | None:
         return replay
     if replay.in_pick:
         if git.current_branch() is not None:
+            # A switch after aborting leaves the pick's starting commit as
+            # the prior HEAD. A switch after a successful pick does not.
+            action = git.run("log", "-1", "--format=%gs", "-g", "HEAD")
+            if action.startswith("checkout:") and git.rev("HEAD@{1}") == replay.head:
+                return None
             raise StackError("the pending replay's detached checkout has changed")
         if head == replay.head:
             return None
@@ -384,7 +397,12 @@ def finish(
     A failure after the ref transaction must keep the journal and its receipt
     so the same metadata can be recorded on the next run.
     """
-    result = run(git, job)
+    try:
+        result = run(git, job)
+    except EmptyOwnCommit:
+        restore_checkout(job.original)
+        job.clear(git)
+        raise
     if result is not None:
         try:
             publish(git, result)
