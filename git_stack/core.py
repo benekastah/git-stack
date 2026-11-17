@@ -536,24 +536,30 @@ class StackCore:
     def restack_all(self, branches: Iterable[str], stacks: Stacks, latest: bool = False) -> None:
         """Restack branches, parent-before-child, skipping those stacked on a
         branch that couldn't be restacked."""
-        original = self.git.current_branch()
+        original = self.current_checkout()
         skipped: set[str] = set()
         branches = dependency_order(branches, {b: stacks.dependencies(b) for b in stacks})
         for branch in branches:
             parents = stacks.dependencies(branch)
             if len(parents) > 1:
                 replay.plan(self.git, branch, parents, self.recorded_base(branch, parents[0]), self.current_checkout())
-        for branch in branches:
+        for index, branch in enumerate(branches):
             blocked = next((base for base in stacks.dependencies(branch) if base in skipped), None)
             if blocked is not None:
                 self.emit(events.ParentSkipped(branch, blocked))
                 skipped.add(branch)
-            elif not self.restack_dependency(branch, stacks, latest):
+            elif not self.restack_dependency(branch, stacks, latest, original, tuple(branches[index + 1 :])):
                 skipped.add(branch)
-        if original and self.git.current_branch() != original:
-            self.git.switch(original)
+        self.restore_checkout(original)
 
-    def restack_dependency(self, branch: str, stacks: Stacks, latest: bool) -> bool:
+    def restack_dependency(
+        self,
+        branch: str,
+        stacks: Stacks,
+        latest: bool,
+        original: str,
+        remaining: tuple[str, ...] = (),
+    ) -> bool:
         """Restack a branch using all of its planned dependencies."""
         parents = stacks.dependencies(branch)
         recorded = read_parents(branch, self.git.config_get(branch, PARENT_KEY) or "")
@@ -562,14 +568,14 @@ class StackCore:
             return self.restack_branch(branch, parents[0], latest)
         git = self.git
         base = self.recorded_base(branch, parents[0])
-        original = self.current_checkout()
         tips = tuple(git.tip(parent) for parent in parents)
         if recorded == parents and git.config_get(branch, replay.TIPS) == " ".join(tips):
             return True
         if (worktree := git.other_worktree_of(branch)) is not None:
             self.emit(events.NotRestackedInOtherWorktree(branch, str(worktree)))
             return False
-        job = replay.plan(git, branch, parents, base, original)
+        self.restore_checkout(original)
+        job = replay.plan(git, branch, parents, base, original, remaining, latest)
         self.emit(events.Restacking(branch, parents[0]))
         job.pin(git)
         self.finish_replay(job)
@@ -583,8 +589,9 @@ class StackCore:
             try:
                 replay.publish(git, result)
             except StackError:
-                self.restore_checkout(result.original)
-                result.clear(git)
+                if not result.was_published(git):
+                    self.restore_checkout(result.original)
+                    result.clear(git)
                 raise
             stacks = self.stacks()
             if stacks.dependencies(result.branch) != result.parents:

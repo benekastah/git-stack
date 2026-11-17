@@ -93,3 +93,47 @@ def test_info_tracks_secondary_source_and_descendant_status(repo: Repo, client: 
     repo.commit("b", "more\n", "more")
     statuses = {b.name: b.status for b in client.info(offline=True)}
     assert statuses["combined"] is statuses["child"] is BranchStatus.NEEDS_RESTACK
+
+
+def test_replay_recovers_between_publication_and_metadata(
+    repo: Repo, client: StackClient, combined: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    original_config_set = client.git.config_set
+
+    def fail_boundary_once(branch: str, key: str, value: str) -> None:
+        if branch == "combined" and key == "stackBase":
+            monkeypatch.setattr(client.git, "config_set", original_config_set)
+            raise StackError("simulated interruption")
+        original_config_set(branch, key, value)
+
+    monkeypatch.setattr(client.git, "config_set", fail_boundary_once)
+    with pytest.raises(StackError, match="simulated interruption"):
+        client.restack()
+    published = repo.git("rev-parse", "combined")
+    assert repo.git("show", "combined:b") == "second"
+
+    client.restack()
+
+    assert repo.git("rev-parse", "combined") == published
+    assert repo.git("branch", "--show-current") == "combined"
+    assert repo.config("combined", "stackBase") == repo.git("rev-parse", "combined^")
+
+
+def test_replay_resumes_descendants_after_a_conflict(repo: Repo, client: StackClient, combined: None) -> None:
+    client.branch("child")
+    repo.commit("c", "child\n", "child")
+    repo.git("switch", "--quiet", "second")
+    repo.commit("a", "conflicting second\n", "conflicting second")
+    repo.git("switch", "--quiet", "child")
+
+    with pytest.raises(StackError, match="cherry-pick --continue"):
+        client.restack()
+    repo.write("a", "resolved\n")
+    repo.git("add", "a")
+    repo.git("-c", "core.editor=true", "cherry-pick", "--continue")
+
+    client.restack()
+
+    assert repo.git("merge-base", "--is-ancestor", "combined", "child") == ""
+    assert repo.git("show", "child:a") == "resolved"
+    assert repo.git("branch", "--show-current") == "child"

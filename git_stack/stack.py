@@ -1286,7 +1286,11 @@ class StackClient(StackCore):
         self.ensure_no_operation_in_progress()
         self.ensure_clean_worktree()
         if (job := replay.pending(self.git)) is not None:
-            self.finish_replay(job)
+            if self.finish_replay(job) and job.remaining:
+                stacks = self.stacks()
+                adapter = make_adapter(self, self.default_remote(job.remaining, stacks), fetch=False)
+                remaining = self.skip_merged(job.remaining, stacks, adapter)
+                self.restack_all(remaining, stacks, job.latest)
             return
         self.settle_all()
         stacks = self.stacks()
@@ -1643,7 +1647,7 @@ class StackClient(StackCore):
             self.take_upstream_rebase(branch, parent, state.remote, allow_rewritten=state.rewritten_upstream)
         self.ensure_upstream_not_rewritten(branch, parent, state.remote, state.rewritten_upstream, state.command)
         try:
-            restacked = self.restack_dependency(branch, state.stacks, state.latest)
+            restacked = self.restack_dependency(branch, state.stacks, state.latest, state.original)
         except BrokenStackError as e:
             self.emit(events.BrokenBranch(branch, str(e)))
             restacked = False

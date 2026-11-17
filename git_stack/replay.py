@@ -3,6 +3,7 @@
 import json
 from dataclasses import asdict, dataclass, replace
 from typing import cast
+from uuid import uuid4
 
 from git_stack.errors import StackError
 from git_stack.git import GitClient, is_object_id
@@ -27,6 +28,16 @@ class Replay:
     boundary: str = ""
     in_pick: bool = False
     ready: bool = False
+    remaining: tuple[str, ...] = ()
+    latest: bool = False
+    token: str = ""
+
+    @property
+    def refs(self) -> str:
+        return PIN_PREFIX + self.token + "/"
+
+    def was_published(self, git: GitClient) -> bool:
+        return git.rev(self.refs + "published") == self.head
 
     def save(self, git: GitClient) -> None:
         git.write_config(PENDING, json.dumps(asdict(self), ensure_ascii=True))
@@ -40,7 +51,7 @@ class Replay:
     def pin(self, git: GitClient) -> None:
         # All queued commits are reachable from these tips.
         tips = dict.fromkeys((self.before, *self.tips, self.old_base))
-        git.run("update-ref", "--stdin", input="".join(f"update {PIN_PREFIX}{i} {tip}\n" for i, tip in enumerate(tips)))
+        git.run("update-ref", "--stdin", input="".join(f"update {self.refs}{i} {tip}\n" for i, tip in enumerate(tips)))
         self.save(git)
 
 
@@ -90,13 +101,18 @@ def parse_pending(git: GitClient, fields: dict[str, object]) -> Replay:
         string("boundary"),
         boolean("in_pick"),
         boolean("ready"),
+        strings("remaining"),
+        boolean("latest"),
+        string("token"),
     )
     validate_pending(git, job)
     return job
 
 
 def validate_pending(git: GitClient, job: Replay) -> None:
-    for branch in (job.branch, *job.parents):
+    if len(job.token) != 32 or not all(c in "0123456789abcdef" for c in job.token):
+        raise ValueError("invalid replay token")
+    for branch in (job.branch, *job.parents, *job.remaining):
         if not git.ok("check-ref-format", f"refs/heads/{branch}"):
             raise ValueError("invalid branch name")
     for oid in (job.before, job.old_base, job.head, *job.tips, *job.secondary, *job.own):
@@ -117,7 +133,15 @@ def commits(git: GitClient, tip: str, excluding: tuple[str, ...], name: str) -> 
     return tuple(result)
 
 
-def plan(git: GitClient, branch: str, parents: tuple[str, ...], base: str, original: str) -> Replay:
+def plan(
+    git: GitClient,
+    branch: str,
+    parents: tuple[str, ...],
+    base: str,
+    original: str,
+    remaining: tuple[str, ...] = (),
+    latest: bool = False,
+) -> Replay:
     tips = tuple(git.tip(parent) for parent in parents)
     secondary: list[str] = []
     for i, (parent, tip) in enumerate(zip(parents, tips, strict=True)):
@@ -138,6 +162,9 @@ def plan(git: GitClient, branch: str, parents: tuple[str, ...], base: str, origi
         tuple(secondary),
         commits(git, before, (base,), branch),
         tips[0],
+        remaining=remaining,
+        latest=latest,
+        token=uuid4().hex,
     )
 
 
@@ -175,7 +202,11 @@ def pick(git: GitClient, commit: str) -> bool:
 def publish(git: GitClient, replay: Replay) -> None:
     ref = f"refs/heads/{replay.branch}"
     current = git.run("rev-parse", "--verify", ref)
-    if current == replay.head:
+    if replay.was_published(git):
+        if not git.is_ancestor(replay.head, current):
+            raise StackError(
+                f"{replay.branch} moved after publication; restore its tip {replay.head} to finish recovery"
+            )
         return
     if git.other_worktree_of(replay.branch) is not None or git.current_branch() is not None:
         raise StackError(f"cannot publish replay of {replay.branch} while it is checked out")
@@ -187,7 +218,7 @@ def publish(git: GitClient, replay: Replay) -> None:
         "-m",
         "git-stack: replay bases",
         "--stdin",
-        input=f"update {ref} {replay.head} {replay.before}\n{inputs}",
+        input=f"update {ref} {replay.head} {replay.before}\ncreate {replay.refs}published {replay.head}\n{inputs}",
     )
 
 
