@@ -123,7 +123,7 @@ def same_file(a: pathlib.Path, b: pathlib.Path) -> bool:
 
 
 @contextmanager
-def git_errors() -> Generator[None, None, None]:
+def git_errors() -> Generator[None]:
     """Report a git command that fails in the block as a StackError, which
     the command line prints as git-stack's own errors."""
     try:
@@ -239,7 +239,7 @@ class GitClient:
             self._ran(args)
 
     @contextmanager
-    def snapshot(self) -> Generator[None, None, None]:
+    def snapshot(self) -> Generator[None]:
         """Within this, read every local branch's commit and upstream, its
         upstream's commit, and which is checked out (see current_branch), with
         one git call, and read them again only after a git call that may have

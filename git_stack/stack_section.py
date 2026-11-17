@@ -7,10 +7,9 @@ the root). Merged pull requests are marked.
 """
 
 import re
-from typing import TypeAlias
 
-Node: TypeAlias = int | str
-Tree: TypeAlias = dict[Node, Node]  # {node: its parent}
+type Node = int | str
+type Tree = dict[Node, Node]  # {node: its parent}
 
 START = "<!-- git-stack -->"
 END = "<!-- /git-stack -->"

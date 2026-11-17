@@ -22,7 +22,7 @@ from git_stack.stack import BranchInfo, StackClient
 
 
 @contextmanager
-def captured_output() -> Generator[list[str], None, None]:
+def captured_output() -> Generator[list[str]]:
     """Capture what this process, and the processes it starts, write to stdout
     and stderr, as [stdout, stderr], filled in on leaving. Their file
     descriptors are pointed at files for the duration, and sys.stdout and

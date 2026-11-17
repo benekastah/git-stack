@@ -149,11 +149,11 @@ class Stacks:
         bottoms = self.group_bottoms(bottom) if groups else [bottom]
         return [b for each in bottoms for b in (each, *self.descendants(each))]
 
-    def copy(self) -> "Stacks":
+    def copy(self) -> Stacks:
         """A copy to change without changing this one, e.g. to check a plan."""
         return Stacks(self._nodes.values())
 
-    def restricted(self, branches: Iterable[str]) -> "Stacks":
+    def restricted(self, branches: Iterable[str]) -> Stacks:
         """A copy with only those of branches that are tracked, in which a
         branch whose parent is left out is at the bottom of a stack."""
         return Stacks(self._nodes[b] for b in dict.fromkeys(branches) if b in self._nodes)

@@ -52,7 +52,7 @@ def test_untracked_says_what_happened_to_branch_and_children(event: events.Event
 
 
 def test_every_event_has_its_own_type() -> None:
-    types = [event.event_type for event in typing.get_args(events.Event)]
+    types = [event.event_type for event in typing.get_args(events.Event.__value__)]
 
     assert len(set(types)) == len(types)
     # The types of the lines --json ends with.
@@ -60,7 +60,7 @@ def test_every_event_has_its_own_type() -> None:
 
 
 def test_no_event_field_hides_a_key_event_json_adds() -> None:
-    for event in typing.get_args(events.Event):
+    for event in typing.get_args(events.Event.__value__):
         assert not {f.name for f in dataclasses.fields(event)} & {"type", "message", "warning"}
 
 

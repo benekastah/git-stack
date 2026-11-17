@@ -8,7 +8,7 @@ on the event's field names, so they don't change once released.
 """
 
 from dataclasses import dataclass
-from typing import ClassVar, TypeAlias
+from typing import ClassVar
 
 
 @dataclass(frozen=True)
@@ -351,7 +351,7 @@ class PullRequestRetargeted:
 
 
 # Every event, so code that handles them can check it handles each one.
-Event: TypeAlias = (
+type Event = (
     WaitingForLock
     | Fetching
     | LookingUpPullRequests

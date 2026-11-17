@@ -135,7 +135,7 @@ class StackCore:
         self._exclusive_depth = 0
 
     @contextmanager
-    def exclusive(self) -> Generator[None, None, None]:
+    def exclusive(self) -> Generator[None]:
         """Hold the repository's git-stack lock (see LOCK_FILE), waiting for
         another git-stack command to finish if it has it.
 

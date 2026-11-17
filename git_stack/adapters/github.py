@@ -7,7 +7,7 @@ import threading
 import urllib.parse
 from collections.abc import Iterable
 from dataclasses import dataclass, replace
-from typing import Self, TypeVar
+from typing import Self
 
 from git_stack import events, stack_section
 from git_stack.adapters.git import GitAdapter, PullRequestLink, PullRequestState
@@ -51,9 +51,6 @@ BASE_CHANGES = (
 STACKED_BASE_ERROR = "Cannot change the base branch because the pull request is part of a stack"
 
 
-T = TypeVar("T")
-
-
 def parse_json(out: str) -> object:
     try:
         parsed: object = json.loads(out)
@@ -62,7 +59,7 @@ def parse_json(out: str) -> object:
     return parsed
 
 
-def field(data: object, key: str, kind: type[T]) -> T:
+def field[T](data: object, key: str, kind: type[T]) -> T:
     """data[key], checking that data is a JSON object and the value a kind."""
     value = data.get(key) if isinstance(data, dict) else None
     if not isinstance(value, kind):
@@ -70,7 +67,7 @@ def field(data: object, key: str, kind: type[T]) -> T:
     return value
 
 
-def optional_field(data: object, key: str, kind: type[T]) -> T | None:
+def optional_field[T](data: object, key: str, kind: type[T]) -> T | None:
     """Like field, but a missing or null value is None."""
     if isinstance(data, dict) and data.get(key) is None:
         return None

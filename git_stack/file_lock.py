@@ -53,7 +53,7 @@ else:
 
 
 @contextmanager
-def file_lock(path: pathlib.Path, on_wait: Callable[[], None]) -> Generator[None, None, None]:
+def file_lock(path: pathlib.Path, on_wait: Callable[[], None]) -> Generator[None]:
     """Hold an exclusive lock on path (created if missing), calling on_wait
     first if another process has it and it has to wait. The system releases
     the lock when the process ends, however it ends."""

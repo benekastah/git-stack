@@ -4,7 +4,7 @@ import re
 from collections.abc import Callable, Iterable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from typing import Concatenate, ParamSpec, TypeVar
+from typing import Concatenate
 
 from git_stack import events
 from git_stack.adapters import ADAPTER_SETTING, make_adapter
@@ -25,12 +25,8 @@ from git_stack.git import DEFAULT_REMOTE, SWITCH
 from git_stack.json_fields import json_name
 from git_stack.stacks import Ownership, Stacks
 
-Client = TypeVar("Client", bound=StackCore)
-Params = ParamSpec("Params")
-Result = TypeVar("Result")
 
-
-def exclusive(
+def exclusive[Client: StackCore, **Params, Result](
     method: Callable[Concatenate[Client, Params], Result],
 ) -> Callable[Concatenate[Client, Params], Result]:
     """Run method holding the repository's git-stack lock (see
@@ -46,7 +42,7 @@ def exclusive(
     return locked
 
 
-def snapshot(
+def snapshot[Client: StackCore, **Params, Result](
     method: Callable[Concatenate[Client, Params], Result],
 ) -> Callable[Concatenate[Client, Params], Result]:
     """Run method, a command that only reads, with a snapshot of the
