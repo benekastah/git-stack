@@ -431,8 +431,8 @@ git stack info
   [Groups](#groups)).
 - A branch with several parents appears under each parent. Its descendants
   appear under its first parent; the other occurrences refer to that parent.
-  `(status unavailable)` means git-stack
-  cannot yet determine the status of a multiple-base branch or its descendants.
+  A branch needs restacking if its recorded source tips differ from its
+  current bases, or if one of its dependencies needs replay.
 - With the [GitHub adapter](#github), each branch's pull request (open or
   merged) is linked in a column at the end of its line: blue if it's open,
   grey if it's a draft, and magenta if it was merged.

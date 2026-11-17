@@ -31,10 +31,10 @@ def test_info_lists_a_multiple_base_branch_once_with_all_its_parents(
     combined = next(branch for branch in branches if branch.name == "pr3")
     assert combined.parent == "pr1"
     assert combined.additional_parents == ("pr2",)
-    assert combined.status is BranchStatus.UNKNOWN
+    assert combined.status is BranchStatus.NEEDS_RESTACK
 
 
-def test_info_does_not_guess_status_of_a_multiple_base_descendant(
+def test_info_reports_when_a_descendant_needs_its_bases_replayed(
     repo: Repo, client: StackClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     repo.make_stack()
@@ -45,8 +45,8 @@ def test_info_does_not_guess_status_of_a_multiple_base_descendant(
 
     statuses = {branch.name: branch.status for branch in client.info(offline=True)}
 
-    assert statuses["pr2"] is BranchStatus.UNKNOWN
-    assert statuses["pr3"] is BranchStatus.UNKNOWN
+    assert statuses["pr2"] is BranchStatus.NEEDS_RESTACK
+    assert statuses["pr3"] is BranchStatus.NEEDS_RESTACK
 
 
 def test_info_lists_a_shared_dependent_once_across_roots(

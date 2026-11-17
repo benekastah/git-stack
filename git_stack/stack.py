@@ -1111,10 +1111,12 @@ class StackClient(StackCore):
         them without looking them up again."""
         git = self.git
         current = git.current_branch()
+        ordered = info_order(stacks)
+        graph = self.graph_branches(ordered, stacks)
 
         def status(branch: str) -> BranchStatus:
-            if stacks.has_multiple_base_ancestor(branch):
-                return BranchStatus.UNKNOWN
+            if branch in graph:
+                return self.graph_branch_status(branch, stacks, adapter)
             parent = stacks.parent(branch)
             parent_tip = git.rev(f"refs/heads/{parent}")
             if parent_tip is None:
@@ -1142,11 +1144,12 @@ class StackClient(StackCore):
             branches = list(stacks)
             statuses = dict(zip(branches, pool.map(status, branches), strict=True))
             prefetched.result()
+        self.propagate_graph_status(ordered, graph, stacks, statuses)
         shown_groups = {
             b: g for b, g in stacks.groups().items() if stacks.is_bottom(b) and len(stacks.group_bottoms(b)) > 1
         }
         result: list[BranchInfo] = []
-        for b in info_order(stacks):
+        for b in ordered:
             if b not in stacks:
                 result.append(BranchInfo(b, None, None, b == current))
             else:
@@ -1162,6 +1165,43 @@ class StackClient(StackCore):
                     )
                 )
         return result
+
+    def graph_branches(self, ordered: list[str], stacks: Stacks) -> set[str]:
+        graph: set[str] = set()
+        for branch in ordered:
+            if branch in stacks and (stacks[branch].additional_parents or stacks.parent(branch) in graph):
+                graph.add(branch)
+        return graph
+
+    def propagate_graph_status(
+        self, ordered: list[str], graph: set[str], stacks: Stacks, statuses: dict[str, BranchStatus]
+    ) -> None:
+        stale = {BranchStatus.NEEDS_RESTACK, BranchStatus.PARENT_MISSING, BranchStatus.UNKNOWN}
+        for branch in ordered:
+            if (
+                branch in graph
+                and statuses[branch] is BranchStatus.UP_TO_DATE
+                and any(statuses.get(base) in stale for base in stacks.dependencies(branch))
+            ):
+                statuses[branch] = BranchStatus.NEEDS_RESTACK
+
+    def graph_branch_status(self, branch: str, stacks: Stacks, adapter: GitAdapter) -> BranchStatus:
+        git = self.git
+        parents = stacks.dependencies(branch)
+        tips = tuple(git.rev(f"refs/heads/{parent}") for parent in parents)
+        if any(tip is None for tip in tips):
+            return BranchStatus.PARENT_MISSING
+        try:
+            base = self.recorded_base(branch, parents[0])
+        except BrokenStackError:
+            return BranchStatus.UNKNOWN
+        if any(adapter.reverted(branch, parent) for parent in parents):
+            return BranchStatus.REVERTED
+        if len(parents) > 1:
+            needs_restack = tuple((git.config_get(branch, replay.TIPS) or "").split()) != tips
+        else:
+            needs_restack = tips[0] != base
+        return BranchStatus.NEEDS_RESTACK if needs_restack else BranchStatus.UP_TO_DATE
 
     def stack_infos(self, branches: Iterable[str], adapter: GitAdapter) -> list[BranchInfo]:
         """The stacks of those of branches that are still tracked, and of the

@@ -133,7 +133,8 @@ def label(branch: BranchInfo | GroupHeader, paint: Paint, color: bool) -> str:
     else:
         parts = [branch.name]
     if branch.status is BranchStatus.PARENT_MISSING:
-        parts.append(paint(f"(parent {branch.parent} missing)", STATUS_COLORS[branch.status]))
+        missing = "(a base is missing)" if branch.additional_parents else f"(parent {branch.parent} missing)"
+        parts.append(paint(missing, STATUS_COLORS[branch.status]))
     elif branch.status is not None:
         note = NOTES[branch.status]
         if note and not (color and branch.status is BranchStatus.NEEDS_RESTACK):

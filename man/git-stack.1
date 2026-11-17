@@ -627,8 +627,8 @@ it onto the branch the parent was merged into.
 A branch with several parents appears under each parent.
 Its descendants appear under its first parent; the other occurrences
 refer to that parent.
-\f[CR](status unavailable)\f[R] means git\-stack cannot yet determine
-the status of a multiple\-base branch or its descendants.
+A branch needs restacking if its recorded source tips differ from its
+current bases, or if one of its dependencies needs replay.
 .IP \(bu 2
 With the GitHub adapter, each branch\(aqs pull request (open or merged)
 is linked in a column at the end of its line: blue if it\(aqs open, grey
