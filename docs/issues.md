@@ -49,12 +49,6 @@ branch can't leave its settings behind, but every other read still trusts it.
 Comparing the file's contents (or a hash of them) instead of its metadata
 would rule out the missed write at little cost, since the file is small.
 
-## `prs` says "the current stack" for named stacks
-
-When every branch looks merged, `git stack prs` prints "nothing to open: every
-branch in the current stack looks merged", even when stacks were named with
-branches or `-g`. `git stack push` already words this by what was named.
-
 ## `import --pr` says a deleted author's pull request isn't open
 
 `open_pull_request_author` returns None both when the pull request isn't open

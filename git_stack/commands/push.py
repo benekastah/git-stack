@@ -6,6 +6,7 @@ from git_stack.commands import (
     add_json_argument,
     add_rebuild_stack_argument,
     add_stack_arguments,
+    named_stacks,
 )
 from git_stack.commands.info import print_tree
 from git_stack.commands.prs import show_steps
@@ -71,5 +72,4 @@ def show(stack: StackClient, args: Args, result: PushResult) -> None:
     elif result.branches:
         print_tree(stack, result.branches)
     if not result.pushed:
-        where = "those stacks" if args.branches or args.groups else f"{stack.git.current_branch()}'s stack"
-        print(f"nothing to push: every branch in {where} looks merged")
+        print(f"nothing to push: every branch in {named_stacks(stack, args.branches, args.groups)} looks merged")

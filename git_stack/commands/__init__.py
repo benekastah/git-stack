@@ -11,6 +11,7 @@ everything the command reports.
 import argparse
 
 from git_stack.core import CURRENT_GROUP, Delete
+from git_stack.stack import StackClient
 
 # argparse doesn't export the type of add_subparsers()'s result.
 type Subparsers = "argparse._SubParsersAction[argparse.ArgumentParser]"  # pyright: ignore[reportPrivateUsage]
@@ -61,6 +62,11 @@ def add_stack_arguments(
         help=f"{verb} the stacks in GROUP too (can be given more than once)"
         + ("; omit GROUP for the current stack's group" if optional_group else ""),
     )
+
+
+def named_stacks(stack: StackClient, branches: list[str], groups: list[str]) -> str:
+    """Name the stacks that add_stack_arguments' arguments chose, for a message."""
+    return "those stacks" if branches or groups else f"{stack.git.current_branch()}'s stack"
 
 
 def add_ignore_revert_argument(parser: argparse.ArgumentParser) -> None:
