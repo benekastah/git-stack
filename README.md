@@ -1414,6 +1414,15 @@ the clone use the [git hooks](#git-hooks) in `git_hooks/`, and makes
 It's safe to rerun, e.g. when `pyproject.toml` changes, to pick up a new
 command-line entry point.
 
+If `~/.local/bin` already has `git-stack` from another clone (or installed
+another way), `dev.py install` stops and says so, changing nothing:
+`dev.py install --replace` takes it over (except, on Windows, another install's `git-stack.exe`, which you
+uninstall). A link to a clone that's since been deleted it just replaces. It
+won't install a clone in a temporary directory (the system's, `/tmp` or
+`/var/tmp`), which would leave the command broken once it's deleted: there,
+run `python3 dev.py venv` and `git config core.hooksPath git_hooks`, and use
+`.venv/bin/git-stack` (on Windows, `.venv\Scripts\git-stack.exe`).
+
 To check the install worked, `git stack -h` should print git-stack's usage,
 and `git stack --help` should open the man page. `dev.py install` warns if
 either won't work:

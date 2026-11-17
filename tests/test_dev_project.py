@@ -52,7 +52,7 @@ def test_install_links_the_man_page_and_sets_up_git_blame(
     monkeypatch.setattr(dev_project, "run", lambda *args: commands.append(args))
     monkeypatch.setattr(dev_project, "_git_has_optional_paths", lambda: optional_paths)
 
-    dev.install()
+    dev.install([])
 
     assert commands[-1] == ("git", "config", "blame.ignoreRevsFile", ignore_revs_file)
     man_link = tmp_path / ".local" / "share" / "man" / "man1" / "git-stack.1"
