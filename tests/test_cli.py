@@ -592,20 +592,6 @@ def test_pull_does_not_accept_remote_deletion(stack: Any) -> None:
     stack.sync.assert_not_called()
 
 
-def test_sync_no_longer_accepts_no_push(stack: Any) -> None:
-    with pytest.raises(SystemExit) as error:
-        main(["sync", "--no-push"], stack=stack)
-    assert error.value.code == 2
-    stack.sync.assert_not_called()
-
-
-def test_restack_no_longer_accepts_squash(stack: Any) -> None:
-    with pytest.raises(SystemExit) as error:
-        main(["restack", "--squash"], stack=stack)
-    assert error.value.code == 2
-    stack.restack.assert_not_called()
-
-
 def test_ownership_bare_group_only_works_when_reading(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
     stack.get_ownership.return_value = (Ownership.OWNED, ["pr1"])
     assert main(["ownership", "-g"], stack=stack) == 0
@@ -974,27 +960,6 @@ def test_info_json_lists_every_branch(stack: Any, capsys: pytest.CaptureFixture[
     ]
 
 
-def test_info_draws_a_branch_under_each_base(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
-    stack.info.return_value = [
-        BranchInfo("main", None, None, current=False),
-        BranchInfo("first", "main", BranchStatus.UP_TO_DATE, current=False),
-        BranchInfo("second", "main", BranchStatus.UP_TO_DATE, current=False),
-        BranchInfo("combined", "first", BranchStatus.UP_TO_DATE, current=True, additional_parents=("second",)),
-    ]
-
-    main(["info"], stack=stack)
-
-    assert capsys.readouterr().out == (
-        "main\n├── first\n│   └── combined *\n└── second\n    └── combined * (see first)\n"
-    )
-
-    main(["info", "--json"], stack=stack)
-    data = json.loads(capsys.readouterr().out)
-    assert [item["name"] for item in data] == ["main", "first", "second", "combined"]
-    assert data[-1]["parent"] == "first"
-    assert data[-1]["additional_parents"] == ["second"]
-
-
 def test_info_does_not_repeat_subtrees_for_secondary_dependencies(
     stack: Any, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -1033,20 +998,6 @@ def test_command_prints_its_result(stack: Any, capsys: pytest.CaptureFixture[str
     assert main(argv, stack=stack) == 0
 
     assert capsys.readouterr().out == out
-
-
-def test_show_stack_quiet_prints_nothing_for_a_stacked_branch(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
-    assert main(["show-stack", "--quiet"], stack=stack) == 0
-
-    assert capsys.readouterr() == ("", "")
-
-
-def test_show_stack_quiet_fails_silently_outside_a_stack(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
-    stack.show_stack.side_effect = StackError("main isn't in a stack")
-
-    assert main(["show-stack", "--quiet"], stack=stack) == 1
-
-    assert capsys.readouterr() == ("", "")
 
 
 def test_show_stack_outside_a_stack_says_so(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:

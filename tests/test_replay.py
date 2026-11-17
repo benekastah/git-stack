@@ -5,7 +5,7 @@ import pytest
 from git_stack import events, replay
 from git_stack.errors import StackError
 from git_stack.git import GitClient
-from git_stack.stack import BranchStatus, StackClient
+from git_stack.stack import StackClient
 from tests.helpers import Repo
 
 
@@ -91,16 +91,6 @@ def test_track_changes_base_order_without_reclassifying_old_replay_as_my_work(
     client.restack()
 
     assert repo.git("log", "--reverse", "--format=%s", "second..combined") == "first\nown change"
-
-
-def test_info_tracks_secondary_source_and_descendant_status(repo: Repo, client: StackClient, combined: None) -> None:
-    client.restack()
-    client.branch("child")
-    assert {b.name: b.status for b in client.info(offline=True)}["combined"] is BranchStatus.UP_TO_DATE
-    repo.git("switch", "--quiet", "second")
-    repo.commit("b", "more\n", "more")
-    statuses = {b.name: b.status for b in client.info(offline=True)}
-    assert statuses["combined"] is statuses["child"] is BranchStatus.NEEDS_RESTACK
 
 
 def test_replay_recovers_between_publication_and_metadata(

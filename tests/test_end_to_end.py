@@ -106,7 +106,8 @@ def test_each_directory_is_relative_to_the_one_before(repo: Repo) -> None:
 def test_show_stack_quiet_answers_with_exit_status(repo: Repo) -> None:
     repo.make_stack()
 
-    assert repo.stack_process("show-stack", "--quiet").stdout == ""
+    result = repo.stack_process("show-stack", "--quiet")
+    assert (result.returncode, result.stdout, result.stderr) == (0, "", "")
     repo.git("switch", "--quiet", "main")
     result = repo.stack_process("show-stack", "--quiet", expect_success=False)
     assert (result.returncode, result.stdout, result.stderr) == (1, "", "")

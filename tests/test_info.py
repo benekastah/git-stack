@@ -8,60 +8,41 @@ from git_client.testing import GitCall
 from git_stack.core import CURRENT_GROUP
 from git_stack.errors import StackError
 from git_stack.stack import BranchInfo, BranchStatus, StackClient
-from git_stack.stacks import StackNode, Stacks
 from tests.helpers import Repo
 
 
-def test_info_lists_a_multiple_base_branch_once_with_all_its_parents(
-    repo: Repo, client: StackClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    repo.make_stack()
-    stacks = Stacks(
-        [
-            StackNode("pr1", "main"),
-            StackNode("pr2", "main"),
-            StackNode("pr3", "pr1", additional_parents=("pr2",)),
-        ]
+def test_info_shows_both_bases_and_reports_when_their_dependents_need_replay(repo: Repo, client: StackClient) -> None:
+    client.branch("first")
+    repo.commit("a", "first\n", "first")
+    client.branch("combined")
+    repo.commit("c", "combined\n", "combined")
+    client.branch("child")
+    repo.git("switch", "--quiet", "-c", "release", "main")
+    client.branch("second")
+    repo.commit("b", "second\n", "second")
+    repo.git("switch", "--quiet", "child")
+    repo.stack("track", "--on", "first", "--on", "second", "combined")
+
+    args = ("info", "--offline")
+
+    def listing() -> list[dict[str, object]]:
+        return json.loads(repo.stack(*args, "--json").stdout)
+
+    initial = listing()
+    assert [item["name"] for item in initial] == ["main", "first", "release", "second", "combined", "child"]
+    combined, child = initial[-2:]
+    assert (combined["parent"], combined["additional_parents"]) == ("first", ["second"])
+    assert combined["status"] == child["status"] == "needs-restack"
+
+    client.restack()
+    assert repo.stack(*args).stdout == (
+        "main\n└── first\n    └── combined\n        └── child *\nrelease\n└── second\n    └── combined (see first)\n"
     )
-    monkeypatch.setattr(client, "settled_stacks", lambda: stacks)
+    assert [item["status"] for item in listing()[-2:]] == ["up-to-date", "up-to-date"]
 
-    branches = client.info(offline=True)
-
-    assert [branch.name for branch in branches] == ["main", "pr1", "pr2", "pr3"]
-    combined = next(branch for branch in branches if branch.name == "pr3")
-    assert combined.parent == "pr1"
-    assert combined.additional_parents == ("pr2",)
-    assert combined.status is BranchStatus.NEEDS_RESTACK
-
-
-def test_info_reports_when_a_descendant_needs_its_bases_replayed(
-    repo: Repo, client: StackClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    repo.make_stack()
-    stacks = Stacks(
-        [StackNode("pr1", "main"), StackNode("pr2", "pr1", additional_parents=("main",)), StackNode("pr3", "pr2")]
-    )
-    monkeypatch.setattr(client, "settled_stacks", lambda: stacks)
-
-    statuses = {branch.name: branch.status for branch in client.info(offline=True)}
-
-    assert statuses["pr2"] is BranchStatus.NEEDS_RESTACK
-    assert statuses["pr3"] is BranchStatus.NEEDS_RESTACK
-
-
-def test_info_lists_a_shared_dependent_once_across_roots(
-    repo: Repo, client: StackClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    repo.make_stack()
-    repo.git("branch", "release", "refs/heads/main")
-    stacks = Stacks(
-        [StackNode("pr1", "main"), StackNode("pr2", "release"), StackNode("pr3", "pr1", additional_parents=("pr2",))]
-    )
-    monkeypatch.setattr(client, "settled_stacks", lambda: stacks)
-
-    branches = client.info(offline=True)
-
-    assert [b.name for b in branches] == ["main", "pr1", "release", "pr2", "pr3"]
+    repo.git("switch", "--quiet", "second")
+    repo.commit("b", "more\n", "more")
+    assert [item["status"] for item in listing()[-2:]] == ["needs-restack", "needs-restack"]
 
 
 def test_info_lists_every_stack_parent_before_child(repo: Repo, client: StackClient) -> None:
