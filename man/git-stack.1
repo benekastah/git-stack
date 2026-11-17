@@ -589,8 +589,12 @@ reverted some or all of its changes.
 and \f[CR]prs\f[R] leave it, and the branches stacked on it, alone (see
 A merged branch was reverted).
 .IP \(bu 2
-\f[CR](parent <name> missing)\f[R]: its parent branch was deleted by
-hand; fix it with \f[CR]git stack track <parent>\f[R].
+\f[CR](parent <name> missing)\f[R]: its parent branch was deleted
+outside git\-stack.
+If the parent was merged, \f[CR]sync\f[R] and \f[CR]clean\f[R] usually
+move it (see \f[CR]sync\f[R]); otherwise they say the
+\f[CR]git stack track <parent> <branch> \-\-base <sha>\f[R] that moves
+it onto the branch the parent was merged into.
 .IP \(bu 2
 \f[CR]group <name>\f[R]: the stacks below it are in the group
 \f[CR]<name>\f[R] (see Groups).
@@ -892,9 +896,20 @@ The branch has to be in the stacks being synced;
 \f[CR]clean \-\-ignore\-revert\f[R] works from anywhere, and doesn\(aqt
 restack or push.
 .IP \(bu 2
+A branch on a stack\(aqs root that was deleted outside git\-stack,
+locally and on the remote (as \f[CR]gh pr merge \-\-delete\-branch\f[R]
+deletes a merged branch), is moved onto the branch its pull request
+merges into now, if that\(aqs a local branch: GitHub retargets the pull
+requests on a merged branch when it\(aqs deleted.
+It keeps its base, so only its own commits are restacked.
+\f[CR]clean\f[R] does this too.
+.IP \(bu 2
 A branch with broken metadata (e.g.
-its parent was deleted by hand) is skipped with a warning, along with
-everything stacked on it; the rest of the stack is still synced.
+its parent was deleted by hand, and there\(aqs no pull request to say
+where it belongs) is skipped with a warning, along with everything
+stacked on it; the rest of the stack is still synced.
+For a deleted parent, the warning gives the \f[CR]git stack track\f[R]
+that moves it onto the branch its parent was merged into.
 .IP \(bu 2
 The root isn\(aqt fast\-forwarded if it has diverged from its upstream;
 \f[CR]sync\f[R] warns instead.

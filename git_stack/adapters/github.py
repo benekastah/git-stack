@@ -507,6 +507,10 @@ class GitHubAdapter(GitAdapter):
         )
         return PullRequestLink(pr.number, f"https://{self.host}/{self.owner}/{self.name}/pull/{pr.number}", state)
 
+    def pull_request_base(self, branch: str) -> str | None:
+        pr = self.pull_requests().get(branch)
+        return pr.base if pr is not None else None
+
     def merge_state(self, branch: str, parent: str, ignore_revert: bool = False) -> MergeState:
         git = self.git
         pr = self.pull_requests().get(branch)

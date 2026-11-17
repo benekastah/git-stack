@@ -123,7 +123,14 @@ def message(event: events.Event) -> str:  # noqa: C901
         case events.BrokenBranch():
             return f"skipping {event.branch}: {event.reason}"
         case events.ParentMissing():
-            return f"skipping {event.branch}: its parent {event.parent} doesn't exist"
+            return f"skipping {event.branch}: its parent {event.parent} doesn't exist. " + move_off_missing_parent(
+                event.branch, event.parent, event.base
+            )
+        case events.MovedOffDeletedParent():
+            return (
+                f"moved {event.branch} onto {event.new_parent}, which its pull request merges into: its parent "
+                f"{event.parent} was deleted"
+            )
         case events.PullRequestLookupFailed():
             return f"couldn't look up pull requests on GitHub, so only checking for merges locally: {event.error}"
         case events.NoPullRequests():
@@ -205,3 +212,11 @@ class JsonStream:
     def _print(self, record: dict[str, Any]) -> None:
         # Flushed, so a tool reading the stream sees each line as it happens.
         print(json.dumps(record), flush=True)
+
+
+def move_off_missing_parent(branch: str, parent: str, base: str | None) -> str:
+    """How to move branch off parent, which doesn't exist, keeping base."""
+    return (
+        f"If {parent} was merged, move {branch} onto the branch it was merged into with "
+        f"`git stack track <branch> {branch} --base {base[:12] if base else '<sha>'}`"
+    )

@@ -10,6 +10,7 @@ from git_stack.check_cache import CheckCache
 from git_stack.errors import BrokenStackError, StackError
 from git_stack.file_lock import file_lock
 from git_stack.git import GitClient
+from git_stack.output import move_off_missing_parent
 from git_stack.stacks import Ownership, StackNode, Stacks
 
 PARENT_KEY = "stackParent"
@@ -463,7 +464,8 @@ class StackCore:
         parent_tip = git.rev(f"refs/heads/{parent}")
         if parent_tip is None:
             raise BrokenStackError(
-                f"{branch}'s parent {parent} doesn't exist; retarget it with `git stack track <parent> --base <sha>`"
+                f"{branch}'s parent {parent} doesn't exist. "
+                + move_off_missing_parent(branch, parent, git.config_get(branch, BASE_KEY))
             )
         base = self.recorded_base(branch, parent)
         if not self.needs_restack(branch, parent, base, parent_tip, latest):

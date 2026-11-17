@@ -1280,6 +1280,11 @@ class StackClient(StackCore):
         remotes = {push_remote} | upstream_remotes | root_remotes | ({remote} if only_remote else set[str]())
         for name in sorted(remotes, key=lambda name: (name != remote, name)):
             self.fetch(name)
+        if self.move_off_deleted_parents(stack, stacks, adapter, push_remote):
+            roots = {stacks.root(b) for b in stack}
+            roots_to_update = {r for r in roots if not only_remote or self.git.config_get(r, "remote") == remote}
+            if push and not force:
+                protected = self.protected_sync_destinations(stack, roots, push_remote)
         # A group's stacks can be on different roots.
         self.fast_forward_trunks(sorted(roots_to_update))
 
@@ -1316,6 +1321,44 @@ class StackClient(StackCore):
             self.branch_infos(stacks.restricted(stack), adapter) if only_remote else self.stack_infos(stack, adapter)
         )
         return SyncResult(state.unpushed, shown)
+
+    def move_off_deleted_parents(
+        self, branches: Sequence[str], stacks: Stacks, adapter: GitAdapter, remote: str
+    ) -> bool:
+        """Move each of branches stacked on a root that's gone, locally and on
+        remote, onto the branch its pull request merges into now, if that's
+        another local branch, and say whether any moved.
+
+        That's what a merged branch deleted outside git-stack (e.g. by
+        `gh pr merge --delete-branch`) leaves: deleting it forgot it was
+        tracked, so nothing local says where it went, but GitHub retargets the
+        pull requests on it to the branch it was merged into. Each keeps its
+        base, the deleted branch's commit it was built on, so restacking it
+        replays only its own commits. The rest are left on the missing root,
+        for sync and clean to say how to move them.
+        """
+        git = self.git
+        moved = False
+        for branch in branches:
+            parent = stacks.parent(branch)
+            if (
+                parent in stacks
+                or git.local_branch_exists(parent)
+                or git.rev(f"refs/remotes/{remote}/{parent}") is not None
+            ):
+                continue
+            new_parent = adapter.pull_request_base(branch)
+            if new_parent is None or new_parent == parent or not git.local_branch_exists(new_parent):
+                continue
+            try:
+                stacks.ensure_no_cycle(branch, new_parent)
+            except StackError:
+                continue
+            stacks.reparent(branch, new_parent)
+            self.save(stacks)
+            self.emit(events.MovedOffDeletedParent(branch, parent, new_parent))
+            moved = True
+        return moved
 
     def sync_branch(self, branch: str, adapter: GitAdapter, state: SyncState) -> None:
         """Untrack branch if it was merged, and otherwise bring it up to date (see
@@ -1420,20 +1463,17 @@ class StackClient(StackCore):
         remote = remote or self.default_remote(stacks, stacks)
         if delete is not None:
             self.ensure_owned(stacks, stacks, allow_shared, "clean")
-        roots = stacks.roots()
-        # Only fast-forwarding the current branch, or deleting it (and so
-        # switching away), touches the worktree, and either could fail partway
-        # with uncommitted changes in the way.
-        current = git.current_branch()
-        if current in roots or (delete is not None and delete.deletes_local and current in stacks):
-            self.ensure_clean_worktree()
+        self.ensure_clean_worktree_for_clean(stacks, delete)
         self.ensure_ignorable_reverts(ignore_reverts, list(stacks), "any stack")
         # Where to leave the user afterwards: their branch (or the commit they had
         # detached at), or wherever deleting their branch left them.
         original = self.current_checkout()
         adapter = self.checked_adapter(remote)
         self.fetch(remote)
-        self.fast_forward_trunks(roots)
+        if self.move_off_deleted_parents(list(stacks), stacks, adapter, remote):
+            # The current branch may be the root a branch moved onto.
+            self.ensure_clean_worktree_for_clean(stacks, delete)
+        self.fast_forward_trunks(stacks.roots())
 
         # Parent-before-child, so a branch whose parent was merged is checked
         # against its new parent.
@@ -1441,7 +1481,7 @@ class StackClient(StackCore):
         for branch in order:
             parent = stacks.parent(branch)
             if git.rev(f"refs/heads/{parent}") is None:
-                self.emit(events.ParentMissing(branch, parent))
+                self.emit(events.ParentMissing(branch, parent, git.config_get(branch, BASE_KEY)))
                 continue
             state = adapter.merge_state(branch, parent, ignore_revert=branch in ignore_reverts)
             if state is MergeState.MERGED:
@@ -1454,6 +1494,15 @@ class StackClient(StackCore):
                 self.emit(self.reverted(branch, stacks, adapter))
         self.restore_checkout(original)
         return self.stack_infos(order, adapter)
+
+    def ensure_clean_worktree_for_clean(self, stacks: Stacks, delete: Delete | None) -> None:
+        """Refuse uncommitted changes that clean could get in the way of: only
+        fast-forwarding the current branch, if it's a stack's root, or deleting
+        it (and so switching away) touches the worktree, and either could fail
+        partway."""
+        current = self.git.current_branch()
+        if current in stacks.roots() or (delete is not None and delete.deletes_local and current in stacks):
+            self.ensure_clean_worktree()
 
     @exclusive
     def push(

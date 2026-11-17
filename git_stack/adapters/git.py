@@ -232,6 +232,11 @@ class GitAdapter:
         """branch's pull request, open or merged, if the adapter knows of one."""
         return None
 
+    def pull_request_base(self, branch: str) -> str | None:
+        """The branch that branch's pull request (see pull_request_link)
+        merges into, if the adapter knows of one."""
+        return None
+
     def ensure_available(self) -> None:
         """Fail now if whatever the adapter asks about merges can't answer,
         rather than falling back to the repository alone."""
