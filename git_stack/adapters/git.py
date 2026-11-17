@@ -219,8 +219,9 @@ class GitAdapter:
         return reverts
 
     def changed_files(self, base: str, rev: str) -> list[str]:
-        """The files rev changes since base."""
-        files = self.git.run("diff", "--name-only", "-z", base, rev).split("\0")
+        """The files rev changes since base, from the top of the worktree, as
+        commit_patch_ids takes them, even with diff.relative set."""
+        files = self.git.run("diff", "--no-relative", "--name-only", "-z", base, rev).split("\0")
         return [f for f in files if f]
 
     def prefetch(self) -> None:

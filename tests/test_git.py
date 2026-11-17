@@ -664,3 +664,33 @@ def test_commit_patch_ids_reads_every_file_from_a_subdirectory_with_diff_relativ
 
     assert [len(patches) for patches in from_top] == [1, 1]
     assert GitClient(repo.path / "sub").commit_patch_ids(*commands) == from_top
+
+
+@pytest.mark.parametrize("relative", [False, True])
+def test_changed_files_name_the_files_patch_ids_compare_from_a_subdirectory(repo: Repo, relative: bool) -> None:
+    """changed_files lists files from the top, which commit_patch_ids takes
+    as paths from the top, whatever directory git-stack runs in (with
+    diff.relative, `git diff` would list them from it, leaving out the
+    others), and literally, even with characters a pathspec reads as a
+    pattern."""
+    base = repo.git("rev-parse", "HEAD")
+    (repo.path / "sub").mkdir()
+    repo.write("sub/x", "x\n")
+    repo.write("[ab]", "brackets\n")
+    repo.write("a", "changed\n")
+    repo.git("add", ".")
+    repo.git("commit", "--quiet", "-m", "three files")
+    repo.commit("b", "changed\n", "change b")
+    top = GitClient(repo.path)
+    [from_top] = top.commit_patch_ids(("log", "-p", f"{base}..HEAD"))
+    # Only the commit that has it, and only its changes there.
+    [brackets] = top.commit_patch_ids(("log", "-p", f"{base}..HEAD", "--", "[ab]"))
+    repo.git("config", "diff.relative", str(relative).lower())
+    git = GitClient(repo.path / "sub")
+
+    files = GitAdapter(StackCore(git)).changed_files(base, "HEAD")
+
+    assert files == ["[ab]", "a", "b", "sub/x"]
+    assert git.commit_patch_ids(("log", "-p", f"{base}..HEAD", "--", *files)) == [from_top]
+    assert len(brackets) == 1
+    assert git.commit_patch_ids(("log", "-p", f"{base}..HEAD", "--", "[ab]")) == [brackets]

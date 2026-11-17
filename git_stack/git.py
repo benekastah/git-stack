@@ -824,7 +824,9 @@ class GitClient:
         """For each of commands, (patch-id, commit) for each commit that
         `git <command>` prints, in the order it prints them, with every file's
         changes, even with diff.relative set. For a diff, the commit is all
-        zeros.
+        zeros. Paths after `--` are files as git lists them (e.g. `git diff
+        --name-only`): from the top of the worktree, whatever directory git
+        runs in, and taken literally.
 
         Each command runs, but one `git patch-id` reads them all: after each
         command's output comes a patch of our own, whose commit (1, 2, ...)
@@ -833,13 +835,14 @@ class GitClient:
         length = self.object_id_length()
         patches = []
         for i, (command, *rest) in enumerate(commands, 1):
+            if "--" in rest:
+                end = rest.index("--") + 1
+                rest = [*rest[:end], *(f":(top,literal){path}" for path in rest[end:])]
             if command == "diff":
                 # A diff has no commit line, so give it one, rather than rely on
                 # the blank line after the marker before it to end the marker.
                 patches.append(f"commit {'0' * length}")
-            patches.append(
-                self.run("--literal-pathspecs", command, "--no-color", "--no-ext-diff", "--no-relative", *rest)
-            )
+            patches.append(self.run(command, "--no-color", "--no-ext-diff", "--no-relative", *rest))
             patches.append(f"commit {i:0{length}x}\n\n{END_MARKER_DIFF}")
         results: list[list[tuple[str, str]]] = [[]]
         for line in self.run("patch-id", "--stable", input="\n".join(patches) + "\n").splitlines():
