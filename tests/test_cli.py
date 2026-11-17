@@ -77,6 +77,7 @@ def stack(autospec_stack: Any) -> Any:
     stack.parent.return_value = "main"
     stack.parents.return_value = ["main"]
     stack.base.return_value = "a" * 40
+    stack.bases.return_value = ["a" * 40]
     stack.show_stack.return_value = ["pr1", "pr2"]
     stack.group_add.return_value = ["pr1"]
     stack.group_remove.return_value = []
@@ -242,6 +243,8 @@ def stack(autospec_stack: Any) -> Any:
         (["parents", "pr1"], "parents", ("pr1",), {}),
         (["parent", "pr1"], "parent", ("pr1",), {}),
         (["base"], "base", (None,), {}),
+        (["bases"], "bases", (None,), {}),
+        (["bases", "pr1"], "bases", ("pr1",), {}),
         (["base", "pr1"], "base", ("pr1",), {}),
         (["show-stack"], "show_stack", (None,), {}),
         (["show-stack", "-q", "pr1"], "show_stack", ("pr1",), {}),
@@ -800,6 +803,7 @@ def test_clean_json_ends_with_the_error_when_it_fails(stack: Any, capsys: pytest
         (["parent"], "parent", "main", {"parent": "main"}),
         (["parents"], "parents", ["main", "other"], {"parents": ["main", "other"]}),
         (["base"], "base", "abc", {"base": "abc"}),
+        (["bases"], "bases", ["abc", "def"], {"bases": ["abc", "def"]}),
         (["show-stack"], "show_stack", ["pr1", "pr2"], {"branches": ["pr1", "pr2"]}),
         (["next"], "next", "pr2", {"branch": "pr2"}),
         (["prev"], "prev", "main", {"branch": "main"}),

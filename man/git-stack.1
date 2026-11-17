@@ -1322,9 +1322,15 @@ built on, the way its pull request does:
 git diff $(git stack parent)...         \f[I]# what this branch\(aqs pull request changes\f[R]
 git log \-\-oneline $(git stack parent)..
 .EE
+.SS \f[CR]git stack bases [<branch>]\f[R]
+Print the recorded base commits for \f[CR]<branch>\f[R] (default: the
+current branch), one per line.
+Recording multiple bases is not supported yet.
 .SS \f[CR]git stack base [<branch>]\f[R]
 Print the commit \f[CR]<branch>\f[R] (default: the current branch) was
 last rebased onto: where its own commits start.
+This singular command is deprecated; use \f[CR]bases\f[R].
+It refuses a branch with multiple parents.
 .PP
 \f[B]When would I use it?\f[R] To act on just a branch\(aqs own commits.
 Unlike \f[CR]git stack parent\f[R], this still works after the parent
@@ -1548,6 +1554,11 @@ T{
 \f[CR]parents\f[R]
 T}@T{
 \f[CR]parents\f[R], the branch names in replay order
+T}
+T{
+\f[CR]bases\f[R]
+T}@T{
+\f[CR]bases\f[R], the recorded base commits in parent order
 T}
 T{
 \f[CR]show\-stack\f[R]

@@ -973,10 +973,17 @@ git diff $(git stack parent)...         # what this branch's pull request change
 git log --oneline $(git stack parent)..
 ```
 
+### `git stack bases [<branch>]`
+
+Print the recorded base commits for `<branch>` (default: the current branch),
+one per line. Recording multiple bases is not supported yet.
+
 ### `git stack base [<branch>]`
 
 Print the commit `<branch>` (default: the current branch) was last rebased
 onto: where its own commits start.
+This singular command is deprecated; use `bases`. It refuses a branch with
+multiple parents.
 
 **When would I use it?** To act on just a branch's own commits. Unlike
 `git stack parent`, this still works after the parent was squash-merged or
@@ -1069,6 +1076,7 @@ What each command's result has, besides `type` and `events`:
 | `unrevert` | the `branch` it created, the `parent` it created it on, the `reverts` it reverted, newest first, and the `children` it moved onto it |
 | `parent`, `base` | the `parent` or `base` |
 | `parents` | `parents`, the branch names in replay order |
+| `bases` | `bases`, the recorded base commits in parent order |
 | `show-stack` | `branches`, bottom first (`--quiet` can't be combined with `--json`) |
 
 `stacks` is the stacks the command covered, as `info --json` lists them.

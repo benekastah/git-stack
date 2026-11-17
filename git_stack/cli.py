@@ -5,6 +5,7 @@ import sys
 import git_stack
 from git_stack.commands import (
     base,
+    bases,
     branch,
     clean,
     group,
@@ -53,6 +54,7 @@ COMMANDS = (
     parent,
     parents,
     base,
+    bases,
     show_stack,
 )
 

@@ -946,7 +946,18 @@ class StackClient(StackCore):
         """The commit branch (default: the current branch) was last rebased onto."""
         stacks = self.settled_stacks()
         branch = self.stacked_branch(branch, stacks)
+        if len(stacks.dependencies(branch)) != 1:
+            raise StackError(f"{branch} has multiple parents; run `git stack bases {branch}`")
         return self.recorded_base(branch, stacks.parent(branch))
+
+    @snapshot
+    def bases(self, branch: str | None = None) -> list[str]:
+        """The recorded base commits, in parent order."""
+        stacks = self.settled_stacks()
+        branch = self.stacked_branch(branch, stacks)
+        if len(stacks.dependencies(branch)) != 1:
+            raise StackError("recording multiple bases is not supported yet")
+        return [self.recorded_base(branch, stacks.parent(branch))]
 
     @snapshot
     def show_stack(self, branch: str | None = None) -> list[str]:
