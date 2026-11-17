@@ -1422,9 +1422,11 @@ class StackClient(StackCore):
         delete: Delete | None = None,
         ignore_reverts: Sequence[str] = (),
         allow_shared: bool = False,
+        no_verify: bool = False,
     ) -> list[BranchInfo]:
         """Fetch and untrack merged branches in every stack, deleting what delete
-        says, without restacking anything. ignore_reverts is as for sync.
+        says, without restacking anything. ignore_reverts is as for sync; no_verify
+        skips the pre-push hook when deleting remote branches.
         Returns every stack, as info() lists them."""
         git = self.git
         self.ensure_no_operation_in_progress()
@@ -1459,7 +1461,10 @@ class StackClient(StackCore):
             state = adapter.merge_state(branch, parent, ignore_revert=branch in ignore_reverts)
             if state is MergeState.MERGED:
                 confirmed = adapter.merge_confirmed(branch, parent)
-                if self.untrack_merged(branch, stacks, delete, confirmed=confirmed) and branch == original:
+                if (
+                    self.untrack_merged(branch, stacks, delete, confirmed=confirmed, no_verify=no_verify)
+                    and branch == original
+                ):
                     original = self.current_checkout()
             elif state is MergeState.MERGED_WITH_NEW_COMMITS:
                 self.emit(events.MergedWithNewCommits(branch, parent))

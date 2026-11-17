@@ -663,7 +663,7 @@ commits are new work or old copies. Inspect the histories, then pass
 `--rewritten-upstream` to replay the unseen commits, or use
 `git stack push --force` to explicitly replace the remote with local history.
 
-### `git stack clean [--remote <name>] [-d local|remote|both] [--ignore-revert <branch>] [--allow-shared]`
+### `git stack clean [--remote <name>] [-d local|remote|both] [--no-verify] [--ignore-revert <branch>] [--allow-shared]`
 
 Fetch with `--prune`, fast-forward every stack's root, and stop tracking merged
 branches in every stack, moving their children onto their parent.
@@ -680,7 +680,7 @@ git stack clean -d local
 
 - Nothing is restacked, so there are no conflicts. The children are rebased
   the next time you `sync` or `restack` their stack.
-- `-d` and `--ignore-revert` work as for `sync`.
+- `-d`, `--no-verify` and `--ignore-revert` work as for `sync`.
 - It ends by showing every stack, as `info` does.
 - Runs from any branch, even one that isn't in a stack. Uncommitted changes
   are fine, unless you're on a stack's root, which `clean` fast-forwards, or,

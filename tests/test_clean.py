@@ -48,6 +48,17 @@ def test_clean_delete_both_deletes_merged_branch(repo: Repo, client: StackClient
     assert repo.git("branch", "--show-current") == "pr2"
 
 
+def test_clean_no_verify_skips_hook_when_deleting_merged_remote_branch(repo: Repo, client: StackClient) -> None:
+    repo.make_stack()
+    client.push()
+    repo.merge_on_forge("pr1", delete_branch=False)
+    repo.add_hook(repo.path, "pre-push", "#!/bin/sh\nexit 1\n")
+
+    repo.stack("clean", "--delete", "remote", "--no-verify")
+
+    assert repo.git("branch", "--list", "pr1", cwd=repo.origin) == ""
+
+
 def test_clean_delete_remote_keeps_the_servers_default_branch(repo: Repo, client: StackClient) -> None:
     repo.git("switch", "--quiet", "main")
     client.branch("trunk")

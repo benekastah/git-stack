@@ -193,6 +193,7 @@ def stack(autospec_stack: Any) -> Any:
             (),
             {"remote": None, "delete": Delete.BOTH, "ignore_reverts": ["a", "b"]},
         ),
+        (["clean", "--no-verify"], "clean", (), {"remote": None, "delete": None, "ignore_reverts": []}),
         (["push"], "push", ([], []), {"remote": "origin", "force": False, "prs": False}),
         (
             ["push", "pr1", "b-*", "--remote", "upstream"],
@@ -250,6 +251,8 @@ def test_command_calls_its_client_method(
 
     if method in ("restack", "sync", "push", "clean", "unrevert"):
         kwargs = {**kwargs, "allow_shared": "--allow-shared" in argv}
+    if method == "clean":
+        kwargs = {**kwargs, "no_verify": "--no-verify" in argv}
     if method in ("sync", "push"):
         kwargs = {**kwargs, "rebuild_stack": "--rebuild-stack" in argv}
         if argv[0] != "pull":
