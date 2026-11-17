@@ -3,6 +3,7 @@
 import json
 
 import pytest
+from git_client.testing import GitCall
 
 from git_stack.core import CURRENT_GROUP
 from git_stack.errors import StackError
@@ -129,3 +130,19 @@ def test_info_shows_reverted_branch(repo: Repo, client: StackClient) -> None:
     repo.git("revert", "--no-edit", "HEAD")
 
     assert repo.branch_info("pr1").status is BranchStatus.REVERTED
+
+
+def test_info_reads_its_settings_with_the_config(repo: Repo, git_calls: list[GitCall]) -> None:
+    """stack.adapter, stack.orientation and the remote's URL come from the one
+    `git config --list` that reads the branches' settings, not a `git config
+    --get` each."""
+    repo.make_stack()
+    repo.git("config", "stack.orientation", "root-at-bottom")
+    git_calls.clear()
+
+    assert repo.stack("info").stdout == "        ┌── pr3 *\n    ┌── pr2\n┌── pr1\nmain\n"
+
+    assert [call[:2] for call in git_calls if call[0] == "config"] == [
+        ["config", "--list"],
+        ["config", "--get-colorbool"],
+    ]

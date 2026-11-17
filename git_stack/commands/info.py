@@ -96,7 +96,7 @@ def use_color(stack: StackClient) -> bool:
 def orientation(stack: StackClient) -> Orientation:
     """Which way up to draw each stack, as ORIENTATION_SETTING says (default:
     root at the top)."""
-    setting = stack.git.run("config", "--get", ORIENTATION_SETTING, check=False)
+    setting = stack.git.config_value(ORIENTATION_SETTING)
     if not setting:
         return Orientation.ROOT_AT_TOP
     try:

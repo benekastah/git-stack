@@ -49,7 +49,8 @@ def stack() -> Any:
     """A mock StackClient whose methods check their arguments against the real ones."""
     stack = create_autospec(StackClient, instance=True)
     stack.git = create_autospec(GitClient, instance=True)
-    stack.git.run.return_value = ""  # e.g. git config --get of an unset setting
+    stack.git.run.return_value = ""
+    stack.git.config_value.return_value = None  # every setting unset
     stack.branch.return_value = "main"
     stack.track.return_value = []
     stack.import_stacks.return_value = ImportResult([], [])
@@ -494,7 +495,7 @@ def test_info_colors_non_current_branch_needing_restack(stack: Any, capsys: pyte
 
 
 def test_info_can_draw_each_stack_with_its_root_at_the_bottom(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
-    stack.git.run.side_effect = lambda *args, check=True: "root-at-bottom" if "stack.orientation" in args else ""
+    stack.git.config_value.side_effect = lambda key: "root-at-bottom" if key == "stack.orientation" else None
     stack.info.return_value = [
         BranchInfo("main", None, None, current=False),
         BranchInfo("pr1", "main", BranchStatus.UP_TO_DATE, current=False),
@@ -508,7 +509,7 @@ def test_info_can_draw_each_stack_with_its_root_at_the_bottom(stack: Any, capsys
 
 
 def test_info_refuses_an_unknown_orientation(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
-    stack.git.run.side_effect = lambda *args, check=True: "sideways" if "stack.orientation" in args else ""
+    stack.git.config_value.side_effect = lambda key: "sideways" if key == "stack.orientation" else None
     stack.info.return_value = [BranchInfo("main", None, None, current=False)]
 
     assert main(["info"], stack=stack) == 1

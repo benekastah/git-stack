@@ -729,3 +729,15 @@ def test_operation_in_progress_sees_each_operations_state(repo: Repo, name: str)
     (repo.path / ".git" / name).touch()
 
     assert git.operation_in_progress()
+
+
+def test_config_value_is_what_git_config_get_gives(repo: Repo) -> None:
+    """The last value, in any case the key is written in; "" for a key with
+    no value, which `git config --get` prints as an empty line; None if unset."""
+    with (repo.path / ".git" / "config").open("a", encoding="utf-8") as f:
+        f.write("[stack]\n\tAdapter = git\n\tadapter = github\n\tflag\n")
+    git = GitClient(repo.path)
+
+    assert git.config_value("stack.adapter") == repo.git("config", "--get", "stack.adapter") == "github"
+    assert git.config_value("stack.flag") == repo.git("config", "--get", "stack.flag") == ""
+    assert git.config_value("stack.unset") is None

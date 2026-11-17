@@ -1051,7 +1051,7 @@ def github_repo(git: GitClient, remote: str) -> tuple[str, str, str] | None:
     (e.g. github-work for github.com) is resolved.
     """
     for url in (
-        git.run("config", "--get", f"remote.{remote}.url", check=False),
+        git.config_value(f"remote.{remote}.url") or "",
         git.run("remote", "get-url", remote, check=False),
     ):
         match = REMOTE_URL.match(url)

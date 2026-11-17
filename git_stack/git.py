@@ -9,7 +9,7 @@ from contextlib import contextmanager
 from typing import TextIO
 
 import git_client
-from git_client import CatFile, Git, GitError, git_common_dir, git_paths
+from git_client import CatFile, Git, GitError, config_key, git_common_dir, git_paths
 
 from git_stack.errors import StackError
 
@@ -160,6 +160,7 @@ class GitClient:
         self._config_read = False
         self._config_stat: tuple[int, int, int] | None = None
         self._branch_config: dict[tuple[str, str], str] = {}
+        self._config: dict[str, list[str | None]] = {}
         # See snapshot: how many snapshot blocks we're in; the refs, as
         # {refname: (commit, the full refname of its upstream, or "")}, the
         # upstreams' refnames they were listed for, and the branch HEAD is on,
@@ -342,8 +343,18 @@ class GitClient:
                     # value wins, as git reads it; a key with none is "".
                     branch, _, name = key.removeprefix("branch.").rpartition(".")
                     branches[branch, name] = values[-1] or ""
-            self._branch_config, self._config_stat, self._config_read = branches, stat, True
+            self._config, self._branch_config = entries, branches
+            self._config_stat, self._config_read = stat, True
         return self._branch_config
+
+    def config_value(self, key: str) -> str | None:
+        """key's value, as `git config --get` gives it (the last, and "" for
+        a key with none), or None if it's unset. Read with the branch config
+        (see branch_config), so it's no git call of its own, and read again
+        as it is."""
+        self.branch_config()
+        values = self._config.get(config_key(key))
+        return None if values is None else values[-1] or ""
 
     def config_get(self, branch: str, key: str) -> str | None:
         return self.branch_config().get((branch, key.lower())) or None

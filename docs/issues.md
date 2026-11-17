@@ -37,9 +37,12 @@ leave the file the same size (e.g. overwriting a commit ID with another) would
 then look like no change, and git-stack would keep using the old values. Not
 reproduced; on btrfs, where inode numbers aren't reused, it can't happen.
 
-It also only watches the common `.git/config`, so `branch.*` settings changed
-in another config file (`git config --worktree` with `extensions.worktreeConfig`,
-or an included file) aren't seen until something writes `.git/config`.
+It also only watches the common `.git/config`, so settings changed in another
+config file (`git config --worktree` with `extensions.worktreeConfig`, an
+included file, or, for `GitClient.config_value`'s `stack.adapter`,
+`stack.orientation` and remote URLs, the global config) aren't seen until
+something writes `.git/config`. The command line reads them afresh each time
+it runs; a script that keeps a `StackClient` across such a change doesn't.
 
 `forget` rereads the config rather than trusting the cache, so untracking a
 branch can't leave its settings behind, but every other read still trusts it.
