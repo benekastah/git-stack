@@ -473,8 +473,8 @@ class StackClient(StackCore):
         """Track open pull requests on GitHub, drafts included, as stacks: each
         one's branch on the branch it merges into, creating local branches
         from remote for those that don't have one. Branches that are already
-        tracked are left alone. The untracked branches they merge into (e.g.
-        main) are fast-forwarded to their upstreams first.
+        tracked are left alone. The untracked branches the ones it creates or
+        tracks go on (e.g. main) are fast-forwarded to their upstreams.
 
         The pull requests are author's (a GitHub login), or the gh user's.
         branches and prs (pull request numbers or URLs, whoever's they are)
@@ -505,8 +505,6 @@ class StackClient(StackCore):
         mine = bool(branches) or not numbers
         open_prs = self.look_up_open_pull_requests(adapter, author, numbers, mine)
         self.fetch(remote)
-        if not dry_run:
-            self.fast_forward_import_trunks(open_prs, adapter.default_branch)
         planner = ImportPlanner(
             self, open_prs, remote, adapter.default_branch, adapter.viewer, force or dry_run, adapter
         )
@@ -516,6 +514,7 @@ class StackClient(StackCore):
         if dry_run:
             return ImportResult(plan, [], without_prs, remote)
         stacks = self.stacks()
+        self.fast_forward_import_trunks(plan, without_prs, stacks)
         previous_ownership = {b: stacks[b].ownership for b in stacks}
         self.apply_import(plan, without_prs, remote, stacks)
         self.classify_imported_stacks(plan, without_prs, open_prs, adapter.viewer, previous_ownership, stacks)
@@ -599,16 +598,16 @@ class StackClient(StackCore):
             raise lookup_failed(e) from e
         return list(prs.values())
 
-    def fast_forward_import_trunks(self, prs: list[OpenPullRequest], default_branch: str | None) -> None:
-        """Fast-forward the untracked branches prs merge into (e.g. main), and
-        the default branch if a branch without a pull request may turn out to
-        be built on it."""
-        # Bases are worked out from the local parents, so a stale main would
-        # make them too old for branches built on a newer origin/main.
-        heads, tracked = {pr.head for pr in prs}, set(self.stacks())
-        trunks = {pr.base for pr in prs if pr.base not in heads | tracked}
-        if default_branch is not None and not all(self.git.local_branch_exists(t) for t in trunks):
-            trunks.add(default_branch)
+    def fast_forward_import_trunks(
+        self, plan: list[ImportStep], without_prs: list[ImportStepWithoutPr], stacks: Stacks
+    ) -> None:
+        """Fast-forward the untracked branches (e.g. main) that the branches
+        import creates or tracks go on, as their bases were worked out for
+        (see ImportPlanner.trunk_ref), and no others."""
+        imported = [s for s in plan if s.action in (ImportAction.CREATE, ImportAction.TRACK)]
+        imported += [s for s in without_prs if s.action is ImportAction.CREATE]
+        heads = {s.branch for s in plan} | {s.branch for s in without_prs}
+        trunks = {s.parent for s in imported if s.parent is not None} - heads - set(stacks)
         self.fast_forward_trunks(sorted(trunks))
 
     def apply_import(
@@ -1871,7 +1870,7 @@ class ImportPlanner:
                 f"refs/heads/{parent}" if git.local_branch_exists(parent) else f"refs/remotes/{remote}/{parent}"
             )
         elif git.local_branch_exists(parent):
-            parent_ref = f"refs/heads/{parent}"
+            parent_ref = self.trunk_ref(parent)
         elif (without_pr := self.plan_without_pr(parent)).action in (ImportAction.CREATE, ImportAction.CREATE_ROOT):
             parent_ref = f"refs/remotes/{remote}/{parent}"
         else:
@@ -1963,10 +1962,18 @@ class ImportPlanner:
             # so main's newer commits don't look like the branch's own.
             return f"refs/remotes/{remote}/{parent}"
         if git.local_branch_exists(parent):
-            return f"refs/heads/{parent}"
+            return self.trunk_ref(parent)
         if self.plan_without_pr(parent).action is ImportAction.SKIP:
             raise StackError(f"{parent}, which it's built on, was skipped")
         return f"refs/remotes/{remote}/{parent}"
+
+    def trunk_ref(self, branch: str) -> str:
+        """The ref of local branch as import leaves it: if it's untracked (a
+        trunk, e.g. main), import fast-forwards it to its upstream when it
+        tracks a branch on it, so a stale trunk doesn't make bases too old."""
+        if branch not in self.stacks and (upstream := self.stack.fast_forward_target(branch)) is not None:
+            return upstream
+        return f"refs/heads/{branch}"
 
     def other_authors(self, parent: str, parent_ref: str, remote_ref: str) -> list[str]:
         """The email addresses of the authors besides the user of the commits

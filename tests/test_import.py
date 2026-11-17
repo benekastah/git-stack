@@ -219,6 +219,62 @@ def test_import_fast_forwards_main_for_a_branch_without_pr_on_it(
     repo.assert_stacked("a", "main", ["a c1"])
 
 
+def release_behind_origin(repo: Repo) -> None:
+    """Make a local release branch, tracking origin/release, then push a
+    commit to origin/release, which release lacks."""
+    push_branch(repo, "release", "main")
+    repo.git("fetch", "--quiet")
+    repo.git("branch", "--quiet", "--track", "release", "origin/release")
+    repo.commit_on_forge("release", "r", "release\n", "release c2")
+
+
+def test_import_fast_forwards_another_trunk_before_finding_bases(
+    repo: Repo, gh: FakeGitHub, client: StackClient
+) -> None:
+    release_behind_origin(repo)
+    open_pr(repo, gh, 1, "fix", "release")  # built on the new origin/release, which release lacks
+
+    client.import_stacks()
+
+    repo.assert_stacked("fix", "release", ["fix c1"])
+
+
+def test_import_fast_forwards_only_the_trunks_of_the_stacks_named(
+    repo: Repo, gh: FakeGitHub, client: StackClient
+) -> None:
+    release_behind_origin(repo)
+    old_release = repo.git("rev-parse", "refs/heads/release")
+    repo.commit_on_forge("main", "d", "main\n", "main c1")
+    open_pr(repo, gh, 1, "pr1", "main")
+    open_pr(repo, gh, 2, "fix", "release")
+
+    client.import_stacks(branches=["pr1"])
+
+    assert repo.git("rev-parse", "refs/heads/main") == repo.git("rev-parse", "refs/remotes/origin/main")
+    assert repo.git("rev-parse", "refs/heads/release") == old_release
+
+
+def test_import_fast_forwards_no_trunk_of_a_stack_it_skips(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+    release_behind_origin(repo)
+    old_release = repo.git("rev-parse", "refs/heads/release")
+    open_pr(repo, gh, 2, "fix", "release", author="someone")
+
+    steps = client.import_stacks(prs=["2"]).steps
+
+    assert actions(steps) == [("fix", ImportAction.SKIP)]
+    assert repo.git("rev-parse", "refs/heads/release") == old_release
+
+
+def test_import_dry_run_fast_forwards_nothing(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+    old_main = repo.git("rev-parse", "refs/heads/main")
+    repo.commit_on_forge("main", "d", "main\n", "main c1")
+    open_pr(repo, gh, 1, "pr1", "main")
+
+    client.import_stacks(dry_run=True)
+
+    assert repo.git("rev-parse", "refs/heads/main") == old_main
+
+
 def test_import_leaves_tracked_branches_alone(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
     open_pr(repo, gh, 1, "pr1", "main")
     open_pr(repo, gh, 2, "pr2", "pr1")

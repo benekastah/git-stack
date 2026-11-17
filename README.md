@@ -302,9 +302,10 @@ git stack import -f --pr https://github.com/acme/widgets/pull/31
   branch and rerun to track them on it. A branch built on an old version of
   its parent (one rewritten since) looks built on what's below the parent; fix
   it with `git stack track <parent> <branch>`.
-- Each branch's base is found as for `git stack track`, after fast-forwarding
-  the branches the pull requests merge into that aren't tracked (e.g. `main`)
-  to their upstreams, as `sync` does. If a parent's commits
+- Each branch's base is found as for `git stack track`, against where the
+  untracked branches they go on (e.g. `main`) are once fast-forwarded to their
+  upstreams, as `sync` does. It fast-forwards only those of the branches it
+  creates or tracks, and none in a dry run. If a parent's commits
   were rewritten after its child was built on them (e.g. the parent was
   rebased and force-pushed from another machine), the child's base can come
   out too old, and its next restack replays the parent's old commits; set it
