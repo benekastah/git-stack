@@ -1460,9 +1460,10 @@ CI (`.github/workflows/ci.yml`, with git-stack's own jobs in `project.yml`)
 runs `dev.py static`, `dev.py types-other-platforms` and `dev.py coverage`
 once, on Linux, and `dev.py tests` on Linux, macOS and Windows with the oldest
 and newest Python git-stack supports (and on Linux, every Python between), for
-every push to `main` and every pull request. On macOS and Windows, the tests
-are split over several jobs (`dev.py tests --shard I/N`), so each finishes
-within CI's 5-minute limit. A new push to a pull request, or to `main`,
+every push to `main` and every pull request into `main` (a stacked pull
+request, into another's branch, gets CI once it targets `main`). On macOS and
+Windows, the tests are split over several jobs (`dev.py tests --shard I/N`),
+so each finishes within CI's 5-minute limit. A new push to a pull request, or to `main`,
 cancels the run on the older commit, and so does merging or closing a pull
 request. A pull request that changes only docs skips the tests, but still
 checks that the man page is up to date with this README (`dev.py man --check`).
