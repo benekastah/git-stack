@@ -2029,10 +2029,9 @@ class ImportPlanner:
 
     def trunk_ref(self, branch: str, built: str) -> str:
         """The ref of local branch, which built (a full ref, as for
-        merges_into_ref) is built on, as import
-        leaves it: if it's untracked (a trunk, e.g. main), import fast-forwards
-        it to its upstream when it tracks a branch on it, so a stale trunk
-        doesn't make bases too old.
+        merges_into_ref) is built on, as import leaves it: if it's untracked
+        (a trunk, e.g. main), import fast-forwards it to its upstream when it
+        tracks a branch on it, so a stale trunk doesn't make bases too old.
 
         Raises StackError if built has commits of the upstream that the trunk
         lacks, and the trunk can't be fast-forwarded (it's checked out in
