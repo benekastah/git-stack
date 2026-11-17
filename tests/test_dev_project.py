@@ -19,6 +19,9 @@ def dev(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     monkeypatch.syspath_prepend(str(ROOT))
     import dev
 
+    # The clone running the tests may be a scratch one in a temporary directory, which
+    # install refuses outright; the tests' installs go to a home of their own.
+    monkeypatch.setattr(dev, "_temporary", lambda names: None)
     return dev
 
 
@@ -52,7 +55,7 @@ def test_install_links_the_man_page_and_sets_up_git_blame(
     monkeypatch.setattr(dev_project, "run", lambda *args: commands.append(args))
     monkeypatch.setattr(dev_project, "_git_has_optional_paths", lambda: optional_paths)
 
-    dev.install()
+    dev.install([])
 
     assert commands[-1] == ("git", "config", "blame.ignoreRevsFile", ignore_revs_file)
     man_link = tmp_path / ".local" / "share" / "man" / "man1" / "git-stack.1"
@@ -60,6 +63,29 @@ def test_install_links_the_man_page_and_sets_up_git_blame(
         assert not man_link.exists()
     else:
         assert man_link.readlink() == ROOT / "man" / "git-stack.1"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="git-stack links no man page on Windows")
+def test_install_changes_nothing_when_another_clone_has_the_man_page(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, dev: ModuleType
+) -> None:
+    bin_dir = tmp_path / ".local" / "bin"
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setattr(dev, "venv", lambda: None)
+    monkeypatch.setattr(dev, "run", lambda *args: None)
+    other_page = tmp_path / "other-clone" / "man" / "git-stack.1"
+    other_page.parent.mkdir(parents=True)
+    other_page.touch()
+    man_link = tmp_path / ".local" / "share" / "man" / "man1" / "git-stack.1"
+    man_link.parent.mkdir(parents=True)
+    man_link.symlink_to(other_page)
+
+    with pytest.raises(SystemExit, match="git-stack.1 points at"):
+        dev.install([])
+
+    assert man_link.readlink() == other_page
+    assert not (bin_dir / "git-stack").is_symlink()
 
 
 def git_version() -> tuple[int, int]:
