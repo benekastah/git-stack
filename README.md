@@ -505,6 +505,8 @@ git stack prev                  # to main
 ```
 
 - From the bottom of a stack, it switches to the stack's root (e.g. `main`).
+- If the branch has several parents, it lists them and leaves you where you
+  are; pick one with `git switch`.
 
 ### `git stack ownership [show|owned|shared] [<branch|glob>...] [-g <group>]`
 

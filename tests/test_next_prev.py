@@ -4,6 +4,7 @@ import pytest
 
 from git_stack.errors import StackError
 from git_stack.stack import StackClient
+from git_stack.stacks import StackNode, Stacks
 from tests.helpers import Repo
 
 
@@ -55,6 +56,19 @@ def test_prev_from_first_branch_switches_to_root(repo: Repo, client: StackClient
     repo.git("switch", "--quiet", "pr1")
 
     assert client.prev() == "main"
+
+
+def test_prev_lists_multiple_parents_without_switching(
+    repo: Repo, client: StackClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client.branch("feature")
+    stacks = Stacks([StackNode("feature", "first", additional_parents=("second",))])
+    monkeypatch.setattr(client, "settled_stacks", lambda: stacks)
+
+    with pytest.raises(StackError, match="first, second.*git switch"):
+        client.prev()
+
+    assert repo.git("branch", "--show-current") == "feature"
 
 
 def test_prev_refuses_outside_a_stack(repo: Repo, client: StackClient) -> None:

@@ -986,7 +986,11 @@ class StackClient(StackCore):
     def prev(self) -> str:
         """Switch to the current branch's parent, and return it."""
         stacks = self.settled_stacks()
-        parent = stacks.parent(self.current_stacked_branch(stacks, "", hint="there's no previous branch"))
+        current = self.current_stacked_branch(stacks, "", hint="there's no previous branch")
+        parents = stacks.dependencies(current)
+        if len(parents) > 1:
+            raise StackError(f"{current} has several parents: {', '.join(parents)}; switch to one with `git switch`")
+        parent = stacks.parent(current)
         if not self.git.local_branch_exists(parent):
             raise StackError(f"{parent} doesn't exist")
         self.switch_to(parent)
