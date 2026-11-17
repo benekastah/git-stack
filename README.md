@@ -1498,7 +1498,8 @@ change that adds one) is installed by the next commit or push that uses it.
   any commit that changes this README. It works on what's staged, so a partly
   staged file commits just its staged part, formatted.
 - `pre-push` runs `dev.py static` (formatting, lint and types) before every
-  push; CI runs the tests. Skip it with `git stack push --no-verify`.
+  push; CI runs the tests. Skip it with `git push --no-verify` (or
+  `git stack push --no-verify`).
 
 ### Skipping reformatting in `git blame`
 
