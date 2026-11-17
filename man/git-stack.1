@@ -1160,8 +1160,8 @@ When a stack is reshaped (e.g.
 a branch is put in its middle), \f[CR]push\f[R], \f[CR]sync\f[R], and
 \f[CR]prs\f[R] refuse to unstack it to change those bases unless given
 \f[CR]\-\-rebuild\-stack\f[R].
-It refuses if the GitHub stack includes unmerged PRs outside the
-selected local stacks.
+It refuses if the GitHub stack includes open PRs outside the selected
+local stacks; closed and merged PRs do not block rebuilding.
 Run \f[CR]prs\f[R] to link them again, or use
 \f[CR]push \-\-prs \-\-rebuild\-stack\f[R] to do both together.
 \f[CR]sync\f[R] may already have changed local branches before it
@@ -1180,8 +1180,8 @@ Use \f[CR]git stack prs \-\-rebuild\-stack\f[R] to unstack the selected
 pull requests on GitHub and create a new stack when the existing stack
 doesn\(aqt match.
 Merged pull requests remain in the old stack.
-It refuses if unstacking would also remove an unmerged pull request
-outside the selected stack.
+It refuses if unstacking would also remove an open pull request outside
+the selected stack.
 If creating the new stack fails, the pull requests remain unstacked;
 rerun \f[CR]prs\f[R] to retry.
 Add \f[CR]\-\-dry\-run\f[R] to see the planned unstack and creation

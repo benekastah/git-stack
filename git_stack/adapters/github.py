@@ -673,10 +673,10 @@ class GitHubAdapter(GitAdapter):
 
     def ensure_stack_scope(self, stack: GitHubStack, allowed: set[int]) -> None:
         """Refuse to unstack PRs outside the selected local stack."""
-        unrelated = sorted(n for n, state in stack.entries if state is not GitHubState.MERGED and n not in allowed)
+        unrelated = sorted(n for n, state in stack.entries if state is GitHubState.OPEN and n not in allowed)
         if unrelated:
             raise StackError(
-                "can't rebuild GitHub stacks containing other unmerged pull requests: "
+                "can't rebuild GitHub stacks containing other open pull requests: "
                 + ", ".join(f"#{n}" for n in unrelated)
             )
 
@@ -974,17 +974,8 @@ class GitHubAdapter(GitAdapter):
             self.core.emit(events.GitHubStackRebuildPlanned((), tuple(chain)))
             return False
         if rebuild_stack and found:
-            unrelated = sorted(
-                n
-                for existing in found.values()
-                for n, state in existing.entries
-                if state is not GitHubState.MERGED and n not in chain
-            )
-            if unrelated:
-                raise StackError(
-                    "can't rebuild GitHub stacks containing other unmerged pull requests: "
-                    + ", ".join(f"#{n}" for n in unrelated)
-                )
+            for existing in found.values():
+                self.ensure_stack_scope(existing, set(chain))
             if dry_run:
                 self.core.emit(events.GitHubStackRebuildPlanned(tuple(sorted(found)), tuple(chain)))
                 return False
