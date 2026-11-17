@@ -258,6 +258,8 @@ Track open pull requests on GitHub, drafts included, as stacks: each pull
 request's branch on the branch it merges into. They're your own, or with
 `--author`, another GitHub user's. `autocreate` is another name for it.
 
+Importing into a repository with multiple-base stacks is not supported yet.
+
 **When would I use it?** When you have pull requests open but git-stack doesn't
 know about their branches yet: in a fresh clone, on another machine, or for
 pull requests you opened before you started using git-stack. Or to build on a

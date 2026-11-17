@@ -8,10 +8,28 @@ from git_client.testing import GitCall
 from git_stack import events
 from git_stack.errors import StackError
 from git_stack.stack import BranchStatus, ImportAction, ImportStep, StackClient
-from git_stack.stacks import Ownership
+from git_stack.stacks import Ownership, StackNode, Stacks
 from tests.helpers import FakeGitHub, Repo
 
 SOMEONE = "Someone <someone@example.com>"
+
+
+def test_import_refuses_unsupported_multiple_base_graph_before_fetching(
+    repo: Repo, client: StackClient, emitted: list[events.Event], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo.make_stack()
+    before = repo.git("rev-parse", "refs/heads/pr3")
+    stacks = Stacks(
+        [StackNode("pr1", "main"), StackNode("pr2", "pr1", additional_parents=("main",)), StackNode("pr3", "pr2")]
+    )
+    monkeypatch.setattr(client, "stacks", lambda: stacks)
+    emitted.clear()
+
+    with pytest.raises(StackError, match="multiple bases.*not supported"):
+        client.import_stacks()
+
+    assert not any(isinstance(event, events.Fetching) for event in emitted)
+    assert repo.git("rev-parse", "refs/heads/pr3") == before
 
 
 def push_branch(repo: Repo, branch: str, base: str, author: str | None = None) -> None:
