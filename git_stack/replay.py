@@ -10,6 +10,7 @@ from git_stack.git import GitClient, is_object_id
 
 PENDING = "stack.pendingReplay"
 TIPS = "stackReplayTips"
+STALE = "stackReplayStale"
 PIN_PREFIX = "refs/git-stack/replay/"
 
 

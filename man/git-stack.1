@@ -1030,6 +1030,7 @@ The children are rebased the next time you \f[CR]sync\f[R] or
 For branches that depend on multiple bases, cleanup requires the primary
 parent to contain the branch\(aqs actual commits.
 It checks for reverts and new upstream work before removing a branch.
+Cleanup keeps any remote branch that a graph root tracks.
 .IP \(bu 2
 \f[CR]\-d\f[R], \f[CR]\-\-no\-verify\f[R] and
 \f[CR]\-\-ignore\-revert\f[R] work as for \f[CR]sync\f[R].

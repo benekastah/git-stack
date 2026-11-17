@@ -573,7 +573,11 @@ class StackCore:
         git = self.git
         base = self.recorded_base(branch, parents[0])
         tips = tuple(git.tip(parent) for parent in parents)
-        if recorded == parents and git.config_get(branch, replay.TIPS) == " ".join(tips):
+        if (
+            recorded == parents
+            and git.config_get(branch, replay.TIPS) == " ".join(tips)
+            and not git.config_get(branch, replay.STALE)
+        ):
             return True
         if (worktree := git.other_worktree_of(branch)) is not None:
             self.emit(events.NotRestackedInOtherWorktree(branch, str(worktree)))
@@ -609,6 +613,7 @@ class StackCore:
                 git.config_set(result.branch, replay.TIPS, " ".join(result.tips))
             else:
                 git.config_unset(result.branch, replay.TIPS)
+            git.config_unset(result.branch, replay.STALE)
         self.restore_checkout(job.original)
         job.clear(git)
         return result is not None
@@ -915,6 +920,7 @@ class StackCore:
         git = self.git
         new_parent = stacks.parent(branch)
         children = tuple(stacks.remove_merged(branch))
+        self.invalidate_source_tips(children)
         if delete and (worktree := git.other_worktree_of(branch)) is not None:
             self.emit(events.NotDeletedInOtherWorktree(branch, str(worktree)))
             delete = False
@@ -942,6 +948,12 @@ class StackCore:
         git.run("branch", "--quiet", "--delete", "--force", branch)
         self.save(stacks)
         self.emit(events.Untracked(branch, new_parent, children, deleted_tip=tip))
+
+    def invalidate_source_tips(self, branches: Iterable[str]) -> None:
+        """Keep old tips for upstream checks, but mark them as superseded."""
+        for branch in branches:
+            if self.git.config_get(branch, replay.TIPS):
+                self.git.config_set(branch, replay.STALE, "true")
 
     def untrack_merged(
         self,
@@ -974,9 +986,8 @@ class StackCore:
             return True
         upstream = git.run("rev-parse", "--abbrev-ref", f"{branch}@{{upstream}}")
         remote_name, ref, tip = remote
-        root = stacks.root(branch)
-        root_ref = f"refs/heads/{git.remote_branch_name(root, remote_name)}"
-        if ref == root_ref:
+        roots = {f"refs/heads/{git.remote_branch_name(root, remote_name)}" for root in stacks.roots()}
+        if ref in roots:
             self.remove_merged(branch, stacks, delete_local)
             return True
         if delete is not None and delete.deletes_remote:

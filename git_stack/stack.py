@@ -950,6 +950,7 @@ class StackClient(StackCore):
             stacks.set_group(name, group)
         for branch in stack:
             stacks.reparent(branch, name)
+        self.invalidate_source_tips(stack)
         self.save(stacks)
         git.config_set(name, BASE_KEY, git.tip(name))
         for old in left:
@@ -1045,7 +1046,7 @@ class StackClient(StackCore):
         if len(parents) == 1:
             return [base]
         tips = (self.git.config_get(branch, replay.TIPS) or "").split()
-        if len(tips) != len(parents):
+        if len(tips) != len(parents) or self.git.config_get(branch, replay.STALE):
             raise StackError(f"{branch}'s base tips have not all been recorded; run `git stack restack {branch}`")
         return tips
 
@@ -1198,7 +1199,8 @@ class StackClient(StackCore):
         if any(adapter.reverted(branch, parent) for parent in parents):
             return BranchStatus.REVERTED
         if len(parents) > 1:
-            needs_restack = tuple((git.config_get(branch, replay.TIPS) or "").split()) != tips
+            incorporated = tuple((git.config_get(branch, replay.TIPS) or "").split())
+            needs_restack = bool(git.config_get(branch, replay.STALE)) or incorporated != tips
         else:
             needs_restack = tips[0] != base
         return BranchStatus.NEEDS_RESTACK if needs_restack else BranchStatus.UP_TO_DATE

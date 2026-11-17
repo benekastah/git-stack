@@ -740,7 +740,8 @@ git stack clean -d local
   the next time you `sync` or `restack` their stack.
 - For branches that depend on multiple bases, cleanup requires the primary
   parent to contain the branch's actual commits. It checks for reverts and
-  new upstream work before removing a branch.
+  new upstream work before removing a branch. Cleanup keeps any remote
+  branch that a graph root tracks.
 - `-d`, `--no-verify` and `--ignore-revert` work as for `sync`.
 - It ends by showing every stack, as `info` does.
 - Runs from any branch, even one that isn't in a stack. Uncommitted changes

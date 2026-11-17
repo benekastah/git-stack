@@ -247,3 +247,39 @@ def test_clean_says_how_to_move_a_branch_off_a_deleted_parent(
     client.track("main", ["pr2"], base=base[:12])
     client.sync()
     repo.assert_stacked("pr2", "main", ["pr2 c1"])
+
+
+def test_clean_keeps_upstream_of_secondary_root(repo: Repo, client: StackClient) -> None:
+    repo.git("branch", "release-local", "main")
+    client.branch("topic")
+    repo.commit("a", "topic\n", "topic")
+    repo.stack("track", "--on", "main", "--on", "release-local")
+    client.restack()
+    client.push()
+    repo.git("branch", "--set-upstream-to=origin/topic", "release-local")
+    repo.merge_on_forge("topic", delete_branch=False)
+
+    client.clean(delete=Delete.REMOTE)
+
+    repo.assert_untracked("topic")
+    assert repo.git("rev-parse", "refs/heads/topic", cwd=repo.origin)
+
+
+def test_clean_invalidates_base_listing_when_secondary_is_replaced(repo: Repo, client: StackClient) -> None:
+    client.branch("first")
+    repo.commit("a", "first\n", "first")
+    client.branch("combined")
+    repo.commit("c", "own\n", "own")
+    repo.git("switch", "--quiet", "main")
+    client.branch("second")
+    repo.commit("b", "second\n", "second")
+    repo.git("switch", "--quiet", "combined")
+    repo.stack("track", "--on", "first", "--on", "second")
+    client.restack()
+    client.push()
+    repo.squash_merge_on_forge("second")
+
+    client.clean()
+
+    assert client.stacks().dependencies("combined") == ("first", "main")
+    assert "git stack restack" in repo.stack("bases", expect_success=False).stderr
