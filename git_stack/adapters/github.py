@@ -1013,8 +1013,8 @@ class GitHubAdapter(GitAdapter):
 
         They're all in one if its open pull requests are chain, in order.
         Otherwise the rest are added to the top of the one whose open pull
-        requests are chain's bottom ones (and which doesn't end in a merged
-        one), or their stack is made, if none is in one. Pull requests can't
+        requests are chain's bottom ones (and whose last pull request is
+        open), or their stack is made, if none is in one. Pull requests can't
         be taken out of a stack, so if they're in several, or in one that
         doesn't fit, they're left alone, with a warning, unless rebuild_stack
         is set, which unstacks those stacks and makes chain's. A repository
