@@ -6,7 +6,7 @@ from git_stack import events
 from git_stack.errors import StackError
 from git_stack.git import GitClient
 from git_stack.stack import BranchInfo, BranchStatus, StackClient
-from git_stack.stacks import Ownership, StackNode, Stacks
+from git_stack.stacks import Ownership
 from tests.helpers import Repo
 
 
@@ -36,18 +36,16 @@ def test_restack_all_orders_parents_before_children(repo: Repo, client: StackCli
     repo.assert_stacked("pr3", "pr2", ["pr3 c1"])
 
 
-def test_restack_multiple_onto_values_refuses_before_changing_branches(repo: Repo, client: StackClient) -> None:
+def test_restack_repeated_onto_does_not_move_either_destination(repo: Repo, client: StackClient) -> None:
     repo.make_stack()
-    before = {branch: repo.git("rev-parse", f"refs/heads/{branch}") for branch in ("pr1", "pr2", "pr3")}
-
-    result = repo.stack("restack", "--onto", "pr1", "--onto", "pr2", expect_success=False)
-
-    assert "multiple bases" in result.stderr
-    assert {branch: repo.git("rev-parse", f"refs/heads/{branch}") for branch in before} == before
-    assert repo.config("pr3", "stackParent") == "pr2"
+    before = {branch: repo.git("rev-parse", branch) for branch in ("pr1", "pr2")}
+    repo.stack("restack", "--onto", "pr1", "--onto", "pr2")
+    assert client.stacks().dependencies("pr3") == ("pr1", "pr2")
+    assert {branch: repo.git("rev-parse", branch) for branch in before} == before
+    assert repo.git("log", "--format=%s", "pr1..pr3") == "pr3 c1\npr2 c1"
 
 
-def test_restack_refuses_before_rewriting_secondary_dependency(repo: Repo, client: StackClient) -> None:
+def test_restack_handles_secondary_dependency_rewritten_with_primary(repo: Repo, client: StackClient) -> None:
     client.branch("second")
     repo.commit("a", "second\n", "second")
     client.branch("first")
@@ -56,14 +54,13 @@ def test_restack_refuses_before_rewriting_secondary_dependency(repo: Repo, clien
     repo.commit("c", "combined\n", "combined")
     repo.stack("track", "--on", "first", "--on", "second")
     repo.git("switch", "--quiet", "main")
-    repo.commit("a", "main changed\n", "main changed")
+    repo.write("d", "main changed\n")
+    repo.git("add", "d")
+    repo.git("commit", "-qm", "main changed")
     repo.git("switch", "--quiet", "combined")
-    before = {b: repo.git("rev-parse", b) for b in ("first", "second", "combined")}
+    client.restack(latest=True)
 
-    with pytest.raises(StackError, match="multiple bases.*not supported"):
-        client.restack(latest=True)
-
-    assert {b: repo.git("rev-parse", b) for b in before} == before
+    assert repo.git("log", "--format=%s", "first..combined") == "combined"
     assert repo.git("branch", "--show-current") == "combined"
     assert client.stacks().dependencies("combined") == ("first", "second")
 
@@ -79,8 +76,7 @@ def test_restack_does_not_collapse_a_graph_when_primary_is_merged(repo: Repo, cl
     repo.git("commit", "--quiet", "-m", "squashed first")
     repo.git("switch", "--quiet", "combined")
 
-    with pytest.raises(StackError, match="multiple bases.*not supported"):
-        client.restack(latest=True)
+    client.restack(latest=True)
 
     assert client.stacks().dependencies("combined") == ("first", "main")
 
@@ -97,13 +93,12 @@ def test_restack_does_not_reapply_reverted_multi_base_changes(repo: Repo, client
     repo.stack("track", "--on", "first", "--on", "main")
     before = repo.git("rev-parse", "combined")
 
-    with pytest.raises(StackError, match="multiple bases.*not supported"):
-        client.restack(latest=True)
+    client.restack(latest=True)
 
     assert repo.git("rev-parse", "combined") == before
 
 
-def test_restack_refuses_an_unincorporated_secondary_base_before_rewriting(repo: Repo, client: StackClient) -> None:
+def test_restack_keeps_refs_unchanged_on_base_conflict(repo: Repo, client: StackClient) -> None:
     client.branch("first")
     repo.commit("a", "first\n", "first")
     client.branch("combined")
@@ -115,33 +110,10 @@ def test_restack_refuses_an_unincorporated_secondary_base_before_rewriting(repo:
     repo.stack("track", "--on", "first", "--on", "second")
     before = {b: repo.git("rev-parse", b) for b in ("first", "second", "combined")}
 
-    with pytest.raises(StackError, match="multiple bases.*not supported"):
+    with pytest.raises(StackError, match="stopped at"):
         client.restack()
 
     assert {b: repo.git("rev-parse", b) for b in before} == before
-
-
-def test_restack_refuses_multiple_bases_before_changing_any_branch(
-    repo: Repo, client: StackClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    stacks = Stacks(
-        [
-            StackNode("first", "main"),
-            StackNode("second", "main"),
-            StackNode("combined", "first", additional_parents=("second",)),
-        ]
-    )
-    attempted: list[str] = []
-
-    def restack_branch(branch: str, parent: str, latest: bool = False) -> bool:
-        attempted.append(branch)
-        return True
-
-    monkeypatch.setattr(client, "restack_branch", restack_branch)
-    with pytest.raises(StackError, match="multiple bases.*not supported"):
-        client.restack_all(["combined", "first", "second"], stacks)
-
-    assert attempted == []
 
 
 def test_restack_refuses_to_drop_local_merge_changes(repo: Repo, client: StackClient) -> None:

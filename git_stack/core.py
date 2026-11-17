@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import cast
 
-from git_stack import events
+from git_stack import events, replay
 from git_stack.check_cache import CheckCache
 from git_stack.errors import BrokenStackError, StackError
 from git_stack.file_lock import file_lock
@@ -539,18 +539,67 @@ class StackCore:
         original = self.git.current_branch()
         skipped: set[str] = set()
         branches = dependency_order(branches, {b: stacks.dependencies(b) for b in stacks})
-        if any(len(stacks.dependencies(branch)) > 1 for branch in branches):
-            raise StackError("restacking branches with multiple bases is not supported yet")
         for branch in branches:
-            parent = stacks.parent(branch)
+            parents = stacks.dependencies(branch)
+            if len(parents) > 1:
+                replay.plan(self.git, branch, parents, self.recorded_base(branch, parents[0]), self.current_checkout())
+        for branch in branches:
             blocked = next((base for base in stacks.dependencies(branch) if base in skipped), None)
             if blocked is not None:
                 self.emit(events.ParentSkipped(branch, blocked))
                 skipped.add(branch)
-            elif not self.restack_branch(branch, parent, latest):
+            elif not self.restack_dependency(branch, stacks, latest):
                 skipped.add(branch)
         if original and self.git.current_branch() != original:
             self.git.switch(original)
+
+    def restack_dependency(self, branch: str, stacks: Stacks, latest: bool) -> bool:
+        """Restack a branch using all of its planned dependencies."""
+        parents = stacks.dependencies(branch)
+        recorded = read_parents(branch, self.git.config_get(branch, PARENT_KEY) or "")
+        was_multi = len(recorded) > 1
+        if len(parents) == 1 and not was_multi and not self.git.config_get(branch, replay.TIPS):
+            return self.restack_branch(branch, parents[0], latest)
+        git = self.git
+        base = self.recorded_base(branch, parents[0])
+        original = self.current_checkout()
+        tips = tuple(git.tip(parent) for parent in parents)
+        if recorded == parents and git.config_get(branch, replay.TIPS) == " ".join(tips):
+            return True
+        if (worktree := git.other_worktree_of(branch)) is not None:
+            self.emit(events.NotRestackedInOtherWorktree(branch, str(worktree)))
+            return False
+        job = replay.plan(git, branch, parents, base, original)
+        self.emit(events.Restacking(branch, parents[0]))
+        job.pin(git)
+        self.finish_replay(job)
+        return True
+
+    def finish_replay(self, job: replay.Replay) -> None:
+        """Resume a queued replay and persist its boundary after publication."""
+        git = self.git
+        result = replay.run(git, job)
+        if result is not None:
+            try:
+                replay.publish(git, result)
+            except StackError:
+                self.restore_checkout(result.original)
+                result.clear(git)
+                raise
+            stacks = self.stacks()
+            if stacks.dependencies(result.branch) != result.parents:
+                stacks.reparent(result.branch, result.parents[0])
+                stacks.set_additional_parents(result.branch, result.parents[1:])
+                if any(parent in stacks and stacks.is_shared(parent) for parent in result.parents):
+                    stacks.share(result.branch)
+                self.save(stacks)
+            git.config_set(result.branch, BASE_KEY, result.boundary)
+            if len(result.parents) > 1:
+                git.config_set(result.branch, replay.TIPS, " ".join(result.tips))
+            else:
+                git.config_unset(result.branch, replay.TIPS)
+        self.restore_checkout(job.original)
+        job.clear(git)
 
     def unpulled_commits(self, branch: str, parent: str, upstream_tip: str) -> list[str]:
         """Non-merge commits on upstream_tip that branch doesn't have, oldest first.

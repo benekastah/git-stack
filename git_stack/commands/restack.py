@@ -8,7 +8,6 @@ from git_stack.commands import (
     add_latest_argument,
     add_stack_arguments,
 )
-from git_stack.errors import StackError
 from git_stack.stack import StackClient
 
 
@@ -44,12 +43,10 @@ class Restacked:
 
 
 def run(stack: StackClient, args: Args) -> Restacked:
-    if len(args.onto) > 1:
-        raise StackError("restacking onto multiple bases is not supported yet")
     stack.restack(
         args.branches,
         args.groups,
-        onto=args.onto[0] if args.onto else None,
+        onto=tuple(args.onto) if len(args.onto) > 1 else next(iter(args.onto), None),
         latest=args.latest,
         allow_shared=args.allow_shared,
     )

@@ -5,7 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Concatenate
 
-from git_stack import events
+from git_stack import events, replay
 from git_stack.adapters import ADAPTER_SETTING, make_adapter
 from git_stack.adapters.git import GitAdapter, PullRequestLink
 from git_stack.adapters.github import GitHubAdapter, GitHubState, OpenPullRequest, check_github_login
@@ -37,6 +37,8 @@ def exclusive[Client: StackCore, **Params, Result](
     @functools.wraps(method)
     def locked(client: Client, /, *args: Params.args, **kwargs: Params.kwargs) -> Result:
         with client.exclusive(), client.git.snapshot():
+            if method.__name__ != "restack" and replay.pending(client.git) is not None:
+                raise StackError("a multi-base replay is pending; rerun `git stack restack` in the original worktree")
             return method(client, *args, **kwargs)
 
     return locked
@@ -1198,6 +1200,7 @@ class StackClient(StackCore):
         skipped: set[str] = set()
         branches = list(branches)
         ineligible = {branch for branch in branches if stacks.has_multiple_base_ancestor(branch)}
+        preserved = {dependency for branch in ineligible for dependency in stacks.dependency_ancestry(branch)}
         for branch in branches:
             parent = stacks.parent(branch)
             blocked = next((base for base in stacks.dependencies(branch) if base in skipped), None)
@@ -1206,12 +1209,17 @@ class StackClient(StackCore):
                 skipped.add(branch)
                 continue
             if branch in ineligible:
-                remaining.append(branch)
+                if any(adapter.reverted(branch, base) for base in stacks.dependencies(branch)):
+                    self.emit(self.reverted(branch, stacks, adapter))
+                    skipped.add(branch)
+                else:
+                    remaining.append(branch)
                 continue
             state = adapter.merge_state(branch, parent)
             if state is MergeState.MERGED:
                 self.emit(events.SkippedMerged(branch, parent))
-                stacks.drop(branch)
+                if branch not in preserved:
+                    stacks.drop(branch)
             elif state is MergeState.REVERTED:
                 # Restacking it could drop its commits, as already in parent.
                 self.emit(self.reverted(branch, stacks, adapter))
@@ -1225,7 +1233,7 @@ class StackClient(StackCore):
         self,
         branches: Sequence[str] = (),
         groups: Sequence[str] = (),
-        onto: str | None = None,
+        onto: str | Sequence[str] | None = None,
         latest: bool = False,
         allow_shared: bool = False,
     ) -> None:
@@ -1242,31 +1250,36 @@ class StackClient(StackCore):
             raise StackError("--onto moves the current branch, so it can't be combined with branches to restack")
         self.ensure_no_operation_in_progress()
         self.ensure_clean_worktree()
+        if (job := replay.pending(self.git)) is not None:
+            self.finish_replay(job)
+            return
         self.settle_all()
         stacks = self.stacks()
         original = self.current_checkout()
         if onto:
             branch = self.current_stacked_branch(stacks, "restack", hint="use `git stack track` first")
-            if stacks[branch].additional_parents:
-                raise StackError("restacking branches with multiple bases is not supported yet")
-            self.ensure_local_branch_parent(onto)
-            stacks.ensure_no_cycle(branch, onto)
-            self.ensure_owned(stacks.stack_of(branch), stacks, allow_shared, "restack")
-            if onto in stacks:
-                self.ensure_owned(stacks.stack_of(onto), stacks, allow_shared, "restack")
+            parents = (onto,) if isinstance(onto, str) else tuple(onto)
+            self.plan_restack_onto(stacks, branch, parents, allow_shared)
             selected = [branch, *stacks.descendants(branch)]
-            # Only in stacks, which isn't saved: restack_branch records the
-            # new parent once the rebase has finished.
-            stacks.reparent(branch, onto)
         else:
             selected = self.selected_stacks(branches, groups, stacks, "restack")
             self.ensure_owned(selected, stacks, allow_shared, "restack")
-        if any(stacks.has_multiple_base_ancestor(branch) for branch in selected):
-            raise StackError("restacking branches with multiple bases is not supported yet")
         adapter = make_adapter(self, self.default_remote(selected, stacks), fetch=False)
         to_restack = self.skip_merged(selected, stacks, adapter)
         self.restack_all(to_restack, stacks, latest)
         self.restore_checkout(original)
+
+    def plan_restack_onto(self, stacks: Stacks, branch: str, parents: tuple[str, ...], allow_shared: bool) -> None:
+        if len(set(parents)) != len(parents):
+            raise StackError("each branch can only appear once")
+        self.ensure_owned(stacks.stack_of(branch), stacks, allow_shared, "restack")
+        for parent in parents:
+            self.ensure_local_branch_parent(parent)
+            stacks.ensure_no_cycle(branch, parent)
+            if parent in stacks:
+                self.ensure_owned(stacks.stack_of(parent), stacks, allow_shared, "restack")
+        stacks.reparent(branch, parents[0])
+        stacks.set_additional_parents(branch, parents[1:])
 
     def sync_selection(
         self,

@@ -103,7 +103,7 @@ def test_track_multiple_bases_inherits_shared_ownership(repo: Repo, client: Stac
     assert stacks.is_shared("child")
 
 
-def test_restack_onto_a_secondary_base_cannot_discard_dependencies(repo: Repo, client: StackClient) -> None:
+def test_restack_onto_can_replace_multiple_bases_with_one(repo: Repo, client: StackClient) -> None:
     client.branch("first")
     client.branch("feature")
     repo.git("switch", "--quiet", "main")
@@ -112,10 +112,9 @@ def test_restack_onto_a_secondary_base_cannot_discard_dependencies(repo: Repo, c
     repo.stack("track", "--on", "first", "--on", "second")
     before = repo.git("rev-parse", "feature")
 
-    result = repo.stack("restack", "--onto", "second", expect_success=False)
+    repo.stack("restack", "--onto", "second")
 
-    assert "multiple bases" in result.stderr
-    assert client.stacks().dependencies("feature") == ("first", "second")
+    assert client.stacks().dependencies("feature") == ("second",)
     assert repo.git("rev-parse", "feature") == before
 
 

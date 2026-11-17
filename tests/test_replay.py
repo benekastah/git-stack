@@ -1,0 +1,71 @@
+"""Ordered replay in real repositories."""
+
+import pytest
+
+from git_stack.errors import StackError
+from git_stack.stack import StackClient
+from tests.helpers import Repo
+
+
+@pytest.fixture
+def combined(repo: Repo, client: StackClient) -> None:
+    client.branch("first")
+    repo.commit("a", "first\n", "first")
+    client.branch("combined")
+    repo.commit("c", "combined\n", "own change")
+    repo.git("switch", "--quiet", "main")
+    client.branch("second")
+    repo.commit("b", "second\n", "second")
+    repo.git("switch", "--quiet", "combined")
+    repo.stack("track", "--on", "first", "--on", "second")
+
+
+def test_replay_rebuilds_from_rewritten_base(repo: Repo, client: StackClient, combined: None) -> None:
+    first = repo.git("rev-parse", "first")
+    second = repo.git("rev-parse", "second")
+    client.restack()
+    assert repo.git("log", "--reverse", "--format=%s", "first..combined") == "second\nown change"
+    tip = repo.git("rev-parse", "combined")
+    client.restack()
+    assert repo.git("rev-parse", "combined") == tip
+    assert repo.git("rev-parse", "second") == second
+
+    repo.git("switch", "--quiet", "second")
+    repo.write("b", "rewritten\n")
+    repo.git("commit", "--quiet", "--amend", "-am", "new second")
+    repo.git("switch", "--quiet", "combined")
+    client.restack()
+
+    assert repo.git("log", "--reverse", "--format=%s", "first..combined") == "new second\nown change"
+    assert repo.git("rev-parse", "first") == first
+    assert repo.git("branch", "--show-current") == "combined"
+
+
+@pytest.mark.parametrize("resume", [True, False])
+def test_replay_conflict_continue_or_abort(repo: Repo, client: StackClient, combined: None, resume: bool) -> None:
+    repo.git("switch", "--quiet", "second")
+    repo.commit("a", "conflicting second\n", "conflicting second")
+    repo.git("switch", "--quiet", "combined")
+    tip = repo.git("rev-parse", "combined")
+    base = repo.config("combined", "stackBase")
+
+    with pytest.raises(StackError, match="cherry-pick --continue"):
+        client.restack()
+    assert repo.git("rev-parse", "combined") == tip
+    assert repo.config("combined", "stackBase") == base
+
+    if resume:
+        repo.write("a", "resolved\n")
+        repo.git("add", "a")
+        repo.git("-c", "core.editor=true", "cherry-pick", "--continue")
+    else:
+        repo.git("cherry-pick", "--abort")
+    client.restack()
+
+    assert repo.git("branch", "--show-current") == "combined"
+    if resume:
+        assert repo.git("show", "combined:a") == "resolved"
+        assert repo.git("log", "-1", "--format=%s", "combined") == "own change"
+    else:
+        assert repo.git("rev-parse", "combined") == tip
+        assert repo.config("combined", "stackBase") == base

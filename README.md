@@ -552,7 +552,7 @@ Ownership changes apply to all connected branches, including every base and
 dependent branch in a multiple-base graph. `show`
 continues to report whether any selected branch is shared.
 
-### `git stack restack [<branch|glob>...] [-g <group>] [--onto <parent>] [-l] [--allow-shared]`
+### `git stack restack [<branch|glob>...] [-g <group>] [--onto <parent>...] [-l] [--allow-shared]`
 
 Rebase every branch in the current stack (or the ones named, see
 [Groups](#groups)) onto its parent, bottom-up, except
@@ -578,12 +578,15 @@ git stack restack --latest              # also move the stack onto main's latest
   [How it works](#how-it-works).
 - A branch with merge commits must be restacked manually while preserving
   those merges; git-stack refuses to replay it as a linear history.
-- Restacking a multiple-base graph is not supported yet; the command refuses
-  before rewriting any of its branches.
 - `--onto` retargets only the current branch, onto another local branch. The
   branches stacked on it come along.
-- Multiple `--onto` values are reserved for multiple bases, which aren't
-  supported yet; they currently fail without changing anything.
+- Repeat `--onto` to replace the current branch's ordered bases. Restack
+  keeps the first base as the starting point, replays the other bases in
+  order, then replays the branch's own commits. Retargeting leaves the
+  destination branches untouched.
+- If a multi-base replay stops, resolve it with `git cherry-pick --continue`
+  or back out with `git cherry-pick --abort`, then rerun `git stack restack`
+  in the same worktree. The branch ref moves only after its replay finishes.
 - `-l`/`--latest` moves the branches on the stack's root onto its latest commit
   even if they don't conflict with it (and the rest of the stack with them).
 - Merged branches are skipped and their children restacked onto their parent;

@@ -774,7 +774,7 @@ Ownership changes apply to all connected branches, including every base
 and dependent branch in a multiple\-base graph.
 \f[CR]show\f[R] continues to report whether any selected branch is
 shared.
-.SS \f[CR]git stack restack [<branch|glob>...] [\-g <group>] [\-\-onto <parent>] [\-l] [\-\-allow\-shared]\f[R]
+.SS \f[CR]git stack restack [<branch|glob>...] [\-g <group>] [\-\-onto <parent>...] [\-l] [\-\-allow\-shared]\f[R]
 Rebase every branch in the current stack (or the ones named, see Groups)
 onto its parent, bottom\-up, except that a branch on the stack\(aqs root
 (e.g.
@@ -807,16 +807,21 @@ See How it works.
 A branch with merge commits must be restacked manually while preserving
 those merges; git\-stack refuses to replay it as a linear history.
 .IP \(bu 2
-Restacking a multiple\-base graph is not supported yet; the command
-refuses before rewriting any of its branches.
-.IP \(bu 2
 \f[CR]\-\-onto\f[R] retargets only the current branch, onto another
 local branch.
 The branches stacked on it come along.
 .IP \(bu 2
-Multiple \f[CR]\-\-onto\f[R] values are reserved for multiple bases,
-which aren\(aqt supported yet; they currently fail without changing
-anything.
+Repeat \f[CR]\-\-onto\f[R] to replace the current branch\(aqs ordered
+bases.
+Restack keeps the first base as the starting point, replays the other
+bases in order, then replays the branch\(aqs own commits.
+Retargeting leaves the destination branches untouched.
+.IP \(bu 2
+If a multi\-base replay stops, resolve it with
+\f[CR]git cherry\-pick \-\-continue\f[R] or back out with
+\f[CR]git cherry\-pick \-\-abort\f[R], then rerun
+\f[CR]git stack restack\f[R] in the same worktree.
+The branch ref moves only after its replay finishes.
 .IP \(bu 2
 \f[CR]\-l\f[R]/\f[CR]\-\-latest\f[R] moves the branches on the
 stack\(aqs root onto its latest commit even if they don\(aqt conflict
