@@ -95,8 +95,9 @@ Text meant for people (messages, `info`'s tree) can change.
 - The tests load py-git-client's pytest plugin (`git_client.testing`, in
   `tests/conftest.py`): each test's git has a config of its own, none of the
   user's config or git's variables (e.g. a hook's `GIT_DIR`), and runs from a
-  directory outside any repository, so nothing a test runs can reach the
-  repository the tests were started in. `git_calls` lists the git processes
+  directory outside any repository, so a git run without naming its
+  repository fails rather than reach the clone the tests were started in.
+  Code that names `ROOT` (`dev.py`, `dev_project.py`) still runs there. `git_calls` lists the git processes
   git-stack starts; the tests' own (`Repo.git`) aren't in it.
 - The man page, `man/git-stack.1`, is generated from the README, and a test
   fails if it's out of date: the pre-commit hook regenerates it (or run
