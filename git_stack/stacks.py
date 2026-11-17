@@ -218,18 +218,31 @@ class Stacks:
                     seen.add(member)
                     selected.append(member)
 
-        for base in self.group_bottoms(bottom) if groups else [bottom]:
-            add_stack(base)
+        expanded: set[str] = set()
+
+        def add_bottom(base: str) -> None:
+            if base not in expanded:
+                bottoms = self.group_bottoms(base) if groups else [base]
+                expanded.update(bottoms)
+                for member in bottoms:
+                    add_stack(member)
+
+        add_bottom(bottom)
         index = 0
         while index < len(selected):
             current = selected[index]
-            for parent in self.dependencies(current):
-                if parent in self._nodes and parent not in seen:
-                    other = self.bottom(parent)
-                    for base in self.group_bottoms(other) if groups else [other]:
-                        add_stack(base)
+            to_visit = self.unvisited_bottoms(current, seen)
+            for base in to_visit:
+                add_bottom(base)
             index += 1
         return dependency_order(selected, {b: self.dependencies(b) for b in selected})
+
+    def unvisited_bottoms(self, branch: str, seen: set[str]) -> list[str]:
+        bottoms = [branch] if self.is_bottom(branch) else []
+        bottoms.extend(
+            self.bottom(parent) for parent in self.dependencies(branch) if parent in self and parent not in seen
+        )
+        return bottoms
 
     def copy(self) -> Stacks:
         """A copy to change without changing this one, e.g. to check a plan."""

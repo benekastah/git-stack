@@ -315,3 +315,17 @@ def test_save_writes_what_changed(repo: Repo, client: StackClient) -> None:
     assert repo.git("config", "branch.pr1.stackGroup") == "g"
     assert repo.git("config", "branch.pr2.stackOwnership") == "shared"
     assert not [key for branch, key in client.git.branch_config() if branch == "pr3" and key.startswith("stack")]
+
+
+def test_stack_selection_reaches_group_of_a_dependent_bottom() -> None:
+    stacks = Stacks(
+        [
+            StackNode("source", "main"),
+            StackNode("combined", "release", group="feature", additional_parents=("source",)),
+            StackNode("sibling", "maintenance", group="feature", ownership=Ownership.SHARED),
+        ]
+    )
+
+    assert set(stacks.stack_of("source")) == {"source", "combined", "sibling"}
+    assert set(stacks.stack_of("sibling")) == {"source", "combined", "sibling"}
+    assert stacks.stack_of("source", groups=False) == ["source", "combined"]
