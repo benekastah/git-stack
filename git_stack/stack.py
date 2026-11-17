@@ -1,6 +1,5 @@
 import enum
 import functools
-import re
 from collections.abc import Callable, Iterable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -9,7 +8,7 @@ from typing import Concatenate
 from git_stack import events
 from git_stack.adapters import ADAPTER_SETTING, make_adapter
 from git_stack.adapters.git import GitAdapter, PullRequestLink
-from git_stack.adapters.github import GitHubAdapter, GitHubState, OpenPullRequest
+from git_stack.adapters.github import GitHubAdapter, GitHubState, OpenPullRequest, check_github_login
 from git_stack.adapters.merge_state import MergeState
 from git_stack.core import (
     BASE_KEY,
@@ -120,10 +119,6 @@ class Unreverted:
     parent: str
     reverts: tuple[str, ...]
     children: tuple[str, ...]
-
-
-# What GitHub allows in a username, so one can't add to a search query.
-GITHUB_LOGIN = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})")
 
 
 def not_github(remote: str) -> str:
@@ -494,8 +489,8 @@ class StackClient(StackCore):
         With dry_run, nothing is changed (besides fetching remote), and the
         steps are what force would do.
         """
-        if author is not None and not GITHUB_LOGIN.fullmatch(author):
-            raise StackError(f"{author} isn't a GitHub username")
+        if author is not None:
+            check_github_login(author)
         self.ensure_no_operation_in_progress()
         self.settle_all()
         remote = remote or self.fallback_remote()

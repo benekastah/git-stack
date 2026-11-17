@@ -20,6 +20,8 @@ from git_stack.stacks import Stacks
 # Matches https://host/owner/repo, ssh://user@host:port/owner/repo and
 # user@host:owner/repo, with or without .git.
 REMOTE_URL = re.compile(r"^(?:[a-z+]+://)?(?:[^@/]+@)?([^:/]+)(?::\d+)?[:/]([^/]+)/([^/]+?)(?:\.git)?/?$")
+# What GitHub allows in a username, so one can't add to a search query.
+GITHUB_LOGIN = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})")
 # A pull request's number, and the path of its page (or one of its tabs, e.g.
 # /files) on GitHub.
 NUMBER = re.compile(r"[0-9]+")
@@ -151,6 +153,13 @@ class OpenPullRequest:
 def login_of(user: object) -> str | None:
     """The login of a GraphQL user (an author), or None for a deleted account."""
     return None if user is None else field(user, "login", str)
+
+
+def check_github_login(login: str) -> None:
+    """Raise StackError if login can't be a GitHub username. It's checked
+    before anything is asked of GitHub, so the error isn't taken for gh's."""
+    if not GITHUB_LOGIN.fullmatch(login):
+        raise StackError(f"{login} isn't a GitHub username")
 
 
 class GitHubAdapter(GitAdapter):

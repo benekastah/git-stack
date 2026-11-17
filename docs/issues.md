@@ -57,15 +57,6 @@ open pull request by a deleted account with `--pr` fails with
 "#N isn't an open pull request". It should look the pull request up anyway
 (its author would show as "a deleted account", as for one found by search).
 
-## GitHub's username format is checked in `stack.py`
-
-`GITHUB_LOGIN`, which `import_stacks` checks `--author` against, is GitHub's
-format, but it lives in `git_stack/stack.py` rather than in
-`git_stack/adapters/github.py` with the rest of what's GitHub-specific (e.g.
-`pull_request_number`). It should move there, still checked before the pull
-requests are looked up, so its error doesn't get the "check `gh auth status`"
-hint.
-
 ## An older git-stack can't finish a restack this one stopped
 
 A restack that stops on a conflict is recorded in one setting,
