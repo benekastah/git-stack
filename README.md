@@ -1211,6 +1211,10 @@ cherry-picking upstream changes, run `git cherry-pick --abort` because
 continuing would skip the commit that couldn't be applied. Rerun the original
 git-stack command with the same arguments.
 
+An untracked file can also block the final checkout of a completed multi-base
+replay. Move the file out of the way and rerun the original git-stack command
+to publish the saved replay.
+
 ## Branches checked out in other worktrees
 
 git won't rebase, check out or delete a branch that's checked out in another

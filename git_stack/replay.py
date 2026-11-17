@@ -440,9 +440,9 @@ def finish(
         job.clear(git)
         raise
     if result is not None:
+        if not result.was_published(git):
+            git.run("switch", "--quiet", "--detach", result.head)
         try:
-            if not result.was_published(git):
-                git.run("switch", "--quiet", "--detach", result.head)
             publish(git, result)
         except StackError:
             if not result.was_published(git):

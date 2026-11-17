@@ -560,6 +560,37 @@ def test_replay_recovers_a_resolved_stage_after_switching_back(repo: Repo, clien
     assert repo.git("branch", "--show-current") == "combined"
 
 
+def test_replay_keeps_completed_resolution_when_final_checkout_is_blocked(repo: Repo, client: StackClient) -> None:
+    client.branch("first")
+    repo.commit("a", "first\n", "first")
+    client.branch("combined")
+    repo.git("switch", "-q", "main")
+    client.branch("second")
+    repo.write("new-file", "from second\n")
+    repo.git("add", "new-file")
+    repo.commit("a", "conflicting second\n", "conflict")
+    repo.git("switch", "-q", "combined")
+    repo.stack("track", "--on", "first", "--on", "second")
+    before = repo.git("rev-parse", "combined")
+    with pytest.raises(StackError, match="rebase --continue"):
+        client.restack()
+    repo.write("a", "resolved\n")
+    repo.git("add", "a")
+    repo.git("-c", "core.editor=true", "rebase", "--continue")
+    repo.git("switch", "-q", "combined")
+    repo.write("new-file", "local\n")
+
+    with pytest.raises(StackError, match="untracked working tree files"):
+        client.restack()
+    assert repo.git("rev-parse", "combined") == before
+    (repo.path / "new-file").rename(repo.path / "saved-local")
+    client.restack()
+
+    assert repo.git("show", "combined:a") == "resolved"
+    assert repo.git("show", "combined:new-file") == "from second"
+    assert (repo.path / "saved-local").read_text(encoding="utf-8") == "local\n"
+
+
 @pytest.mark.parametrize("resume", [True, False])
 def test_own_stage_recovery_accepts_an_edited_resolution_message(
     repo: Repo, client: StackClient, combined: None, resume: bool

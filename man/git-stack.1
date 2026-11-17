@@ -1750,6 +1750,11 @@ If Git stopped while cherry\-picking upstream changes, run
 \f[CR]git cherry\-pick \-\-abort\f[R] because continuing would skip the
 commit that couldn\(aqt be applied.
 Rerun the original git\-stack command with the same arguments.
+.PP
+An untracked file can also block the final checkout of a completed
+multi\-base replay.
+Move the file out of the way and rerun the original git\-stack command
+to publish the saved replay.
 .SH BRANCHES CHECKED OUT IN OTHER WORKTREES
 git won\(aqt rebase, check out or delete a branch that\(aqs checked out
 in another worktree, or that a rebase stopped partway through there, and
