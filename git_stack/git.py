@@ -882,6 +882,9 @@ class GitClient:
             return False
         with tempfile.TemporaryDirectory(prefix="git-stack-index-") as directory:
             env = {**os.environ, "GIT_INDEX_FILE": str(pathlib.Path(directory) / "index")}
+            # Where git apply runs: in a subdirectory, it leaves out the paths
+            # outside it.
+            top = str(self.toplevel())
 
             def run(*args: str, input: bytes | None = None) -> subprocess.CompletedProcess[bytes]:
                 return subprocess.run(
@@ -904,9 +907,6 @@ class GitClient:
                 )
                 if patch.returncode:
                     raise StackError(f"couldn't read changes in {commit}")
-                # From the top: run in a subdirectory, git apply leaves out the
-                # paths outside it.
-                top = str(self.toplevel())
                 if patch.stdout and run("-C", top, "apply", "--cached", "--3way", input=patch.stdout).returncode:
                     return False
                 tree = run("write-tree")
