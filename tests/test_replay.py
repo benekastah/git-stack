@@ -161,3 +161,47 @@ def test_replay_preserves_own_patch_when_a_replaceable_base_has_it(
     client.restack()
     client.restack(onto="first")
     assert repo.git("show", "combined:c") == "combined"
+
+
+def test_replay_deduplicates_a_shared_source_in_a_nested_graph(repo: Repo, client: StackClient) -> None:
+    client.branch("secondary")
+    repo.commit("a", "secondary\n", "secondary")
+    client.branch("first")
+    repo.commit("a", "secondary amended\n", "amend secondary")
+    client.branch("final")
+    repo.commit("c", "final\n", "final")
+    repo.git("switch", "--quiet", "main")
+    client.branch("other")
+    repo.commit("b", "other\n", "other")
+    client.branch("mixed")
+    repo.stack("track", "--on", "other", "--on", "secondary")
+    repo.git("switch", "--quiet", "final")
+    repo.stack("track", "--on", "first", "--on", "mixed")
+
+    client.restack()
+
+    assert repo.git("show", "final:a") == "secondary amended"
+    assert repo.git("show", "final:b") == "other"
+    assert repo.git("log", "--reverse", "--format=%s", "first..final") == "other\nfinal"
+
+
+def test_replay_uses_updated_primary_when_validating_secondary_changes(repo: Repo, client: StackClient) -> None:
+    client.branch("first")
+    repo.commit("a", "first\n", "first")
+    client.branch("combined")
+    repo.commit("c", "own\n", "own")
+    repo.git("switch", "--quiet", "main")
+    repo.git("switch", "--quiet", "-c", "trunk-side")
+    repo.write("d", "trunk side\n")
+    repo.git("add", "d")
+    repo.git("commit", "-qm", "trunk side")
+    repo.git("switch", "--quiet", "main")
+    repo.git("merge", "--no-ff", "--no-edit", "trunk-side")
+    client.branch("second")
+    repo.commit("b", "second\n", "second")
+    repo.git("switch", "--quiet", "combined")
+    repo.stack("track", "--on", "first", "--on", "second")
+
+    client.restack(latest=True)
+
+    assert repo.git("log", "--reverse", "--format=%s", "first..combined") == "second\nown"

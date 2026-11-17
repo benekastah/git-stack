@@ -542,7 +542,11 @@ class StackCore:
         for branch in branches:
             parents = stacks.dependencies(branch)
             if len(parents) > 1:
-                replay.plan(self.git, branch, parents, self.recorded_base(branch, parents[0]), self.current_checkout())
+                for parent in parents:
+                    if not self.git.local_branch_exists(parent):
+                        raise BrokenStackError(f"{branch}'s base {parent} is missing")
+                base = self.recorded_base(branch, parents[0])
+                replay.commits(self.git, self.git.tip(branch), (base,), branch)
         for index, branch in enumerate(branches):
             blocked = next((base for base in stacks.dependencies(branch) if base in skipped), None)
             if blocked is not None:

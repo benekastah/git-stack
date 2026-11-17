@@ -149,7 +149,8 @@ def plan(
             continue
         if not any(git.ok("merge-base", tip, previous) for previous in tips[:i]):
             raise StackError(f"{parent} has no shared history with the preceding bases of {branch}")
-        secondary.extend(commits(git, tip, tips[:i], parent))
+        pending_commits = commits(git, tip, tips[:i], parent)
+        secondary.extend(unique_patches(git, tip, tips[:i], pending_commits))
     before = git.tip(branch)
     return Replay(
         branch,
@@ -166,6 +167,17 @@ def plan(
         latest=latest,
         token=uuid4().hex,
     )
+
+
+def unique_patches(git: GitClient, tip: str, previous: tuple[str, ...], candidates: tuple[str, ...]) -> list[str]:
+    """Exclude patch-equivalent copies contributed by earlier bases."""
+    unique = set(candidates)
+    for earlier in previous:
+        if not unique:
+            break
+        divergent = git.run("rev-list", "--cherry-pick", "--right-only", "--no-merges", f"{earlier}...{tip}", "--")
+        unique.intersection_update(divergent.splitlines())
+    return [commit for commit in candidates if commit in unique]
 
 
 def advance(replay: Replay, picked_tip: str) -> Replay:
