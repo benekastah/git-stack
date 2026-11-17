@@ -116,12 +116,28 @@ def test_snapshot_asks_git_about_refs_it_doesnt_have(repo: Repo, git_calls: list
 
 
 def test_snapshot_isnt_read_for_refs_it_cant_answer(repo: Repo, git_calls: list[GitCall]) -> None:
+    """They're asked of the snapshot's cat-file instead, one process for all."""
+    git = GitClient(repo.path)
+    main = repo.git("rev-parse", "main")
+    with git.snapshot():
+        assert git.rev("HEAD") == main
+        assert git.rev("main~0") == main
+        assert git.rev("main~5") is None
+
+    assert [call[0] for call in git_calls] == ["cat-file"]
+
+
+def test_snapshot_asks_its_cat_file_for_a_branch_it_doesnt_have(repo: Repo, git_calls: list[GitCall]) -> None:
     git = GitClient(repo.path)
     with git.snapshot():
-        git.rev("HEAD")
-        git.rev("main~0")
+        git.local_branches()
+        repo.git("branch", "later")
+        assert git.tip("later") == repo.git("rev-parse", "main")
+        with pytest.raises(StackError, match="refs/heads/nope"):
+            git.tip("nope")
 
-    assert [call[0] for call in git_calls] == ["rev-parse", "rev-parse"]
+    # The config, for the upstreams the snapshot lists, then the refs.
+    assert [call[0] for call in git_calls] == ["config", "for-each-ref", "cat-file"]
 
 
 def test_snapshot_reads_refs_again_after_git_changes_them(repo: Repo) -> None:

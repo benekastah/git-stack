@@ -400,12 +400,16 @@ class GitClient:
                 return None
             if upstream in refs:
                 return refs[upstream][0]
-        return self.run("rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}", check=False) or None
+        return self._resolve(f"{ref}^{{commit}}")
 
     def tip(self, branch: str) -> str:
-        """The commit local branch points at. Fails if branch doesn't exist."""
+        """The commit local branch points at. Fails if branch doesn't exist.
+        Within a snapshot that hasn't it, asked of the snapshot's cat-file."""
         if (refs := self._snapshot_refs()) is not None and (entry := refs.get(f"refs/heads/{branch}")):
             return entry[0]
+        if self._snapshot_depth:
+            with git_errors():
+                return self._cat_file.verify(f"refs/heads/{branch}")
         return self.run("rev-parse", "--verify", f"refs/heads/{branch}")
 
     def is_ancestor(self, ancestor: str, descendant: str) -> bool:
@@ -433,15 +437,19 @@ class GitClient:
         runs until it ends, rather than a process each."""
         if (known := self._objects.get((object_id, kind))) is not None:
             return known
-        query = f"{object_id}^{{{kind}}}"
-        if not self._snapshot_depth:
-            found = self.run("rev-parse", "--verify", "--quiet", query, check=False) or None
-        else:
-            with git_errors():
-                found = self._cat_file.resolve(query)
+        found = self._resolve(f"{object_id}^{{{kind}}}")
         if found is not None:
             self._objects[object_id, kind] = found
         return found
+
+    def _resolve(self, name: str) -> str | None:
+        """The object name names, or None if it names none: within a snapshot,
+        asked of a `git cat-file` that runs until it ends, rather than a
+        process each."""
+        if not self._snapshot_depth:
+            return self.run("rev-parse", "--verify", "--quiet", name, check=False) or None
+        with git_errors():
+            return self._cat_file.resolve(name)
 
     def author_email(self) -> str | None:
         """The email address git authors commits with, or None if it has none."""
