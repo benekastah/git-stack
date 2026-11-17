@@ -58,33 +58,12 @@ def test_lock_is_shared_by_every_worktree(repo: Repo) -> None:
     assert GitClient(repo.tmp / "elsewhere").common_dir() == GitClient(repo.path).common_dir()
 
 
-def test_config_write_waits_while_another_process_has_config_locked(repo: Repo, client: StackClient) -> None:
-    client.branch("pr1")
-    # Newer versions of git wait for the lock themselves; older ones, and this
-    # one with this setting, fail at once.
-    repo.git("config", "core.configLockTimeout", "0")
-    config_lock = repo.path / ".git" / "config.lock"
-    config_lock.touch()
-    unlocked = threading.Event()
-
-    def unlock() -> None:
-        # Set first: a write that lands as soon as the lock goes still finds it set.
-        unlocked.set()
-        config_lock.unlink()
-
-    threading.Timer(0.3, unlock).start()
-
-    client.git.config_set("pr1", "stackBase", "x")
-
-    # It waited for the lock, rather than failing while it was held.
-    assert unlocked.is_set()
-    assert repo.config("pr1", "stackBase") == "x"
-
-
 def test_config_write_gives_up_once_config_stays_locked(
     repo: Repo, client: StackClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(git, "CONFIG_LOCK_TIMEOUT", 0.2)
+    """As a StackError, which the command line reports as its own. git_client
+    tries it again while the lock is held (see Git.write_config)."""
+    monkeypatch.setattr(git, "CONFIG_LOCK_TIMEOUT", 0)
     repo.git("config", "core.configLockTimeout", "0")
     (repo.path / ".git" / "config.lock").touch()
 

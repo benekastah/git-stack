@@ -3,14 +3,13 @@ import pathlib
 import subprocess
 import tempfile
 import threading
-import time
 from collections import Counter
 from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from typing import TextIO
 
 import git_client
-from git_client import CatFile, ConfigLockedError, Git, GitError
+from git_client import CatFile, Git, GitError
 
 from git_stack.errors import StackError
 
@@ -355,38 +354,24 @@ class GitClient:
         )
 
     def write_config(self, *args: str, check: bool = True) -> None:
-        """Run `git config <args>`, retrying for up to CONFIG_LOCK_TIMEOUT
-        seconds while another process has the config file locked.
-
-        git config doesn't wait for the lock itself, and fails at once instead.
-        A write either happens or doesn't, so retrying it is safe.
+        """Run `git config <args>`, trying it again for up to
+        CONFIG_LOCK_TIMEOUT seconds while another process has the config file
+        locked (see git_client's Git.write_config).
 
         Writing anything but git-stack's own settings (see core.PARENT_KEY and
         the rest, which all start with "stack") forgets the ref snapshot, since
         it may change a branch's upstream.
         """
-        deadline = time.monotonic() + CONFIG_LOCK_TIMEOUT
-        delay = 0.01
-        error: GitError | None = None
-        while True:
-            try:
-                self._git.run("config", *args)
-                error = None
-            except ConfigLockedError as e:
-                error = e
-                if time.monotonic() < deadline:
-                    time.sleep(delay)
-                    delay = min(delay * 2, 0.5)
-                    continue
-            except GitError as e:
-                error = e
-            break
-        key = next((a for a in args if not a.startswith("-")), "")
-        if not key.rpartition(".")[2].lower().startswith("stack"):
-            # A config write can't move a worktree's HEAD.
-            self._forget_refs(worktrees=False)
-        if check and error is not None:
-            raise StackError(f"git config {' '.join(args)} failed:\n{error.stderr.strip()}") from error
+        try:
+            self._git.write_config(*args, wait=CONFIG_LOCK_TIMEOUT)
+        except GitError as e:
+            if check:
+                raise StackError(f"git config {' '.join(args)} failed:\n{e.stderr.strip()}") from e
+        finally:
+            key = next((a for a in args if not a.startswith("-")), "")
+            if not key.rpartition(".")[2].lower().startswith("stack"):
+                # A config write can't move a worktree's HEAD.
+                self._forget_refs(worktrees=False)
 
     def rev(self, ref: str) -> str | None:
         """The commit ref names, or None if it names none. A local or
