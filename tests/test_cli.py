@@ -14,7 +14,7 @@ from git_stack.adapters.git import PullRequestLink, PullRequestState
 from git_stack.cli import main
 from git_stack.core import CURRENT_GROUP, Delete
 from git_stack.errors import StackError
-from git_stack.git import GitClient
+from git_stack.git import GIT_VARIABLE, GitClient
 from git_stack.json_fields import to_json
 from git_stack.stack import (
     BranchInfo,
@@ -938,3 +938,18 @@ def test_show_stack_outside_a_stack_says_so(stack: Any, capsys: pytest.CaptureFi
 def test_show_stack_takes_quiet_or_json_but_not_both(stack: Any) -> None:
     with pytest.raises(SystemExit):
         main(["show-stack", "--quiet", "--json"], stack=stack)
+
+
+@pytest.mark.usefixtures("fresh_find_git")
+def test_no_git_is_an_error_not_a_traceback(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.delenv(GIT_VARIABLE)
+    monkeypatch.setenv("PATH", str(tmp_path))
+
+    assert main(["info"]) == 1
+    assert capsys.readouterr().err == "git stack: git isn't in any directory on PATH; $GIT_STACK_GIT can name it\n"
+    assert main(["parent", "--json"]) == 1
+    error = json.loads(capsys.readouterr().out)
+    assert error["type"] == "error"
+    assert "git isn't in any directory on PATH" in error["message"]

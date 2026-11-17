@@ -86,16 +86,17 @@ def main(argv: list[str] | None = None, stack: StackClient | None = None) -> int
 
     use_utf8_output()
     args = parser.parse_args(argv)
-    if stack is None:
-        # Joining starts over at an absolute path, as git's -C does.
-        stack = StackClient(GitClient(pathlib.Path(".", *args.directories)))
     # With --json, stdout is for the JSON, so git's output goes to stderr.
     stream = JsonStream() if args.json else None
-    stack.on_event = stream.event if stream else print_event
-    if stream:
-        stack.git.passthrough_stdout = sys.stderr
     status: int | None = None
     try:
+        if stack is None:
+            # Joining starts over at an absolute path, as git's -C does. It
+            # fails if there's no git to run.
+            stack = StackClient(GitClient(pathlib.Path(".", *args.directories)))
+        stack.on_event = stream.event if stream else print_event
+        if stream:
+            stack.git.passthrough_stdout = sys.stderr
         result = args.run(stack, args)
         # A command can fail after doing part of its work (e.g. push --prs,
         # which pushed, but couldn't open pull requests): then its error(result)

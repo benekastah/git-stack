@@ -148,11 +148,15 @@ class UserLocaleGit(Git):
 class GitClient:
     """Runs git in directory, as `git -C <directory>` does: $GIT_STACK_GIT if
     set, otherwise the git on PATH (see git_client.find_git), started through
-    py-git-client's Git."""
+    py-git-client's Git. A StackError if there's no such git."""
 
     def __init__(self, directory: str | os.PathLike[str] = ".") -> None:
         self.directory = pathlib.Path(directory)
-        self._git = UserLocaleGit(self.directory, env_var=GIT_VARIABLE)
+        try:
+            self._git = UserLocaleGit(self.directory, env_var=GIT_VARIABLE)
+        except (FileNotFoundError, ValueError) as e:
+            # find_git's: no git on PATH, or on Windows, a batch file.
+            raise StackError(str(e)) from e
         self._common_dir: pathlib.Path | None = None
         self._toplevel: pathlib.Path | None = None
         # See _object, is_ancestor and merged_tree: what they've found, for the
