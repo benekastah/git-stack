@@ -665,6 +665,27 @@ def test_prs_adds_only_children_to_the_top_of_a_github_stack_in_a_branching_stac
     assert all(stack_section.START in body(gh, n) for n in (5, 6, 7))
 
 
+def test_prs_keeps_a_github_stack_in_a_branching_stack_when_linking_is_turned_off(
+    repo: Repo, gh: FakeGitHub, client: StackClient
+) -> None:
+    gh.enable_stacks()
+    repo.make_stack()
+    client.push(prs=True)
+    repo.git("config", "stack.githubStacks", "false")
+    client.branch("pr4")  # #4, which would join the stack's top
+    repo.commit("c", "pr4\n", "pr4 c1")
+    repo.git("switch", "--quiet", "pr2")
+    client.branch("pr3b")  # #5
+    repo.commit("b", "pr3b\n", "pr3b c1")
+
+    client.push(prs=True)
+
+    assert gh.stacks() == [[1, 2, 3]]
+    # GitHub still shows its stack on those in it.
+    assert [body(gh, n) for n in (1, 2, 3)] == ["", "", ""]
+    assert all(stack_section.START in body(gh, n) for n in (4, 5))
+
+
 def test_prs_keeps_a_github_stack_whose_bottom_merged_in_a_branching_stack(
     repo: Repo, gh: FakeGitHub, client: StackClient
 ) -> None:
