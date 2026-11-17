@@ -69,3 +69,17 @@ def test_replay_conflict_continue_or_abort(repo: Repo, client: StackClient, comb
     else:
         assert repo.git("rev-parse", "combined") == tip
         assert repo.config("combined", "stackBase") == base
+
+
+def test_track_changes_base_order_without_reclassifying_old_replay_as_my_work(
+    repo: Repo, client: StackClient, combined: None
+) -> None:
+    client.restack()
+    old = repo.git("rev-parse", "combined")
+
+    repo.stack("track", "--on", "second", "--on", "first")
+    assert repo.git("rev-parse", "combined") == old
+    assert client.stacks().dependencies("combined") == ("second", "first")
+    client.restack()
+
+    assert repo.git("log", "--reverse", "--format=%s", "second..combined") == "first\nown change"

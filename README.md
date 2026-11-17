@@ -235,10 +235,9 @@ git stack track --on main pr1  # track one named branch on main
 ```
 
 The `--on` form tracks one branch (the current branch by default). Repeat
-`--on` to record its ordered bases. This records dependencies without changing
-history; replaying multiple bases is not supported yet. To add bases to a
-tracked branch, its first `--on` must be its existing parent. Changing the
-bases of a branch that already has multiple bases is not supported yet.
+`--on` to record or replace its ordered bases without changing history. For
+an already tracked branch, this preserves the boundary where its own commits
+begin. Run `git stack restack` to incorporate the new set of bases.
 
 Each branch's base, the commit it was built on, is where it forked from the
 branch before it (or from `<parent>`). Like `git rebase`, this is found from

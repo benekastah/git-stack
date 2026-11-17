@@ -360,13 +360,11 @@ git stack track \-\-on main pr1  \f[I]# track one named branch on main\f[R]
 .PP
 The \f[CR]\-\-on\f[R] form tracks one branch (the current branch by
 default).
-Repeat \f[CR]\-\-on\f[R] to record its ordered bases.
-This records dependencies without changing history; replaying multiple
-bases is not supported yet.
-To add bases to a tracked branch, its first \f[CR]\-\-on\f[R] must be
-its existing parent.
-Changing the bases of a branch that already has multiple bases is not
-supported yet.
+Repeat \f[CR]\-\-on\f[R] to record or replace its ordered bases without
+changing history.
+For an already tracked branch, this preserves the boundary where its own
+commits begin.
+Run \f[CR]git stack restack\f[R] to incorporate the new set of bases.
 .PP
 Each branch\(aqs base, the commit it was built on, is where it forked
 from the branch before it (or from \f[CR]<parent>\f[R]).

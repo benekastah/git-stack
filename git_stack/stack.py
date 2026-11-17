@@ -447,7 +447,9 @@ class StackClient(StackCore):
 
     def ensure_track_supported(self, stacks: Stacks, branches: Iterable[str]) -> None:
         if any(b in stacks and stacks[b].additional_parents for b in branches):
-            raise StackError("changing the bases of a multiple-base branch is not supported yet")
+            raise StackError(
+                "use repeated --on to change a multiple-base branch, or restack --onto to give it a single base"
+            )
 
     @exclusive
     def track_on(self, parents: Sequence[str], branch: str | None, base: str | None = None) -> list[Tracked]:
@@ -461,11 +463,14 @@ class StackClient(StackCore):
         for parent in parents:
             stacks.ensure_no_cycle(branch, parent)
         if branch in stacks:
-            if stacks[branch].additional_parents:
-                raise StackError("changing the bases of a multiple-base branch is not supported yet")
-            if stacks.parent(branch) != parents[0] or base is not None:
-                raise StackError("first track the branch on its primary base without --on, then add its other bases")
-            base_sha = self.recorded_base(branch, parents[0])
+            base_sha = self.recorded_base(branch, stacks.parent(branch))
+            if base is not None and git.rev(base) != base_sha:
+                raise StackError(
+                    "changing dependencies must preserve the recorded boundary before the branch's own commits"
+                )
+            if stacks.dependencies(branch) != tuple(parents):
+                git.config_unset(branch, replay.TIPS)
+                stacks.reparent(branch, parents[0])
         else:
             base_sha = git.rev(base) if base else self.fork_point(parents[0], branch)
             if base_sha is None:
