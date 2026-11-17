@@ -630,3 +630,22 @@ def test_hooks_run_in_the_users_locale(repo: Repo, monkeypatch: pytest.MonkeyPat
     GitClient(repo.path).switch("other")
 
     assert (repo.path / ".git" / "hook-locale").read_text(encoding="utf-8") == "C.UTF-8"
+
+
+def test_changed_files_are_from_the_top_even_with_diff_relative(repo: Repo) -> None:
+    """commit_patch_ids takes them from the top, whatever directory git-stack
+    runs in, which diff.relative would otherwise make `git diff` list them
+    from (leaving out the others)."""
+    (repo.path / "sub").mkdir()
+    repo.write("sub/x", "x\n")
+    repo.write("top", "top\n")
+    repo.git("add", ".")
+    repo.git("commit", "--quiet", "-m", "two files")
+    repo.git("config", "diff.relative", "true")
+    git = GitClient(repo.path / "sub")
+
+    files = GitAdapter(StackCore(git)).changed_files("HEAD~1", "HEAD")
+
+    assert files == ["sub/x", "top"]
+    [patches] = git.commit_patch_ids(("log", "-p", "HEAD~1..HEAD", "--", *files))
+    assert len(patches) == 1
