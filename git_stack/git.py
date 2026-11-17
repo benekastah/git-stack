@@ -826,7 +826,7 @@ class GitClient:
         changes, even with diff.relative set. For a diff, the commit is all
         zeros. Paths after `--` are files as git lists them (e.g. `git diff
         --name-only`): from the top of the worktree, whatever directory git
-        runs in, and taken literally.
+        runs in, and taken literally, even with GIT_LITERAL_PATHSPECS set.
 
         Each command runs, but one `git patch-id` reads them all: after each
         command's output comes a patch of our own, whose commit (1, 2, ...)
@@ -842,7 +842,10 @@ class GitClient:
                 # A diff has no commit line, so give it one, rather than rely on
                 # the blank line after the marker before it to end the marker.
                 patches.append(f"commit {'0' * length}")
-            patches.append(self.run(command, "--no-color", "--no-ext-diff", "--no-relative", *rest))
+            # --no-literal-pathspecs: GIT_LITERAL_PATHSPECS would turn off the marks.
+            patches.append(
+                self.run("--no-literal-pathspecs", command, "--no-color", "--no-ext-diff", "--no-relative", *rest)
+            )
             patches.append(f"commit {i:0{length}x}\n\n{END_MARKER_DIFF}")
         results: list[list[tuple[str, str]]] = [[]]
         for line in self.run("patch-id", "--stable", input="\n".join(patches) + "\n").splitlines():

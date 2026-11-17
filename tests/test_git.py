@@ -694,3 +694,14 @@ def test_changed_files_name_the_files_patch_ids_compare_from_a_subdirectory(repo
     assert git.commit_patch_ids(("log", "-p", f"{base}..HEAD", "--", *files)) == [from_top]
     assert len(brackets) == 1
     assert git.commit_patch_ids(("log", "-p", f"{base}..HEAD", "--", "[ab]")) == [brackets]
+
+
+def test_commit_patch_ids_marks_paths_even_with_git_literal_pathspecs(
+    repo: Repo, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """GIT_LITERAL_PATHSPECS, which a user may export, would turn off the
+    :(top,literal) its paths are marked with, making them names of no file."""
+    repo.commit("a", "changed\n", "change a")
+    monkeypatch.setenv("GIT_LITERAL_PATHSPECS", "1")
+
+    assert [len(p) for p in GitClient(repo.path).commit_patch_ids(("log", "-p", "HEAD~1..HEAD", "--", "a"))] == [1]
