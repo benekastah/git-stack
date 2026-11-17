@@ -156,16 +156,21 @@ def test_replay_preserves_own_patch_when_a_replaceable_base_has_it(
     assert repo.git("show", "combined:c") == "combined"
 
 
-@pytest.mark.parametrize(("untrack_source", "no_prefix"), [(False, False), (True, False), (False, True)])
+@pytest.mark.parametrize(
+    ("untrack_source", "diff_config"),
+    [(False, None), (True, None), (False, ("diff.noprefix", "true")), (False, ("diff.context", "0"))],
+)
 def test_replay_deduplicates_a_shared_source_in_a_nested_graph(
-    repo: Repo, client: StackClient, untrack_source: bool, no_prefix: bool
+    repo: Repo, client: StackClient, untrack_source: bool, diff_config: tuple[str, str] | None
 ) -> None:
-    if no_prefix:
-        repo.git("config", "diff.noprefix", "true")
+    if diff_config:
+        repo.git("config", *diff_config)
+    repo.commit("a", "one\ntwo\ncommon\nfour\nfive\n", "add context")
     client.branch("secondary")
-    repo.commit("a", "secondary\n", "secondary")
+    repo.commit("a", "one\ntwo\nsecondary\nfour\nfive\n", "secondary")
     client.branch("first")
-    repo.commit("a", "secondary amended\n", "amend secondary")
+    resolved = "one\ntwo\nsecondary amended\nfour\nfive"
+    repo.commit("a", resolved + "\n", "amend secondary")
     client.branch("final")
     repo.commit("c", "final\n", "final")
     repo.git("switch", "--quiet", "main")
@@ -187,7 +192,7 @@ def test_replay_deduplicates_a_shared_source_in_a_nested_graph(
         repo.git("switch", "-q", "final")
         client.restack()
 
-    assert repo.git("show", "final:a") == "secondary amended"
+    assert repo.git("show", "final:a") == resolved
     assert repo.git("show", "final:b") == "other"
     assert repo.git("log", "--reverse", "--format=%s", "first..final") == "other\nfinal"
 

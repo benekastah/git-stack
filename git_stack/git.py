@@ -778,11 +778,12 @@ class GitClient:
             if run("read-tree", new_base).returncode:
                 raise StackError("couldn't prepare an index to check the upstream rebase")
             for (commit, _), (upstream, _) in zip(ours, theirs, strict=True):
-                # Read every changed path and keep the a/ and b/ prefixes that git apply expects.
+                # Use the prefixes and context git apply expects, independent of display settings.
                 patch = run(
                     "show",
                     "--format=",
                     "--no-relative",
+                    "--unified=3",
                     "--src-prefix=a/",
                     "--dst-prefix=b/",
                     "--binary",
