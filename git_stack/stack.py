@@ -1629,10 +1629,20 @@ class StackClient(StackCore):
             else:
                 state.unpushed.append(branch)
 
-    def ensure_clean_supported(self, stacks: Stacks) -> None:
-        """Refuse cleanup until multi-base merge detection is implemented."""
-        if any(stacks.has_multiple_base_ancestor(branch) for branch in stacks):
-            raise StackError("clean with multiple bases is not supported yet")
+    def cleanup_merge_state(self, branch: str, stacks: Stacks, adapter: GitAdapter, ignore_revert: bool) -> MergeState:
+        parent = stacks.parent(branch)
+        if not stacks.has_multiple_base_ancestor(branch):
+            return adapter.merge_state(branch, parent, ignore_revert=ignore_revert)
+        # A graph branch has no authoritative PR. Require the primary
+        # parent to actually contain its tip before removing dependencies.
+        if not ignore_revert and adapter.reverted(branch, parent):
+            return MergeState.REVERTED
+        git = self.git
+        if not git.is_ancestor(f"refs/heads/{branch}", f"refs/heads/{parent}") or not adapter.changes_something(branch):
+            return MergeState.NOT_MERGED
+        if (upstream := git.rev(f"{branch}@{{upstream}}")) and self.unpulled_commits(branch, parent, upstream):
+            return MergeState.MERGED_WITH_NEW_COMMITS
+        return MergeState.MERGED
 
     @exclusive
     def clean(
@@ -1649,10 +1659,8 @@ class StackClient(StackCore):
         Returns every stack, as info() lists them."""
         git = self.git
         self.ensure_no_operation_in_progress()
-        self.ensure_clean_supported(self.stacks())
         self.settle_all()
         stacks = self.stacks()
-        self.ensure_clean_supported(stacks)
         remote = remote or self.default_remote(stacks, stacks)
         if delete is not None:
             self.ensure_owned(stacks, stacks, allow_shared, "clean")
@@ -1677,9 +1685,9 @@ class StackClient(StackCore):
             if git.rev(f"refs/heads/{parent}") is None:
                 self.emit(events.ParentMissing(branch, parent, git.config_get(branch, BASE_KEY)))
                 continue
-            state = adapter.merge_state(branch, parent, ignore_revert=branch in ignore_reverts)
+            state = self.cleanup_merge_state(branch, stacks, adapter, branch in ignore_reverts)
             if state is MergeState.MERGED:
-                confirmed = adapter.merge_confirmed(branch, parent)
+                confirmed = stacks.has_multiple_base_ancestor(branch) or adapter.merge_confirmed(branch, parent)
                 if (
                     self.untrack_merged(branch, stacks, delete, confirmed=confirmed, no_verify=no_verify)
                     and branch == original

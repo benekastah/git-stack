@@ -1025,8 +1025,9 @@ Nothing is restacked, so there are no conflicts.
 The children are rebased the next time you \f[CR]sync\f[R] or
 \f[CR]restack\f[R] their stack.
 .IP \(bu 2
-It refuses a repository with multiple\-base stacks until merge detection
-and removal support them.
+For branches that depend on multiple bases, cleanup requires the primary
+parent to contain the branch\(aqs actual commits.
+It checks for reverts and new upstream work before removing a branch.
 .IP \(bu 2
 \f[CR]\-d\f[R], \f[CR]\-\-no\-verify\f[R] and
 \f[CR]\-\-ignore\-revert\f[R] work as for \f[CR]sync\f[R].

@@ -7,27 +7,44 @@ from git_stack.core import Delete
 from git_stack.errors import StackError
 from git_stack.output import message
 from git_stack.stack import StackClient
-from git_stack.stacks import StackNode, Stacks
 from tests.helpers import Repo
 
 
-def test_clean_refuses_multiple_base_graph_before_fetching_or_changing_branches(
-    repo: Repo, client: StackClient, emitted: list[events.Event], monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_clean_processes_ordinary_merges_and_keeps_unmerged_graphs(repo: Repo, client: StackClient) -> None:
     repo.make_stack()
     client.push()
-    before = {b: repo.git("rev-parse", f"refs/heads/{b}") for b in ("main", "pr1", "pr2", "pr3")}
-    stacks = Stacks(
-        [StackNode("pr1", "main"), StackNode("pr2", "pr1", additional_parents=("main",)), StackNode("pr3", "pr2")]
-    )
-    monkeypatch.setattr(client, "stacks", lambda: stacks)
-    emitted.clear()
+    repo.stack("track", "--on", "pr1", "--on", "main", "pr2")
+    before = repo.git("rev-parse", "pr2")
+    repo.squash_merge_on_forge("pr1")
 
-    with pytest.raises(StackError, match="multiple bases.*not supported"):
-        client.clean()
+    client.clean()
 
-    assert not any(isinstance(event, events.Fetching) for event in emitted)
-    assert {b: repo.git("rev-parse", f"refs/heads/{b}") for b in before} == before
+    repo.assert_untracked("pr1")
+    assert client.stacks().dependencies("pr2") == ("main",)
+    assert repo.git("rev-parse", "pr2") == before
+    assert "pr3" in client.stacks()
+
+
+def test_clean_untracks_multi_base_branch_after_a_proven_merge(repo: Repo, client: StackClient) -> None:
+    client.branch("first")
+    repo.commit("a", "first\n", "first")
+    client.branch("combined")
+    repo.commit("c", "own\n", "own")
+    repo.git("switch", "--quiet", "main")
+    client.branch("second")
+    repo.commit("b", "second\n", "second")
+    repo.git("switch", "--quiet", "combined")
+    repo.stack("track", "--on", "first", "--on", "second")
+    client.restack()
+    client.branch("child")
+    repo.git("switch", "--quiet", "first")
+    repo.git("merge", "--ff-only", "combined")
+
+    client.clean()
+
+    repo.assert_untracked("combined")
+    assert client.stacks().dependencies("child") == ("first", "second")
+    assert "second" in client.stacks()
 
 
 def test_clean_untracks_merged_branches_in_every_stack_without_restacking(
