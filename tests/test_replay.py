@@ -205,3 +205,36 @@ def test_replay_uses_updated_primary_when_validating_secondary_changes(repo: Rep
     client.restack(latest=True)
 
     assert repo.git("log", "--reverse", "--format=%s", "first..combined") == "second\nown"
+
+
+def test_pull_keeps_own_boundary_when_primary_already_contains_the_graph_branch(
+    repo: Repo, client: StackClient, combined: None
+) -> None:
+    client.restack()
+    old_base = repo.config("combined", "stackBase")
+    repo.git("switch", "--quiet", "first")
+    repo.git("merge", "--ff-only", "combined")
+    repo.git("switch", "--quiet", "combined")
+
+    client.sync(push=False)
+
+    assert repo.config("combined", "stackBase") == old_base
+    client.clean()
+    repo.assert_untracked("combined")
+
+
+def test_revert_advice_names_the_base_that_reverted_the_branch(repo: Repo, client: StackClient, combined: None) -> None:
+    original = repo.git("rev-parse", "combined")
+    repo.git("switch", "--quiet", "second")
+    repo.git("cherry-pick", original)
+    repo.git("revert", "--no-edit", "HEAD")
+    revert = repo.git("rev-parse", "HEAD")
+    repo.git("switch", "--quiet", "combined")
+    client.branch("child")
+
+    result = repo.stack("restack")
+
+    assert "then second reverted" in result.stderr
+    assert f"{revert[:12]} --from second" in result.stderr
+    assert "--stack child" not in result.stderr
+    assert repo.git("rev-parse", "combined") == original

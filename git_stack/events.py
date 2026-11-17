@@ -254,6 +254,7 @@ class Reverted:
     parent: str
     reverts: tuple[str, ...]
     children: tuple[str, ...]
+    stack_children: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)

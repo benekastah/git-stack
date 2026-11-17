@@ -607,6 +607,7 @@ with the remote:
 For multiple-base graphs, `sync` updates dependencies before their dependents
 and keeps the configured upstreams. Branches that depend on multiple bases
 are included in the Git push and excluded from pull request updates.
+Use `clean` to retire merged branches that participate in the graph.
 
 1. Fetch with `--prune`.
 2. Fast-forward the stack's root (e.g. `main`) to its upstream.

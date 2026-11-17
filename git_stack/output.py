@@ -109,9 +109,12 @@ def message(event: events.Event) -> str:  # noqa: C901
                 f"skipping {event.branch}: it was merged into {event.parent}, but it or its "
                 f"remote branch has commits that {event.parent} doesn't"
             )
+        case events.Reverted() if not event.reverts:
+            return f"skipping {event.branch}: changes were reverted on {event.parent}"
         case events.Reverted():
-            stack = "".join(f" --stack {child}" for child in event.children)
-            onto = f" with {', '.join(event.children)} on them" if event.children else ""
+            children = event.children if event.stack_children is None else event.stack_children
+            stack = "".join(f" --stack {child}" for child in children)
+            onto = f" with {', '.join(children)} on them" if children else ""
             return (
                 f"skipping {event.branch}: it was merged into {event.parent}, then {event.parent} reverted "
                 f"some of its changes. To bring them back{onto}, run `git stack unrevert {event.branch}-unrevert "

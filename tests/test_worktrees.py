@@ -180,7 +180,7 @@ def test_sync_fails_when_upstream_commits_cant_be_pulled_into_branch_in_other_wo
     add_worktree(repo, "pr1")
     repo.commit_on_forge("pr1", "d", "collab\n", "collab")
 
-    with pytest.raises(StackError, match="didn't push pr1:"):
+    with pytest.raises(StackError, match="didn't push pr1, pr2, pr3:"):
         client.sync()
 
 

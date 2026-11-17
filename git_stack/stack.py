@@ -1245,18 +1245,14 @@ class StackClient(StackCore):
                 self.emit(events.ParentSkipped(branch, blocked))
                 skipped.add(branch)
                 continue
-            if branch in ineligible:
-                if any(adapter.reverted(branch, base) for base in stacks.dependencies(branch)):
-                    self.emit(self.reverted(branch, stacks, adapter))
-                    skipped.add(branch)
-                else:
-                    remaining.append(branch)
-                continue
-            state = adapter.merge_state(branch, parent)
+            state = self.cleanup_merge_state(branch, stacks, adapter, ignore_revert=False)
             if state is MergeState.MERGED:
                 self.emit(events.SkippedMerged(branch, parent))
                 if branch not in preserved:
                     stacks.drop(branch)
+            elif state is MergeState.MERGED_WITH_NEW_COMMITS and branch in ineligible:
+                self.emit(events.MergedWithNewCommits(branch, parent))
+                skipped.add(branch)
             elif state is MergeState.REVERTED:
                 # Restacking it could drop its commits, as already in parent.
                 self.emit(self.reverted(branch, stacks, adapter))
@@ -1576,9 +1572,9 @@ class StackClient(StackCore):
             if blocked in state.blocked:
                 state.blocked.append(branch)
             return
-        merge_state = self.sync_merge_state(branch, adapter, state)
+        merge_state = self.cleanup_merge_state(branch, state.stacks, adapter, branch in state.ignore_reverts)
         if merge_state is MergeState.MERGED:
-            if any(state.stacks.has_multiple_base_ancestor(child) for child in state.stacks.children(branch)):
+            if self.retain_merged_dependency(branch, state.stacks):
                 # Retain a merged source until cleanup can explicitly replace its graph edges.
                 return
             outside = [b for b in state.stacks.children(branch) if b not in state.scope]
@@ -1608,21 +1604,21 @@ class StackClient(StackCore):
         else:
             self.sync_unmerged(branch, parent, state)
 
-    def sync_merge_state(self, branch: str, adapter: GitAdapter, state: SyncState) -> MergeState:
-        stacks = state.stacks
-        ignore_revert = branch in state.ignore_reverts
-        if stacks.has_multiple_base_ancestor(branch):
-            if not ignore_revert and any(adapter.reverted(branch, base) for base in stacks.dependencies(branch)):
-                return MergeState.REVERTED
-            return MergeState.NOT_MERGED
-        return adapter.merge_state(branch, stacks.parent(branch), ignore_revert=ignore_revert)
+    def retain_merged_dependency(self, branch: str, stacks: Stacks) -> bool:
+        return stacks.has_multiple_base_ancestor(branch) or any(
+            stacks.has_multiple_base_ancestor(child) for child in stacks.children(branch)
+        )
 
     def reverted(self, branch: str, stacks: Stacks, adapter: GitAdapter) -> events.Reverted:
-        """The warning that branch, which stacks says is stacked on its parent,
-        was merged and then reverted, with what unrevert needs to bring it back."""
-        parent = stacks.parent(branch)
+        """Report the base on which the changes were reverted."""
+        parents = stacks.dependencies(branch)
+        parent, reverts = next(
+            ((base, found) for base in parents if (found := adapter.reverts(branch, base))),
+            (parents[0], []),
+        )
         children = tuple(stacks.children(branch))
-        return events.Reverted(branch, parent, tuple(adapter.reverts(branch, parent)), children)
+        movable = tuple(child for child in children if stacks.parent(child) == branch and len(parents) == 1)
+        return events.Reverted(branch, parent, tuple(reverts), children, None if movable == children else movable)
 
     def ensure_ignorable_reverts(self, ignore_reverts: Iterable[str], scope: Sequence[str], where: str) -> None:
         """Refuse a branch to ignore the reverts of (see sync) that isn't in
@@ -1676,7 +1672,7 @@ class StackClient(StackCore):
             return adapter.merge_state(branch, parent, ignore_revert=ignore_revert)
         # A graph branch has no authoritative PR. Require the primary
         # parent to actually contain its tip before removing dependencies.
-        if not ignore_revert and adapter.reverted(branch, parent):
+        if not ignore_revert and any(adapter.reverted(branch, base) for base in stacks.dependencies(branch)):
             return MergeState.REVERTED
         git = self.git
         if not git.is_ancestor(f"refs/heads/{branch}", f"refs/heads/{parent}") or not adapter.changes_something(branch):
