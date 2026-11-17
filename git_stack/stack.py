@@ -1283,6 +1283,8 @@ class StackClient(StackCore):
         if self.move_off_deleted_parents(stack, stacks, adapter, push_remote):
             roots = {stacks.root(b) for b in stack}
             roots_to_update = {r for r in roots if not only_remote or self.git.config_get(r, "remote") == remote}
+            for name in sorted(self.upstream_remotes(roots_to_update) - remotes):
+                self.fetch(name)
             if push and not force:
                 protected = self.protected_sync_destinations(stack, roots, push_remote)
         # A group's stacks can be on different roots.

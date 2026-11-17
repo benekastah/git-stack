@@ -745,6 +745,21 @@ def test_clean_untracks_merged_branches_whose_parent_was_merged_and_deleted(
     assert repo.git("rev-parse", "refs/heads/main") == repo.git("rev-parse", "refs/remotes/origin/main")
 
 
+def test_sync_fetches_the_remote_of_the_root_a_branch_moved_onto(
+    repo: Repo, gh: FakeGitHub, client: StackClient
+) -> None:
+    repo.make_stack()
+    repo.git("remote", "add", "upstream", str(repo.origin))
+    repo.git("fetch", "--quiet", "upstream")  # so upstream/main won't have pr1's merge
+    merge_pr1_and_delete_it_everywhere(repo, gh)
+    repo.git("branch", "--quiet", "--set-upstream-to=upstream/main", "main")
+
+    client.sync(push=False)  # pr2's pull request can't be retargeted onto upstream's main
+
+    assert client.stacks().parents() == {"pr2": "main", "pr3": "pr2"}
+    assert repo.git("rev-parse", "refs/heads/main") == repo.git("rev-parse", "refs/remotes/origin/main")
+
+
 def test_clean_moves_a_branch_onto_the_local_branch_of_its_prs_base(
     repo: Repo, gh: FakeGitHub, client: StackClient
 ) -> None:
