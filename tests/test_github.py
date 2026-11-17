@@ -785,6 +785,27 @@ def test_clean_refuses_uncommitted_changes_on_the_root_a_branch_moved_onto(
         client.clean()
 
 
+def test_sync_moves_a_branch_off_a_deleted_parent_merged_with_commits_it_never_fetched(
+    repo: Repo, gh: FakeGitHub, client: StackClient
+) -> None:
+    repo.make_stack()
+    client.push()
+    repo.commit_on_forge("pr1", "d", "pr1 again\n", "pr1 c3")  # e.g. "Update branch", never fetched
+    head = repo.git("rev-parse", "HEAD", cwd=repo.forge)
+    repo.git("update-ref", "refs/pull/1/head", head, cwd=repo.origin)
+    repo.git("switch", "--quiet", "-C", "main", "origin/main", cwd=repo.forge)
+    repo.squash_merge_on_forge("pr1")
+    merge = {"oid": repo.git("rev-parse", "HEAD", cwd=repo.forge)}
+    gh.add_pr(number=1, state="MERGED", headRefName="pr1", headRefOid=head, baseRefName="main", mergeCommit=merge)
+    gh.add_pr(number=2, state="OPEN", headRefName="pr2", headRefOid=repo.git("rev-parse", "pr2"), baseRefName="main")
+    repo.git("switch", "--quiet", "pr3")
+    repo.git("branch", "--quiet", "-D", "pr1")
+
+    client.sync()
+
+    assert client.stacks().parents() == {"pr2": "main", "pr3": "pr2"}
+
+
 def test_sync_leaves_a_branch_whose_deleted_parent_wasnt_merged(
     repo: Repo, gh: FakeGitHub, client: StackClient
 ) -> None:

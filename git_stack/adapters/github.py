@@ -329,14 +329,15 @@ class GitHubAdapter(GitAdapter):
         if base is None:
             return None
         merged = [pr for pr in prs if pr.state is GitHubState.MERGED]
-        self.fetch_missing_heads(merged)
+        self.fetch_missing_heads((pr.number, pr.head_oid) for pr in merged)
         return next(
             (pr for pr in merged if self.git.rev(pr.head_oid) and self.git.is_ancestor(base, pr.head_oid)), None
         )
 
-    def fetch_missing_heads(self, prs: list[PullRequest]) -> None:
-        """Fetch the head commits of prs that we don't have, which GitHub keeps
-        after their branches are deleted.
+    def fetch_missing_heads(self, heads: Iterable[tuple[int, str]]) -> None:
+        """Fetch the head commits of pull requests, heads (number, head commit),
+        that we don't have, which GitHub keeps after their branches are
+        deleted.
 
         A pull request's last commit can be made on GitHub (e.g. by "Update
         branch") right before it's merged and its branch deleted, so we never
@@ -346,7 +347,7 @@ class GitHubAdapter(GitAdapter):
         """
         if not self.fetch:
             return
-        refs = [f"refs/pull/{pr.number}/head" for pr in prs if not self.git.rev(pr.head_oid)]
+        refs = [f"refs/pull/{number}/head" for number, oid in heads if not self.git.rev(oid)]
         if refs:
             self.git.run("fetch", "--quiet", "--no-write-fetch-head", self.remote, *refs, check=False)
 
@@ -514,7 +515,8 @@ class GitHubAdapter(GitAdapter):
         retargeted by hand, over a parent that wasn't merged, doesn't count,
         nor does a merged pull request of an earlier branch of parent's name:
         its head must contain branch's base, the parent's commit branch was
-        built on."""
+        built on. A head we never fetched (e.g. a commit "Update branch" made
+        right before the merge) is fetched first."""
         git = self.git
         pr = self.pull_requests().get(branch)
         base = git.config_get(branch, BASE_KEY)
@@ -524,24 +526,25 @@ class GitHubAdapter(GitAdapter):
             merged = self.merged_heads(parent, pr.base)
         except StackError:
             return None
-        if not any(git.is_ancestor(base, head) if git.rev(head) else head == base for head in merged):
+        self.fetch_missing_heads(merged)
+        if not any(git.rev(head) and git.is_ancestor(base, head) for _, head in merged):
             return None
         return self.local_branch_of(pr.base)
 
-    def merged_heads(self, head: str, base: str) -> list[str]:
-        """The head commits of the pull requests from head, a branch in the
-        repository, merged into base."""
+    def merged_heads(self, head: str, base: str) -> list[tuple[int, str]]:
+        """The numbers and head commits of the pull requests from head, a
+        branch in the repository, merged into base."""
         query = (
             "query($owner: String!, $name: String!, $h0: String!) { repository(owner: $owner, name: $name) "
             f"{{ h0: pullRequests(headRefName: $h0, states: MERGED, first: {PRS_PER_BRANCH}, "
             "orderBy: {field: UPDATED_AT, direction: DESC}) "
-            "{ nodes { baseRefName headRefOid isCrossRepository } } } }"
+            "{ nodes { number baseRefName headRefOid isCrossRepository } } } }"
         )
         args = ["api", "graphql", "--hostname", self.host, "-f", f"owner={self.owner}", "-f", f"name={self.name}"]
         args += ["-f", f"h0={head}", "-f", f"query={query}"]
         repository = field(field(parse_json(self.gh(*args)), "data", dict), "repository", dict)
         return [
-            field(pr, "headRefOid", str)
+            (field(pr, "number", int), field(pr, "headRefOid", str))
             for pr in field(field(repository, "h0", dict), "nodes", list)
             if not field(pr, "isCrossRepository", bool) and field(pr, "baseRefName", str) == base
         ]
