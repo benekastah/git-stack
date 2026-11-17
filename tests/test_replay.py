@@ -328,3 +328,47 @@ def test_replay_recovers_after_pick_before_journal_write(
     client.restack()
 
     assert repo.git("log", "--reverse", "--format=%s", "first..combined") == "second\nown change"
+
+
+def test_replay_resume_preserves_an_earlier_worktree_skip(repo: Repo, client: StackClient, combined: None) -> None:
+    repo.git("switch", "--quiet", "main")
+    client.branch("blocked")
+    repo.commit("c", "blocked\n", "blocked")
+    client.branch("after")
+    repo.stack("track", "--on", "blocked", "--on", "combined")
+    after = repo.git("rev-parse", "after")
+    repo.git("worktree", "add", str(repo.tmp / "blocked-worktree"), "blocked")
+
+    repo.git("switch", "--quiet", "main")
+    repo.write("d", "upstream\n")
+    repo.git("add", "d")
+    repo.git("commit", "-qm", "upstream")
+    repo.git("switch", "--quiet", "second")
+    repo.commit("a", "conflicting second\n", "conflicting second")
+    repo.git("switch", "--quiet", "after")
+    with pytest.raises(StackError, match="cherry-pick --continue"):
+        client.restack(latest=True)
+    assert any(isinstance(event, events.NotRestackedInOtherWorktree) for event in repo.emitted)
+    repo.write("a", "resolved\n")
+    repo.git("add", "a")
+    repo.git("-c", "core.editor=true", "cherry-pick", "--continue")
+
+    client.restack()
+
+    assert repo.git("show", "combined:a") == "resolved"
+    assert repo.git("rev-parse", "after") == after
+
+
+def test_restack_onto_does_not_treat_a_prospective_base_as_a_merge(
+    repo: Repo, client: StackClient, combined: None
+) -> None:
+    client.restack()
+    before = repo.git("rev-parse", "combined")
+    repo.git("branch", "newfirst", before)
+    repo.git("branch", "newsecond", "main")
+
+    result = repo.stack("restack", "--onto", "newfirst", "--onto", "newsecond", expect_success=False)
+
+    assert "own commit" in result.stderr
+    assert client.stacks().dependencies("combined") == ("first", "second")
+    assert repo.git("rev-parse", "combined") == before

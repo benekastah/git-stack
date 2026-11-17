@@ -6,6 +6,7 @@ from collections import Counter
 from collections.abc import Callable, Generator, Iterable, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
+from itertools import islice
 from typing import cast
 
 from git_stack import events, replay
@@ -559,8 +560,14 @@ class StackCore:
             if blocked is not None:
                 self.emit(events.ParentSkipped(branch, blocked))
                 skipped.add(branch)
-            elif not self.restack_dependency(branch, stacks, latest, original, tuple(branches[index + 1 :])):
-                skipped.add(branch)
+            else:
+                remaining = (
+                    candidate
+                    for candidate in islice(branches, index + 1, None)
+                    if not skipped or skipped.isdisjoint(stacks.dependency_ancestry(candidate))
+                )
+                if not self.restack_dependency(branch, stacks, latest, original, remaining):
+                    skipped.add(branch)
         self.restore_checkout(original)
 
     def restack_dependency(
@@ -569,7 +576,7 @@ class StackCore:
         stacks: Stacks,
         latest: bool,
         original: str,
-        remaining: tuple[str, ...] = (),
+        remaining: Iterable[str] = (),
     ) -> bool:
         """Restack a branch using all of its planned dependencies."""
         parents = stacks.dependencies(branch)
@@ -590,7 +597,7 @@ class StackCore:
             self.emit(events.NotRestackedInOtherWorktree(branch, str(worktree)))
             return False
         self.restore_checkout(original)
-        job = replay.plan(git, branch, parents, base, original, remaining, latest)
+        job = replay.plan(git, branch, parents, base, original, tuple(remaining), latest)
         self.emit(events.Restacking(branch, parents[0]))
         job.pin(git)
         self.finish_replay(job)

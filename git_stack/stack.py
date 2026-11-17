@@ -1244,7 +1244,9 @@ class StackClient(StackCore):
             ) from e
         return adapter
 
-    def skip_merged(self, branches: Iterable[str], stacks: Stacks, adapter: GitAdapter) -> list[str]:
+    def skip_merged(
+        self, branches: Iterable[str], stacks: Stacks, adapter: GitAdapter, *, retargeted: str | None = None
+    ) -> list[str]:
         """Leave merged branches out of branches (parent-before-child), moving
         their children down in stacks (see Stacks.drop). Leave reverted ones
         out too, with the branches stacked on them, as sync does."""
@@ -1260,7 +1262,11 @@ class StackClient(StackCore):
                 self.emit(events.ParentSkipped(branch, blocked))
                 skipped.add(branch)
                 continue
-            state = self.cleanup_merge_state(branch, stacks, adapter, ignore_revert=False)
+            state = (
+                MergeState.NOT_MERGED
+                if branch == retargeted
+                else self.cleanup_merge_state(branch, stacks, adapter, ignore_revert=False)
+            )
             if state is MergeState.MERGED:
                 self.emit(events.SkippedMerged(branch, parent))
                 if branch not in preserved:
@@ -1308,16 +1314,20 @@ class StackClient(StackCore):
         self.settle_all()
         stacks = self.stacks()
         original = self.current_checkout()
+        retargeted = None
         if onto:
             branch = self.current_stacked_branch(stacks, "restack", hint="use `git stack track` first")
             parents = (onto,) if isinstance(onto, str) else tuple(onto)
+            before = stacks.dependencies(branch)
+            if before != parents and max(len(before), len(parents)) > 1:
+                retargeted = branch
             self.plan_restack_onto(stacks, branch, parents, allow_shared)
             selected = [branch, *stacks.descendants(branch)]
         else:
             selected = self.selected_stacks(branches, groups, stacks, "restack")
             self.ensure_owned(selected, stacks, allow_shared, "restack")
         adapter = make_adapter(self, self.default_remote(selected, stacks), fetch=False)
-        to_restack = self.skip_merged(selected, stacks, adapter)
+        to_restack = self.skip_merged(selected, stacks, adapter, retargeted=retargeted)
         self.restack_all(to_restack, stacks, latest)
         self.restore_checkout(original)
 
