@@ -93,6 +93,8 @@ def stack(autospec_stack: Any) -> Any:
         (["create", "pr1", "--group", "feat"], "branch", ("pr1",), {"group": "feat"}),
         (["branch", "pr1", "--group", "feat"], "branch", ("pr1",), {"group": "feat"}),
         (["track", "main"], "track", ("main", []), {"base": None}),
+        (["track", "--on", "main"], "track", ("main", []), {"base": None}),
+        (["track", "--on", "main", "pr1"], "track", ("main", ["pr1"]), {"base": None}),
         (["track", "main", "pr1", "pr2", "--base", "abc123"], "track", ("main", ["pr1", "pr2"]), {"base": "abc123"}),
         (
             ["import"],

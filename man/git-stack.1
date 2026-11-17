@@ -338,6 +338,7 @@ would.
 If the stack is in another group already, it refuses without creating
 the branch.
 .SS \f[CR]git stack track <parent> [<branch>...] [\-\-base <sha>]\f[R]
+.SS \f[CR]git stack track \-\-on <parent> [<branch>] [\-\-base <sha>]\f[R]
 Track existing branches (default: the current branch) as a stack on
 \f[CR]<parent>\f[R], each stacked on the one before it.
 .PP
@@ -354,7 +355,13 @@ To move a branch onto another parent and rebase it in one go, use
 git stack track main            \f[I]# stack the current branch on main\f[R]
 git stack track main pr1 pr2 pr3
 git stack track pr1             \f[I]# move the current branch onto pr1\f[R]
+git stack track \-\-on main pr1  \f[I]# track one named branch on main\f[R]
 .EE
+.PP
+The \f[CR]\-\-on\f[R] form tracks at most one branch (the current branch
+by default).
+Multiple \f[CR]\-\-on\f[R] values are reserved for multiple bases, which
+aren\(aqt supported yet; they currently fail without changing anything.
 .PP
 Each branch\(aqs base, the commit it was built on, is where it forked
 from the branch before it (or from \f[CR]<parent>\f[R]).

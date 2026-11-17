@@ -78,6 +78,8 @@ def main(argv: list[str] | None = None, stack: StackClient | None = None) -> int
         command.register(subparsers)
 
     args = parser.parse_args(argv)
+    if validate := getattr(args, "validate", None):
+        validate(parser, args)
     # With --json, stdout is for the JSON, so git's output goes to stderr.
     stream = JsonStream() if args.json else None
     status: int | None = None

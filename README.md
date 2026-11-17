@@ -215,6 +215,8 @@ git stack create search-ui --group search   # a new stack, in group search
 
 ### `git stack track <parent> [<branch>...] [--base <sha>]`
 
+### `git stack track --on <parent> [<branch>] [--base <sha>]`
+
 Track existing branches (default: the current branch) as a stack on `<parent>`,
 each stacked on the one before it.
 
@@ -229,7 +231,12 @@ branch onto another parent and rebase it in one go, use
 git stack track main            # stack the current branch on main
 git stack track main pr1 pr2 pr3
 git stack track pr1             # move the current branch onto pr1
+git stack track --on main pr1  # track one named branch on main
 ```
+
+The `--on` form tracks at most one branch (the current branch by default).
+Multiple `--on` values are reserved for multiple bases, which aren't supported
+yet; they currently fail without changing anything.
 
 Each branch's base, the commit it was built on, is where it forked from the
 branch before it (or from `<parent>`). Like `git rebase`, this is found from

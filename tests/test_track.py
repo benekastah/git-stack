@@ -7,6 +7,47 @@ from git_stack.stack import StackClient
 from tests.helpers import Repo
 
 
+def test_track_on_tracks_the_current_branch(repo: Repo) -> None:
+    repo.git("switch", "--quiet", "-c", "feature")
+    repo.commit("a", "feature\n", "feature")
+
+    repo.stack("track", "--on", "main")
+
+    repo.assert_stacked("feature", "main", ["feature"])
+
+
+def test_track_on_tracks_one_named_branch(repo: Repo) -> None:
+    repo.git("switch", "--quiet", "-c", "feature")
+    repo.commit("a", "feature\n", "feature")
+    repo.git("switch", "--quiet", "main")
+
+    repo.stack("track", "--on", "main", "feature")
+
+    repo.assert_stacked("feature", "main", ["feature"])
+    assert repo.git("branch", "--show-current") == "main"
+
+
+def test_track_on_multiple_bases_refuses_before_changing_metadata(repo: Repo) -> None:
+    repo.git("switch", "--quiet", "-c", "feature")
+    repo.commit("a", "feature\n", "feature")
+    before = repo.git("rev-parse", "HEAD")
+
+    result = repo.stack("track", "--on", "main", "--on", "other", expect_success=False)
+
+    assert "multiple bases" in result.stderr
+    assert repo.git("rev-parse", "HEAD") == before
+    assert not repo.config_exists("feature", "stackParent")
+
+
+def test_track_on_refuses_more_than_one_target_with_argument_error(repo: Repo) -> None:
+    result = repo.stack("track", "--on", "main", "a", "b", expect_success=False)
+    assert result.returncode == 2
+
+
+def test_track_without_parent_is_still_an_argument_error(repo: Repo) -> None:
+    assert repo.stack("track", expect_success=False).returncode == 2
+
+
 def test_track_rejects_cycle(repo: Repo, client: StackClient) -> None:
     repo.make_stack()
     repo.git("switch", "--quiet", "pr1")
