@@ -650,3 +650,17 @@ def test_changes_something_sees_changes_at_the_top_from_a_subdirectory_with_diff
     repo.git("config", "diff.relative", "true")
 
     assert GitAdapter(StackCore(GitClient(repo.path / "sub"))).changes_something("pr1")
+
+
+def test_commit_patch_ids_reads_every_file_from_a_subdirectory_with_diff_relative(repo: Repo) -> None:
+    """diff.relative would have `git log -p` and `git diff` leave out the
+    files outside the subdirectory, so the patches wouldn't be the commits'."""
+    base = repo.git("rev-parse", "HEAD")
+    repo.commit("a", "changed\n", "change a")
+    (repo.path / "sub").mkdir()
+    commands = [("log", "-p", f"{base}..HEAD"), ("diff", base, "HEAD")]
+    from_top = GitClient(repo.path).commit_patch_ids(*commands)
+    repo.git("config", "diff.relative", "true")
+
+    assert [len(patches) for patches in from_top] == [1, 1]
+    assert GitClient(repo.path / "sub").commit_patch_ids(*commands) == from_top

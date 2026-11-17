@@ -822,8 +822,9 @@ class GitClient:
 
     def commit_patch_ids(self, *commands: Sequence[str]) -> list[list[tuple[str, str]]]:
         """For each of commands, (patch-id, commit) for each commit that
-        `git <command>` prints, in the order it prints them. For a diff, the
-        commit is all zeros.
+        `git <command>` prints, in the order it prints them, with every file's
+        changes, even with diff.relative set. For a diff, the commit is all
+        zeros.
 
         Each command runs, but one `git patch-id` reads them all: after each
         command's output comes a patch of our own, whose commit (1, 2, ...)
@@ -836,7 +837,9 @@ class GitClient:
                 # A diff has no commit line, so give it one, rather than rely on
                 # the blank line after the marker before it to end the marker.
                 patches.append(f"commit {'0' * length}")
-            patches.append(self.run("--literal-pathspecs", command, "--no-color", "--no-ext-diff", *rest))
+            patches.append(
+                self.run("--literal-pathspecs", command, "--no-color", "--no-ext-diff", "--no-relative", *rest)
+            )
             patches.append(f"commit {i:0{length}x}\n\n{END_MARKER_DIFF}")
         results: list[list[tuple[str, str]]] = [[]]
         for line in self.run("patch-id", "--stable", input="\n".join(patches) + "\n").splitlines():
