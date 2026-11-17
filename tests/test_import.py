@@ -425,9 +425,7 @@ def test_import_finds_the_author_of_a_named_pr(repo: Repo, gh: FakeGitHub, clien
 
     assert [(s.branch, s.action, s.other_authors) for s in result.steps] == [("api", ImportAction.CREATE, ["someone"])]
     assert repo.git("branch", "--list", "mine") == ""
-    assert [e for e in repo.emitted if isinstance(e, events.LookingUpPullRequests)] == [
-        events.LookingUpPullRequests("someone")
-    ]
+    assert repo.emitted[:2] == [events.LookingUpNamedPullRequests((2,)), events.LookingUpPullRequests("someone")]
 
 
 def test_import_finds_a_named_pr_by_a_deleted_account(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:

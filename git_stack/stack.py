@@ -575,6 +575,8 @@ class StackClient(StackCore):
         """The open pull requests numbers, those of their authors and of
         author, and (if author is None and mine) of the gh user, saying whose
         it looks up as it goes. Those from forks are left out."""
+        if numbers:
+            self.emit(events.LookingUpNamedPullRequests(tuple(numbers)))
         try:
             named = {number: adapter.open_pull_request_by_number(number) for number in numbers}
         except StackError as e:

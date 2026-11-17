@@ -40,6 +40,8 @@ def message(event: events.Event) -> str:  # noqa: C901
             return "looking up your open pull requests on GitHub"
         case events.LookingUpPullRequests(author=author):
             return f"looking up {author}'s open pull requests on GitHub"
+        case events.LookingUpNamedPullRequests():
+            return f"looking up {', '.join(f'#{n}' for n in event.numbers)} on GitHub"
         case events.Squashing():
             return f"squashing {event.count} commits on {event.branch}"
         case events.Restacking():
