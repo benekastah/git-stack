@@ -49,14 +49,6 @@ branch can't leave its settings behind, but every other read still trusts it.
 Comparing the file's contents (or a hash of them) instead of its metadata
 would rule out the missed write at little cost, since the file is small.
 
-## `import --pr` says a deleted author's pull request isn't open
-
-`open_pull_request_author` returns None both when the pull request isn't open
-and when its author's account was deleted (GitHub's ghost user), so naming an
-open pull request by a deleted account with `--pr` fails with
-"#N isn't an open pull request". It should look the pull request up anyway
-(its author would show as "a deleted account", as for one found by search).
-
 ## An older git-stack can't finish a restack this one stopped
 
 A restack that stops on a conflict is recorded in one setting,

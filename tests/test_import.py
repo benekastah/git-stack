@@ -430,6 +430,32 @@ def test_import_finds_the_author_of_a_named_pr(repo: Repo, gh: FakeGitHub, clien
     ]
 
 
+def test_import_finds_a_named_pr_by_a_deleted_account(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+    push_branch(repo, "api", "main", author=SOMEONE)
+    gh.add_pr(
+        number=2,
+        state="OPEN",
+        author=None,
+        headRefName="api",
+        baseRefName="main",
+        headRefOid=repo.git("rev-parse", "HEAD", cwd=repo.forge),
+        mergeCommit=None,
+    )
+
+    result = client.import_stacks(prs=["2"], force=True)
+
+    assert [(s.branch, s.action, s.other_authors) for s in result.steps] == [
+        ("api", ImportAction.CREATE, ["a deleted account"])
+    ]
+
+
+def test_import_refuses_a_named_pr_from_a_fork(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+    gh.add_pr(number=2, state="OPEN", headRefName="api", baseRefName="main", isCrossRepository=True)
+
+    with pytest.raises(StackError, match="^#2 isn't from a branch in the repository"):
+        client.import_stacks(prs=["2"], force=True)
+
+
 def test_import_says_whose_pull_requests_it_looks_up(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
     open_pr(repo, gh, 1, "mine", "main")
     open_pr(repo, gh, 2, "api", "main", author="someone")
