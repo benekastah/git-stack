@@ -156,10 +156,12 @@ def test_replay_preserves_own_patch_when_a_replaceable_base_has_it(
     assert repo.git("show", "combined:c") == "combined"
 
 
-@pytest.mark.parametrize("untrack_source", [False, True])
+@pytest.mark.parametrize(("untrack_source", "no_prefix"), [(False, False), (True, False), (False, True)])
 def test_replay_deduplicates_a_shared_source_in_a_nested_graph(
-    repo: Repo, client: StackClient, untrack_source: bool
+    repo: Repo, client: StackClient, untrack_source: bool, no_prefix: bool
 ) -> None:
+    if no_prefix:
+        repo.git("config", "diff.noprefix", "true")
     client.branch("secondary")
     repo.commit("a", "secondary\n", "secondary")
     client.branch("first")
