@@ -305,14 +305,14 @@ git stack import -f --pr https://github.com/acme/widgets/pull/31
 - Each branch's base is found as for `git stack track`, against where the
   untracked branches they go on (e.g. `main`) are once fast-forwarded to their
   upstreams, as `sync` does. It fast-forwards only those of the branches it
-  creates or tracks, and none in a dry run. A branch built on commits of the
-  upstream that such a branch lacks, and that it can't fast-forward (it's
-  checked out in another worktree, or diverged), is skipped, saying what to
-  do first, rather than tracked with those commits counted as its own. If a parent's commits
-  were rewritten after its child was built on them (e.g. the parent was
-  rebased and force-pushed from another machine), the child's base can come
-  out too old, and its next restack replays the parent's old commits; set it
-  with `git stack track <parent> <branch> --base <sha>`.
+  creates or tracks, and none in a dry run. If such a branch can't be
+  fast-forwarded (it's checked out in another worktree, or has diverged), a
+  branch built on upstream commits it lacks is skipped, saying what to do
+  first, rather than tracked with those commits counted as its own. If a
+  parent's commits were rewritten after its child was built on them (e.g. the
+  parent was rebased and force-pushed from another machine), the child's base
+  can come out too old, and its next restack replays the parent's old commits;
+  set it with `git stack track <parent> <branch> --base <sha>`.
 
 ### `git stack untrack [<branch|glob>...]`
 

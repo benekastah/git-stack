@@ -464,10 +464,10 @@ against where the untracked branches they go on (e.g.
 \f[CR]sync\f[R] does.
 It fast\-forwards only those of the branches it creates or tracks, and
 none in a dry run.
-A branch built on commits of the upstream that such a branch lacks, and
-that it can\(aqt fast\-forward (it\(aqs checked out in another worktree,
-or diverged), is skipped, saying what to do first, rather than tracked
-with those commits counted as its own.
+If such a branch can\(aqt be fast\-forwarded (it\(aqs checked out in
+another worktree, or has diverged), a branch built on upstream commits
+it lacks is skipped, saying what to do first, rather than tracked with
+those commits counted as its own.
 If a parent\(aqs commits were rewritten after its child was built on
 them (e.g.
 the parent was rebased and force\-pushed from another machine), the
