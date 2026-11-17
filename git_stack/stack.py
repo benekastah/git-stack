@@ -1915,7 +1915,7 @@ class ImportPlanner:
         except StackError as e:
             return self.skip(pr, str(e))
         try:
-            parent_ref = self.merges_into_ref(parent, branch if local else remote_ref)
+            parent_ref = self.merges_into_ref(parent, f"refs/heads/{branch}" if local else remote_ref)
             self.stacks.ensure_no_cycle(branch, parent)
         except StackError as e:
             return self.skip(pr, str(e))
@@ -1927,7 +1927,8 @@ class ImportPlanner:
         return ImportStep(branch, parent, pr.number, action, base=base, other_authors=others)
 
     def merges_into_ref(self, parent: str, built: str) -> str:
-        """The ref of parent, which a pull request of built (a ref) merges
+        """The ref of parent, which a pull request of built (a full ref, e.g.
+        refs/heads/pr1, never a bare name a tag could have too) merges
         into, after planning it if it's to be created. Raises StackError if the
         pull request has to be skipped for it."""
         git, remote = self.git, self.remote
@@ -2023,7 +2024,8 @@ class ImportPlanner:
         return f"refs/remotes/{remote}/{parent}"
 
     def trunk_ref(self, branch: str, built: str) -> str:
-        """The ref of local branch, which built (a ref) is built on, as import
+        """The ref of local branch, which built (a full ref, as for
+        merges_into_ref) is built on, as import
         leaves it: if it's untracked (a trunk, e.g. main), import fast-forwards
         it to its upstream when it tracks a branch on it, so a stale trunk
         doesn't make bases too old.

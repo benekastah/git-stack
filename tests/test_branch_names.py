@@ -3,6 +3,7 @@ have too: git takes a bare name for a tag before a branch, warning that it's
 ambiguous. Each test tags every branch name, then fails on that warning."""
 
 import os
+import pathlib
 import subprocess
 from collections.abc import Iterator
 from typing import Any
@@ -144,3 +145,20 @@ def test_opening_pull_requests_and_syncing_with_github(repo: Repo, gh: FakeGitHu
 
     assert repo.git("branch", "--list", "pr1") == ""
     assert stacked_on(repo, "pr2", "main")
+
+
+@pytest.mark.usefixtures("no_ambiguous_names")
+def test_import_tracks_a_local_branch_on_a_trunk_checked_out_elsewhere(
+    repo: Repo, gh: FakeGitHub, client: StackClient, tmp_path: pathlib.Path
+) -> None:
+    repo.git("switch", "--quiet", "-c", "pr1")
+    repo.commit("a", "pr1\n", "pr1 c1")
+    repo.git("push", "--quiet", "-u", "origin", "pr1")
+    gh.add_pr(number=1, state="OPEN", headRefName="pr1", baseRefName="main", headRefOid=repo.git("rev-parse", "HEAD"))
+    repo.commit_on_forge("main", "d", "main\n", "main c1")
+    repo.git("worktree", "add", "--quiet", str(tmp_path / "other"), "main")  # so import can't move main
+    shadow(repo, "main", "pr1")
+
+    client.import_stacks()
+
+    assert stacked_on(repo, "pr1", "main")
