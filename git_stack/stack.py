@@ -532,11 +532,6 @@ class StackClient(StackCore):
                     f"`git switch {name}` and track it with `git stack track <parent>`"
                 )
 
-    def ensure_import_supported(self, stacks: Stacks) -> None:
-        """Refuse imports until existing multiple-base graphs can be updated safely."""
-        if any(stacks.has_multiple_base_ancestor(branch) for branch in stacks):
-            raise StackError("import with multiple bases is not supported yet")
-
     @exclusive
     def import_stacks(
         self,
@@ -569,9 +564,7 @@ class StackClient(StackCore):
         if author is not None:
             check_github_login(author)
         self.ensure_no_operation_in_progress()
-        self.ensure_import_supported(self.stacks())
         self.settle_all()
-        self.ensure_import_supported(self.stacks())
         remote = remote or self.fallback_remote()
         adapter = make_adapter(self, remote, fetch=True)
         if not isinstance(adapter, GitHubAdapter):

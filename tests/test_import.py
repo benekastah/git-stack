@@ -8,28 +8,31 @@ from git_client.testing import GitCall
 from git_stack import events
 from git_stack.errors import StackError
 from git_stack.stack import BranchStatus, ImportAction, ImportStep, StackClient
-from git_stack.stacks import Ownership, StackNode, Stacks
+from git_stack.stacks import Ownership
 from tests.helpers import FakeGitHub, Repo
 
 SOMEONE = "Someone <someone@example.com>"
 
 
-def test_import_refuses_unsupported_multiple_base_graph_before_fetching(
-    repo: Repo, client: StackClient, emitted: list[events.Event], monkeypatch: pytest.MonkeyPatch
+def test_import_preserves_existing_graph_when_importing_other_prs(
+    repo: Repo, gh: FakeGitHub, client: StackClient
 ) -> None:
     repo.make_stack()
-    before = repo.git("rev-parse", "refs/heads/pr3")
-    stacks = Stacks(
-        [StackNode("pr1", "main"), StackNode("pr2", "pr1", additional_parents=("main",)), StackNode("pr3", "pr2")]
-    )
-    monkeypatch.setattr(client, "stacks", lambda: stacks)
-    emitted.clear()
+    repo.stack("track", "--on", "pr1", "--on", "main", "pr2")
+    client.restack()
+    client.set_ownership(Ownership.SHARED)
+    before = repo.git("rev-parse", "pr2")
+    base = repo.config("pr2", "stackBase")
+    open_pr(repo, gh, 42, "separate", "main")
 
-    with pytest.raises(StackError, match="multiple bases.*not supported"):
-        client.import_stacks()
+    result = client.import_stacks()
 
-    assert not any(isinstance(event, events.Fetching) for event in emitted)
-    assert repo.git("rev-parse", "refs/heads/pr3") == before
+    assert any(step.action is ImportAction.CREATE and step.branch == "separate" for step in result.steps)
+    stacks = client.stacks()
+    assert stacks.dependencies("pr2") == ("pr1", "main")
+    assert stacks.is_shared("pr2")
+    assert repo.git("rev-parse", "pr2") == before
+    assert repo.config("pr2", "stackBase") == base
 
 
 def push_branch(repo: Repo, branch: str, base: str, author: str | None = None) -> None:
