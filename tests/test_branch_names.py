@@ -8,7 +8,7 @@ from collections.abc import Iterator
 from typing import Any
 
 import pytest
-from git_client import Arg, Git, decode
+from git_client import Arg, CatFile, Git, decode
 
 from git_stack.core import Delete
 from git_stack.stack import BranchStatus, StackClient
@@ -31,8 +31,19 @@ def no_ambiguous_names(monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFix
         warnings.extend(f"{line} (git {command})" for line in text.splitlines() if "is ambiguous" in line)
         return result
 
-    # Every git process GitClient starts but cat-file's, whose warnings go nowhere.
+    def asked_of_rev_parse(method: Any) -> Any:
+        def ask(self: CatFile, name: str, *args: Any, **kwargs: Any) -> Any:
+            # cat-file keeps its warnings to itself, so ask rev-parse too, which says them.
+            assert isinstance(self.git, Git)
+            checked(self.git, "rev-parse", "--verify", "--quiet", name)
+            return method(self, name, *args, **kwargs)
+
+        return ask
+
+    # Every git process GitClient starts, and every name it asks its cat-file.
     monkeypatch.setattr(Git, "process", checked)
+    monkeypatch.setattr(CatFile, "resolve", asked_of_rev_parse(CatFile.resolve))
+    monkeypatch.setattr(CatFile, "verify", asked_of_rev_parse(CatFile.verify))
     yield
     assert warnings == []
 
