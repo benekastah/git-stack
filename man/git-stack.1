@@ -811,6 +811,9 @@ Branches checked out in other worktrees.
 .SS \f[CR]git stack sync [<branch|glob>...] [\-g <group>] [\-\-remote <name>] [\-d local|remote|both] [\-l] [\-\-force] [\-\-no\-verify] [\-\-ignore\-revert <branch>] [\-\-allow\-shared] [\-\-pull\-tracked\-upstream] [\-\-rewritten\-upstream] [\-\-rebuild\-stack]\f[R]
 Bring the current stack (or the ones named, see Groups) up to date with
 the remote:
+.PP
+Syncing a stack that depends on multiple bases is not supported yet;
+\f[CR]sync\f[R] refuses before changing branches.
 .IP "1." 3
 Fetch with \f[CR]\-\-prune\f[R].
 .IP "2." 3

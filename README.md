@@ -584,6 +584,9 @@ git stack restack --latest              # also move the stack onto main's latest
 Bring the current stack (or the ones named, see [Groups](#groups)) up to date
 with the remote:
 
+Syncing a stack that depends on multiple bases is not supported yet; `sync`
+refuses before changing branches.
+
 1. Fetch with `--prune`.
 2. Fast-forward the stack's root (e.g. `main`) to its upstream.
 3. Go through the stack's branches, each before the branches stacked on it:

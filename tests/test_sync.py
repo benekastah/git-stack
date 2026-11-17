@@ -11,8 +11,26 @@ from git_stack.core import Delete
 from git_stack.errors import StackError
 from git_stack.git import GitClient
 from git_stack.stack import BranchStatus, StackClient
-from git_stack.stacks import Ownership
+from git_stack.stacks import Ownership, StackNode, Stacks
 from tests.helpers import Repo
+
+
+def test_sync_refuses_multiple_base_graph_before_changing_any_branch(
+    repo: Repo, client: StackClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo.make_stack()
+    client.push()
+    before = {b: repo.git("rev-parse", f"refs/heads/{b}") for b in ("main", "pr1", "pr2", "pr3")}
+    stacks = Stacks(
+        [StackNode("pr1", "main"), StackNode("pr2", "pr1", additional_parents=("main",)), StackNode("pr3", "pr2")]
+    )
+    monkeypatch.setattr(client, "stacks", lambda: stacks)
+
+    with pytest.raises(StackError, match="multiple bases.*not supported"):
+        client.sync()
+
+    assert {b: repo.git("rev-parse", f"refs/heads/{b}") for b in before} == before
+    assert repo.git("branch", "--show-current") == "pr3"
 
 
 def test_sync_refuses_unseen_upstream_merge_commits(repo: Repo, client: StackClient) -> None:

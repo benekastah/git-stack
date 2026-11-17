@@ -1309,7 +1309,10 @@ class StackClient(StackCore):
         command = SyncCommand.SYNC if push else SyncCommand.PULL
         self.ensure_no_operation_in_progress()
         self.ensure_clean_worktree()
-        initial_stack, _ = self.sync_selection(branches, groups, self.stacks(), remote, only_remote, command)
+        initial_stacks = self.stacks()
+        initial_stack, _ = self.sync_selection(branches, groups, initial_stacks, remote, only_remote, command)
+        if push and any(initial_stacks.has_multiple_base_ancestor(branch) for branch in initial_stack):
+            raise StackError("syncing branches with multiple bases is not supported yet")
         if only_remote:
             for branch in initial_stack:
                 if self.git.config_get(branch, "remote") == remote:
