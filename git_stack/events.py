@@ -293,7 +293,7 @@ def move_off_missing_parent(branch: str, parent: str, base: str | None) -> str:
     ParentMissing's message, and the error restacking branch gives."""
     return (
         f"If {parent} was merged, move {branch} onto the branch it was merged into with "
-        f"`git stack track <branch> {branch} --base {base[:12] if base else '<sha>'}`"
+        f"`git stack track <parent> {branch} --base {base[:12] if base else '<sha>'}`"
     )
 
 

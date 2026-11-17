@@ -194,7 +194,7 @@ def test_clean_says_how_to_move_a_branch_off_a_deleted_parent(
     assert events.ParentMissing("pr2", "pr1", base) in emitted
     assert message(events.ParentMissing("pr2", "pr1", base)) == (
         "skipping pr2: its parent pr1 doesn't exist. If pr1 was merged, move pr2 onto the branch it was "
-        f"merged into with `git stack track <branch> pr2 --base {base[:12]}`"
+        f"merged into with `git stack track <parent> pr2 --base {base[:12]}`"
     )
     client.track("main", ["pr2"], base=base[:12])
     client.sync()
