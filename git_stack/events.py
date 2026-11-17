@@ -31,11 +31,23 @@ class Fetching:
 @dataclass(frozen=True)
 class LookingUpPullRequests:
     """import is searching GitHub for the open pull requests of author (a
-    GitHub login), or if None, the user's."""
+    GitHub login), or if None, the user's: one for each author it searches
+    for, if any (there's none when it only has pull requests by deleted
+    accounts to go on)."""
 
     event_type: ClassVar[str] = "looking-up-pull-requests"
 
     author: str | None = None
+
+
+@dataclass(frozen=True)
+class LookingUpNamedPullRequests:
+    """import is looking up the pull requests numbers, named with --pr,
+    before it searches for their authors'."""
+
+    event_type: ClassVar[str] = "looking-up-named-pull-requests"
+
+    numbers: tuple[int, ...]
 
 
 @dataclass(frozen=True)
@@ -355,6 +367,7 @@ type Event = (
     WaitingForLock
     | Fetching
     | LookingUpPullRequests
+    | LookingUpNamedPullRequests
     | Squashing
     | Restacking
     | PullingUpstream

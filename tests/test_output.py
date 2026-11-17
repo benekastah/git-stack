@@ -104,3 +104,7 @@ def test_reverted_gives_the_unrevert_command(children: tuple[str, ...], expected
     event = events.Reverted("pr1", "main", ("0123456789abcdef", "fedcba9876543210"), children)
 
     assert message(event) == expected
+
+
+def test_looking_up_named_pull_requests_lists_their_numbers() -> None:
+    assert message(events.LookingUpNamedPullRequests((5, 6))) == "looking up #5, #6 on GitHub"

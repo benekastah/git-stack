@@ -376,10 +376,17 @@ def test_prs_shows_the_stack_with_new_pull_requests_in_green(
     ]
 
 
-def test_prs_says_when_everything_looks_merged(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
-    main(["prs"], stack=stack)
+@pytest.mark.parametrize(
+    ("argv", "where"), [([], "pr1's stack"), (["pr2"], "those stacks"), (["-g", "api"], "those stacks")]
+)
+def test_prs_says_when_everything_looks_merged(
+    stack: Any, capsys: pytest.CaptureFixture[str], argv: list[str], where: str
+) -> None:
+    stack.git.current_branch.return_value = "pr1"
 
-    assert capsys.readouterr().out == "nothing to open: every branch in the current stack looks merged\n"
+    main(["prs", *argv], stack=stack)
+
+    assert capsys.readouterr().out == f"nothing to open: every branch in {where} looks merged\n"
 
 
 def test_stack_error_is_printed_and_fails(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:

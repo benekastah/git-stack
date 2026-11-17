@@ -1,6 +1,12 @@
 import argparse
 
-from git_stack.commands import Subparsers, add_json_argument, add_rebuild_stack_argument, add_stack_arguments
+from git_stack.commands import (
+    Subparsers,
+    add_json_argument,
+    add_rebuild_stack_argument,
+    add_stack_arguments,
+    named_stacks,
+)
 from git_stack.commands.info import print_tree
 from git_stack.stack import BranchInfo, PrsResult, PullRequestAction, PullRequestStep, StackClient
 
@@ -41,7 +47,7 @@ def run(stack: StackClient, args: Args) -> PrsResult:
 
 def show(stack: StackClient, args: Args, result: PrsResult) -> None:
     if not result.steps:
-        print("nothing to open: every branch in the current stack looks merged")
+        print(f"nothing to open: every branch in {named_stacks(stack, args.branches, args.groups)} looks merged")
     show_steps(stack, result.steps, result.branches, args.dry_run)
 
 

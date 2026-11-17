@@ -425,6 +425,56 @@ def test_import_finds_the_author_of_a_named_pr(repo: Repo, gh: FakeGitHub, clien
 
     assert [(s.branch, s.action, s.other_authors) for s in result.steps] == [("api", ImportAction.CREATE, ["someone"])]
     assert repo.git("branch", "--list", "mine") == ""
+    assert repo.emitted[:2] == [events.LookingUpNamedPullRequests((2,)), events.LookingUpPullRequests("someone")]
+
+
+def test_import_finds_a_named_pr_by_a_deleted_account(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+    push_branch(repo, "api", "main", author=SOMEONE)
+    gh.add_pr(
+        number=2,
+        state="OPEN",
+        author=None,
+        headRefName="api",
+        baseRefName="main",
+        headRefOid=repo.git("rev-parse", "HEAD", cwd=repo.forge),
+        mergeCommit=None,
+    )
+
+    result = client.import_stacks(prs=["2"], force=True)
+
+    assert [(s.branch, s.action, s.other_authors) for s in result.steps] == [
+        ("api", ImportAction.CREATE, ["a deleted account"])
+    ]
+
+
+def test_import_refuses_a_named_pr_from_a_fork(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+    gh.add_pr(number=2, state="OPEN", headRefName="api", baseRefName="main", isCrossRepository=True)
+
+    with pytest.raises(StackError, match="^#2 isn't from a branch in the repository"):
+        client.import_stacks(prs=["2"], force=True)
+
+
+@pytest.mark.parametrize("branches", [[], ["mine"]])
+def test_import_looks_up_a_named_pr_of_the_users_as_theirs(
+    repo: Repo, gh: FakeGitHub, client: StackClient, branches: list[str]
+) -> None:
+    open_pr(repo, gh, 1, "mine", "main")
+
+    client.import_stacks(branches=branches, prs=["1"])
+
+    assert [e for e in repo.emitted if isinstance(e, events.LookingUpPullRequests)] == [events.LookingUpPullRequests()]
+
+
+def test_import_says_whose_pull_requests_it_looks_up(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+    open_pr(repo, gh, 1, "mine", "main")
+    open_pr(repo, gh, 2, "api", "main", author="someone")
+
+    client.import_stacks(branches=["mine"], prs=["2"], force=True)
+
+    assert [e for e in repo.emitted if isinstance(e, events.LookingUpPullRequests)] == [
+        events.LookingUpPullRequests(),
+        events.LookingUpPullRequests("someone"),
+    ]
 
 
 def test_import_takes_a_branch_named_like_a_number_as_a_branch(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:

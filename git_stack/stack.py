@@ -1,6 +1,5 @@
 import enum
 import functools
-import re
 from collections.abc import Callable, Iterable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -9,7 +8,7 @@ from typing import Concatenate
 from git_stack import events
 from git_stack.adapters import ADAPTER_SETTING, make_adapter
 from git_stack.adapters.git import GitAdapter, PullRequestLink
-from git_stack.adapters.github import GitHubAdapter, GitHubState, OpenPullRequest
+from git_stack.adapters.github import GitHubAdapter, GitHubState, OpenPullRequest, check_github_login
 from git_stack.adapters.merge_state import MergeState
 from git_stack.core import (
     BASE_KEY,
@@ -120,10 +119,6 @@ class Unreverted:
     parent: str
     reverts: tuple[str, ...]
     children: tuple[str, ...]
-
-
-# What GitHub allows in a username, so one can't add to a search query.
-GITHUB_LOGIN = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})")
 
 
 def not_github(remote: str) -> str:
@@ -494,8 +489,8 @@ class StackClient(StackCore):
         With dry_run, nothing is changed (besides fetching remote), and the
         steps are what force would do.
         """
-        if author is not None and not GITHUB_LOGIN.fullmatch(author):
-            raise StackError(f"{author} isn't a GitHub username")
+        if author is not None:
+            check_github_login(author)
         self.ensure_no_operation_in_progress()
         self.settle_all()
         remote = remote or self.fallback_remote()
@@ -506,7 +501,6 @@ class StackClient(StackCore):
                 f"GitHub repository, gh isn't installed, or {ADAPTER_SETTING} is git"
             )
         numbers = sorted({adapter.pull_request_number(pr) for pr in prs})
-        self.emit(events.LookingUpPullRequests(author))
         # The user's own pull requests, unless only pull requests were named.
         mine = bool(branches) or not numbers
         open_prs = self.look_up_open_pull_requests(adapter, author, numbers, mine)
@@ -578,19 +572,28 @@ class StackClient(StackCore):
     def look_up_open_pull_requests(
         self, adapter: GitHubAdapter, author: str | None, numbers: Sequence[int], mine: bool
     ) -> list[OpenPullRequest]:
-        """The open pull requests of author, of the authors of the pull
-        requests numbers, and (if author is None and mine) of the gh user."""
+        """The open pull requests numbers, those of their authors and of
+        author, and (if author is None and mine) of the gh user, saying whose
+        it looks up as it goes. Those from forks are left out."""
+        if numbers:
+            self.emit(events.LookingUpNamedPullRequests(tuple(numbers)))
         try:
-            logins = {number: adapter.open_pull_request_author(number) for number in numbers}
+            named = {number: adapter.open_pull_request_by_number(number) for number in numbers}
         except StackError as e:
             raise lookup_failed(e) from e
-        if closed := [number for number, login in logins.items() if login is None]:
+        if closed := [number for number, pr in named.items() if pr is None]:
             raise StackError(f"#{closed[0]} isn't an open pull request")
+        # A deleted account's pull requests can't be searched for, so those
+        # named are kept as they were looked up.
+        prs = {pr.number: pr for pr in named.values() if pr is not None and not pr.fork}
         authors = {author} if author else ({"@me"} if mine else set[str]())
-        authors |= {login for login in logins.values() if login}
-        prs: dict[int, OpenPullRequest] = {}
+        # The lookups said who the gh user is, whose are searched for as @me.
+        authors |= {
+            "@me" if pr.author == adapter.viewer else pr.author for pr in named.values() if pr is not None and pr.author
+        }
         try:
             for login in sorted(authors):
+                self.emit(events.LookingUpPullRequests(None if login == "@me" else login))
                 prs |= {pr.number: pr for pr in adapter.open_pull_requests(login)}
         except StackError as e:
             raise lookup_failed(e) from e

@@ -49,36 +49,6 @@ branch can't leave its settings behind, but every other read still trusts it.
 Comparing the file's contents (or a hash of them) instead of its metadata
 would rule out the missed write at little cost, since the file is small.
 
-## `prs` says "the current stack" for named stacks
-
-When every branch looks merged, `git stack prs` prints "nothing to open: every
-branch in the current stack looks merged", even when stacks were named with
-branches or `-g`. `git stack push` already words this by what was named.
-
-## `import --pr` says a deleted author's pull request isn't open
-
-`open_pull_request_author` returns None both when the pull request isn't open
-and when its author's account was deleted (GitHub's ghost user), so naming an
-open pull request by a deleted account with `--pr` fails with
-"#N isn't an open pull request". It should look the pull request up anyway
-(its author would show as "a deleted account", as for one found by search).
-
-## `import --pr` says it's looking up your pull requests
-
-With only `--pr` (and no `--author`), `import` looks up the pull requests of
-the authors of the ones named, not the user's, but its
-`looking-up-pull-requests` event has no author, so it prints "looking up your
-open pull requests on GitHub".
-
-## GitHub's username format is checked in `stack.py`
-
-`GITHUB_LOGIN`, which `import_stacks` checks `--author` against, is GitHub's
-format, but it lives in `git_stack/stack.py` rather than in
-`git_stack/adapters/github.py` with the rest of what's GitHub-specific (e.g.
-`pull_request_number`). It should move there, still checked before the pull
-requests are looked up, so its error doesn't get the "check `gh auth status`"
-hint.
-
 ## An older git-stack can't finish a restack this one stopped
 
 A restack that stops on a conflict is recorded in one setting,

@@ -5,7 +5,8 @@ Keeps pull requests and the calls it got in the JSON file at $FAKE_GH_STATE,
 and fails for commands whose first argument is listed in its "fail" key, for
 opening pull requests of the branches in its "fail_heads" key, and for editing
 the pull requests numbered in its "fail_edits" key. A pull
-request's "author" is "me", the gh user, unless it says otherwise.
+request's "author" is "me", the gh user, unless it says otherwise (None for a
+deleted account).
 
 GitHub's stacks of pull requests are in its "stacks" key, each a "number" and
 the "prs" in it, bottom first. Without a "stacks" key, the repository doesn't
@@ -65,7 +66,7 @@ def respond(args: list[str], state: dict[str, Any]) -> str | None:
         if "search(" in query:
             return open_pull_requests(opt_value(args, "q"), prs)
         if "pullRequest(number: $number)" in query:
-            return pull_request_author(int(opt_value(args, "number")), prs)
+            return pull_request(int(opt_value(args, "number")), prs)
         if "pullRequest(number:" in query:
             if " stack {" in query and "stacks" not in state and state.get("no_stack_field"):
                 raise GhError("gh: Field 'stack' doesn't exist on type 'PullRequest'")
@@ -97,14 +98,19 @@ def open_pull_requests(q: str, prs: list[dict[str, Any]]) -> str:
     return json.dumps({"data": {"viewer": {"login": "me"}, "repository": repository, "search": search}})
 
 
-def pull_request_author(number: int, prs: list[dict[str, Any]]) -> str:
-    """The state and author of pull request number, or GraphQL's error if
-    there's none."""
+def pull_request(number: int, prs: list[dict[str, Any]]) -> str:
+    """Pull request number, as a lookup of one by number gets it, or
+    GraphQL's error if there's none. An author of None is a deleted account."""
     pr = next((p for p in prs if p["number"] == number), None)
     if pr is None:
         raise GhError(f"gh: Could not resolve to a PullRequest with the number of {number}.")
-    node = {"state": pr["state"], "author": {"login": pr.get("author", "me")}}
-    return json.dumps({"data": {"repository": {"pullRequest": node}}})
+    author = pr.get("author", "me")
+    node = {
+        **{k: pr[k] for k in ("number", "state", "headRefName", "baseRefName", "isCrossRepository")},
+        "author": None if author is None else {"login": author},
+    }
+    repository = {"defaultBranchRef": {"name": "main"}, "pullRequest": node}
+    return json.dumps({"data": {"viewer": {"login": "me"}, "repository": repository}})
 
 
 def pull_requests_by_number(query: str, state: dict[str, Any]) -> str:
