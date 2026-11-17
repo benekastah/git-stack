@@ -857,7 +857,9 @@ git stack prs
   Use `git stack prs --rebuild-stack` to unstack the selected pull requests on
   GitHub and create a new stack when the existing stack doesn't match. Merged
   pull requests remain in the old stack. It refuses if unstacking would also
-  remove an open pull request outside the selected stack. If creating the
+  remove an open pull request outside the selected stack; a closed one outside
+  it is taken out of the stack with the rest, and isn't linked again, even if
+  it's reopened later. If creating the
   new stack fails, the pull requests remain unstacked; rerun `prs` to retry.
   Add `--dry-run` to see the planned unstack and creation without changing them.
 

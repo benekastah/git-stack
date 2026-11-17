@@ -672,7 +672,8 @@ class GitHubAdapter(GitAdapter):
         self.core.emit(events.PullRequestRetargeted(branch, pr.number, base))
 
     def ensure_stack_scope(self, stack: GitHubStack, allowed: set[int]) -> None:
-        """Refuse to unstack PRs outside the selected local stack."""
+        """Refuse to unstack open PRs outside the selected local stack; closed and
+        merged ones don't stop it."""
         unrelated = sorted(n for n, state in stack.entries if state is GitHubState.OPEN and n not in allowed)
         if unrelated:
             raise StackError(
@@ -681,8 +682,9 @@ class GitHubAdapter(GitAdapter):
             )
 
     def unstack(self, number: int, allowed: set[int]) -> None:
-        """Take the open pull requests of pull request number's stack on GitHub
-        out of it. Merged ones stay in it."""
+        """Take the unmerged pull requests of pull request number's stack on
+        GitHub out of it. Merged ones stay in it. Closed ones outside allowed are
+        taken out too, and nothing links them into a stack again."""
         fields = self.pull_request_fields([number], STACK_FIELDS)
         stack_field = optional_field(fields[number], "stack", dict)
         if stack_field is None:
