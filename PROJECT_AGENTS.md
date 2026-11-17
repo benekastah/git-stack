@@ -38,7 +38,8 @@ man page is generated from it.
   `DependencyPlan` snapshots the operation's order, selected branches and roots
   before ref or metadata changes can alter the graph. `replay.finish` handles
   recovery and publication, then calls `StackCore.record_replay` to update
-  stack metadata before it clears the journal.
+  stack metadata before it clears the journal. The remaining restack queue
+  includes the parent choices already made for those branches.
 - Each command is a module in `git_stack/commands/` with `register`, `run` and
   `show`: `run` does the command and returns a dataclass result, and `show`
   prints it as text. With `--json`, the CLI prints the result as JSON instead

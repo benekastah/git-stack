@@ -2,10 +2,13 @@
 
 from collections.abc import Iterable
 from collections.abc import Set as AbstractSet
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from itertools import islice
 
+from git_stack.errors import StackError
 from git_stack.stacks import Stacks, dependency_order
+
+type PlannedBranch = tuple[str, tuple[str, ...]]
 
 
 @dataclass(frozen=True)
@@ -26,13 +29,24 @@ class DependencyPlan:
         order = tuple(dependency_order(branches, parents))
         return cls(order, frozenset(order), dependency_roots(order, parents))
 
-    def remaining(self, index: int, stacks: Stacks, skipped: AbstractSet[str]) -> Iterable[str]:
+    def remaining(self, index: int, stacks: Stacks, skipped: AbstractSet[str]) -> Iterable[PlannedBranch]:
         """Queue after a replay, excluding dependents of earlier skips."""
         return (
-            branch
+            (branch, stacks.dependencies(branch))
             for branch in islice(self.order, index + 1, None)
             if not skipped or skipped.isdisjoint(stacks.dependency_ancestry(branch))
         )
+
+
+def project_remaining(stacks: Stacks, remaining: tuple[PlannedBranch, ...]) -> Stacks:
+    """Restore the in-memory parent choices made before a conflict."""
+    parents = dict(remaining)
+    if missing := parents.keys() - set(stacks):
+        raise StackError(f"cannot resume restack: these branches are no longer tracked: {', '.join(sorted(missing))}")
+    return Stacks(
+        replace(stacks[b], parent=parents[b][0], additional_parents=parents[b][1:]) if b in parents else stacks[b]
+        for b in stacks
+    )
 
 
 def dependency_roots(branches: tuple[str, ...], parents: dict[str, tuple[str, ...]]) -> frozenset[str]:

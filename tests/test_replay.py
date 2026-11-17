@@ -385,3 +385,33 @@ def test_replay_refuses_a_symbolic_target_ref(repo: Repo, client: StackClient, c
 
     assert repo.git("rev-parse", "unrelated") == before
     assert repo.git("symbolic-ref", "refs/heads/combined") == "refs/heads/unrelated"
+
+
+def test_replay_resumes_projected_merge_in_another_group_member(
+    repo: Repo, client: StackClient, combined: None
+) -> None:
+    repo.git("switch", "--quiet", "main")
+    client.branch("z-merged")
+    repo.write("d", "merged\n")
+    repo.git("add", "d")
+    repo.git("commit", "-qm", "merged")
+    client.branch("z-child")
+    repo.commit("c", "z-child\n", "z-child")
+    client.group_add("together", ["combined", "z-merged"])
+    repo.git("switch", "--quiet", "main")
+    repo.git("merge", "--squash", "z-merged")
+    repo.git("commit", "-qm", "squashed z-merged")
+    repo.git("switch", "--quiet", "second")
+    repo.commit("a", "conflicting secondary\n", "conflicting secondary")
+    repo.git("switch", "--quiet", "combined")
+
+    with pytest.raises(StackError, match="cherry-pick --continue"):
+        client.restack(groups=["together"], latest=True)
+    repo.write("a", "resolved\n")
+    repo.git("add", "a")
+    repo.git("-c", "core.editor=true", "cherry-pick", "--continue")
+
+    client.restack()
+
+    assert client.stacks().dependencies("z-child") == ("main",)
+    assert repo.git("log", "--format=%s", "main..z-child") == "z-child"

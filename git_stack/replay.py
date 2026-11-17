@@ -6,6 +6,7 @@ from dataclasses import asdict, dataclass, replace
 from typing import cast
 from uuid import uuid4
 
+from git_stack.dependency_plan import PlannedBranch
 from git_stack.errors import StackError
 from git_stack.git import GitClient, is_object_id
 
@@ -31,7 +32,7 @@ class Replay:
     boundary: str = ""
     in_pick: bool = False
     ready: bool = False
-    remaining: tuple[str, ...] = ()
+    remaining: tuple[PlannedBranch, ...] = ()
     latest: bool = False
     token: str = ""
     copies: tuple[str, ...] = ()
@@ -83,13 +84,7 @@ def parse_pending(git: GitClient, fields: dict[str, object]) -> Replay:
         return value
 
     def strings(key: str) -> tuple[str, ...]:
-        value = fields[key]
-        if not isinstance(value, list):
-            raise TypeError(key)
-        values = cast(list[object], value)
-        if any(not isinstance(item, str) for item in values):
-            raise TypeError(key)
-        return tuple(str(item) for item in values)
+        return string_tuple(fields[key])
 
     job = Replay(
         string("branch"),
@@ -105,7 +100,7 @@ def parse_pending(git: GitClient, fields: dict[str, object]) -> Replay:
         string("boundary"),
         boolean("in_pick"),
         boolean("ready"),
-        strings("remaining"),
+        decode_remaining(fields["remaining"]),
         boolean("latest"),
         string("token"),
         strings("copies"),
@@ -114,10 +109,37 @@ def parse_pending(git: GitClient, fields: dict[str, object]) -> Replay:
     return job
 
 
+def string_tuple(value: object) -> tuple[str, ...]:
+    if not isinstance(value, list):
+        raise TypeError("expected a list")
+    values = cast(list[object], value)
+    if any(not isinstance(item, str) for item in values):
+        raise TypeError("expected strings")
+    return tuple(str(item) for item in values)
+
+
+def decode_remaining(value: object) -> tuple[PlannedBranch, ...]:
+    if not isinstance(value, list):
+        raise TypeError("expected remaining branches")
+    remaining: list[PlannedBranch] = []
+    for row in cast(list[object], value):
+        if not isinstance(row, list):
+            raise TypeError("expected a branch and its dependencies")
+        branch, dependencies = cast(list[object], row)
+        parents = string_tuple(dependencies)
+        if not isinstance(branch, str) or not parents:
+            raise ValueError("invalid remaining branch")
+        remaining.append((branch, parents))
+    return tuple(remaining)
+
+
 def validate_pending(git: GitClient, job: Replay) -> None:
     if len(job.token) != 32 or not all(c in "0123456789abcdef" for c in job.token):
         raise ValueError("invalid replay token")
-    for branch in (job.branch, *job.parents, *job.remaining):
+    refnames = {job.branch, *job.parents}
+    for branch, parents in job.remaining:
+        refnames.update((branch, *parents))
+    for branch in refnames:
         if not git.ok("check-ref-format", f"refs/heads/{branch}"):
             raise ValueError("invalid branch name")
     for oid in (job.before, job.old_base, job.head, *job.tips, *job.secondary, *job.own):
@@ -149,7 +171,7 @@ def plan(
     parents: tuple[str, ...],
     base: str,
     original: str,
-    remaining: tuple[str, ...] = (),
+    remaining: tuple[PlannedBranch, ...] = (),
     latest: bool = False,
 ) -> Replay:
     require_direct_target(git, branch)

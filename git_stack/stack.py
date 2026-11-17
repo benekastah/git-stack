@@ -20,7 +20,7 @@ from git_stack.core import (
     SyncCommand,
     TrunkUpstream,
 )
-from git_stack.dependency_plan import DependencyPlan, blocked_base
+from git_stack.dependency_plan import DependencyPlan, blocked_base, project_remaining
 from git_stack.errors import BrokenStackError, StackError
 from git_stack.git import DEFAULT_REMOTE, SWITCH
 from git_stack.json_fields import json_name
@@ -1306,9 +1306,10 @@ class StackClient(StackCore):
         self.ensure_clean_worktree()
         if (job := replay.pending(self.git)) is not None:
             if self.finish_replay(job) and job.remaining:
-                stacks = self.stacks()
-                adapter = make_adapter(self, self.default_remote(job.remaining, stacks), fetch=False)
-                remaining = self.skip_merged(job.remaining, stacks, adapter)
+                stacks = project_remaining(self.stacks(), job.remaining)
+                queued = [branch for branch, _ in job.remaining]
+                adapter = make_adapter(self, self.default_remote(queued, stacks), fetch=False)
+                remaining = self.skip_merged(queued, stacks, adapter)
                 self.restack_all(remaining, stacks, job.latest)
             return
         self.settle_all()

@@ -10,7 +10,7 @@ from typing import cast
 
 from git_stack import events, replay
 from git_stack.check_cache import CheckCache
-from git_stack.dependency_plan import DependencyPlan, blocked_base
+from git_stack.dependency_plan import DependencyPlan, PlannedBranch, blocked_base
 from git_stack.errors import BrokenStackError, StackError
 from git_stack.file_lock import file_lock
 from git_stack.git import GitClient
@@ -572,7 +572,7 @@ class StackCore:
         stacks: Stacks,
         latest: bool,
         original: str,
-        remaining: Iterable[str] = (),
+        remaining: Iterable[PlannedBranch] = (),
     ) -> bool:
         """Restack a branch using all of its planned dependencies."""
         parents = stacks.dependencies(branch)
