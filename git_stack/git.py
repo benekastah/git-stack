@@ -887,7 +887,10 @@ class GitClient:
                 patch = run("show", "--format=", "--binary", "--full-index", "--no-color", "--no-ext-diff", commit)
                 if patch.returncode:
                     raise StackError(f"couldn't read changes in {commit}")
-                if patch.stdout and run("apply", "--cached", "--3way", input=patch.stdout).returncode:
+                # From the top: run in a subdirectory, git apply leaves out the
+                # paths outside it.
+                top = str(self.toplevel())
+                if patch.stdout and run("-C", top, "apply", "--cached", "--3way", input=patch.stdout).returncode:
                     return False
                 tree = run("write-tree")
                 if tree.returncode or tree.stdout.decode().strip() != self.tree(upstream):

@@ -602,3 +602,22 @@ def test_snapshot_doesnt_keep_a_rebase_read_while_it_was_forgotten(repo: Repo, m
         git.rebasing_in(repo.path)
 
     assert reads == [repo.path] * 2
+
+
+def test_is_rebased_copy_replays_every_file_from_a_subdirectory(repo: Repo) -> None:
+    """Run from a subdirectory, `git apply` would leave out the changes
+    outside it; then the replay wouldn't match."""
+    base = repo.git("rev-parse", "HEAD")
+    (repo.path / "sub").mkdir()
+    repo.write("sub/x", "x\n")
+    repo.write("a", "changed\n")
+    repo.git("add", ".")
+    repo.git("commit", "--quiet", "-m", "change")
+    local = repo.git("rev-parse", "HEAD")
+    repo.git("switch", "--quiet", "--detach", base)
+    repo.commit("b", "moved on\n", "moved on")
+    new_base = repo.git("rev-parse", "HEAD")
+    repo.git("cherry-pick", "--quiet", local)
+    rebased = repo.git("rev-parse", "HEAD")
+
+    assert GitClient(repo.path / "sub").is_rebased_copy(base, local, new_base, rebased)
