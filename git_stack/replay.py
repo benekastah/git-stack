@@ -411,10 +411,10 @@ def stopped_stage(git: GitClient, job: Replay, commit: str) -> StackError:
             "Resolve the conflicts, stage the resolved files, and run `git rebase --continue`, "
             "or run `git rebase --abort`."
         )
-    elif not job.secondary and git.rev("REBASE_HEAD") == commit:
-        instructions = "If Git reports an empty own commit, run `git rebase --abort` to preserve its change."
     else:
         instructions = "Address the Git error above, then run `git rebase --continue` or `git rebase --abort`."
+        if not job.secondary:
+            instructions += " If Git reports an empty own commit, abort to preserve its change."
     return StackError(
         f"replaying {job.branch} stopped at {commit[:12]}. {instructions} "
         f"Then rerun `git stack {job.command}` with the same arguments in this worktree "

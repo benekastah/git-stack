@@ -591,6 +591,32 @@ def test_replay_keeps_completed_resolution_when_final_checkout_is_blocked(repo: 
     assert (repo.path / "saved-local").read_text(encoding="utf-8") == "local\n"
 
 
+def test_replay_prints_how_to_continue_when_an_untracked_file_blocks_an_own_commit(
+    repo: Repo, client: StackClient, combined: None
+) -> None:
+    repo.write("new-file", "own change\n")
+    repo.git("add", "new-file")
+    repo.git("commit", "-qm", "add file")
+    repo.git("switch", "-q", "second")
+    repo.commit("a", "conflicting second\n", "conflict")
+    repo.git("switch", "-q", "combined")
+    with pytest.raises(StackError, match="rebase --continue"):
+        client.restack()
+    repo.write("a", "resolved\n")
+    repo.git("add", "a")
+    repo.git("-c", "core.editor=true", "rebase", "--continue")
+    repo.write("new-file", "local\n")
+
+    with pytest.raises(StackError, match="rebase --continue"):
+        client.restack()
+    (repo.path / "new-file").rename(repo.path / "saved-local")
+    repo.git("-c", "core.editor=true", "rebase", "--continue")
+    client.restack()
+
+    assert repo.git("show", "combined:a") == "resolved"
+    assert repo.git("show", "combined:new-file") == "own change"
+
+
 @pytest.mark.parametrize("resume", [True, False])
 def test_own_stage_recovery_accepts_an_edited_resolution_message(
     repo: Repo, client: StackClient, combined: None, resume: bool
