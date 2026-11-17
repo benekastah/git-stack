@@ -506,7 +506,6 @@ class StackClient(StackCore):
                 f"GitHub repository, gh isn't installed, or {ADAPTER_SETTING} is git"
             )
         numbers = sorted({adapter.pull_request_number(pr) for pr in prs})
-        self.emit(events.LookingUpPullRequests(author))
         # The user's own pull requests, unless only pull requests were named.
         mine = bool(branches) or not numbers
         open_prs = self.look_up_open_pull_requests(adapter, author, numbers, mine)
@@ -579,7 +578,8 @@ class StackClient(StackCore):
         self, adapter: GitHubAdapter, author: str | None, numbers: Sequence[int], mine: bool
     ) -> list[OpenPullRequest]:
         """The open pull requests of author, of the authors of the pull
-        requests numbers, and (if author is None and mine) of the gh user."""
+        requests numbers, and (if author is None and mine) of the gh user,
+        saying whose it looks up as it goes."""
         try:
             logins = {number: adapter.open_pull_request_author(number) for number in numbers}
         except StackError as e:
@@ -591,6 +591,7 @@ class StackClient(StackCore):
         prs: dict[int, OpenPullRequest] = {}
         try:
             for login in sorted(authors):
+                self.emit(events.LookingUpPullRequests(None if login == "@me" else login))
                 prs |= {pr.number: pr for pr in adapter.open_pull_requests(login)}
         except StackError as e:
             raise lookup_failed(e) from e

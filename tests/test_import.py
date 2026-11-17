@@ -425,6 +425,21 @@ def test_import_finds_the_author_of_a_named_pr(repo: Repo, gh: FakeGitHub, clien
 
     assert [(s.branch, s.action, s.other_authors) for s in result.steps] == [("api", ImportAction.CREATE, ["someone"])]
     assert repo.git("branch", "--list", "mine") == ""
+    assert [e for e in repo.emitted if isinstance(e, events.LookingUpPullRequests)] == [
+        events.LookingUpPullRequests("someone")
+    ]
+
+
+def test_import_says_whose_pull_requests_it_looks_up(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+    open_pr(repo, gh, 1, "mine", "main")
+    open_pr(repo, gh, 2, "api", "main", author="someone")
+
+    client.import_stacks(branches=["mine"], prs=["2"], force=True)
+
+    assert [e for e in repo.emitted if isinstance(e, events.LookingUpPullRequests)] == [
+        events.LookingUpPullRequests(),
+        events.LookingUpPullRequests("someone"),
+    ]
 
 
 def test_import_takes_a_branch_named_like_a_number_as_a_branch(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:

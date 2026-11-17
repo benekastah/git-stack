@@ -57,13 +57,6 @@ open pull request by a deleted account with `--pr` fails with
 "#N isn't an open pull request". It should look the pull request up anyway
 (its author would show as "a deleted account", as for one found by search).
 
-## `import --pr` says it's looking up your pull requests
-
-With only `--pr` (and no `--author`), `import` looks up the pull requests of
-the authors of the ones named, not the user's, but its
-`looking-up-pull-requests` event has no author, so it prints "looking up your
-open pull requests on GitHub".
-
 ## GitHub's username format is checked in `stack.py`
 
 `GITHUB_LOGIN`, which `import_stacks` checks `--author` against, is GitHub's

@@ -31,7 +31,7 @@ class Fetching:
 @dataclass(frozen=True)
 class LookingUpPullRequests:
     """import is searching GitHub for the open pull requests of author (a
-    GitHub login), or if None, the user's."""
+    GitHub login), or if None, the user's: one for each author it looks up."""
 
     event_type: ClassVar[str] = "looking-up-pull-requests"
 
