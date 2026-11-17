@@ -200,27 +200,36 @@ def print_tree(
     children = tree_children(branches)
 
     # (the tree drawn before branch, branch), in the order they're printed.
-    rows: list[tuple[str, BranchInfo | GroupHeader]] = []
+    rows: list[tuple[str, BranchInfo | GroupHeader, bool]] = []
 
-    def add(branch: BranchInfo | GroupHeader, prefix: str, drawn: list[tuple[str, BranchInfo | GroupHeader]]) -> None:
+    def add(
+        branch: BranchInfo | GroupHeader, prefix: str, drawn: list[tuple[str, BranchInfo | GroupHeader, bool]]
+    ) -> None:
         kids = children.get(branch if isinstance(branch, GroupHeader) else branch.name, [])
         for i, kid in enumerate(kids):
             last = i == len(kids) - 1
-            drawn.append((f"{prefix}{('┌── ' if flip else '└── ') if last else '├── '}", kid))
-            add(kid, prefix + ("    " if last else "│   "), drawn)
+            reference = isinstance(branch, BranchInfo) and isinstance(kid, BranchInfo) and kid.parent != branch.name
+            drawn.append((f"{prefix}{('┌── ' if flip else '└── ') if last else '├── '}", kid, reference))
+            if not reference:
+                add(kid, prefix + ("    " if last else "│   "), drawn)
 
     for branch in branches:
         if branch.parent is None:
-            drawn: list[tuple[str, BranchInfo | GroupHeader]] = [("", branch)]
+            drawn: list[tuple[str, BranchInfo | GroupHeader, bool]] = [("", branch, False)]
             add(branch, "", drawn)
             # Upside down, the tree reads the same, mirrored.
             rows.extend(reversed(drawn) if flip else drawn)
+
     # Pull request links go in a right-aligned column after the longest line.
-    widths = [len(tree) + len(label(row, painter(False), color)) for tree, row in rows]
-    links = [link_of(row, new_links) for _, row in rows]
+    def row_label(row: BranchInfo | GroupHeader, reference: bool, row_paint: Paint) -> str:
+        text = label(row, row_paint, color)
+        return f"{text} (see {row.parent})" if reference and isinstance(row, BranchInfo) else text
+
+    widths = [len(tree) + len(row_label(row, reference, painter(False))) for tree, row, reference in rows]
+    links = [link_of(row, new_links) for _, row, _ in rows]
     link_width = max(len(link[0]) if link else 0 for link in links)
-    for (tree, row), width, link in zip(rows, widths, links, strict=True):
-        line = paint(tree, TREE) + label(row, paint, color)
+    for (tree, row, reference), width, link in zip(rows, widths, links, strict=True):
+        line = paint(tree, TREE) + row_label(row, reference, paint)
         if link:
             text, link_color = link
             line += " " * (max(widths) - width + 2) + paint(text.rjust(link_width), link_color)

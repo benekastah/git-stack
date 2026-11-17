@@ -984,13 +984,39 @@ def test_info_draws_a_branch_under_each_base(stack: Any, capsys: pytest.CaptureF
 
     main(["info"], stack=stack)
 
-    assert capsys.readouterr().out == ("main\n├── first\n│   └── combined *\n└── second\n    └── combined *\n")
+    assert capsys.readouterr().out == (
+        "main\n├── first\n│   └── combined *\n└── second\n    └── combined * (see first)\n"
+    )
 
     main(["info", "--json"], stack=stack)
     data = json.loads(capsys.readouterr().out)
     assert [item["name"] for item in data] == ["main", "first", "second", "combined"]
     assert data[-1]["parent"] == "first"
     assert data[-1]["additional_parents"] == ["second"]
+
+
+def test_info_does_not_repeat_subtrees_for_secondary_dependencies(
+    stack: Any, capsys: pytest.CaptureFixture[str]
+) -> None:
+    branches = [BranchInfo("main", None, None, current=False)]
+    parent = "main"
+    for index in range(10):
+        left, right, combined = (f"left{index}", f"right{index}", f"combined{index}")
+        branches.extend(
+            [
+                BranchInfo(left, parent, BranchStatus.UP_TO_DATE, current=False),
+                BranchInfo(right, parent, BranchStatus.UP_TO_DATE, current=False),
+                BranchInfo(combined, left, BranchStatus.UNKNOWN, current=False, additional_parents=(right,)),
+            ]
+        )
+        parent = combined
+    stack.info.return_value = branches
+
+    main(["info"], stack=stack)
+
+    lines = capsys.readouterr().out.splitlines()
+    assert len(lines) == 41
+    assert sum("combined9" in line for line in lines) == 2
 
 
 @pytest.mark.parametrize(
