@@ -288,6 +288,15 @@ class ParentMissing:
     base: str | None = None
 
 
+def move_off_missing_parent(branch: str, parent: str, base: str | None) -> str:
+    """How to move branch off parent, which doesn't exist, keeping base: for
+    ParentMissing's message, and the error restacking branch gives."""
+    return (
+        f"If {parent} was merged, move {branch} onto the branch it was merged into with "
+        f"`git stack track <branch> {branch} --base {base[:12] if base else '<sha>'}`"
+    )
+
+
 @dataclass(frozen=True)
 class MovedOffDeletedParent:
     """branch's parent, a stack's root, was deleted, locally and on the

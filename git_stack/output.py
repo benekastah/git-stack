@@ -123,8 +123,9 @@ def message(event: events.Event) -> str:  # noqa: C901
         case events.BrokenBranch():
             return f"skipping {event.branch}: {event.reason}"
         case events.ParentMissing():
-            return f"skipping {event.branch}: its parent {event.parent} doesn't exist. " + move_off_missing_parent(
-                event.branch, event.parent, event.base
+            return (
+                f"skipping {event.branch}: its parent {event.parent} doesn't exist. "
+                + events.move_off_missing_parent(event.branch, event.parent, event.base)
             )
         case events.MovedOffDeletedParent():
             return (
@@ -212,11 +213,3 @@ class JsonStream:
     def _print(self, record: dict[str, Any]) -> None:
         # Flushed, so a tool reading the stream sees each line as it happens.
         print(json.dumps(record), flush=True)
-
-
-def move_off_missing_parent(branch: str, parent: str, base: str | None) -> str:
-    """How to move branch off parent, which doesn't exist, keeping base."""
-    return (
-        f"If {parent} was merged, move {branch} onto the branch it was merged into with "
-        f"`git stack track <branch> {branch} --base {base[:12] if base else '<sha>'}`"
-    )
