@@ -14,7 +14,7 @@ class Args(argparse.Namespace):
 
 
 def register(subparsers: Subparsers) -> None:
-    p = subparsers.add_parser("branch", help="create a new branch stacked on the current one")
+    p = subparsers.add_parser("create", aliases=["branch"], help="create a new branch stacked on the current one")
     p.add_argument("name")
     p.add_argument(
         "--group",

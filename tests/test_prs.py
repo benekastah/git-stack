@@ -539,10 +539,32 @@ def test_prs_rebuild_refuses_to_unstack_unrelated_pull_requests(
     client.untrack(["pr2"])
     repo.git("config", "branch.pr3.stackParent", "pr1")
 
-    with pytest.raises(StackError, match="other unmerged pull requests: #2"):
+    with pytest.raises(StackError, match="other open pull requests: #2"):
         client.prs(rebuild_stack=True)
 
     assert gh.stacks() == [[1, 2, 3]]
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_prs_rebuild_allows_unrelated_closed_pull_requests(
+    repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event], dry_run: bool
+) -> None:
+    repo.make_stack()
+    client.push()
+    client.prs()
+    gh.enable_stacks([1, 2])
+    state = gh.load()
+    other = dict(state["prs"][0])
+    other.update(number=99, state="CLOSED", headRefName="unrelated")
+    state["prs"].append(other)
+    state["stacks"][0]["prs"].append(99)
+    gh.save(state)
+
+    client.prs(rebuild_stack=True, dry_run=dry_run)
+
+    assert gh.stacks() == ([[1, 2, 99]] if dry_run else [[1, 2, 3]])
+    if dry_run:
+        assert events.GitHubStackRebuildPlanned((1000,), (1, 2, 3)) in emitted
 
 
 def test_prs_rebuild_dry_run_does_not_create_a_stack(
@@ -706,7 +728,7 @@ def test_prs_refuses_to_unstack_unrelated_prs_during_retarget(
     state["prs"][1]["baseRefName"] = "main"
     gh.save(state)
 
-    with pytest.raises(StackError, match="other unmerged pull requests: #99"):
+    with pytest.raises(StackError, match="other open pull requests: #99"):
         client.prs(rebuild_stack=True, dry_run=dry_run)
 
     assert gh.stacks() == [[1, 2, 3, 99]]
@@ -774,9 +796,34 @@ def test_push_checks_unrelated_prs_before_pushing_a_new_parent(repo: Repo, gh: F
     client.restack(onto="pr1b")
     before = repo.git("rev-parse", "refs/remotes/origin/pr2")
 
-    with pytest.raises(StackError, match="other unmerged pull requests: #99"):
+    with pytest.raises(StackError, match="other open pull requests: #99"):
         client.push(rebuild_stack=True)
 
     assert gh.stacks() == [[1, 2, 3, 99]]
     assert repo.git("rev-parse", "refs/remotes/origin/pr2") == before
     assert not repo.git("branch", "--list", "pr1b", cwd=repo.origin)
+
+
+def test_push_rebuild_allows_unrelated_closed_pr_before_pushing_new_parent(
+    repo: Repo, gh: FakeGitHub, client: StackClient
+) -> None:
+    gh.enable_stacks()
+    repo.make_stack()
+    client.push()
+    client.prs()
+    state = gh.load()
+    other = dict(state["prs"][0])
+    other.update(number=99, state="CLOSED", headRefName="unrelated", baseRefName="pr3")
+    state["prs"].append(other)
+    state["stacks"][0]["prs"].append(99)
+    gh.save(state)
+    repo.git("switch", "--quiet", "pr1")
+    client.branch("pr1b")
+    repo.commit("a", "new parent\n", "new parent")
+    repo.git("switch", "--quiet", "pr2")
+    client.restack(onto="pr1b")
+
+    client.push(rebuild_stack=True)
+
+    assert repo.git("rev-parse", "refs/remotes/origin/pr2") == repo.git("rev-parse", "pr2")
+    assert gh.load()["prs"][1]["baseRefName"] == "pr1b"

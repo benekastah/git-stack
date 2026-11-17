@@ -21,11 +21,13 @@ class Args(argparse.Namespace):
     ignore_reverts: list[str]
     json: bool
     allow_shared: bool
+    no_verify: bool
 
 
 def register(subparsers: Subparsers) -> None:
     p = subparsers.add_parser("clean", help="fetch and untrack merged branches in every stack, without restacking")
     p.add_argument("--remote")
+    p.add_argument("--no-verify", action="store_true", help="skip the pre-push hook")
     add_delete_argument(p)
     add_ignore_revert_argument(p)
     add_json_argument(p)
@@ -47,6 +49,7 @@ def run(stack: StackClient, args: Args) -> Cleaned:
             delete=Delete(args.delete) if args.delete else None,
             ignore_reverts=args.ignore_reverts,
             allow_shared=args.allow_shared,
+            no_verify=args.no_verify,
         )
     )
 

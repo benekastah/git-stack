@@ -10,9 +10,9 @@ keeps what it knows in your repository's git config.
 pipx install git+https://github.com/benekastah/git-stack   # see Install for uv and requirements
 
 git switch main
-git stack branch add-api        # a branch for PR 1
+git stack create add-api        # a branch for PR 1
 # ...commit...
-git stack branch use-api        # a branch for PR 2, built on PR 1
+git stack create use-api        # a branch for PR 2, built on PR 1
 # ...commit...
 git stack push --prs            # push both, and open draft PRs for them, each into the branch it's built on
 ```
@@ -34,7 +34,7 @@ git stack sync                  # catch up: drop merged PRs, rebase what's left,
 
 | I want to... | Run |
 | --- | --- |
-| start a PR | `git stack branch <name>`, from `main` or from the PR it builds on |
+| start a PR | `git stack create <name>`, from `main` or from the PR it builds on |
 | see my stacks and what needs doing | `git stack info --all` |
 | update the PRs above one I just changed | `git stack restack`, then `git stack push` |
 | catch up after a PR merged, or `main` changed | `git stack sync` |
@@ -60,7 +60,7 @@ git stack sync                  # catch up: drop merged PRs, rebase what's left,
 - **root**: the branch at the bottom of a stack, usually `main`. git-stack
   doesn't manage it, but `sync` keeps it up to date.
 - **tracked**: a branch git-stack knows about, because you made it with
-  `git stack branch`, or added it with `git stack track` or
+  `git stack create`, or added it with `git stack track` or
   `git stack import`.
 - **restack**: rebase a branch onto its parent's latest commit, replaying only
   the branch's own commits.
@@ -179,9 +179,10 @@ Like git, every command accepts `-C <path>` before it to run as if started in
 `<path>`, e.g. `git stack -C ~/src/app info`, and `git -C <path> stack ...`
 works too.
 
-### `git stack branch <name> [--group <group>]`
+### `git stack create <name> [--group <group>]`
 
 Create `<name>` on top of the current branch, switch to it, and track it.
+`git stack branch` remains available as an alias.
 
 **When would I use it?** Whenever you start a new branch for a pull request,
 use this instead of `git switch -c`, so git-stack knows what it's built on. Run
@@ -190,10 +191,10 @@ for a change that depends on that PR before it's merged.
 
 ```sh
 git switch main
-git stack branch add-api        # stacked on main
-git stack branch use-api        # stacked on add-api
+git stack create add-api        # stacked on main
+git stack create use-api        # stacked on add-api
 git switch main
-git stack branch search-ui --group search   # a new stack, in group search
+git stack create search-ui --group search   # a new stack, in group search
 ```
 
 - Uncommitted changes come along to the new branch, as with `git switch -c`.
@@ -347,7 +348,7 @@ git stack rename api-v2                 # rename the current branch
 git stack rename add-api api-v2
 ```
 
-- Like `branch`, refuses a new name a remote already has a branch of.
+- Like `create`, refuses a new name a remote already has a branch of.
 - Its remote branch isn't renamed, and its pull request stays with the old
   name. The renamed branch's upstream is unset, so the next `git stack push`
   pushes it under the new name, and you have to open its pull request again.
@@ -557,7 +558,7 @@ git stack restack --latest              # also move the stack onto main's latest
 - A branch checked out in another worktree is skipped, with a warning; see
   [Branches checked out in other worktrees](#branches-checked-out-in-other-worktrees).
 
-### `git stack sync [<branch|glob>...] [-g <group>] [--remote <name>] [-d local|remote|both] [-l] [--force] [--ignore-revert <branch>] [--allow-shared] [--pull-tracked-upstream] [--rewritten-upstream] [--rebuild-stack]`
+### `git stack sync [<branch|glob>...] [-g <group>] [--remote <name>] [-d local|remote|both] [-l] [--force] [--no-verify] [--ignore-revert <branch>] [--allow-shared] [--pull-tracked-upstream] [--rewritten-upstream] [--rebuild-stack]`
 
 Bring the current stack (or the ones named, see [Groups](#groups)) up to date
 with the remote:
@@ -572,6 +573,8 @@ with the remote:
      [Pulling commits others pushed](#pulling-commits-others-pushed)).
 4. Push the branches that differ from the remote branch they already have,
    like `push` does.
+
+Pass `--no-verify` to skip the local pre-push hook.
 
 **When would I use it?** Your everyday command for catching up: after a pull
 request in the stack was merged, when `main` changed in a way that conflicts
@@ -660,7 +663,7 @@ commits are new work or old copies. Inspect the histories, then pass
 `--rewritten-upstream` to replay the unseen commits, or use
 `git stack push --force` to explicitly replace the remote with local history.
 
-### `git stack clean [--remote <name>] [-d local|remote|both] [--ignore-revert <branch>] [--allow-shared]`
+### `git stack clean [--remote <name>] [-d local|remote|both] [--no-verify] [--ignore-revert <branch>] [--allow-shared]`
 
 Fetch with `--prune`, fast-forward every stack's root, and stop tracking merged
 branches in every stack, moving their children onto their parent.
@@ -677,13 +680,13 @@ git stack clean -d local
 
 - Nothing is restacked, so there are no conflicts. The children are rebased
   the next time you `sync` or `restack` their stack.
-- `-d` and `--ignore-revert` work as for `sync`.
+- `-d`, `--no-verify` and `--ignore-revert` work as for `sync`.
 - It ends by showing every stack, as `info` does.
 - Runs from any branch, even one that isn't in a stack. Uncommitted changes
   are fine, unless you're on a stack's root, which `clean` fast-forwards, or,
   with `-d local` or `-d both`, on a tracked branch, which it could delete.
 
-### `git stack push [<branch|glob>...] [-g <group>] [--remote <name>] [--force] [--prs] [--allow-shared] [--rebuild-stack]`
+### `git stack push [<branch|glob>...] [-g <group>] [--remote <name>] [--force] [--no-verify] [--prs] [--allow-shared] [--rebuild-stack]`
 
 Force-push (with lease) every branch in the current stack (or the ones named,
 see [Groups](#groups)), and set each one's upstream.
@@ -700,6 +703,7 @@ git stack push
 git stack push use-api          # push use-api's stack from anywhere
 git stack push 'search-*'       # the stacks of every search-* branch
 git stack push --force          # drop commits on the remote you didn't pull
+git stack push --no-verify      # skip the local pre-push hook
 git stack push --prs            # then open pull requests, as `git stack prs` does
 ```
 
@@ -839,7 +843,8 @@ git stack prs
   the base of a pull request in a stack either. When a stack is reshaped
   (e.g. a branch is put in its middle), `push`, `sync`, and `prs` refuse to
   unstack it to change those bases unless given `--rebuild-stack`. It refuses
-  if the GitHub stack includes unmerged PRs outside the selected local stacks.
+  if the GitHub stack includes open PRs outside the selected local stacks;
+  closed and merged PRs do not block rebuilding.
   Run `prs` to
   link them again, or use `push --prs --rebuild-stack` to do both together.
   `sync` may already have changed local branches before it reaches this check.
@@ -852,7 +857,9 @@ git stack prs
   Use `git stack prs --rebuild-stack` to unstack the selected pull requests on
   GitHub and create a new stack when the existing stack doesn't match. Merged
   pull requests remain in the old stack. It refuses if unstacking would also
-  remove an unmerged pull request outside the selected stack. If creating the
+  remove an open pull request outside the selected stack; a closed one outside
+  it is taken out of the stack with the rest, and isn't linked again unless
+  it's reopened and a later `prs` links it with its stack. If creating the
   new stack fails, the pull requests remain unstacked; rerun `prs` to retry.
   Add `--dry-run` to see the planned unstack and creation without changing them.
 
@@ -901,7 +908,7 @@ git stack unrevert add-api-unrevert 1a2b3c4d5e6f --stack use-api
 # note: run `git stack push --prs` to open a pull request for add-api-unrevert
 ```
 
-- `<name>` must be a new branch, and like `branch`, it refuses a name a remote
+- `<name>` must be a new branch, and like `create`, it refuses a name a remote
   already has a branch of. It's tracked on `--from`, which defaults to the
   root of the first `--stack` branch's stack (e.g. `main`), or without
   `--stack`, to the remote's default branch.
@@ -1022,7 +1029,7 @@ What each command's result has, besides `type` and `events`:
 
 | Command | Result |
 | --- | --- |
-| `branch` | `branch`, the `parent` it was created on, and its `group` (or `null`) |
+| `create`, `branch` | `branch`, the `parent` it was created on, and its `group` (or `null`) |
 | `track` | `tracked`: each branch's `branch`, `parent` and `base` |
 | `import` | `stacks`, and `steps`, one for each pull request: its `branch`, the `parent` it merges into, its `number`, and the `action`: `create`, `track`, `already-tracked`, `parent-differs` or `skip`. `base` is the commit a branch it creates or tracks is built on, `tracked_parent` the parent a `parent-differs` branch is tracked on instead, and `reason` why it skipped one; each is `null` otherwise. `other_authors` has the pull request's author if it isn't you (so it needs `-f`), and is empty otherwise. `without_prs` has the same for the branches without a pull request that the pull requests are built on, without `number` or `tracked_parent`, and `create`, `create-root` or `skip`; their `other_authors` are email addresses, and `parent` is `null` for a root or if it couldn't tell which branch one is built on. `remote` is the remote it imported from |
 | `untrack` | `untracked`: each `branch`, and the `children` still stacked on it |
@@ -1502,7 +1509,8 @@ change that adds one) is installed by the next commit or push that uses it.
   any commit that changes this README. It works on what's staged, so a partly
   staged file commits just its staged part, formatted.
 - `pre-push` runs `dev.py static` (formatting, lint and types) before every
-  push; CI runs the tests. Skip it with `git push --no-verify`.
+  push; CI runs the tests. Skip it with `git push --no-verify` (or
+  `git stack push --no-verify`).
 
 ### Skipping reformatting in `git blame`
 

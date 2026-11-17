@@ -807,6 +807,7 @@ class StackCore:
         delete: Delete | None,
         allow_different_upstream: bool = False,
         confirmed: bool = True,
+        no_verify: bool = False,
     ) -> bool:
         """Stop tracking merged branch, deleting what delete says, and moving its children onto its parent (see remove_merged).
         Returns False, leaving branch alone, if its remote branch couldn't be
@@ -842,7 +843,7 @@ class StackCore:
             if ref == f"refs/heads/{default}":
                 self.remove_merged(branch, stacks, delete_local)
                 return True
-            if not git.delete_remote_branch(remote_name, ref, tip):
+            if not git.delete_remote_branch(remote_name, ref, tip, no_verify=no_verify):
                 self.emit(events.RemoteBranchDeleteFailed(branch, upstream))
                 return False
             self.emit(events.RemoteBranchDeleted(upstream))

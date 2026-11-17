@@ -642,9 +642,11 @@ class GitClient:
             return None
         return remote, ref, tip
 
-    def delete_remote_branch(self, remote: str, ref: str, tip: str) -> bool:
+    def delete_remote_branch(self, remote: str, ref: str, tip: str, no_verify: bool = False) -> bool:
         """Delete ref on remote, failing if it no longer points at tip."""
-        return self.passthrough("push", f"--force-with-lease={ref}:{tip}", remote, f":{ref}")
+        return self.passthrough(
+            "push", *(["--no-verify"] if no_verify else []), f"--force-with-lease={ref}:{tip}", remote, f":{ref}"
+        )
 
     def push_would_fail(self, *args: str) -> str | None:
         """Why `git push <args>` would fail (git's error output), found with a

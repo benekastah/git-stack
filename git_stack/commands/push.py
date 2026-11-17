@@ -25,6 +25,7 @@ class Args(argparse.Namespace):
     json: bool
     allow_shared: bool
     rebuild_stack: bool
+    no_verify: bool
 
 
 def register(subparsers: Subparsers) -> None:
@@ -35,6 +36,7 @@ def register(subparsers: Subparsers) -> None:
     )
     add_stack_arguments(p, "push")
     p.add_argument("--remote", help="only push branches for this remote")
+    p.add_argument("--no-verify", action="store_true", help="skip the pre-push hook")
     p.add_argument(
         "--force",
         action="store_true",
@@ -63,6 +65,7 @@ def run(stack: StackClient, args: Args) -> PushResult:
         prs=args.prs,
         allow_shared=args.allow_shared,
         rebuild_stack=args.rebuild_stack,
+        no_verify=args.no_verify,
     )
 
 
