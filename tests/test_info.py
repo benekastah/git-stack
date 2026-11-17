@@ -34,6 +34,21 @@ def test_info_lists_a_multiple_base_branch_once_with_all_its_parents(
     assert combined.status is BranchStatus.UNKNOWN
 
 
+def test_info_does_not_guess_status_of_a_multiple_base_descendant(
+    repo: Repo, client: StackClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo.make_stack()
+    stacks = Stacks(
+        [StackNode("pr1", "main"), StackNode("pr2", "pr1", additional_parents=("main",)), StackNode("pr3", "pr2")]
+    )
+    monkeypatch.setattr(client, "settled_stacks", lambda: stacks)
+
+    statuses = {branch.name: branch.status for branch in client.info(offline=True)}
+
+    assert statuses["pr2"] is BranchStatus.UNKNOWN
+    assert statuses["pr3"] is BranchStatus.UNKNOWN
+
+
 def test_info_lists_a_shared_dependent_once_across_roots(
     repo: Repo, client: StackClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:

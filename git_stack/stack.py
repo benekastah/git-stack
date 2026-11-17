@@ -1057,7 +1057,7 @@ class StackClient(StackCore):
         current = git.current_branch()
 
         def status(branch: str) -> BranchStatus:
-            if len(stacks.dependencies(branch)) > 1:
+            if stacks.has_multiple_base_ancestor(branch):
                 return BranchStatus.UNKNOWN
             parent = stacks.parent(branch)
             parent_tip = git.rev(f"refs/heads/{parent}")
