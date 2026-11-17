@@ -716,6 +716,8 @@ git stack clean -d local
 
 - Nothing is restacked, so there are no conflicts. The children are rebased
   the next time you `sync` or `restack` their stack.
+- It refuses a repository with multiple-base stacks until merge detection and
+  removal support them.
 - `-d`, `--no-verify` and `--ignore-revert` work as for `sync`.
 - It ends by showing every stack, as `info` does.
 - Runs from any branch, even one that isn't in a stack. Uncommitted changes

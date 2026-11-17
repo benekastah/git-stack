@@ -7,7 +7,27 @@ from git_stack.core import Delete
 from git_stack.errors import StackError
 from git_stack.output import message
 from git_stack.stack import StackClient
+from git_stack.stacks import StackNode, Stacks
 from tests.helpers import Repo
+
+
+def test_clean_refuses_multiple_base_graph_before_fetching_or_changing_branches(
+    repo: Repo, client: StackClient, emitted: list[events.Event], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo.make_stack()
+    client.push()
+    before = {b: repo.git("rev-parse", f"refs/heads/{b}") for b in ("main", "pr1", "pr2", "pr3")}
+    stacks = Stacks(
+        [StackNode("pr1", "main"), StackNode("pr2", "pr1", additional_parents=("main",)), StackNode("pr3", "pr2")]
+    )
+    monkeypatch.setattr(client, "stacks", lambda: stacks)
+    emitted.clear()
+
+    with pytest.raises(StackError, match="multiple bases.*not supported"):
+        client.clean()
+
+    assert not any(isinstance(event, events.Fetching) for event in emitted)
+    assert {b: repo.git("rev-parse", f"refs/heads/{b}") for b in before} == before
 
 
 def test_clean_untracks_merged_branches_in_every_stack_without_restacking(

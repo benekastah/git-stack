@@ -1516,6 +1516,11 @@ class StackClient(StackCore):
             else:
                 state.unpushed.append(branch)
 
+    def ensure_clean_supported(self, stacks: Stacks) -> None:
+        """Refuse cleanup until multi-base merge detection is implemented."""
+        if any(stacks.has_multiple_base_ancestor(branch) for branch in stacks):
+            raise StackError("clean with multiple bases is not supported yet")
+
     @exclusive
     def clean(
         self,
@@ -1531,8 +1536,10 @@ class StackClient(StackCore):
         Returns every stack, as info() lists them."""
         git = self.git
         self.ensure_no_operation_in_progress()
+        self.ensure_clean_supported(self.stacks())
         self.settle_all()
         stacks = self.stacks()
+        self.ensure_clean_supported(stacks)
         remote = remote or self.default_remote(stacks, stacks)
         if delete is not None:
             self.ensure_owned(stacks, stacks, allow_shared, "clean")
