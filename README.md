@@ -832,9 +832,11 @@ git stack prs
   [stacked pull requests](https://docs.github.com/en/pull-requests/reference/stacked-pull-requests),
   and a stack's open pull requests are a chain, each on the one before, it
   first links them into a stack on GitHub, or adds the new ones to the top
-  of the one they're in. Once they're all in one, GitHub shows the stack on
-  each pull request, so they get no stack in their descriptions, and the
-  ones they had are removed. A stack that branches out, or a group's stacks,
+  of the one they're in. GitHub shows its stack on each pull request in it,
+  so those in a stack on GitHub that still fits get no stack in their
+  descriptions, and the ones they had are removed; the others (e.g. new ones
+  not added to it, as linking is off) get one showing the whole stack. A
+  stack that branches out, or a group's stacks,
   can't be one stack on GitHub, so they aren't linked. But a stack on GitHub
   is kept while its open pull requests are still a path through the local
   stack, from its root, each on the one before (e.g. once a branch is
