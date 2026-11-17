@@ -1170,6 +1170,9 @@ It refuses if the GitHub stack includes open PRs outside the selected
 local stacks; closed and merged PRs do not block rebuilding.
 Run \f[CR]prs\f[R] to link them again, or use
 \f[CR]push \-\-prs \-\-rebuild\-stack\f[R] to do both together.
+Only a stack that\(aqs a chain is linked again: one that branches out is
+left unlinked, with description sections, since nothing says yet which
+path through it to link.
 \f[CR]sync\f[R] may already have changed local branches before it
 reaches this check.
 To stop it linking them, run
@@ -1184,7 +1187,8 @@ gh\-stack
 .PP
 Use \f[CR]git stack prs \-\-rebuild\-stack\f[R] to unstack the selected
 pull requests on GitHub and create a new stack when the existing stack
-doesn\(aqt match.
+doesn\(aqt match (for a stack that\(aqs a chain; one that branches out
+is only unstacked).
 Merged pull requests remain in the old stack.
 It refuses if unstacking would also remove an open pull request outside
 the selected stack; a closed one outside it is taken out of the stack

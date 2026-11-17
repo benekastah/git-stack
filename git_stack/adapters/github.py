@@ -730,8 +730,8 @@ class GitHubAdapter(GitAdapter):
             raise StackError(f"GitHub stack {stack} changed while checking it; retry the command")
         self.gh("api", "--hostname", self.host, "-X", "POST", f"{self.stacks_path()}/{stack}/unstack")
         self.changes.append(
-            f"GitHub stack {stack} was unstacked (`git stack prs` links its pull requests into one again, "
-            "once they're pushed)"
+            f"GitHub stack {stack} was unstacked (once they're pushed, `git stack prs` links a linear stack's "
+            "pull requests into one again; one that branches out is left unlinked, with description sections)"
         )
         self.core.emit(events.GitHubStackUnstacked(stack, number))
 

@@ -852,6 +852,9 @@ git stack prs
   closed and merged PRs do not block rebuilding.
   Run `prs` to
   link them again, or use `push --prs --rebuild-stack` to do both together.
+  Only a stack that's a chain is linked again: one that branches out is left
+  unlinked, with description sections, since nothing says yet which path
+  through it to link.
   `sync` may already have changed local branches before it reaches this check.
   To stop it linking them, run
   `git config stack.githubStacks false`. git-stack links them through
@@ -860,7 +863,8 @@ git stack prs
   (`gh extension install github/gh-stack`).
 
   Use `git stack prs --rebuild-stack` to unstack the selected pull requests on
-  GitHub and create a new stack when the existing stack doesn't match. Merged
+  GitHub and create a new stack when the existing stack doesn't match (for a
+  stack that's a chain; one that branches out is only unstacked). Merged
   pull requests remain in the old stack. It refuses if unstacking would also
   remove an open pull request outside the selected stack; a closed one outside
   it is taken out of the stack with the rest, and isn't linked again unless
