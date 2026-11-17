@@ -95,7 +95,7 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           # The oldest Python supported, which basedpyright checks for too.
-          python-version: "3.11"
+          python-version: "3.15"
       # Through uv: the runner's own `python` may be older than the one uv provides, and
       # dev.py stops under a Python older than the package needs. dev.py installs from
       # uv.lock, and in CI fails if it's out of date.
@@ -114,17 +114,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {os: ubuntu-latest, python: "3.11", shard: 1, shards: 1}
           - {os: ubuntu-latest, python: "3.15", shard: 1, shards: 1}
-          - {os: macos-latest, python: "3.11", shard: 1, shards: 2}
-          - {os: macos-latest, python: "3.11", shard: 2, shards: 2}
           - {os: macos-latest, python: "3.15", shard: 1, shards: 2}
           - {os: macos-latest, python: "3.15", shard: 2, shards: 2}
-          - {os: windows-latest, python: "3.11", shard: 1, shards: 5}
-          - {os: windows-latest, python: "3.11", shard: 2, shards: 5}
-          - {os: windows-latest, python: "3.11", shard: 3, shards: 5}
-          - {os: windows-latest, python: "3.11", shard: 4, shards: 5}
-          - {os: windows-latest, python: "3.11", shard: 5, shards: 5}
           - {os: windows-latest, python: "3.15", shard: 1, shards: 5}
           - {os: windows-latest, python: "3.15", shard: 2, shards: 5}
           - {os: windows-latest, python: "3.15", shard: 3, shards: 5}
@@ -187,7 +179,7 @@ jobs:
     with:
       context: >-
         {"code": ${{ needs.changes.outputs.code == 'true' }},
-        "min_python": "3.11", "newest_python": "3.15"}
+        "min_python": "3.15", "newest_python": "3.15"}
 
   # The one check a ruleset on main should require, so changing the jobs doesn't change what's
   # required. It runs even if a check failed (a skipped required check would count as

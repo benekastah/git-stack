@@ -1346,7 +1346,7 @@ where characters a branch name can have (`&`, `|`, `%`) mean something else.
 
 ## Install
 
-Runs on Linux, macOS and Windows. Requires Python 3.11+ and git 2.38+. The
+Runs on Linux, macOS and Windows. Requires Python 3.15+ and git 2.38+. The
 GitHub integration also needs [`gh`](https://cli.github.com), logged in with
 `gh auth login`.
 

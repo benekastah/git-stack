@@ -6,7 +6,7 @@ author_name: Paul Harper
 copyright_year: '2026'
 description: Stacked branches that survive squash merges
 github_user: benekastah
-min_python: '3.11'
+min_python: '3.15'
 newest_python: '3.15'
 package_name: git_stack
 project_name: git-stack

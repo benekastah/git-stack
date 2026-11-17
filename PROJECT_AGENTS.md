@@ -137,9 +137,8 @@ Keep these when resolving a `copier update`'s conflicts:
   in `dev`, Ruff's line length, extra rules, `force-exclude` and `dev.py`'s
   exclusions, and basedpyright's `include` and relaxed rules.
 - CI: `.github/workflows/project.yml` runs the man page check (on docs-only
-  changes too), the type checks as if on Windows and macOS, and the tests with
-  the Pythons between the oldest and newest, on Linux. `ci.yml` has two edits
-  of git-stack's, each commented: the tests job sets up the Windows Dev Drive
-  (`.github/actions/fast-temp`), and the time limits. `tests/conftest.py` gives
-  CI 8 test workers. `.github/workflows/measure.yml` is git-stack's own.
+  changes too) and the type checks as if on Windows and macOS. `ci.yml` has two
+  edits of git-stack's, each commented: the tests job sets up the Windows Dev
+  Drive (`.github/actions/fast-temp`), and the time limits. `tests/conftest.py`
+  gives CI 8 test workers. `.github/workflows/measure.yml` is git-stack's own.
 - The extra lines in `.gitattributes` and `.gitignore`.
