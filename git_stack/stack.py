@@ -334,6 +334,8 @@ class StackClient(StackCore):
         self.ensure_no_operation_in_progress()
         stacks = self.stacks()
         selected = self.selected_stacks(branches, groups, stacks, "mark")
+        if any(stacks.has_multiple_base_ancestor(branch) for branch in selected):
+            raise StackError("changing ownership with multiple bases is not supported yet")
         for branch in selected:
             stacks.set_ownership(branch, ownership)
         self.save(stacks)

@@ -541,6 +541,9 @@ explicit `ownership owned` or `ownership shared` choice can change the default.
 Existing stacks default to owned. Ownership is local to this clone, not a
 permission or a substitute for coordinating with contributors.
 
+Changing ownership of a multiple-base graph is not supported yet; `show`
+continues to report whether any selected branch is shared.
+
 ### `git stack restack [<branch|glob>...] [-g <group>] [--onto <parent>] [-l] [--allow-shared]`
 
 Rebase every branch in the current stack (or the ones named, see

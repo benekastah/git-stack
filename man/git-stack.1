@@ -756,6 +756,10 @@ choice can change the default.
 Existing stacks default to owned.
 Ownership is local to this clone, not a permission or a substitute for
 coordinating with contributors.
+.PP
+Changing ownership of a multiple\-base graph is not supported yet;
+\f[CR]show\f[R] continues to report whether any selected branch is
+shared.
 .SS \f[CR]git stack restack [<branch|glob>...] [\-g <group>] [\-\-onto <parent>] [\-l] [\-\-allow\-shared]\f[R]
 Rebase every branch in the current stack (or the ones named, see Groups)
 onto its parent, bottom\-up, except that a branch on the stack\(aqs root
