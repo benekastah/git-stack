@@ -1364,6 +1364,12 @@ Either one puts `git-stack` on your `PATH` (run `pipx ensurepath` or
 a specific branch, tag or commit, add `@<ref>` to the URL. To update to the
 latest version, run `pipx upgrade git-stack` or `uv tool upgrade git-stack`.
 
+uv downloads Python 3.15 if it needs to. pipx installs with its own default
+Python, so if that's older, name a 3.15 (`pipx install --python python3.15
+git+https://github.com/benekastah/git-stack`); an install made with an older
+Python fails to upgrade, and needs `pipx reinstall --python python3.15
+git-stack` once.
+
 ### The man page
 
 `git stack --help` opens git-stack's man page (git runs `man git-stack` for
