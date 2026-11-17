@@ -1010,11 +1010,13 @@ class GitHubAdapter(GitAdapter):
         they're all in one.
 
         They're all in one if its open pull requests are chain, in order.
-        Otherwise their stack is made, if none is in one, or the rest are
-        added to the top of the one whose open pull requests are chain's
-        bottom ones. Pull requests can't be taken out of a stack, so if
-        they're in several, or in one that doesn't fit, they're left alone,
-        with a warning. So is a repository without stacked pull requests.
+        Otherwise the rest are added to the top of the one whose open pull
+        requests are chain's bottom ones (and which doesn't end in a merged
+        one), or their stack is made, if none is in one. Pull requests can't
+        be taken out of a stack, so if they're in several, or in one that
+        doesn't fit, they're left alone, with a warning, unless rebuild_stack
+        is set, which unstacks those stacks and makes chain's. A repository
+        without stacked pull requests is left alone too.
         """
         found = {stack.number: stack for stack in stacks.values() if stack is not None}
         (stack,) = found.values() if len(found) == 1 else (None,)
@@ -1023,29 +1025,38 @@ class GitHubAdapter(GitAdapter):
             return True
         if not self.github_stacks_enabled():
             return False
+        if (
+            stack is not None
+            and bottom == chain[: len(bottom)]
+            and stack.entries
+            and stack.entries[-1][1] is GitHubState.OPEN
+        ):
+            if dry_run:
+                self.core.emit(events.GitHubStackAddPlanned(stack.number, tuple(chain[len(bottom) :])))
+                return False
+            return self.stacks_api(f"/{stack.number}/add", chain[len(bottom) :])
         if dry_run and not found:
             self.core.emit(events.GitHubStackRebuildPlanned((), tuple(chain)))
             return False
         if rebuild_stack and found:
-            for existing in found.values():
-                self.ensure_stack_scope(existing, set(chain))
-            if dry_run:
-                self.core.emit(events.GitHubStackRebuildPlanned(tuple(sorted(found)), tuple(chain)))
-                return False
-            for existing in found.values():
-                representative = next(n for n, state in existing.entries if state is GitHubState.OPEN and n in chain)
-                self.unstack(representative, set(chain))
-            return self.stacks_api("", chain)
-        if (
-            len(found) > 1
-            or bottom != chain[: len(bottom)]
-            or (stack is not None and stack.entries and stack.entries[-1][1] is not GitHubState.OPEN)
-        ):
+            return self.rebuild_github_stack(chain, found, dry_run)
+        if found:
             self.core.emit(events.GitHubStackMismatch(tuple(chain), tuple(sorted(found))))
             return False
-        if stack is None:
-            return self.stacks_api("", chain)
-        return self.stacks_api(f"/{stack.number}/add", chain[len(bottom) :])
+        return self.stacks_api("", chain)
+
+    def rebuild_github_stack(self, chain: list[int], found: dict[int, GitHubStack], dry_run: bool) -> bool:
+        """Unstack the stacks on GitHub found, {number: stack}, which don't fit
+        chain, then link chain into a new one (see link_github_stack)."""
+        for existing in found.values():
+            self.ensure_stack_scope(existing, set(chain))
+        if dry_run:
+            self.core.emit(events.GitHubStackRebuildPlanned(tuple(sorted(found)), tuple(chain)))
+            return False
+        for existing in found.values():
+            representative = next(n for n, state in existing.entries if state is GitHubState.OPEN and n in chain)
+            self.unstack(representative, set(chain))
+        return self.stacks_api("", chain)
 
     def github_stacks_enabled(self) -> bool:
         setting = self.git.run("config", "--type=bool", "--get", GITHUB_STACKS_SETTING, check=False)

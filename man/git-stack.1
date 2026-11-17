@@ -1192,8 +1192,11 @@ with the rest, and isn\(aqt linked again unless it\(aqs reopened and a
 later \f[CR]prs\f[R] links it with its stack.
 If creating the new stack fails, the pull requests remain unstacked;
 rerun \f[CR]prs\f[R] to retry.
-Add \f[CR]\-\-dry\-run\f[R] to see the planned unstack and creation
-without changing them.
+A stack that matches is never unstacked: new pull requests are added to
+its top, as without \f[CR]\-\-rebuild\-stack\f[R], so it keeps its
+number.
+Add \f[CR]\-\-dry\-run\f[R] to see the planned unstack and creation, or
+additions, without changing them.
 .IP
 .EX
 <!\-\- git\-stack \-\->

@@ -456,6 +456,28 @@ def test_prs_adds_new_pull_requests_to_the_top_of_the_stack_on_github(
     assert gh.stacks() == [[1, 2, 3, 4]]
 
 
+@pytest.mark.parametrize("beside", [False, True], ids=["chain", "tree"])
+def test_rebuild_stack_adds_to_the_top_of_a_github_stack_that_fits(
+    repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event], beside: bool
+) -> None:
+    gh.enable_stacks()
+    repo.make_stack()
+    client.push(prs=True)
+    if beside:
+        repo.git("switch", "--quiet", "pr2")
+        client.branch("pr3b")
+        repo.commit("b", "pr3b\n", "pr3b c1")
+    repo.git("switch", "--quiet", "pr3")
+    client.branch("pr4")
+    repo.commit("c", "pr4\n", "pr4 c1")
+
+    client.push(prs=True, rebuild_stack=True)
+
+    # The same stack, not a new one in its place.
+    assert gh.load()["stacks"] == [{"number": 1000, "prs": [1, 2, 3, 4]}]
+    assert not any(isinstance(e, events.GitHubStackUnstacked) for e in emitted)
+
+
 def test_prs_adds_to_a_stack_on_github_whose_bottom_merged(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
     gh.enable_stacks()
     repo.make_stack()
@@ -728,8 +750,7 @@ def test_prs_rebuild_dry_run_changes_nothing_in_a_branching_stack(
 
     after = gh.load()
     assert (after["prs"], after["stacks"]) == (before["prs"], before["stacks"])
-    # As for a linear stack, rebuilding puts the new pull request on top.
-    assert events.GitHubStackRebuildPlanned((1000,), (1, 2, 3, 4)) in emitted
+    assert events.GitHubStackAddPlanned(1000, (4,)) in emitted
 
 
 def test_prs_doesnt_link_on_github_when_turned_off(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:

@@ -333,6 +333,16 @@ class GitHubStackRebuildPlanned:
 
 
 @dataclass(frozen=True)
+class GitHubStackAddPlanned:
+    """The pull requests numbers would be added to the top of stack stack on
+    GitHub."""
+
+    event_type: ClassVar[str] = "github-stack-add-planned"
+    stack: int
+    numbers: tuple[int, ...]
+
+
+@dataclass(frozen=True)
 class GitHubStackUnstackPlanned:
     """GitHub stacks that would be unstacked to retarget pull requests."""
 
@@ -398,5 +408,6 @@ type Event = (
     | GitHubStackMismatch
     | GitHubStackUnstacked
     | GitHubStackRebuildPlanned
+    | GitHubStackAddPlanned
     | GitHubStackUnstackPlanned
 )

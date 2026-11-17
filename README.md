@@ -866,7 +866,10 @@ git stack prs
   it is taken out of the stack with the rest, and isn't linked again unless
   it's reopened and a later `prs` links it with its stack. If creating the
   new stack fails, the pull requests remain unstacked; rerun `prs` to retry.
-  Add `--dry-run` to see the planned unstack and creation without changing them.
+  A stack that matches is never unstacked: new pull requests are added to its
+  top, as without `--rebuild-stack`, so it keeps its number.
+  Add `--dry-run` to see the planned unstack and creation, or additions,
+  without changing them.
 
   ```
   <!-- git-stack -->
