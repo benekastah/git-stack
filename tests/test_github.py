@@ -770,6 +770,22 @@ def test_clean_refuses_uncommitted_changes_on_the_root_a_branch_moved_onto(
         client.clean()
 
 
+def test_sync_leaves_a_branch_whose_deleted_parent_wasnt_merged(
+    repo: Repo, gh: FakeGitHub, client: StackClient
+) -> None:
+    repo.make_stack()
+    client.push()
+    repo.git("push", "--quiet", "origin", ":pr1", cwd=repo.forge)
+    # Retargeted by hand, abandoning pr1.
+    gh.add_pr(number=2, state="OPEN", headRefName="pr2", headRefOid=repo.git("rev-parse", "pr2"), baseRefName="main")
+    repo.git("switch", "--quiet", "pr3")
+    repo.git("branch", "--quiet", "-D", "pr1")
+
+    client.sync()
+
+    assert client.stacks().parents() == {"pr2": "pr1", "pr3": "pr2"}
+
+
 def test_sync_leaves_a_branch_whose_deleted_parent_is_still_on_the_remote(
     repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event]
 ) -> None:

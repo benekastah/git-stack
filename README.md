@@ -641,10 +641,11 @@ git stack sync -d both          # ...and their remote branches
   `clean --ignore-revert` works from anywhere, and doesn't restack or push.
 - A branch on a stack's root that was deleted outside git-stack, locally and
   on the remote (as `gh pr merge --delete-branch` deletes a merged branch), is
-  moved onto the branch its pull request merges into now, if that's a local
-  branch: GitHub retargets the pull requests on a merged branch when it's
-  deleted. It keeps its base, so only its own commits are restacked. `clean`
-  does this too.
+  moved onto the branch its pull request merges into now, if the deleted
+  branch's pull request into it was merged and it's a local branch (or a
+  local branch tracks it): GitHub retargets the pull requests on a merged
+  branch when it's deleted. It keeps its base, so only its own commits are
+  restacked. `clean` does this too.
 - A branch with broken metadata (e.g. its parent was deleted by hand, and
   there's no pull request to say where it belongs) is skipped with a warning,
   along with everything stacked on it; the rest of the stack is still synced.

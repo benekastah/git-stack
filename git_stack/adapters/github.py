@@ -507,9 +507,36 @@ class GitHubAdapter(GitAdapter):
         )
         return PullRequestLink(pr.number, f"https://{self.host}/{self.owner}/{self.name}/pull/{pr.number}", state)
 
-    def pull_request_base(self, branch: str) -> str | None:
+    def deleted_parent_merged_into(self, branch: str, parent: str) -> str | None:
+        """The local branch of the one branch's pull request merges into now,
+        if parent's pull request into it was merged: GitHub retargets the pull
+        requests on a merged branch when it's deleted. A pull request
+        retargeted by hand, over a parent that wasn't merged, doesn't count."""
         pr = self.pull_requests().get(branch)
-        return self.local_branch_of(pr.base) if pr is not None else None
+        if pr is None or pr.base == parent:
+            return None
+        try:
+            merged = pr.base in self.merged_bases(parent)
+        except StackError:
+            return None
+        return self.local_branch_of(pr.base) if merged else None
+
+    def merged_bases(self, head: str) -> set[str]:
+        """The branches the merged pull requests from head, a branch in the
+        repository, were merged into."""
+        query = (
+            "query($owner: String!, $name: String!, $h0: String!) { repository(owner: $owner, name: $name) "
+            f"{{ h0: pullRequests(headRefName: $h0, states: MERGED, first: {PRS_PER_BRANCH}, "
+            "orderBy: {field: UPDATED_AT, direction: DESC}) { nodes { baseRefName isCrossRepository } } } }"
+        )
+        args = ["api", "graphql", "--hostname", self.host, "-f", f"owner={self.owner}", "-f", f"name={self.name}"]
+        args += ["-f", f"h0={head}", "-f", f"query={query}"]
+        repository = field(field(parse_json(self.gh(*args)), "data", dict), "repository", dict)
+        return {
+            field(pr, "baseRefName", str)
+            for pr in field(field(repository, "h0", dict), "nodes", list)
+            if not field(pr, "isCrossRepository", bool)
+        }
 
     def local_branch_of(self, name: str) -> str | None:
         """The local branch of name, a branch on remote: the one whose

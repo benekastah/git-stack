@@ -232,9 +232,10 @@ class GitAdapter:
         """branch's pull request, open or merged, if the adapter knows of one."""
         return None
 
-    def pull_request_base(self, branch: str) -> str | None:
-        """The local branch of the one that branch's pull request (see
-        pull_request_link) merges into, if the adapter knows of both."""
+    def deleted_parent_merged_into(self, branch: str, parent: str) -> str | None:
+        """The local branch that parent, a branch deleted everywhere, was
+        merged into, if the adapter can tell from branch, which was stacked
+        on it."""
         return None
 
     def ensure_available(self) -> None:

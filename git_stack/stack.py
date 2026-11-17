@@ -1326,8 +1326,9 @@ class StackClient(StackCore):
         self, branches: Sequence[str], stacks: Stacks, adapter: GitAdapter, remote: str
     ) -> bool:
         """Move each of branches stacked on a root that's gone, locally and on
-        remote, onto the branch its pull request merges into now, if that's
-        another local branch, and say whether any moved.
+        remote, onto the branch the root was merged into, if the adapter can
+        tell (see GitAdapter.deleted_parent_merged_into), and say whether any
+        moved.
 
         That's what a merged branch deleted outside git-stack (e.g. by
         `gh pr merge --delete-branch`) leaves: deleting it forgot it was
@@ -1347,8 +1348,8 @@ class StackClient(StackCore):
                 or git.rev(f"refs/remotes/{remote}/{parent}") is not None
             ):
                 continue
-            new_parent = adapter.pull_request_base(branch)
-            if new_parent is None or new_parent == parent or not git.local_branch_exists(new_parent):
+            new_parent = adapter.deleted_parent_merged_into(branch, parent)
+            if new_parent is None:
                 continue
             try:
                 stacks.ensure_no_cycle(branch, new_parent)
