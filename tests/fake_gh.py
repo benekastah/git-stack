@@ -9,7 +9,8 @@ request's "author" is "me", the gh user, unless it says otherwise (None for a
 deleted account).
 
 GitHub's stacks of pull requests are in its "stacks" key, each a "number" and
-the "prs" in it, bottom first. Without a "stacks" key, the repository doesn't
+the "prs" in it, bottom first; "next_stack" is the next one's number, so,
+as on GitHub, none is reused. Without a "stacks" key, the repository doesn't
 have them, so the stacks API is Not Found, and with a true "no_stack_field"
 key, GraphQL doesn't even know pull requests' stack field, like GitHub
 Enterprise without them.
@@ -199,7 +200,10 @@ def link_stack(path: str, numbers: list[int], state: dict[str, Any]) -> str:
     if match is None:
         if len(numbers) < 2:
             raise GhError("gh: Validation Failed (HTTP 422): a stack needs two pull requests")
-        state["stacks"].append({"number": 1000 + len(state["stacks"]), "prs": numbers})
+        # Like GitHub's, a stack's number is never reused.
+        number = state.get("next_stack", 1000)
+        state["next_stack"] = number + 1
+        state["stacks"].append({"number": number, "prs": numbers})
     else:
         next(stack for stack in state["stacks"] if stack["number"] == int(match.group(1)))["prs"].extend(numbers)
     return json.dumps({"pull_requests": [{"number": n} for n in numbers]})
