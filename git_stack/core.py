@@ -611,7 +611,9 @@ class StackCore:
             stacks.set_additional_parents(result.branch, result.parents[1:])
         # A previous attempt may have written the parents and stopped
         # before marking the descendants shared.
-        if any(parent in stacks and stacks.is_shared(parent) for parent in result.parents):
+        if stacks.is_shared(result.branch) or any(
+            parent in stacks and stacks.is_shared(parent) for parent in result.parents
+        ):
             stacks.share(result.branch)
         self.save(stacks)
         git.config_set(result.branch, BASE_KEY, result.boundary)
