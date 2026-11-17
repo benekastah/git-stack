@@ -95,12 +95,13 @@ class GitAdapter:
         """Whether branch's tree differs from its recorded base's.
 
         False for a branch with no commits of its own yet, and when the base is
-        missing or not in its history.
+        missing or not in its history. Every file counts, even with
+        diff.relative set.
         """
         base = self.git.config_get(branch, BASE_KEY)
         if base is None or not self.git.is_ancestor(base, f"refs/heads/{branch}"):
             return False
-        return not self.git.ok("diff", "--quiet", base, f"refs/heads/{branch}")
+        return not self.git.ok("diff", "--no-relative", "--quiet", base, f"refs/heads/{branch}")
 
     def landed_as_patches(self, branch: str, parent_tip: str) -> bool:
         """Whether parent_tip, the commit branch's parent is at, has branch's

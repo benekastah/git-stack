@@ -10,6 +10,8 @@ from typing import Any
 
 import pytest
 
+from git_stack.adapters.git import GitAdapter
+from git_stack.core import StackCore
 from git_stack.errors import StackError
 from git_stack.git import GitClient, changes_refs, changes_worktrees, git_program, same_file
 from tests.conftest import GIT_EXEC_PATH, GIT_REPOSITORY_VARIABLES
@@ -637,3 +639,14 @@ def test_is_rebased_copy_replays_every_file_from_a_subdirectory(repo: Repo, rela
     repo.git("config", "diff.relative", str(relative).lower())
 
     assert GitClient(repo.path / "sub").is_rebased_copy(base, local, new_base, rebased)
+
+
+def test_changes_something_sees_changes_at_the_top_from_a_subdirectory_with_diff_relative(repo: Repo) -> None:
+    """diff.relative would have `git diff --quiet` look only at the
+    subdirectory's files."""
+    repo.client.branch("pr1")
+    repo.commit("a", "pr1\n", "pr1 c1")
+    (repo.path / "sub").mkdir()
+    repo.git("config", "diff.relative", "true")
+
+    assert GitAdapter(StackCore(GitClient(repo.path / "sub"))).changes_something("pr1")
