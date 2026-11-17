@@ -2,7 +2,9 @@
 
 import pytest
 
+from git_stack import events, replay
 from git_stack.errors import StackError
+from git_stack.git import GitClient
 from git_stack.stack import BranchStatus, StackClient
 from tests.helpers import Repo
 
@@ -252,3 +254,39 @@ def test_track_repairs_boundary_after_manual_rebase(repo: Repo, client: StackCli
     client.restack()
 
     assert repo.git("log", "--reverse", "--format=%s", "first..combined") == "second\nown change"
+
+
+def test_replay_does_not_publish_after_a_source_ref_changes(
+    repo: Repo, client: StackClient, combined: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    publish = replay.publish
+    before = repo.git("rev-parse", "combined")
+    boundary = repo.config("combined", "stackBase")
+
+    def move_source_then_publish(git: GitClient, job: replay.Replay) -> None:
+        repo.git("update-ref", "refs/heads/second", "refs/heads/main")
+        publish(git, job)
+
+    monkeypatch.setattr(replay, "publish", move_source_then_publish)
+    with pytest.raises(StackError, match="update-ref"):
+        client.restack()
+
+    assert repo.git("rev-parse", "combined") == before
+    assert repo.config("combined", "stackBase") == boundary
+    assert repo.git("branch", "--show-current") == "combined"
+    assert replay.pending(client.git) is None
+
+
+def test_replay_skips_combined_branch_checked_out_in_another_worktree(
+    repo: Repo, client: StackClient, combined: None
+) -> None:
+    before = repo.git("rev-parse", "combined")
+    repo.git("switch", "--quiet", "first")
+    worktree = repo.tmp / "combined-worktree"
+    repo.git("worktree", "add", str(worktree), "combined")
+
+    client.restack(["combined"])
+
+    assert repo.git("rev-parse", "combined") == before
+    assert repo.git("rev-parse", "HEAD", cwd=worktree) == before
+    assert isinstance(repo.emitted[-1], events.NotRestackedInOtherWorktree)
