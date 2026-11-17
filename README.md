@@ -1168,7 +1168,9 @@ worktree, then rerun the git-stack command to return to your original
 checkout. After `git cherry-pick --abort`, a checkout recorded in the HEAD
 reflog can also let git-stack recognize the abort if you already switched
 back. Leave the checkout in place after `--continue` until git-stack
-publishes the replay.
+publishes the replay. If you already switched away and git-stack recognizes
+the resolved commit in the reflog, it prints the exact checkout command to
+return to it and the git-stack command to rerun.
 
 For a pull, each upstream commit must be accounted for, even when commits share
 an author, date, and subject; a skipped commit is not counted as pulled.

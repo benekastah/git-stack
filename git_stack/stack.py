@@ -1678,7 +1678,9 @@ class StackClient(StackCore):
             self.take_upstream_rebase(branch, parent, state.remote, allow_rewritten=state.rewritten_upstream)
         self.ensure_upstream_not_rewritten(branch, parent, state.remote, state.rewritten_upstream, state.command)
         try:
-            restacked = self.restack_dependency(branch, state.stacks, state.latest, state.original)
+            restacked = self.restack_dependency(
+                branch, state.stacks, state.latest, state.original, command=state.command.value
+            )
         except BrokenStackError as e:
             self.emit(events.BrokenBranch(branch, str(e)))
             restacked = False

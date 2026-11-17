@@ -573,6 +573,8 @@ class StackCore:
         latest: bool,
         original: str,
         remaining: Iterable[PlannedBranch] = (),
+        *,
+        command: str = "restack",
     ) -> bool:
         """Restack a branch using all of its planned dependencies."""
         parents = stacks.dependencies(branch)
@@ -593,7 +595,7 @@ class StackCore:
             self.emit(events.NotRestackedInOtherWorktree(branch, str(worktree)))
             return False
         self.restore_checkout(original)
-        job = replay.plan(git, branch, parents, base, original, tuple(remaining), latest)
+        job = replay.plan(git, branch, parents, base, original, tuple(remaining), latest, command=command)
         self.emit(events.Restacking(branch, parents[0]))
         job.pin(git)
         self.finish_replay(job)

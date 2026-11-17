@@ -1696,6 +1696,9 @@ HEAD reflog can also let git\-stack recognize the abort if you already
 switched back.
 Leave the checkout in place after \f[CR]\-\-continue\f[R] until
 git\-stack publishes the replay.
+If you already switched away and git\-stack recognizes the resolved
+commit in the reflog, it prints the exact checkout command to return to
+it and the git\-stack command to rerun.
 .PP
 For a pull, each upstream commit must be accounted for, even when
 commits share an author, date, and subject; a skipped commit is not

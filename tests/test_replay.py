@@ -517,3 +517,41 @@ def test_replay_does_not_deduplicate_a_conflict_resolution_that_changed_indentat
         client.restack()
 
     assert repo.git("rev-parse", "final") == before
+
+
+@pytest.mark.parametrize("command", ["restack", "pull", "sync"])
+def test_replay_conflict_names_the_command_to_resume(
+    repo: Repo, client: StackClient, combined: None, command: str
+) -> None:
+    repo.git("switch", "-q", "second")
+    repo.commit("a", "conflicting second\n", "conflict")
+    repo.git("switch", "-q", "combined")
+
+    result = repo.stack(command, expect_success=False)
+
+    assert "`git cherry-pick --continue`" in result.stderr
+    assert "`git cherry-pick --abort`" in result.stderr
+    assert f"`git stack {command}`" in result.stderr
+    assert "before switching branches" in result.stderr
+
+
+def test_replay_prints_how_to_return_to_a_resolved_pick(repo: Repo, client: StackClient, combined: None) -> None:
+    repo.git("switch", "-q", "second")
+    repo.commit("a", "conflicting second\n", "conflict")
+    repo.git("switch", "-q", "combined")
+    with pytest.raises(StackError, match="cherry-pick --continue"):
+        client.restack()
+    repo.write("a", "resolved\n")
+    repo.git("add", "a")
+    repo.git("-c", "core.editor=true", "cherry-pick", "--continue")
+    resolved = repo.git("rev-parse", "HEAD")
+    repo.git("switch", "-q", "combined")
+
+    result = repo.stack("restack", expect_success=False)
+    assert f"`git switch --detach {resolved}`" in result.stderr
+    assert "`git stack restack`" in result.stderr
+
+    repo.git("switch", "-q", "--detach", resolved)
+    client.restack()
+    assert repo.git("show", "combined:a") == "resolved"
+    assert repo.git("branch", "--show-current") == "combined"
