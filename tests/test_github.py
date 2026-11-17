@@ -745,6 +745,19 @@ def test_clean_untracks_merged_branches_whose_parent_was_merged_and_deleted(
     assert repo.git("rev-parse", "refs/heads/main") == repo.git("rev-parse", "refs/remotes/origin/main")
 
 
+def test_clean_moves_a_branch_onto_the_local_branch_of_its_prs_base(
+    repo: Repo, gh: FakeGitHub, client: StackClient
+) -> None:
+    repo.make_stack()
+    merge_pr1_and_delete_it_everywhere(repo, gh)
+    repo.git("branch", "--quiet", "-m", "main", "mainline")  # still tracking origin/main
+    repo.git("branch", "--quiet", "--no-track", "main", "mainline")  # another branch, named like the base
+
+    client.clean()
+
+    assert client.stacks().parents() == {"pr2": "mainline", "pr3": "pr2"}
+
+
 def test_clean_refuses_uncommitted_changes_on_the_root_a_branch_moved_onto(
     repo: Repo, gh: FakeGitHub, client: StackClient
 ) -> None:

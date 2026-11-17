@@ -509,7 +509,23 @@ class GitHubAdapter(GitAdapter):
 
     def pull_request_base(self, branch: str) -> str | None:
         pr = self.pull_requests().get(branch)
-        return pr.base if pr is not None else None
+        return self.local_branch_of(pr.base) if pr is not None else None
+
+    def local_branch_of(self, name: str) -> str | None:
+        """The local branch of name, a branch on remote: the one whose
+        upstream it is (name itself, if several are), or else a local branch
+        called name that tracks nothing else on remote. None if there's none."""
+        git = self.git
+        tracking = sorted(
+            b
+            for b in git.local_branches()
+            if git.has_branch_upstream(b, self.remote) and git.remote_branch_name(b, self.remote) == name
+        )
+        if tracking:
+            return name if name in tracking else tracking[0] if len(tracking) == 1 else None
+        if git.local_branch_exists(name) and git.remote_branch_name(name, self.remote) == name:
+            return name
+        return None
 
     def merge_state(self, branch: str, parent: str, ignore_revert: bool = False) -> MergeState:
         git = self.git

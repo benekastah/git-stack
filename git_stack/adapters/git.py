@@ -233,8 +233,8 @@ class GitAdapter:
         return None
 
     def pull_request_base(self, branch: str) -> str | None:
-        """The branch that branch's pull request (see pull_request_link)
-        merges into, if the adapter knows of one."""
+        """The local branch of the one that branch's pull request (see
+        pull_request_link) merges into, if the adapter knows of both."""
         return None
 
     def ensure_available(self) -> None:
