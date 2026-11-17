@@ -297,14 +297,28 @@ class InProcessGh:
         return getattr(subprocess, name)
 
     @staticmethod
-    def run(args: list[str], *, input: bytes | str | None = None, encoding: str | None = None, **kwargs: Any) -> Any:
+    def run(
+        args: list[str],
+        *,
+        input: bytes | str | None = None,
+        encoding: str | None = None,
+        check: bool = False,
+        **kwargs: Any,
+    ) -> Any:
         if args[0] != "gh":
-            return subprocess.run(args, input=input, encoding=encoding, **kwargs)  # noqa: PLW1510 (the caller's check)
+            return subprocess.run(args, input=input, encoding=encoding, check=check, **kwargs)
+        # Only the ways git-stack runs gh: its output captured, with or without input.
+        assert kwargs == {"capture_output": True}, kwargs
         stdin = input.encode(encoding or "utf-8") if isinstance(input, str) else input or b""
         status, out, err = fake_gh.run(args[1:], lambda: stdin)
-        if encoding is None:
-            return subprocess.CompletedProcess(args, status, out, err)
-        return subprocess.CompletedProcess(args, status, out.decode(encoding), err.decode(encoding))
+        result: subprocess.CompletedProcess[Any] = (
+            subprocess.CompletedProcess(args, status, out, err)
+            if encoding is None
+            else subprocess.CompletedProcess(args, status, out.decode(encoding), err.decode(encoding))
+        )
+        if check:
+            result.check_returncode()
+        return result
 
 
 @dataclass
