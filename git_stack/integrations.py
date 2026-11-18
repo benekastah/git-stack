@@ -3,18 +3,24 @@
 import hashlib
 import json
 import pathlib
-from collections.abc import Iterable, Sequence
+import time
+from collections.abc import Sequence
 from typing import NotRequired, TypedDict, cast
 
 from git_stack import events
 from git_stack.adapters import make_adapter
 from git_stack.adapters.github import GitHubAdapter
-from git_stack.core import INTEGRATION_KEY, StackCore
+from git_stack.core import INTEGRATION_KEY, RemoteDeletion, StackCore
 from git_stack.errors import StackError
 from git_stack.git import GitClient, is_object_id, same_file
 from git_stack.stacks import Stacks
 
 PENDING_KEY = "stackIntegrationBuild"
+CHECKOUT_KEY = "stackIntegrationCheckout"
+PUBLISH_KEY = "stackIntegrationPublish"
+DELETE_PREFIX = "stackIntegrationDelete"
+# GitHub can attach merge metadata after the commit becomes visible on the root.
+EVIDENCE_RECHECK_SECONDS = 300
 
 
 class Source(TypedDict):
@@ -23,12 +29,15 @@ class Source(TypedDict):
     remote: str | None
     head: str
     landing: str | None
+    checked: NotRequired[bool]
+    checked_at: NotRequired[float]
 
 
 class Integration(TypedDict):
     root: str
     sources: list[Source]
     root_tip: str | None
+    evidence_remote: NotRequired[str]
     tip: str
 
 
@@ -49,6 +58,7 @@ class Integrations:
     def __init__(self, core: StackCore) -> None:
         self.core = core
         self.git = core.git
+        self.adapters: dict[tuple[str, bool], GitHubAdapter | None] = {}
 
     def names(self) -> set[str]:
         return {b for b, key in self.git.branch_config() if key == INTEGRATION_KEY.lower()}
@@ -59,7 +69,16 @@ class Integrations:
 
     def pending(self, name: str) -> Build | None:
         value = self.git.config_get(name, PENDING_KEY)
-        return cast(Build, json.loads(value)) if value else None
+        if not value:
+            return None
+        build = cast(Build, json.loads(value))
+        try:
+            step, head = self.progress_path(name).read_text(encoding="utf-8").split()
+        except FileNotFoundError:
+            return build
+        if int(step) > build["step"]:
+            build["step"], build["head"] = int(step), head
+        return build
 
     def save(self, name: str, integration: Integration) -> None:
         self.git.config_set(name, INTEGRATION_KEY, json.dumps(integration))
@@ -67,9 +86,51 @@ class Integrations:
     def journal(self, name: str, build: Build) -> None:
         self.git.config_set(name, PENDING_KEY, json.dumps(build))
 
+    def remember_first_push(self, name: str, remote: str, target: str, tip: str) -> None:
+        self.git.config_set(name, PUBLISH_KEY, json.dumps([remote, target, tip]))
+
+    def first_push(self, name: str) -> tuple[str, str, str] | None:
+        value = self.git.config_get(name, PUBLISH_KEY)
+        return cast(tuple[str, str, str], json.loads(value)) if value else None
+
+    def forget_first_push(self, name: str) -> None:
+        if self.git.config_get(name, PUBLISH_KEY):
+            self.git.config_unset(name, PUBLISH_KEY)
+
+    def deletion_key(self, deletion: RemoteDeletion) -> str:
+        target = f"{deletion.remote} {deletion.ref}".encode()
+        return DELETE_PREFIX + hashlib.sha256(target).hexdigest()
+
+    def remember_deletion(self, name: str, deletion: RemoteDeletion) -> None:
+        self.git.config_set(
+            name, self.deletion_key(deletion), json.dumps([deletion.remote, deletion.ref, deletion.tip])
+        )
+
+    def forget_deletion(self, name: str, deletion: RemoteDeletion) -> None:
+        self.git.config_unset(name, self.deletion_key(deletion))
+
+    def pending_deletions(self, names: set[str], remote: str) -> list[tuple[str, RemoteDeletion]]:
+        return [
+            (name, deletion)
+            for (name, key), value in self.git.branch_config().items()
+            if name in names
+            and key.startswith(DELETE_PREFIX.lower())
+            and (deletion := RemoteDeletion(*cast(tuple[str, str, str], json.loads(value)))).remote == remote
+        ]
+
     def path(self, name: str) -> pathlib.Path:
         key = hashlib.sha256(name.encode()).hexdigest()[:24]
         return self.git.common_dir() / "stack-integration-builds" / key
+
+    def progress_path(self, name: str) -> pathlib.Path:
+        return self.path(name).with_suffix(".progress")
+
+    def write_progress(self, name: str, build: Build) -> None:
+        """Write a small checkpoint without rewriting the immutable build inputs."""
+        path = self.progress_path(name)
+        staging = path.with_suffix(".tmp")
+        staging.write_text(f"{build['step']} {build['head']}\n", encoding="utf-8")
+        staging.replace(path)
 
     def remove_build(self, name: str) -> None:
         path = self.path(name)
@@ -78,6 +139,8 @@ class Integrations:
         if any(path == pathlib.Path(entry[9:]) for entry in registered if entry.startswith("worktree ")):
             self.git.run("worktree", "remove", "--force", str(path))
         self.git.config_unset(name, PENDING_KEY)
+        self.progress_path(name).unlink(missing_ok=True)
+        self.progress_path(name).with_suffix(".tmp").unlink(missing_ok=True)
 
     def restore_pending_checkout(self) -> None:
         """Restore the integration if an interruption left this worktree detached."""
@@ -85,14 +148,16 @@ class Integrations:
             return
         head = self.git.rev("HEAD")
         for name in sorted(self.names()):
-            build = self.pending(name)
-            if (
-                build
-                and build["result"] == head
-                and (checkout := build.get("checkout"))
-                and same_file(pathlib.Path(checkout), self.git.toplevel())
-            ):
+            marker = self.git.config_get(name, CHECKOUT_KEY)
+            if marker:
+                checkout, result = cast(tuple[str, str], json.loads(marker))
+            else:
+                # A build stopped by an earlier version recorded this in its journal.
+                build = self.pending(name)
+                checkout, result = (build.get("checkout"), build["result"]) if build else (None, None)
+            if checkout and result == head and same_file(pathlib.Path(checkout), self.git.toplevel()):
                 self.git.switch(name)
+                self.git.config_unset(name, CHECKOUT_KEY)
                 break
 
     def finish_interrupted(self, name: str) -> bool:
@@ -103,6 +168,8 @@ class Integrations:
         if result == build["expected"] and self.read(name) != build["integration"]:
             return False
         self.save(name, build["integration"])
+        if (checkout := build.get("checkout")) and not self.git.config_get(name, CHECKOUT_KEY):
+            self.git.config_set(name, CHECKOUT_KEY, json.dumps([checkout, result]))
         self.remove_build(name)
         return True
 
@@ -119,7 +186,7 @@ class Integrations:
             previous = None
         head = (
             self.git.remote_branch_name(name, remote)
-            if remote and self.git.has_branch_upstream(name, remote)
+            if remote and self.git.config_get(name, "remote") == remote
             else (previous["head"] if previous else name)
         )
         return Source(
@@ -129,15 +196,6 @@ class Integrations:
             head=head,
             landing=previous["landing"] if previous and tip == previous["tip"] else None,
         )
-
-    def source_remotes(self, integrations: Iterable[Integration]) -> set[str]:
-        remotes = set(self.git.remotes())
-        return {
-            remote
-            for integration in integrations
-            for source in integration["sources"]
-            if (remote := self.git.config_get(source["name"], "remote") or source["remote"]) and remote in remotes
-        }
 
     def validate(
         self,
@@ -196,40 +254,96 @@ class Integrations:
         remote: str,
         fetch: bool,
         captured: dict[str, Source] | None = None,
+        *,
+        previous: Integration | None = None,
     ) -> tuple[Integration, dict[str, str | None]]:
         root_tip = self.git.tip(root)
         observed: dict[str, str | None] = {root: root_tip}
+        same_root = bool(previous and previous["root_tip"] == root_tip and previous.get("evidence_remote") == remote)
         inputs: list[Source] = []
+        unresolved: list[Source] = []
         for source in sources:
             branch = source["name"]
             live = self.git.rev(f"refs/heads/{branch}")
             observed[branch] = live
             if live is None and captured and branch in captured:
                 source = captured[branch]
-            tip = live or source["tip"]
-            current = self.source(branch, tip, source)
-            landing = source["landing"] if source["tip"] == tip else None
-            if landing and not self.git.is_ancestor(landing, root_tip):
-                landing = None
-            if landing is None and self.git.rev(tip) and self.git.is_ancestor(tip, root_tip):
-                landing = tip
-            if landing is None:
-                adapter = make_adapter(self.core, current["remote"] or remote, fetch=fetch)
-                if isinstance(adapter, GitHubAdapter):
-                    try:
-                        landing = adapter.source_landing(current["head"], tip, root_tip)
-                    except StackError as exc:
-                        if fetch:
-                            raise
-                        self.core.emit(events.PullRequestLookupFailed(str(exc)))
-            if live is None and landing is None:
-                raise StackError(
-                    f"source {branch} is missing and its included tip {tip} hasn't been proven to land on {root}. "
-                    f"Replace the sources with `git stack integrate {name} <source>...`."
-                )
-            current["landing"] = landing
+            current = self.source(branch, live or source["tip"], source)
+            if self.local_landing(current, root_tip):
+                pass
+            elif live and same_root and self.same_evidence(source, current, fetch):
+                current["checked"] = source.get("checked", False)
+                current["checked_at"] = source.get("checked_at", 0)
+            else:
+                unresolved.append(current)
             inputs.append(current)
-        return Integration(root=root, sources=inputs, root_tip=root_tip, tip=root_tip), observed
+        self.look_up_landings(unresolved, remote, root_tip, fetch)
+        for current in inputs:
+            if observed[current["name"]] is None and not current["landing"]:
+                raise StackError(
+                    f"source {current['name']} is missing and its included tip {current['tip']} "
+                    f"hasn't been proven to land on {root}. Replace the sources with "
+                    f"`git stack integrate {name} <source>...`."
+                )
+        return Integration(root=root, sources=inputs, root_tip=root_tip, evidence_remote=remote, tip=root_tip), observed
+
+    def local_landing(self, source: Source, root_tip: str) -> bool:
+        """Keep a recorded proof only while its commit is still on the root."""
+        landing = source["landing"]
+        if landing and self.git.rev(landing) and self.git.is_ancestor(landing, root_tip):
+            return True
+        tip = source["tip"]
+        source["landing"] = tip if self.git.rev(tip) and self.git.is_ancestor(tip, root_tip) else None
+        return source["landing"] is not None
+
+    @staticmethod
+    def same_evidence(old: Source, source: Source, fetch: bool) -> bool:
+        return (
+            "checked" in old
+            and (not fetch or old["checked"])
+            and 0 <= time.time() - old.get("checked_at", 0) < EVIDENCE_RECHECK_SECONDS
+            and all(old[key] == source[key] for key in ("tip", "remote", "head"))
+        )
+
+    def look_up_landings(self, sources: list[Source], remote: str, root_tip: str, fetch: bool) -> None:
+        if not sources:
+            return
+        self.check_landings(sources, remote, root_tip, fetch)
+        # A source can also have landed via a PR in another GitHub repository
+        # whose merge commit was subsequently brought onto the root.
+        others: dict[str, list[Source]] = {}
+        for source in sources:
+            if not source["landing"] and (other := source["remote"]) and other != remote:
+                others.setdefault(other, []).append(source)
+        for other, candidates in others.items():
+            self.check_landings(candidates, other, root_tip, fetch, optional=True)
+
+    def check_landings(
+        self, sources: list[Source], remote: str, root_tip: str, fetch: bool, *, optional: bool = False
+    ) -> None:
+        key = remote, fetch
+        try:
+            if key not in self.adapters:
+                adapter = make_adapter(self.core, remote, fetch=fetch)
+                self.adapters[key] = adapter if isinstance(adapter, GitHubAdapter) else None
+            if github := self.adapters[key]:
+                landed, complete = github.source_landings({(s["head"], s["tip"]) for s in sources}, root_tip)
+                for source in sources:
+                    identity = source["head"], source["tip"]
+                    source["landing"] = landed.get(identity)
+                    if identity in complete:
+                        source["checked"] = fetch
+                        source["checked_at"] = time.time()
+                    else:
+                        source.pop("checked", None)
+                        source.pop("checked_at", None)
+        except StackError as exc:
+            if fetch and not optional:
+                raise
+            for source in sources:
+                source.pop("checked", None)
+                source.pop("checked_at", None)
+            self.core.emit(events.PullRequestLookupFailed(str(exc)))
 
     def build(
         self,
@@ -251,7 +365,9 @@ class Integrations:
                 build["expected"] != expected
                 or build["observed"] != observed
                 or saved["root"] != root
-                or saved["sources"] != desired["sources"]
+                or [(s["name"], s["tip"]) for s in saved["sources"]]
+                != [(s["name"], s["tip"]) for s in desired["sources"]]
+                or self.active_sources(saved) != inputs
             ):
                 raise StackError(
                     f"inputs or tip of {name} changed during its integration build. "
@@ -270,6 +386,7 @@ class Integrations:
         else:
             self.ensure_available_worktree(name)
             build = Build(integration=desired, expected=expected, observed=observed, step=0, head=root_tip, result=None)
+            self.progress_path(name).unlink(missing_ok=True)
             self.journal(name, build)
         self.ensure_available_worktree(name)
         result = self.merge(name, build, inputs)
@@ -309,7 +426,7 @@ class Integrations:
                 raise StackError(f"merging {source} into {name} failed; run `git stack integrate --abort {name}`")
             build["head"] = worktree.run("rev-parse", "HEAD")
             build["step"] = index + 1
-            self.journal(name, build)
+            self.write_progress(name, build)
         if worktree.rev("HEAD") != build["head"] or worktree.run("status", "--porcelain"):
             raise StackError(f"integration worktree changed unexpectedly; run `git stack integrate --abort {name}`")
         return build["head"]
@@ -349,7 +466,7 @@ class Integrations:
         checked_out = self.git.current_branch() == name and result != expected
         if checked_out:
             self.core.ensure_clean_worktree()
-            build["checkout"] = str(self.git.toplevel())
+            self.git.config_set(name, CHECKOUT_KEY, json.dumps([str(self.git.toplevel()), result]))
         self.journal(name, build)
         if checked_out:
             # Check out the result before moving the ref. Git can then refuse
@@ -362,23 +479,24 @@ class Integrations:
         finally:
             if checked_out:
                 self.git.switch(name)
+                self.git.config_unset(name, CHECKOUT_KEY)
         self.remove_build(name)
 
     def verify(self, refs: dict[str, str | None], update: tuple[str, str] | None = None) -> None:
         """Verify inputs together, with the update in the same ref transaction."""
-        # An omitted old value in a verify means the ref must not exist.
+        # NUL-delimited fields let Git validate the names in the same
+        # transaction. An empty old value for verify requires an absent ref.
         commands = ["start"]
         for branch, tip in refs.items():
-            if not self.git.ok("check-ref-format", f"refs/heads/{branch}") or (tip and not is_object_id(tip)):
+            if "\0" in branch or (tip and not is_object_id(tip)):
                 raise StackError(f"invalid integration input ref or tip for {branch}")
             commands.append("option no-deref")
-            old = f" {tip}" if tip else ""
             if update and branch == update[0]:
-                commands.append(f"update refs/heads/{branch} {update[1]}{old or ' ' + '0' * len(update[1])}")
+                commands.extend((f"update refs/heads/{branch}", update[1], tip or "0" * len(update[1])))
             else:
-                commands.append(f"verify refs/heads/{branch}{old}")
+                commands.extend((f"verify refs/heads/{branch}", tip or ""))
         commands.extend(("prepare", "commit" if update else "abort", ""))
         try:
-            self.git.run("update-ref", "--stdin", input="\n".join(commands))
+            self.git.run("update-ref", "--stdin", "-z", input="\0".join(commands))
         except StackError as e:
             raise StackError(f"integration refs changed or could not be locked; retry or abort the build:\n{e}") from e

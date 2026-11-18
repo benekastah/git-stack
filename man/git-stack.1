@@ -419,15 +419,18 @@ the same atomic push with leases.
 The first sync sets the integration\(aqs upstream.
 If sync also deletes merged remote branches, those deletions wait for
 the same push.
-If the push fails, locally untracked branches stay untracked and sync
-reports the remote branches it kept.
+If the push fails, sync reports the remote branches it kept.
+Rerun sync with the same integration selected to retry those deletions
+with the original leases.
 Use the usual \f[CR]push\f[R] and \f[CR]prs\f[R] commands to publish new
 work branches and open their PRs.
 .PP
 A source drops out of the generated history when its tip is already on
 the configured root or when a merged GitHub PR proves that exact tip
 landed there.
-A deleted source requires the same proof for its last included tip.
+Unchanged tips can reuse a recent GitHub check for up to five minutes.
+A deleted source requires proof for its last included tip and is checked
+again if that tip has no recorded proof.
 If there\(aqs no proof, replace the source list with
 \f[CR]git stack integrate <name> <source>...\f[R].
 When all sources land, the integration follows the configured root.

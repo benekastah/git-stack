@@ -28,8 +28,9 @@ man page is generated from it.
   `StackCore.save()` writes only what changed. Walk and change the tree through
   it rather than with a `{branch: parent}` map of your own.
 - `git_stack/integrations.py` keeps integration roots out of `Stacks`. Its branch config
-  records exact tips and merge evidence, and journals the detached worktree's progress.
-  The refresh commands order selected source stacks before the integration builds, then
+  records exact tips, merge evidence, build inputs and pending publication. The merge
+  checkpoint stores only the step and HEAD so it can advance without rewriting those
+  inputs. The checkout recovery marker survives worktree cleanup. The refresh commands order selected source stacks before the integration builds, then
   use the ordinary single-parent rebase path for the work above each integration.
 - Each command is a module in `git_stack/commands/` with `register`, `run` and
   `show`: `run` does the command and returns a dataclass result, and `show`

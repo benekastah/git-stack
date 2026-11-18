@@ -7,11 +7,13 @@ import shutil
 import pytest
 from git_client.testing import GitCall
 
+from git_stack import cli
+from git_stack import integrations as integration_module
 from git_stack.errors import StackError
 from git_stack.git import GitClient
 from git_stack.integrations import Integration, Integrations
 from git_stack.stacks import StackNode, Stacks
-from tests.helpers import FakeGitHub, Repo
+from tests.helpers import FakeGitHub, Repo, captured_output
 
 
 def tip(repo: Repo, branch: str, *, remote: bool = False) -> str:
@@ -486,6 +488,126 @@ def test_clean_leaves_integration_tip_in_place(repo: Repo) -> None:
     assert tip(repo, "combined") == before
 
 
+@pytest.mark.parametrize("select_integration", [True, False])
+def test_sync_keeps_custom_root_when_a_merged_branch_tracks_it(repo: Repo, select_integration: bool) -> None:
+    source(repo, "one", "a")
+    source(repo, "two", "b")
+    repo.git("branch", "release", "refs/heads/main")
+    repo.git("push", "--set-upstream", "origin", "refs/heads/release")
+    release = tip(repo, "release")
+    repo.stack("integrate", "combined", "one", "two", "--root", "release")
+    source(repo, "alias", "a", tracked=True)
+    repo.git("branch", "--set-upstream-to=origin/release", "alias")
+    repo.git("switch", "--quiet", "main")
+    repo.git("merge", "--ff-only", "refs/heads/alias")
+
+    names = ("combined", "alias") if select_integration else ("alias",)
+    repo.stack("sync", *names, "--delete", "remote")
+
+    assert tip(repo, "release", remote=True) == release
+
+
+def test_sync_publishes_validated_work_when_local_ref_moves(repo: Repo, monkeypatch: pytest.MonkeyPatch) -> None:
+    integration(repo)
+    work(repo)
+    repo.stack("sync")
+    repo.stack("push")
+    repo.commit("c", "local work\n", "local work")
+    work_tip = tip(repo, "work")
+    passthrough = GitClient.passthrough
+
+    def move_work(git: GitClient, *args: str) -> bool:
+        if args[:2] == ("push", "--atomic"):
+            repo.git("update-ref", "refs/heads/work", tip(repo, "main"), work_tip)
+        return passthrough(git, *args)
+
+    monkeypatch.setattr(GitClient, "passthrough", move_work)
+    repo.stack("sync")
+
+    assert tip(repo, "work", remote=True) == work_tip
+    assert repo.config("work", "stackPulled") == work_tip
+
+
+def test_first_sync_retries_after_tracking_write_fails(repo: Repo, monkeypatch: pytest.MonkeyPatch) -> None:
+    integration(repo)
+    work(repo)
+    run = GitClient.run
+
+    def fail_tracking(git: GitClient, *args: str, check: bool = True, input: str | None = None) -> str:
+        if args[:2] == ("branch", "--set-upstream-to=refs/remotes/origin/combined"):
+            raise StackError("failed to write upstream")
+        return run(git, *args, check=check, input=input)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(GitClient, "run", fail_tracking)
+        assert "failed to write upstream" in repo.stack("sync", expect_success=False).stderr
+    assert tip(repo, "combined", remote=True) == tip(repo, "combined")
+
+    repo.stack("sync")
+
+    assert repo.config("combined", "remote") == "origin"
+
+
+@pytest.mark.parametrize("remote_moved", [False, True])
+def test_sync_retries_a_rejected_atomic_deletion(repo: Repo, remote_moved: bool) -> None:
+    integration(repo, tracked=True)
+    work(repo)
+    repo.stack("push", "one")
+    repo.stack("group", "add", "both", "work", "one")
+    repo.git("switch", "--quiet", "main")
+    repo.git("merge", "--ff-only", "refs/heads/one")
+    repo.git("switch", "--quiet", "work")
+    repo.add_hook(repo.origin, "pre-receive", "#!/bin/sh\nexit 1\n")
+
+    assert "push failed" in repo.stack("sync", "--delete", "both", "-g", "both", expect_success=False).stderr
+    (repo.origin / "hooks" / "pre-receive").unlink()
+    if remote_moved:
+        repo.commit_on_forge("one", "d", "remote work\n", "advance remote branch")
+    expected = repo.git("ls-remote", "--heads", "origin", "one") if remote_moved else ""
+
+    repo.stack("sync", "--delete", "both", "-g", "both")
+
+    assert repo.git("ls-remote", "--heads", "origin", "one") == expected
+    assert repo.git("branch", "--list", "one") == ""
+
+
+def test_recovery_survives_completion_from_another_worktree(repo: Repo, monkeypatch: pytest.MonkeyPatch) -> None:
+    integration(repo)
+    work(repo)
+    repo.git("switch", "--quiet", "one")
+    repo.commit("a", "new\n", "advance source")
+    second = repo.tmp / "second"
+    repo.git("worktree", "add", str(second), "main")
+    repo.git("switch", "--quiet", "combined")
+
+    def stop_before_checkout(git: GitClient, branch: str) -> None:
+        raise StackError("interrupted before restoring checkout")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(GitClient, "switch", stop_before_checkout)
+        assert "interrupted" in repo.stack("restack", expect_success=False).stderr
+    with captured_output() as output:
+        status = cli.main(["-C", str(second), "restack", "combined"])
+    assert status == 0, output
+
+    repo.stack("restack")
+
+    assert repo.git("branch", "--show-current") == "combined"
+
+
+def test_rename_refuses_pending_integration_build(repo: Repo) -> None:
+    integration(repo)
+    repo.git("switch", "--quiet", "two")
+    repo.commit("a", "conflicting\n", "conflict")
+    result = repo.stack("restack", "combined", expect_success=False)
+    path = conflict_worktree(result.stderr)
+
+    assert "--abort" in repo.stack("rename", "combined", "renamed", expect_success=False).stderr
+    repo.stack("integrate", "--abort", "combined")
+
+    assert not path.exists()
+
+
 def test_import_keeps_registered_integration_as_an_untracked_root(repo: Repo, gh: FakeGitHub) -> None:
     integration(repo)
     work(repo)
@@ -522,6 +644,57 @@ def test_missing_integration_root_does_not_block_unrelated_track(repo: Repo) -> 
     assert repo.config("ordinary", "stackParent") == "main"
 
 
+@pytest.mark.parametrize("mirror", [False, True])
+def test_squash_evidence_survives_pruned_alias_and_mirror(repo: Repo, gh: FakeGitHub, mirror: bool) -> None:
+    source(repo, "one", "a")
+    source(repo, "two", "b")
+    if mirror:
+        repo.git("remote", "add", "mirror", str(repo.origin))
+    remote = "mirror" if mirror else "origin"
+    repo.git("push", "--set-upstream", remote, "refs/heads/one:refs/heads/review-one")
+    repo.squash_merge_on_forge("review-one")
+    gh.add_pr(
+        number=1,
+        state="MERGED",
+        headRefName="review-one",
+        headRefOid=tip(repo, "one"),
+        baseRefName="main",
+        mergeCommit={"oid": tip(repo, "main", remote=True)},
+    )
+    repo.git("fetch", "--prune", remote)
+    repo.git("fetch", "origin")
+    repo.git("switch", "--quiet", "main")
+    repo.git("merge", "--ff-only", "refs/remotes/origin/main")
+
+    repo.stack("integrate", "combined", "one", "two")
+
+    assert repo.git("rev-parse", "refs/heads/combined^1") == tip(repo, "main")
+
+
+def test_pull_does_not_fetch_unneeded_source_remote(repo: Repo) -> None:
+    integration(repo)
+    repo.git("switch", "--quiet", "main")
+    repo.git("merge", "--ff-only", "refs/heads/one")
+    repo.git("remote", "add", "mirror", str(repo.tmp / "unavailable"))
+    repo.git("config", "branch.one.remote", "mirror")
+    repo.git("config", "branch.one.merge", "refs/heads/one")
+
+    repo.stack("pull", "combined")
+
+    assert repo.git("rev-parse", "refs/heads/combined^1") == tip(repo, "main")
+
+
+def test_unchanged_integration_reuses_batched_evidence(repo: Repo, gh: FakeGitHub) -> None:
+    integration(repo)
+    first = [c for c in gh.load()["calls"] if any("states: MERGED" in arg for arg in c)]
+    gh.clear_calls()
+
+    repo.stack("restack", "combined")
+
+    assert len(first) == 1
+    assert not any("states: MERGED" in arg for call in gh.load()["calls"] for arg in call)
+
+
 def test_selecting_grouped_integration_traverses_group_once(repo: Repo, monkeypatch: pytest.MonkeyPatch) -> None:
     integration(repo)
     count = 32
@@ -541,6 +714,14 @@ def test_selecting_grouped_integration_traverses_group_once(repo: Repo, monkeypa
     assert len(expanded) == count + 1
 
 
+def test_integration_writes_full_journal_only_at_build_boundaries(repo: Repo, git_calls: list[GitCall]) -> None:
+    integration(repo)
+
+    writes = [c for c in git_calls if "branch.combined.stackIntegrationBuild" in c and "--unset" not in c]
+    assert len(writes) == 2
+    assert len([c for c in git_calls if c[:1] == ["check-ref-format"]]) == 2
+
+
 def test_naming_integration_root_does_not_select_cross_root_group_peers(repo: Repo) -> None:
     integration(repo, tracked=True)
     work(repo)
@@ -552,3 +733,46 @@ def test_naming_integration_root_does_not_select_cross_root_group_peers(repo: Re
 
     assert tip(repo, "one") == original
     assert repo.git("rev-parse", "refs/heads/combined^1^1") == tip(repo, "main")
+
+
+def test_blocked_integration_leaves_selected_source_and_trunk_unchanged(repo: Repo) -> None:
+    integration(repo, tracked=True)
+    work(repo)
+    repo.stack("group", "add", "both", "work", "one")
+    path = repo.tmp / "another"
+    repo.git("worktree", "add", str(path), "combined")
+    original = {name: tip(repo, name) for name in ("main", "one", "combined", "work")}
+    repo.commit_on_forge("main", "d", "upstream\n", "upstream")
+
+    assert (
+        "checked out in another worktree" in repo.stack("pull", "-g", "both", "--latest", expect_success=False).stderr
+    )
+
+    assert {name: tip(repo, name) for name in original} == original
+
+
+def test_negative_evidence_expires_with_unchanged_root_and_source(
+    repo: Repo, gh: FakeGitHub, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source(repo, "one", "a")
+    source(repo, "two", "b")
+    repo.git("push", "origin", "refs/heads/one")
+    repo.squash_merge_on_forge("one")
+    repo.git("fetch", "origin")
+    repo.git("switch", "--quiet", "main")
+    repo.git("merge", "--ff-only", "refs/remotes/origin/main")
+    repo.stack("integrate", "combined", "one", "two")
+    assert repo.git("rev-parse", "refs/heads/combined^1^2") == tip(repo, "one")
+    gh.add_pr(
+        number=4,
+        state="MERGED",
+        headRefName="one",
+        headRefOid=tip(repo, "one"),
+        baseRefName="main",
+        mergeCommit={"oid": tip(repo, "main")},
+    )
+    monkeypatch.setattr(integration_module, "EVIDENCE_RECHECK_SECONDS", 0)
+
+    repo.stack("restack", "combined")
+
+    assert repo.git("rev-parse", "refs/heads/combined^1") == tip(repo, "main")

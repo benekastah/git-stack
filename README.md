@@ -274,14 +274,17 @@ configured root when possible before rebuilding.
 `sync` publishes the integration and eligible selected work in the same
 atomic push with leases. The first sync sets the integration's upstream.
 If sync also deletes merged remote branches, those deletions wait for the
-same push. If the push fails, locally untracked branches stay untracked and
-sync reports the remote branches it kept. Use the usual `push` and `prs`
-commands to publish new work branches and open their PRs.
+same push. If the push fails, sync reports the remote branches it kept.
+Rerun sync with the same integration selected to retry those deletions
+with the original leases.
+Use the usual `push` and `prs` commands to publish new work branches and
+open their PRs.
 
 A source drops out of the generated history when its tip is already on the
 configured root or when a merged GitHub PR proves that exact tip landed
-there. A deleted source requires the same proof for its last included tip.
-If there's no proof, replace the source list with `git stack integrate
+there. Unchanged tips can reuse a recent GitHub check for up to five minutes.
+A deleted source requires proof for its last included tip and is checked
+again if that tip has no recorded proof. If there's no proof, replace the source list with `git stack integrate
 <name> <source>...`. When all sources land, the integration follows the
 configured root. To promote the work, switch to the bottom work branch,
 run `git stack restack --onto main`, then `git stack push` to update open

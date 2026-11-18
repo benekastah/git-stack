@@ -228,7 +228,9 @@ def pull_requests_by_head(args: list[str], query: str, prs: list[dict[str, Any]]
             reverse=True,
         )
         if "pageInfo { hasNextPage endCursor }" in query:
-            start = int(next((a.removeprefix("after=") for a in args if a.startswith("after=")), "0"))
+            cursor = re.search(rf"\b{alias}: pullRequests\([^)]*after: \$(\w+)", query)
+            key = (cursor[1] if cursor else "after") + "="
+            start = int(next((a.removeprefix(key) for a in args if a.startswith(key)), "0"))
             end = start + 10
             found[alias] = {
                 "nodes": [

@@ -862,7 +862,8 @@ class StackCore:
         allow_different_upstream: bool = False,
         confirmed: bool = True,
         no_verify: bool = False,
-        deferred: list[RemoteDeletion] | None = None,
+        defer: Callable[[RemoteDeletion], None] | None = None,
+        protected_refs: frozenset[str] = frozenset(),
     ) -> bool:
         """Stop tracking merged branch, deleting what delete says, and moving its children onto its parent (see remove_merged).
         Returns False, leaving branch alone, if its remote branch couldn't be
@@ -888,7 +889,7 @@ class StackCore:
         remote_name, ref, tip = remote
         root = stacks.root(branch)
         root_ref = f"refs/heads/{git.remote_branch_name(root, remote_name)}"
-        if ref == root_ref:
+        if ref == root_ref or ref in protected_refs:
             self.remove_merged(branch, stacks, delete_local)
             return True
         if delete is not None and delete.deletes_remote:
@@ -898,7 +899,7 @@ class StackCore:
             if ref == f"refs/heads/{default}":
                 self.remove_merged(branch, stacks, delete_local)
                 return True
-            if not self.delete_merged_upstream(branch, RemoteDeletion(remote_name, ref, tip), no_verify, deferred):
+            if not self.delete_merged_upstream(branch, RemoteDeletion(remote_name, ref, tip), no_verify, defer):
                 return False
             self.remove_merged(branch, stacks, delete_local)
         else:
@@ -907,11 +908,11 @@ class StackCore:
         return True
 
     def delete_merged_upstream(
-        self, branch: str, deletion: RemoteDeletion, no_verify: bool, deferred: list[RemoteDeletion] | None
+        self, branch: str, deletion: RemoteDeletion, no_verify: bool, defer: Callable[[RemoteDeletion], None] | None
     ) -> bool:
         """Queue a deletion for an atomic sync push, or delete it now."""
-        if deferred is not None:
-            deferred.append(deletion)
+        if defer is not None:
+            defer(deletion)
         elif self.git.delete_remote_branch(deletion.remote, deletion.ref, deletion.tip, no_verify=no_verify):
             self.emit(events.RemoteBranchDeleted(deletion.upstream))
         else:
