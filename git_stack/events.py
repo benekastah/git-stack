@@ -278,10 +278,36 @@ class BrokenBranch:
 
 @dataclass(frozen=True)
 class ParentMissing:
+    """branch was skipped because its parent, a stack's root, doesn't exist.
+    base is branch's recorded base, which moving it with `track --base` keeps."""
+
     event_type: ClassVar[str] = "parent-missing"
 
     branch: str
     parent: str
+    base: str | None = None
+
+
+def move_off_missing_parent(branch: str, parent: str, base: str | None) -> str:
+    """How to move branch off parent, which doesn't exist, keeping base: for
+    ParentMissing's message, and the error restacking branch gives."""
+    return (
+        f"If {parent} was merged, move {branch} onto the branch it was merged into with "
+        f"`git stack track <parent> {branch} --base {base[:12] if base else '<sha>'}`"
+    )
+
+
+@dataclass(frozen=True)
+class MovedOffDeletedParent:
+    """branch's parent, a stack's root, was deleted, locally and on the
+    remote, as a merged branch is, so branch was moved onto new_parent, which
+    its pull request merges into now, keeping its base."""
+
+    event_type: ClassVar[str] = "moved-off-deleted-parent"
+
+    branch: str
+    parent: str
+    new_parent: str
 
 
 @dataclass(frozen=True)
@@ -391,6 +417,7 @@ type Event = (
     | UpstreamGone
     | BrokenBranch
     | ParentMissing
+    | MovedOffDeletedParent
     | PullRequestLookupFailed
     | NoPullRequests
     | PullRequestRetargeted

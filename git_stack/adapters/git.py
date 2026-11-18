@@ -232,6 +232,12 @@ class GitAdapter:
         """branch's pull request, open or merged, if the adapter knows of one."""
         return None
 
+    def deleted_parent_merged_into(self, branch: str, parent: str) -> str | None:
+        """The local branch that parent, a branch deleted everywhere, was
+        merged into, if the adapter can tell from branch, which was stacked
+        on it."""
+        return None
+
     def ensure_available(self) -> None:
         """Fail now if whatever the adapter asks about merges can't answer,
         rather than falling back to the repository alone."""

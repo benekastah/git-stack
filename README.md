@@ -303,13 +303,17 @@ git stack import -f --pr https://github.com/acme/widgets/pull/31
   branch and rerun to track them on it. A branch built on an old version of
   its parent (one rewritten since) looks built on what's below the parent; fix
   it with `git stack track <parent> <branch>`.
-- Each branch's base is found as for `git stack track`, after fast-forwarding
-  the branches the pull requests merge into that aren't tracked (e.g. `main`)
-  to their upstreams, as `sync` does. If a parent's commits
-  were rewritten after its child was built on them (e.g. the parent was
-  rebased and force-pushed from another machine), the child's base can come
-  out too old, and its next restack replays the parent's old commits; set it
-  with `git stack track <parent> <branch> --base <sha>`.
+- Each branch's base is found as for `git stack track`, against where the
+  untracked branches they go on (e.g. `main`) are once fast-forwarded to their
+  upstreams, as `sync` does. It fast-forwards only those of the branches it
+  creates or tracks, and none in a dry run. If such a branch can't be
+  fast-forwarded (it's checked out in another worktree, or has diverged), a
+  branch built on upstream commits it lacks is skipped, saying what to do
+  first, rather than tracked with those commits counted as its own. If a
+  parent's commits were rewritten after its child was built on them (e.g. the
+  parent was rebased and force-pushed from another machine), the child's base
+  can come out too old, and its next restack replays the parent's old commits;
+  set it with `git stack track <parent> <branch> --base <sha>`.
 
 ### `git stack untrack [<branch|glob>...]`
 
@@ -405,8 +409,10 @@ git stack info
   all of its changes. `sync`, `clean`, `restack`, `push` and `prs` leave it,
   and the branches stacked on it, alone (see
   [A merged branch was reverted](#a-merged-branch-was-reverted)).
-- `(parent <name> missing)`: its parent branch was deleted by hand; fix it
-  with `git stack track <parent>`.
+- `(parent <name> missing)`: its parent branch was deleted outside
+  git-stack. If the parent was merged, `sync` and `clean` usually move it (see
+  `sync`); otherwise they say the `git stack track <parent> <branch> --base
+  <sha>` that moves it onto the branch the parent was merged into.
 - `group <name>`: the stacks below it are in the group `<name>` (see
   [Groups](#groups)).
 - With the [GitHub adapter](#github), each branch's pull request (open or
@@ -639,9 +645,18 @@ git stack sync -d both          # ...and their remote branches
   wasn't really a revert: the branch counts as merged, and is untracked as
   usual. The branch has to be in the stacks being synced;
   `clean --ignore-revert` works from anywhere, and doesn't restack or push.
-- A branch with broken metadata (e.g. its parent was deleted by hand) is
-  skipped with a warning, along with everything stacked on it; the rest of the
-  stack is still synced.
+- A branch on a stack's root that was deleted outside git-stack, locally and
+  on the remote (as `gh pr merge --delete-branch` deletes a merged branch), is
+  moved onto the branch its pull request merges into now, if the deleted
+  branch's pull request into it was merged and it's a local branch (or a
+  local branch tracks it): GitHub retargets the pull requests on a merged
+  branch when it's deleted. It keeps its base, so only its own commits are
+  restacked. `clean` does this too.
+- A branch with broken metadata (e.g. its parent was deleted by hand, and
+  there's no pull request to say where it belongs) is skipped with a warning,
+  along with everything stacked on it; the rest of the stack is still synced.
+  For a deleted parent, the warning gives the `git stack track` that moves it
+  onto the branch its parent was merged into.
 - The root isn't fast-forwarded if it has diverged from its upstream; `sync`
   warns instead.
 - Branches checked out in another worktree are left alone, with a warning;

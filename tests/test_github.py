@@ -697,6 +697,163 @@ def test_sync_deletes_a_squash_merged_pr_whose_branch_was_kept(repo: Repo, gh: F
     assert repo.git("branch", "--list", "pr1", cwd=repo.origin) == ""
 
 
+def merge_pr1_and_delete_it_everywhere(repo: Repo, gh: FakeGitHub, merge_pr2: bool = False) -> None:
+    """Squash-merge pr1 (and with merge_pr2, then pr2) into main on GitHub,
+    deleting their remote branches, with pr2's pull request retargeted to main
+    as GitHub does; then delete the local pr1 outside git-stack, as
+    `gh pr merge --delete-branch` does, which forgets that it was tracked."""
+    repo.client.push()
+    for number, branch in enumerate(["pr1", "pr2"] if merge_pr2 else ["pr1"], start=1):
+        head = repo.git("rev-parse", branch)
+        repo.squash_merge_on_forge(branch)
+        merge = {"oid": repo.git("rev-parse", "HEAD", cwd=repo.forge)}
+        gh.add_pr(
+            number=number, state="MERGED", headRefName=branch, headRefOid=head, baseRefName="main", mergeCommit=merge
+        )
+    if not merge_pr2:
+        gh.add_pr(
+            number=2, state="OPEN", headRefName="pr2", headRefOid=repo.git("rev-parse", "pr2"), baseRefName="main"
+        )
+    repo.git("switch", "--quiet", "pr3")
+    repo.git("branch", "--quiet", "-D", "pr1")
+
+
+def test_sync_moves_a_branch_whose_parent_was_merged_and_deleted_onto_its_prs_base(
+    repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event]
+) -> None:
+    repo.make_stack()
+    merge_pr1_and_delete_it_everywhere(repo, gh)
+
+    client.sync()
+
+    assert client.stacks().parents() == {"pr2": "main", "pr3": "pr2"}
+    repo.assert_stacked("pr2", "main", ["pr2 c1"])
+    repo.assert_stacked("pr3", "pr2", ["pr3 c1"])
+    assert repo.git("rev-parse", "refs/heads/main") == repo.git("rev-parse", "refs/remotes/origin/main")
+    assert events.MovedOffDeletedParent("pr2", "pr1", "main") in emitted
+
+
+def test_clean_untracks_merged_branches_whose_parent_was_merged_and_deleted(
+    repo: Repo, gh: FakeGitHub, client: StackClient
+) -> None:
+    repo.make_stack()
+    merge_pr1_and_delete_it_everywhere(repo, gh, merge_pr2=True)
+
+    client.clean()
+
+    assert client.stacks().parents() == {"pr3": "main"}
+    assert repo.git("rev-parse", "refs/heads/main") == repo.git("rev-parse", "refs/remotes/origin/main")
+
+
+def test_sync_fetches_the_remote_of_the_root_a_branch_moved_onto(
+    repo: Repo, gh: FakeGitHub, client: StackClient
+) -> None:
+    repo.make_stack()
+    repo.git("remote", "add", "upstream", str(repo.origin))
+    repo.git("fetch", "--quiet", "upstream")  # so upstream/main won't have pr1's merge
+    merge_pr1_and_delete_it_everywhere(repo, gh)
+    repo.git("branch", "--quiet", "--set-upstream-to=upstream/main", "main")
+
+    client.sync(push=False)  # pr2's pull request can't be retargeted onto upstream's main
+
+    assert client.stacks().parents() == {"pr2": "main", "pr3": "pr2"}
+    assert repo.git("rev-parse", "refs/heads/main") == repo.git("rev-parse", "refs/remotes/origin/main")
+
+
+def test_clean_moves_a_branch_onto_the_local_branch_of_its_prs_base(
+    repo: Repo, gh: FakeGitHub, client: StackClient
+) -> None:
+    repo.make_stack()
+    merge_pr1_and_delete_it_everywhere(repo, gh)
+    repo.git("branch", "--quiet", "-m", "main", "mainline")  # still tracking origin/main
+    repo.git("branch", "--quiet", "--no-track", "main", "mainline")  # another branch, named like the base
+
+    client.clean()
+
+    assert client.stacks().parents() == {"pr2": "mainline", "pr3": "pr2"}
+
+
+def test_clean_refuses_uncommitted_changes_on_the_root_a_branch_moved_onto(
+    repo: Repo, gh: FakeGitHub, client: StackClient
+) -> None:
+    repo.make_stack()
+    merge_pr1_and_delete_it_everywhere(repo, gh)
+    repo.git("switch", "--quiet", "main")
+    repo.write("a", "uncommitted\n")
+
+    with pytest.raises(StackError, match="you have uncommitted changes"):
+        client.clean()
+
+
+def test_sync_moves_a_branch_off_a_deleted_parent_merged_with_commits_it_never_fetched(
+    repo: Repo, gh: FakeGitHub, client: StackClient
+) -> None:
+    repo.make_stack()
+    client.push()
+    repo.commit_on_forge("pr1", "d", "pr1 again\n", "pr1 c3")  # e.g. "Update branch", never fetched
+    head = repo.git("rev-parse", "HEAD", cwd=repo.forge)
+    repo.git("update-ref", "refs/pull/1/head", head, cwd=repo.origin)
+    repo.git("switch", "--quiet", "-C", "main", "origin/main", cwd=repo.forge)
+    repo.squash_merge_on_forge("pr1")
+    merge = {"oid": repo.git("rev-parse", "HEAD", cwd=repo.forge)}
+    gh.add_pr(number=1, state="MERGED", headRefName="pr1", headRefOid=head, baseRefName="main", mergeCommit=merge)
+    gh.add_pr(number=2, state="OPEN", headRefName="pr2", headRefOid=repo.git("rev-parse", "pr2"), baseRefName="main")
+    repo.git("switch", "--quiet", "pr3")
+    repo.git("branch", "--quiet", "-D", "pr1")
+
+    client.sync()
+
+    assert client.stacks().parents() == {"pr2": "main", "pr3": "pr2"}
+
+
+def test_sync_leaves_a_branch_whose_deleted_parent_wasnt_merged(
+    repo: Repo, gh: FakeGitHub, client: StackClient
+) -> None:
+    repo.make_stack()
+    client.push()
+    repo.git("push", "--quiet", "origin", ":pr1", cwd=repo.forge)
+    # Retargeted by hand, abandoning pr1.
+    gh.add_pr(number=2, state="OPEN", headRefName="pr2", headRefOid=repo.git("rev-parse", "pr2"), baseRefName="main")
+    repo.git("switch", "--quiet", "pr3")
+    repo.git("branch", "--quiet", "-D", "pr1")
+
+    client.sync()
+
+    assert client.stacks().parents() == {"pr2": "pr1", "pr3": "pr2"}
+
+
+def test_sync_leaves_a_branch_whose_deleted_parent_only_shares_its_name_with_a_merged_one(
+    repo: Repo, gh: FakeGitHub, client: StackClient
+) -> None:
+    old_main = repo.git("rev-parse", "refs/heads/main")
+    gh.add_pr(number=1, state="MERGED", headRefName="pr1", headRefOid=old_main, baseRefName="main", mergeCommit=None)
+    repo.make_stack()
+    client.push()
+    repo.git("push", "--quiet", "origin", ":pr1", cwd=repo.forge)
+    # Retargeted by hand, abandoning today's pr1.
+    gh.add_pr(number=2, state="OPEN", headRefName="pr2", headRefOid=repo.git("rev-parse", "pr2"), baseRefName="main")
+    repo.git("switch", "--quiet", "pr3")
+    repo.git("branch", "--quiet", "-D", "pr1")
+
+    client.sync()
+
+    assert client.stacks().parents() == {"pr2": "pr1", "pr3": "pr2"}
+
+
+def test_sync_leaves_a_branch_whose_deleted_parent_is_still_on_the_remote(
+    repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event]
+) -> None:
+    repo.make_stack()
+    client.push()
+    gh.add_pr(number=2, state="OPEN", headRefName="pr2", headRefOid=repo.git("rev-parse", "pr2"), baseRefName="main")
+    repo.git("switch", "--quiet", "pr3")
+    repo.git("branch", "--quiet", "-D", "pr1")
+
+    client.sync()
+
+    assert client.stacks().parents() == {"pr2": "pr1", "pr3": "pr2"}
+
+
 def test_open_pr_on_default_branch_overrides_local_detection(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
     repo.make_stack()
     client.push()

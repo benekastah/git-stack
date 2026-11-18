@@ -4,16 +4,6 @@ What's wrong with what's built: bugs, and gaps against the rules in `AGENTS.md` 
 `PROJECT_AGENTS.md`, most severe first. New work is in [roadmap.md](roadmap.md). When a change
 fixes one, remove it in the same change; when a change leaves something wrong, add it.
 
-## `import` fast-forwards the trunks of stacks it doesn't import
-
-`fast_forward_import_trunks` gets every pull request it looked up, before the
-branches and `--pr` narrow them to the stack trees named, and before `-f` is
-checked. So the untracked branches the other trees merge into (e.g. a local
-`release/1.x`) are fast-forwarded too, even when nothing is imported. It's
-what `sync` would do to them anyway, but it's a change nobody asked for.
-Fast-forwarding only the trunks of the steps it creates or tracks would fix
-it.
-
 ## A change undone some other way can look like a revert
 
 Revert detection compares patch-ids without context lines, so a revert still

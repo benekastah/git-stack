@@ -3,6 +3,7 @@ import fnmatch
 from collections import Counter
 from collections.abc import Callable, Generator, Iterable, Sequence
 from contextlib import contextmanager
+from dataclasses import dataclass
 
 from git_stack import events
 from git_stack.check_cache import CheckCache
@@ -68,6 +69,17 @@ GROUP_KEY = "stackGroup"
 CURRENT_GROUP = "\0"
 # Ownership is stored on every tracked branch so it survives stack splits.
 OWNERSHIP_KEY = "stackOwnership"
+
+
+@dataclass(frozen=True)
+class TrunkUpstream:
+    """The upstream of a trunk (e.g. main), by its name (e.g. origin/main)
+    and its ref, with the trunk's commit and the upstream's."""
+
+    name: str
+    ref: str
+    old: str
+    new: str
 
 
 class Delete(enum.Enum):
@@ -451,7 +463,8 @@ class StackCore:
         parent_tip = git.rev(f"refs/heads/{parent}")
         if parent_tip is None:
             raise BrokenStackError(
-                f"{branch}'s parent {parent} doesn't exist; retarget it with `git stack track <parent> --base <sha>`"
+                f"{branch}'s parent {parent} doesn't exist. "
+                + events.move_off_missing_parent(branch, parent, git.config_get(branch, BASE_KEY))
             )
         base = self.recorded_base(branch, parent)
         if not self.needs_restack(branch, parent, base, parent_tip, latest):
@@ -723,20 +736,40 @@ class StackCore:
         self.emit(events.Fetching(remote))
         self.git.fetch(remote)
 
+    def trunk_upstream(self, root: str) -> TrunkUpstream | None:
+        """root's upstream, if root is a local branch whose upstream exists
+        and is at another commit."""
+        git = self.git
+        if not git.local_branch_exists(root):
+            return None
+        upstream = git.run("rev-parse", "--abbrev-ref", f"{root}@{{upstream}}", check=False)
+        if not upstream:
+            return None
+        upstream_ref = git.run("rev-parse", "--symbolic-full-name", f"{root}@{{upstream}}", check=False)
+        old, new = git.tip(root), git.rev(upstream_ref) if upstream_ref else None
+        if new is None or old == new:
+            return None
+        return TrunkUpstream(upstream, upstream_ref, old, new)
+
+    def fast_forward_target(self, root: str, upstream: TrunkUpstream | None) -> str | None:
+        """The ref of root's upstream (as trunk_upstream gives it), if
+        fast_forward_trunks would move root to it, or None if it would leave
+        root where it is."""
+        git = self.git
+        if upstream is None or not git.is_ancestor(upstream.old, upstream.new):
+            return None
+        if root != git.current_branch() and git.worktree_of(root) is not None:
+            return None
+        return upstream.ref
+
     def fast_forward_trunks(self, roots: Iterable[str]) -> None:
         """Fast-forward untracked local parents (e.g. main) to their upstreams."""
         git = self.git
         current = git.current_branch()
         for root in roots:
-            if not git.local_branch_exists(root):
+            if (found := self.trunk_upstream(root)) is None:
                 continue
-            upstream = git.run("rev-parse", "--abbrev-ref", f"{root}@{{upstream}}", check=False)
-            if not upstream:
-                continue
-            upstream_ref = git.run("rev-parse", "--symbolic-full-name", f"{root}@{{upstream}}", check=False)
-            old, new = git.tip(root), git.rev(upstream_ref) if upstream_ref else None
-            if new is None or old == new:
-                continue
+            upstream, old, new = found.name, found.old, found.new
             if not git.is_ancestor(old, new):
                 self.emit(events.TrunkDiverged(root, upstream))
                 continue

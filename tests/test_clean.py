@@ -5,6 +5,7 @@ import pytest
 from git_stack import events
 from git_stack.core import Delete
 from git_stack.errors import StackError
+from git_stack.output import message
 from git_stack.stack import StackClient
 from tests.helpers import Repo
 
@@ -187,3 +188,25 @@ def test_clean_runs_with_uncommitted_changes_it_doesnt_touch(
     assert not repo.config_exists("pr1", "stackParent")
     assert repo.git("branch", "--show-current") == checkout
     assert (repo.path / "c").read_text() == "uncommitted\n"
+
+
+def test_clean_says_how_to_move_a_branch_off_a_deleted_parent(
+    repo: Repo, client: StackClient, emitted: list[events.Event]
+) -> None:
+    repo.make_stack()
+    client.push()
+    repo.squash_merge_on_forge("pr1")
+    repo.git("switch", "--quiet", "pr3")
+    repo.git("branch", "--quiet", "-D", "pr1")
+    base = repo.config("pr2", "stackBase")
+
+    client.clean()
+
+    assert events.ParentMissing("pr2", "pr1", base) in emitted
+    assert message(events.ParentMissing("pr2", "pr1", base)) == (
+        "skipping pr2: its parent pr1 doesn't exist. If pr1 was merged, move pr2 onto the branch it was "
+        f"merged into with `git stack track <parent> pr2 --base {base[:12]}`"
+    )
+    client.track("main", ["pr2"], base=base[:12])
+    client.sync()
+    repo.assert_stacked("pr2", "main", ["pr2 c1"])
