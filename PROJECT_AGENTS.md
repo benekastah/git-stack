@@ -38,6 +38,10 @@ man page is generated from it.
   recovery can read the result without relying on commit messages or a reflog. The
   recorded base is the boundary before the branch's own commits, and
   `stackReplayTips` holds the source tips in dependency order.
+  For GitHub drafts, `draft_base.py` manages a separate remote ref pointing to
+  the replay boundary. `stackDraftBase` records ownership and the expected
+  tips for leased pushes. The managed node in text output is a projection of
+  that ref, outside the tracked dependency graph.
   `stackReplayCopies` associates unchanged secondary copies with their original
   commits. Verify a copy by comparing the resulting tree after applying its
   source patch. Preserve copy records when an untracked branch is still a base. The ref transaction checks the branch and source tips before

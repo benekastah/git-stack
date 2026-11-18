@@ -268,10 +268,9 @@ entry, it's their merge-base.
   rebases commits from later bases. Conflicts are the signal to reconsider
   the structure. Keep the base order stable across restacks, since the first
   base anchors the history and later bases are applied in order.
-- Use the combined branch for integration, and open PRs for the independent
-  base branches. You can push the combined branch, but git-stack skips PRs
-  for it and its descendants. Once the dependencies merge, restack the work
-  you want to review onto a single base.
+- Open regular PRs for the independent base branches. Open a draft for the
+  combined branch with `git stack push --prs` if you want early review of
+  its own changes. See [Draft PRs for multiple bases](#draft-prs-for-multiple-bases).
 
 ### `git stack import [<branch>...] [--pr <number|url>]... [--author <login>] [--remote <name>] [-n | -f]`
 
@@ -632,9 +631,9 @@ Bring the current stack (or the ones named, see [Groups](#groups)) up to date
 with the remote:
 
 For multiple-base graphs, `sync` updates dependencies before their dependents
-and keeps the configured upstreams. Branches that depend on multiple bases
-are included in the Git push and excluded from pull request updates.
-Use `clean` to retire merged branches that participate in the graph.
+and keeps the configured upstreams. With GitHub it also maintains
+[managed draft bases](#draft-prs-for-multiple-bases). Use `clean` to retire
+merged branches that participate in the graph.
 
 1. Fetch with `--prune`.
 2. Fast-forward the stack's root (e.g. `main`) to its upstream.
@@ -827,10 +826,11 @@ git stack push --prs            # then open pull requests, as `git stack prs` do
   [Rebased on the remote](#rebased-on-the-remote)). `--force` pushes over it.
 - The branches are pushed in one atomic push: if any of them can't be pushed
   (e.g. because its remote branch changed since your last fetch), none are.
-- A branch depending on multiple bases is pushed, but `push` does not create
-  or retarget its pull request. This also applies to its descendants. Those
-  branches aren't automatically moved to a rebased remote branch; `push`
-  refuses unpulled remote changes unless `--force` is given.
+- With GitHub, `push` keeps existing draft PRs for restacked multi-base
+  branches on their [managed base](#draft-prs-for-multiple-bases). Use `--prs`
+  to open drafts. Branches in the dependency graph aren't automatically moved
+  to a rebased remote branch; `push` refuses unpulled remote changes unless
+  `--force` is given.
 - Refuses to push a branch whose remote branch was deleted, since that's
   usually a merged pull request `sync` hasn't seen yet. If it wasn't, run
   `git branch --unset-upstream <branch>` to push it again.
@@ -914,9 +914,9 @@ git stack prs
   that isn't into its branch's stack parent (say it was opened from the link
   GitHub prints on push, which targets `main`) is pointed at it, as `push`
   does.
-- Branches with multiple bases and their descendants are skipped, including
-  when they already have pull requests. Independent base branches can still
-  have pull requests.
+- Restacked branches with multiple bases can have a draft PR into a
+  [managed base](#draft-prs-for-multiple-bases). Their descendants become
+  eligible for regular PRs when they no longer depend on a multiple-base branch.
 - Then it adds the stack to the end of each open pull request's description,
   as a tree from the stack's root, with that pull request marked, and keeps
   it up to date each time it runs, showing each open one on what it's stacked
@@ -985,6 +985,24 @@ git stack prs
 - `git stack pr` is an alias.
 - `-n`/`--dry-run` shows the stacks with the pull requests it would open, with
   their titles, in place of their links, without opening them.
+
+#### Draft PRs for multiple bases
+
+For a restacked branch with several bases, `git stack push --prs` or
+`git stack prs` can open a GitHub draft against a managed remote branch.
+The managed branch points to the exact combined base, so the draft shows the
+branch's own changes. A GitHub-backed `push` or `sync` also adopts an existing
+draft. Existing multi-base tracking works as-is. `info` shows the managed
+base as a node in the text tree. Git-stack maintains the remote ref for you.
+
+As GitHub confirms dependencies have merged into the common default branch,
+`sync` rebuilds the combined base from current `main` (or the repository's
+default branch) and the remaining dependencies. With one dependency left,
+the draft moves to that branch once it includes current `main`. Run
+`git stack sync --latest` to bring that last dependency up to date. With
+none left, the draft targets `main`. Git-stack removes the managed ref after
+retargeting if no open PR still uses it. Keep the review PR in draft while
+it targets the managed branch.
 
 ### `git stack unrevert <name> <revert>... [--from <branch>] [--stack <branch>...] [--remote <name>] [--allow-shared]`
 

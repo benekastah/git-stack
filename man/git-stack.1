@@ -407,12 +407,11 @@ Conflicts are the signal to reconsider the structure.
 Keep the base order stable across restacks, since the first base anchors
 the history and later bases are applied in order.
 .IP \(bu 2
-Use the combined branch for integration, and open PRs for the
-independent base branches.
-You can push the combined branch, but git\-stack skips PRs for it and
-its descendants.
-Once the dependencies merge, restack the work you want to review onto a
-single base.
+Open regular PRs for the independent base branches.
+Open a draft for the combined branch with
+\f[CR]git stack push \-\-prs\f[R] if you want early review of its own
+changes.
+See Draft PRs for multiple bases.
 .SS \f[CR]git stack import [<branch>...] [\-\-pr <number|url>]... [\-\-author <login>] [\-\-remote <name>] [\-n | \-f]\f[R]
 Track open pull requests on GitHub, drafts included, as stacks: each
 pull request\(aqs branch on the branch it merges into.
@@ -881,8 +880,7 @@ the remote:
 .PP
 For multiple\-base graphs, \f[CR]sync\f[R] updates dependencies before
 their dependents and keeps the configured upstreams.
-Branches that depend on multiple bases are included in the Git push and
-excluded from pull request updates.
+With GitHub it also maintains managed draft bases.
 Use \f[CR]clean\f[R] to retire merged branches that participate in the
 graph.
 .IP "1." 3
@@ -1148,12 +1146,12 @@ The branches are pushed in one atomic push: if any of them can\(aqt be
 pushed (e.g.
 because its remote branch changed since your last fetch), none are.
 .IP \(bu 2
-A branch depending on multiple bases is pushed, but \f[CR]push\f[R] does
-not create or retarget its pull request.
-This also applies to its descendants.
-Those branches aren\(aqt automatically moved to a rebased remote branch;
-\f[CR]push\f[R] refuses unpulled remote changes unless
-\f[CR]\-\-force\f[R] is given.
+With GitHub, \f[CR]push\f[R] keeps existing draft PRs for restacked
+multi\-base branches on their managed base.
+Use \f[CR]\-\-prs\f[R] to open drafts.
+Branches in the dependency graph aren\(aqt automatically moved to a
+rebased remote branch; \f[CR]push\f[R] refuses unpulled remote changes
+unless \f[CR]\-\-force\f[R] is given.
 .IP \(bu 2
 Refuses to push a branch whose remote branch was deleted, since
 that\(aqs usually a merged pull request \f[CR]sync\f[R] hasn\(aqt seen
@@ -1262,9 +1260,10 @@ An open pull request that isn\(aqt into its branch\(aqs stack parent
 (say it was opened from the link GitHub prints on push, which targets
 \f[CR]main\f[R]) is pointed at it, as \f[CR]push\f[R] does.
 .IP \(bu 2
-Branches with multiple bases and their descendants are skipped,
-including when they already have pull requests.
-Independent base branches can still have pull requests.
+Restacked branches with multiple bases can have a draft PR into a
+managed base.
+Their descendants become eligible for regular PRs when they no longer
+depend on a multiple\-base branch.
 .IP \(bu 2
 Then it adds the stack to the end of each open pull request\(aqs
 description, as a tree from the stack\(aqs root, with that pull request
@@ -1362,6 +1361,30 @@ Needs the GitHub adapter.
 \f[CR]\-n\f[R]/\f[CR]\-\-dry\-run\f[R] shows the stacks with the pull
 requests it would open, with their titles, in place of their links,
 without opening them.
+.SS Draft PRs for multiple bases
+For a restacked branch with several bases,
+\f[CR]git stack push \-\-prs\f[R] or \f[CR]git stack prs\f[R] can open a
+GitHub draft against a managed remote branch.
+The managed branch points to the exact combined base, so the draft shows
+the branch\(aqs own changes.
+A GitHub\-backed \f[CR]push\f[R] or \f[CR]sync\f[R] also adopts an
+existing draft.
+Existing multi\-base tracking works as\-is.
+\f[CR]info\f[R] shows the managed base as a node in the text tree.
+Git\-stack maintains the remote ref for you.
+.PP
+As GitHub confirms dependencies have merged into the common default
+branch, \f[CR]sync\f[R] rebuilds the combined base from current
+\f[CR]main\f[R] (or the repository\(aqs default branch) and the
+remaining dependencies.
+With one dependency left, the draft moves to that branch once it
+includes current \f[CR]main\f[R].
+Run \f[CR]git stack sync \-\-latest\f[R] to bring that last dependency
+up to date.
+With none left, the draft targets \f[CR]main\f[R].
+Git\-stack removes the managed ref after retargeting if no open PR still
+uses it.
+Keep the review PR in draft while it targets the managed branch.
 .SS \f[CR]git stack unrevert <name> <revert>... [\-\-from <branch>] [\-\-stack <branch>...] [\-\-remote <name>] [\-\-allow\-shared]\f[R]
 Create \f[CR]<name>\f[R] on \f[CR]\-\-from\f[R], with commits that
 revert the given reverts, to bring back the changes of a merged branch

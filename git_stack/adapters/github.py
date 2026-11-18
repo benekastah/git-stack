@@ -366,10 +366,17 @@ class GitHubAdapter(GitAdapter):
 
     def has_merged_pull_requests_into(self, branch: str) -> bool:
         """Whether a branch has served as the base of a merged pull request."""
+        return self.has_pull_requests_into(branch, GitHubState.MERGED)
+
+    def has_open_pull_requests_into(self, branch: str) -> bool:
+        """Whether any open pull request still needs this remote base branch."""
+        return self.has_pull_requests_into(branch, GitHubState.OPEN)
+
+    def has_pull_requests_into(self, branch: str, state: GitHubState) -> bool:
         query = (
             "query($owner: String!, $name: String!, $base: String!) "
             "{ repository(owner: $owner, name: $name) "
-            "{ pullRequests(baseRefName: $base, states: MERGED, first: 1) { nodes { number } } } }"
+            f"{{ pullRequests(baseRefName: $base, states: {state.name}, first: 1) {{ nodes {{ number }} }} }} }}"
         )
         args = [
             "api",
@@ -723,14 +730,23 @@ class GitHubAdapter(GitAdapter):
         if without and not opening:
             self.core.emit(events.NoPullRequests(without))
 
-    def retarget(self, branch: str, base: str, rebuild_stack: bool = False, allowed: set[int] | None = None) -> None:
+    def retarget(
+        self,
+        branch: str,
+        base: str,
+        rebuild_stack: bool = False,
+        allowed: set[int] | None = None,
+        *,
+        base_is_remote: bool = False,
+    ) -> None:
         """Point branch's pull request at base, if it's open and isn't already."""
         prs = self.pull_requests()
         pr = prs.get(branch)
         if pr is None or pr.state is not GitHubState.OPEN:
             return
-        self.ensure_pr_parent_remote(branch, base)
-        base = self.git.remote_branch_name(base, self.remote)
+        if not base_is_remote:
+            self.ensure_pr_parent_remote(branch, base)
+            base = self.git.remote_branch_name(base, self.remote)
         if pr.base == base:
             return
         edit = ("pr", "edit", str(pr.number), "--repo", self.repo, "--base", base)
@@ -812,8 +828,11 @@ class GitHubAdapter(GitAdapter):
                     return self.git.run("cat-file", "blob", oid)
         return None
 
-    def open_pull_request(self, branch: str, base: str, title: str, body: str) -> tuple[int, str]:
+    def open_pull_request(
+        self, branch: str, base: str, title: str, body: str, *, base_is_remote: bool = False
+    ) -> tuple[int, str]:
         """Open a draft pull request of branch into base. Returns its number and URL."""
+        remote_base = base if base_is_remote else self.git.remote_branch_name(base, self.remote)
         url = self.gh(
             "pr",
             "create",
@@ -821,7 +840,7 @@ class GitHubAdapter(GitAdapter):
             self.repo,
             "--draft",
             "--base",
-            self.git.remote_branch_name(base, self.remote),
+            remote_base,
             "--head",
             self.git.remote_branch_name(branch, self.remote),
             "--title",
@@ -840,7 +859,7 @@ class GitHubAdapter(GitAdapter):
             True,
             False,
             self.git.tip(branch),
-            self.git.remote_branch_name(base, self.remote),
+            remote_base,
             None,
         )
         return number, url

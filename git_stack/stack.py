@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Concatenate
 
-from git_stack import events, replay
+from git_stack import draft_base, events, replay
 from git_stack.adapters import ADAPTER_SETTING, make_adapter
 from git_stack.adapters.git import GitAdapter, PullRequestLink
 from git_stack.adapters.github import GitHubAdapter, GitHubState, OpenPullRequest, check_github_login
@@ -1608,6 +1608,7 @@ class StackClient(StackCore):
             if blocked in state.blocked:
                 state.blocked[branch] = None
             return
+        parent = self.reduce_draft_dependencies(branch, state.stacks, adapter, state.push)
         merge_state = self.cleanup_merge_state(branch, state.stacks, adapter, branch in state.ignore_reverts)
         if merge_state is MergeState.MERGED:
             if self.retain_merged_dependency(branch, state.stacks):
@@ -1639,7 +1640,7 @@ class StackClient(StackCore):
             self.emit(self.reverted(branch, state.stacks, adapter))
             state.skipped.add(branch)
         else:
-            self.sync_unmerged(branch, parent, state)
+            self.sync_unmerged(branch, parent, state, adapter)
 
     def retain_merged_dependency(self, branch: str, stacks: Stacks) -> bool:
         return stacks.has_multiple_base_ancestor(branch) or any(
@@ -1666,7 +1667,7 @@ class StackClient(StackCore):
             if branch not in scope:
                 raise StackError(f"there's no revert of {branch} to ignore in {where}: it isn't one of their branches")
 
-    def sync_unmerged(self, branch: str, parent: str, state: SyncState) -> None:
+    def sync_unmerged(self, branch: str, parent: str, state: SyncState, adapter: GitAdapter) -> None:
         """Take a rebase of branch from its upstream (see take_upstream_rebase),
         restack branch, which isn't merged, onto parent and pull in commits
         others pushed to it, then note whether it needs pushing."""
@@ -1699,11 +1700,66 @@ class StackClient(StackCore):
             state.blocked[branch] = None
             return
         upstream_tip = git.rev(f"{branch}@{{upstream}}")
-        if upstream_tip and upstream_tip != git.rev(f"refs/heads/{branch}"):
+        if upstream_tip and (
+            upstream_tip != git.rev(f"refs/heads/{branch}") or self.draft_needs_push(branch, state, adapter)
+        ):
             if state.push and git.remote_branch(branch) is not None:
                 state.pushable.append(branch)
             else:
                 state.unpushed.append(branch)
+
+    def draft_needs_push(self, branch: str, state: SyncState, adapter: GitAdapter) -> bool:
+        if not state.push or not isinstance(adapter, GitHubAdapter):
+            return False
+        pr = adapter.pull_requests().get(branch)
+        if pr is None or pr.state is not GitHubState.OPEN or not pr.draft:
+            return False
+        managed = self.git.config_get(branch, draft_base.KEY)
+        if len(state.stacks.dependencies(branch)) == 1:
+            return bool(managed)
+        fields = managed.split() if managed else []
+        return bool(self.git.config_get(branch, replay.TIPS)) and (len(fields) < 2 or pr.base != fields[1])
+
+    def reduce_draft_dependencies(self, branch: str, stacks: Stacks, adapter: GitAdapter, push: bool) -> str:
+        """Retain the unmerged dependencies, using the up-to-date common root once one lands."""
+        parent, *secondary = stacks.dependencies(branch)
+        if (
+            not push
+            or not isinstance(adapter, GitHubAdapter)
+            or not secondary
+            or not self.git.config_get(branch, draft_base.KEY)
+        ):
+            return parent
+        pr = adapter.pull_requests().get(branch)
+        if pr is None or pr.state is not GitHubState.OPEN or not pr.draft:
+            return parent
+        root = stacks.root(parent)
+        if self.git.remote_branch_name(root, adapter.remote) != adapter.default_branch:
+            return parent
+        bases = (parent, *secondary)
+        sources = [base for base in bases if base != root]
+        if any(stacks.root(base) != root for base in sources):
+            return parent
+        remaining = [
+            base
+            for base in sources
+            if not adapter.merge_confirmed(base, root) or adapter.merge_state(base, root) is not MergeState.MERGED
+        ]
+        if len(remaining) > 1:
+            if remaining == sources:
+                return parent
+            onto = (root, *remaining)
+        elif remaining and not self.git.is_ancestor(self.git.tip(root), self.git.tip(remaining[0])):
+            # Targeting the last dependency would expose merged changes if it
+            # is still based on an older main.
+            onto = (root, remaining[0])
+        else:
+            onto = tuple(remaining or [root])
+        if onto == bases:
+            return parent
+        stacks.reparent(branch, onto[0])
+        stacks.set_additional_parents(branch, onto[1:])
+        return onto[0]
 
     def cleanup_merge_state(
         self, branch: str, stacks: Stacks, adapter: GitAdapter, ignore_revert: bool, *, graph: bool | None = None
@@ -1863,7 +1919,13 @@ class StackClient(StackCore):
         )
         steps = (
             self.open_pull_requests(
-                pushed, stacks, github, push_remote, rebuild_stack=rebuild_stack, ineligible=ineligible
+                pushed,
+                stacks,
+                github,
+                push_remote,
+                rebuild_stack=rebuild_stack,
+                ineligible=ineligible,
+                no_verify=no_verify,
             )
             if github and pushed
             else None
@@ -1935,6 +1997,10 @@ class StackClient(StackCore):
         # them), and pin each lease to the remote-tracking ref we checked, so a
         # push that raced with someone else's fails instead of overwriting it.
         leases, refspecs = self.push_refspecs(branches, stacks, remote, force, use_upstreams)
+        draft_bases = self.managed_draft_updates(branches, stacks, adapter, remote)
+        retiring = self.retiring_draft_bases(branches, stacks, adapter, remote)
+        leases.extend(base.lease for base in draft_bases)
+        refspecs.extend(base.refspec for base in draft_bases)
         # Before the adapter changes anything (e.g. retargets pull requests),
         # so a push that's bound to fail, e.g. because a remote branch moved
         # since it was fetched, leaves nothing changed. The remote can still
@@ -1946,7 +2012,9 @@ class StackClient(StackCore):
                 f"`git stack sync` and try again:\n{why}"
             )
         pr_branches = [
-            branch for branch in branches if branch not in ineligible and not stacks.has_multiple_base_ancestor(branch)
+            branch
+            for branch in branches
+            if branch not in retiring and branch not in ineligible and not stacks.has_multiple_base_ancestor(branch)
         ]
         pr_scope = (
             [branch for branch in scope if branch not in ineligible and not stacks.has_multiple_base_ancestor(branch)]
@@ -1962,12 +2030,7 @@ class StackClient(StackCore):
             ) from e
         # Atomic, so a branch that can't be pushed doesn't leave the rest of the
         # stack pushed without it, and its pull requests not retargeted.
-        verify_options = ["--no-verify"] if no_verify else []
-        if not git.passthrough("push", "--atomic", *verify_options, *leases, "--set-upstream", remote, *refspecs):
-            raise StackError(
-                "push failed, so nothing was pushed; if the remote has new commits, run `git stack sync` and try "
-                f"again{self.changes_left(adapter)}"
-            )
+        self.push_with_draft_bases(remote, leases, refspecs, draft_bases, adapter, no_verify)
         upstreams = [(b, git.tip(b), self.upstream_identity(b)) for b in branches]
         recorded = git.branch_config()
         for b, tip, identity in upstreams:
@@ -1976,12 +2039,108 @@ class StackClient(StackCore):
             if identity is not None and recorded.get((b, PULLED_UPSTREAM_KEY.lower())) != identity:
                 git.config_set(b, PULLED_UPSTREAM_KEY, identity)
         try:
+            self.finish_draft_bases(draft_bases, retiring, stacks, adapter, rebuild_stack, no_verify)
             adapter.after_push(pr_branches, stacks, opening, rebuild_stack, pr_scope)
         except StackError as e:
             raise StackError(
                 f"pushed, but updating pull requests failed (set {ADAPTER_SETTING} to git to stop using GitHub): {e}"
             ) from e
         return branches
+
+    def push_with_draft_bases(
+        self,
+        remote: str,
+        leases: list[str],
+        refspecs: list[str],
+        bases: list[draft_base.DraftBase],
+        adapter: GitAdapter,
+        no_verify: bool,
+    ) -> None:
+        git = self.git
+        for base in bases:
+            base.record(git)
+        verify_options = ["--no-verify"] if no_verify else []
+        if not git.passthrough("push", "--atomic", *verify_options, *leases, "--set-upstream", remote, *refspecs):
+            raise StackError(
+                "push failed, so nothing was pushed; if the remote has new commits, run `git stack sync` and try "
+                f"again{self.changes_left(adapter)}"
+            )
+        for base in bases:
+            base.confirm(git)
+
+    def managed_draft_updates(
+        self, branches: list[str], stacks: Stacks, adapter: GitAdapter, remote: str
+    ) -> list[draft_base.DraftBase]:
+        if not isinstance(adapter, GitHubAdapter):
+            return []
+        drafts = adapter.pull_requests()
+        updates: list[draft_base.DraftBase] = []
+        for branch in branches:
+            if len(stacks.dependencies(branch)) < 2 or not self.git.config_get(branch, replay.TIPS):
+                continue
+            pr = drafts.get(branch)
+            if pr is None or pr.state is not GitHubState.OPEN:
+                continue
+            if not pr.draft:
+                if pr.base.startswith(draft_base.PREFIX):
+                    raise StackError(f"#{pr.number} uses a managed draft base; convert it to a draft before pushing")
+                continue
+            boundary = self.recorded_base(branch, stacks.parent(branch))
+            base = draft_base.DraftBase.plan(self.git, branch, remote, boundary)
+            updates.append(base)
+        return updates
+
+    def retiring_draft_bases(
+        self, branches: list[str], stacks: Stacks, adapter: GitAdapter, remote: str
+    ) -> dict[str, draft_base.DraftBase]:
+        if not isinstance(adapter, GitHubAdapter):
+            return {}
+        prs = adapter.pull_requests()
+        retiring: dict[str, draft_base.DraftBase] = {}
+        for b in branches:
+            if len(stacks.dependencies(b)) != 1 or not self.git.config_get(b, draft_base.KEY):
+                continue
+            pr = prs.get(b)
+            if pr is None or pr.state is not GitHubState.OPEN:
+                continue
+            base = draft_base.DraftBase.owned(self.git, b, remote)
+            parent = stacks.parent(b)
+            if base is not None and pr.base in (base.name, self.git.remote_branch_name(parent, remote)):
+                if pr.base == base.name and not pr.draft:
+                    raise StackError(f"#{pr.number} uses a managed draft base; convert it to a draft before pushing")
+                retiring[b] = base
+        return retiring
+
+    def retire_draft_base(
+        self, base: draft_base.DraftBase, parent: str, adapter: GitHubAdapter, rebuild_stack: bool, no_verify: bool
+    ) -> None:
+        git = self.git
+        remote_parent = git.remote_branch_name(parent, base.remote)
+        parent_tip = git.rev(f"refs/remotes/{base.remote}/{remote_parent}")
+        if parent_tip is None or not git.is_ancestor(parent_tip, git.tip(base.branch)):
+            raise StackError(f"{base.branch} isn't based on the pushed {remote_parent}; restack and push again")
+        adapter.retarget(base.branch, parent, rebuild_stack, {adapter.pull_requests()[base.branch].number})
+        if adapter.has_open_pull_requests_into(base.name):
+            return
+        if base.previous and not git.delete_remote_branch(base.remote, base.ref, base.previous, no_verify=no_verify):
+            raise StackError(f"couldn't remove the draft base {base.name}; retry after checking the remote")
+        git.config_unset(base.branch, draft_base.KEY)
+
+    def finish_draft_bases(
+        self,
+        updated: list[draft_base.DraftBase],
+        retiring: dict[str, draft_base.DraftBase],
+        stacks: Stacks,
+        adapter: GitAdapter,
+        rebuild_stack: bool,
+        no_verify: bool,
+    ) -> None:
+        if isinstance(adapter, GitHubAdapter):
+            prs = adapter.pull_requests()
+            for base in updated:
+                adapter.retarget(base.branch, base.name, rebuild_stack, {prs[base.branch].number}, base_is_remote=True)
+            for branch, base in retiring.items():
+                self.retire_draft_base(base, stacks.parent(branch), adapter, rebuild_stack, no_verify)
 
     def changes_left(self, adapter: GitAdapter) -> str:
         """What adapter changed before a push failed, for its error, or ""."""
@@ -2076,6 +2235,7 @@ class StackClient(StackCore):
         dry_run: bool = False,
         rebuild_stack: bool = False,
         ineligible: frozenset[str] = frozenset(),
+        no_verify: bool = False,
     ) -> list[PullRequestStep]:
         """Do what prs does for branches, which must be unmerged,
         parent-before-child. Returns a PullRequestStep for each."""
@@ -2090,13 +2250,18 @@ class StackClient(StackCore):
         steps: list[PullRequestStep] = []
         for b in branches:
             parent = stacks.parent(b)
-            if b in ineligible or stacks.has_multiple_base_ancestor(b):
-                steps.append(PullRequestStep(b, parent, PullRequestAction.MULTIPLE_BASES))
-                continue
             pr = prs.get(b)
+            managed: draft_base.DraftBase | None = None
+            if b in ineligible or stacks.has_multiple_base_ancestor(b):
+                managed = self.plan_draft_base(b, stacks, adapter, remote)
+                if managed is None:
+                    steps.append(PullRequestStep(b, parent, PullRequestAction.MULTIPLE_BASES))
+                    continue
             if pr is not None:
                 if not dry_run:
-                    adapter.retarget(b, parent, rebuild_stack, allowed)
+                    self.retarget_draft_or_branch(
+                        b, parent, managed, adapter, rebuild_stack, allowed | {pr.number}, no_verify
+                    )
                 steps.append(PullRequestStep(b, parent, PullRequestAction.EXISTS, number=pr.number))
                 continue
             base = self.recorded_base(b, parent)
@@ -2109,7 +2274,13 @@ class StackClient(StackCore):
                 steps.append(PullRequestStep(b, parent, PullRequestAction.OPEN, title=title))
                 continue
             try:
-                number, url = adapter.open_pull_request(b, parent, title, template)
+                number, url = adapter.open_pull_request(
+                    b,
+                    self.publish_draft_base(managed, parent, no_verify),
+                    title,
+                    template,
+                    base_is_remote=managed is not None,
+                )
             except StackError as e:
                 opened = ", ".join(f"#{s.number} for {s.branch}" for s in steps if s.action is PullRequestAction.OPEN)
                 raise StackError(
@@ -2120,6 +2291,43 @@ class StackClient(StackCore):
         if eligible and (not dry_run or rebuild_stack):
             self.update_stack_sections(eligible, stacks, adapter, rebuild_stack, dry_run)
         return steps
+
+    def publish_draft_base(self, base: draft_base.DraftBase | None, parent: str, no_verify: bool) -> str:
+        if base is None:
+            return parent
+        base.publish(self.git, no_verify)
+        return base.name
+
+    def retarget_draft_or_branch(
+        self,
+        branch: str,
+        parent: str,
+        base: draft_base.DraftBase | None,
+        adapter: GitHubAdapter,
+        rebuild_stack: bool,
+        allowed: set[int],
+        no_verify: bool,
+    ) -> None:
+        adapter.retarget(
+            branch,
+            self.publish_draft_base(base, parent, no_verify),
+            rebuild_stack,
+            allowed,
+            base_is_remote=base is not None,
+        )
+
+    def plan_draft_base(
+        self, branch: str, stacks: Stacks, adapter: GitHubAdapter, remote: str
+    ) -> draft_base.DraftBase | None:
+        git = self.git
+        parents = stacks.dependencies(branch)
+        if len(parents) < 2 or (git.config_get(branch, replay.TIPS) or "").split() != [git.tip(p) for p in parents]:
+            return None
+        pr = adapter.pull_requests().get(branch)
+        if pr is not None and (pr.state is not GitHubState.OPEN or not pr.draft):
+            return None
+        self.ensure_on_remote([branch], [], remote)
+        return draft_base.DraftBase.plan(git, branch, remote, self.recorded_base(branch, parents[0]))
 
     def update_stack_sections(
         self,

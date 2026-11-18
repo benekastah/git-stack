@@ -4,8 +4,9 @@ import json
 import os
 import sys
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
+from git_stack import draft_base
 from git_stack.adapters.git import PullRequestState
 from git_stack.commands import Subparsers, add_stack_arguments
 from git_stack.errors import StackError
@@ -240,6 +241,32 @@ def base_brackets(rows: list[TreeRow]) -> dict[int, str]:
     return {i: "".join(fields) for i, fields in lines.items()}
 
 
+def show_managed_bases(stack: StackClient, branches: list[BranchInfo]) -> list[BranchInfo]:
+    """Project actual remote draft bases into the text tree."""
+    result: list[BranchInfo] = []
+    for branch in branches:
+        if branch.additional_parents:
+            saved = stack.git.config_get(branch.name, draft_base.KEY)
+            fields = saved.split() if isinstance(saved, str) else []
+            if len(fields) >= 3:
+                remote, name, *_ = fields
+                if name.startswith(draft_base.PREFIX) and stack.git.rev(f"refs/remotes/{remote}/{name}"):
+                    node = f"{name} (managed draft base)"
+                    result.append(
+                        BranchInfo(
+                            node,
+                            branch.parent,
+                            None,
+                            False,
+                            group=branch.group,
+                            additional_parents=branch.additional_parents,
+                        )
+                    )
+                    branch = replace(branch, parent=node, group=None, additional_parents=())
+        result.append(branch)
+    return result
+
+
 def print_tree(
     stack: StackClient,
     branches: list[BranchInfo],
@@ -252,7 +279,7 @@ def print_tree(
     color = use_color(stack)
     paint = painter(color)
     flip = orientation(stack) is Orientation.ROOT_AT_BOTTOM
-    rows = tree_rows(branches, flip)
+    rows = tree_rows(show_managed_bases(stack, branches), flip)
     brackets = base_brackets(rows)
     plain = painter(False)
     widths = [len(tree) + len(label(row, plain, color)) for tree, row in rows]

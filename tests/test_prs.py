@@ -12,6 +12,130 @@ from tests.helpers import FakeGitHub, Repo
 TEMPLATE = "## What\n\n## Why"
 
 
+@pytest.mark.parametrize("adopt", [None, "push", "sync", "sync-retry"])
+def test_multi_base_draft_compares_only_the_branches_own_changes(
+    repo: Repo, gh: FakeGitHub, client: StackClient, adopt: str | None
+) -> None:
+    client.branch("first")
+    repo.commit("a", "first\n", "first")
+    client.branch("combined")
+    repo.commit("c", "own\n", "own change")
+    repo.git("switch", "-q", "main")
+    client.branch("second")
+    repo.commit("b", "second\n", "second")
+    repo.git("switch", "-q", "combined")
+    client.restack(onto=("first", "second"))
+
+    if adopt:
+        client.push()
+        gh.add_pr(
+            number=42,
+            headRefName="combined",
+            headRefOid=repo.git("rev-parse", "combined"),
+            baseRefName="first",
+            state="OPEN",
+            isDraft=True,
+            mergeCommit=None,
+        )
+        if adopt == "sync-retry":
+            gh.fail("pr")
+            with pytest.raises(StackError, match="pushed, but updating pull requests failed"):
+                client.push()
+            gh.fail()
+        if adopt.startswith("sync"):
+            client.sync()
+        else:
+            client.push()
+    else:
+        client.push(prs=True)
+
+    draft = next(pr for pr in gh.load()["prs"] if pr["headRefName"] == "combined")
+    assert draft["isDraft"]
+    if adopt:
+        assert draft["number"] == 42
+    base = f"refs/heads/{draft['baseRefName']}"
+    assert repo.git("rev-parse", base, cwd=repo.origin) == repo.config("combined", "stackBase")
+    assert repo.git("diff", "--name-only", f"{base}...refs/heads/combined", cwd=repo.origin) == "c"
+    assert f"{draft['baseRefName']} (managed draft base)" in repo.stack("info", "--offline").stdout
+
+
+def test_multi_base_draft_rebuilds_as_dependencies_merge_and_retargets_to_the_last_one(
+    repo: Repo, gh: FakeGitHub, client: StackClient
+) -> None:
+    client.branch("first")
+    repo.commit("a", "first\n", "first")
+    client.branch("combined")
+    repo.commit("c", "own\n", "own change")
+    repo.git("switch", "-q", "main")
+    client.branch("second")
+    repo.commit("b", "second\n", "second")
+    repo.git("switch", "-q", "main")
+    client.branch("third")
+    repo.write("extra", "third\n")
+    repo.git("add", "extra")
+    repo.git("commit", "-qm", "third")
+    repo.git("switch", "-q", "combined")
+    client.restack(onto=("first", "second", "third"))
+    client.push(prs=True)
+
+    def draft() -> dict[str, object]:
+        return next(pr for pr in gh.load()["prs"] if pr["headRefName"] == "combined")
+
+    def merge(branch: str) -> None:
+        repo.git("switch", "-q", "main")
+        repo.git("merge", "--squash", branch)
+        repo.git("commit", "-qm", f"land {branch}")
+        repo.git("push", "-q", "origin", "main")
+        state = gh.load()
+        pr = next(pr for pr in state["prs"] if pr["headRefName"] == branch)
+        pr.update(
+            state="MERGED", headRefOid=repo.git("rev-parse", branch), mergeCommit={"oid": repo.git("rev-parse", "main")}
+        )
+        gh.save(state)
+        repo.git("switch", "-q", "combined")
+
+    number = draft()["number"]
+    managed = str(draft()["baseRefName"])
+    ref = f"refs/heads/{managed}"
+
+    merge("first")
+    client.sync()
+    assert client.stacks().dependencies("combined") == ("main", "second", "third")
+    assert draft()["baseRefName"] == managed
+    assert repo.git("rev-parse", ref, cwd=repo.origin) == repo.config("combined", "stackBase")
+    assert repo.git("diff", "--name-only", f"{ref}...refs/heads/combined", cwd=repo.origin) == "c"
+
+    merge("second")
+    client.sync()
+    assert client.stacks().dependencies("combined") == ("main", "third")
+    assert draft()["baseRefName"] == managed
+    gh.add_pr(
+        number=100,
+        headRefName="other",
+        headRefOid=repo.git("rev-parse", "combined"),
+        baseRefName=managed,
+        state="OPEN",
+        isDraft=True,
+        mergeCommit=None,
+    )
+    client.sync(latest=True)
+    assert client.stacks().dependencies("combined") == ("third",)
+    assert draft()["baseRefName"] == "third"
+    assert draft()["number"] == number
+    assert repo.git("branch", "--list", managed, cwd=repo.origin)
+    state = gh.load()
+    next(pr for pr in state["prs"] if pr["number"] == 100)["state"] = "CLOSED"
+    gh.save(state)
+    client.push()
+    assert not repo.git("branch", "--list", managed, cwd=repo.origin)
+
+    merge("third")
+    client.sync()
+    assert client.stacks().dependencies("combined") == ("main",)
+    assert draft()["baseRefName"] == "main"
+    assert draft()["number"] == number
+
+
 @pytest.mark.parametrize("dry_run", [False, True])
 def test_prs_skips_multiple_base_branches_and_their_descendants(
     repo: Repo, gh: FakeGitHub, client: StackClient, monkeypatch: pytest.MonkeyPatch, dry_run: bool
