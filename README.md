@@ -1449,7 +1449,8 @@ either won't work:
 Run every check (that the Python code is formatted with
 [Ruff](https://docs.astral.sh/ruff/), Ruff's linter with the rules
 `pyproject.toml` adds to its defaults (e.g. a limit on functions' cyclomatic
-complexity), basedpyright in strict mode, then the tests) with:
+complexity), basedpyright in strict mode, that the man page is current, then
+the tests) with:
 
 ```sh
 python3 dev.py check
@@ -1462,7 +1463,8 @@ If the formatting check fails, format the code with:
 ```
 
 If the linter fails, `.venv/bin/ruff check --fix` fixes what it can.
-`python3 dev.py static` runs only the formatting, lint and type checks,
+`python3 dev.py static` runs all but the tests (formatting, lint, types and
+the man page),
 `python3 dev.py tests` only the tests, and `python3 dev.py coverage` the tests
 under coverage.py, then what they don't run. `python3 dev.py types-other-platforms` type-checks
 the code as if on Windows and macOS, as `check` does as if on Linux; CI runs
@@ -1511,8 +1513,8 @@ change that adds one) is installed by the next commit or push that uses it.
   files (`git commit README.md`) can't have the page added, so the hook stops
   it if the page changes: run `python3 dev.py man`, `git add` the page, then
   commit without naming files.
-- `pre-push` runs `dev.py static` (formatting, lint and types) before every
-  push; CI runs the tests. Skip it with `git push --no-verify` (or
+- `pre-push` runs `dev.py static` (formatting, lint, types and the man page)
+  before every push; CI runs the tests. Skip it with `git push --no-verify` (or
   `git stack push --no-verify`).
 
 ### Skipping reformatting in `git blame`
@@ -1555,8 +1557,9 @@ uvx copier update --defaults
 
 and resolve any conflicts it marks, keeping what's git-stack's own (see
 `PROJECT_AGENTS.md`'s "Where git-stack differs from the template"). `dev.py`
-and `AGENTS.md` stay the template's: git-stack's own commands and install
-steps (the man page's SYNOPSIS, `git blame`) are in `dev_project.py`, and its own rules
+and `AGENTS.md` stay the template's: git-stack's own command
+(`types-other-platforms`), install step (`git blame`) and the man page's
+SYNOPSIS are in `dev_project.py`, and its own rules
 for agents (and people) changing it are in `PROJECT_AGENTS.md`. It never
 changes this README, `PROJECT_AGENTS.md`, `docs/` or
 `.github/workflows/project.yml`.
