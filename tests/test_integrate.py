@@ -49,13 +49,14 @@ def test_create_refresh_and_replace_ordered_sources(repo: Repo, git_calls: list[
     assert repo.git("rev-parse", "refs/heads/combined^1^1") == tip(repo, "main")
 
     repo.git("switch", "--quiet", "combined")
-    assert "combined (integration)" in repo.stack("info", "--offline").stdout
+    assert repo.stack("info", "--offline").stdout.splitlines()[0] == "combined (of one, two) *"
     git_calls.clear()
     repo.stack("restack")
     assert tip(repo, "combined") == before
     assert not any(call[:2] == ["worktree", "add"] for call in git_calls)
 
     repo.stack("integrate", "combined", "two")
+    assert repo.stack("info", "--offline").stdout.splitlines()[0] == "combined (of two) *"
     assert repo.git("rev-parse", "refs/heads/combined^2") == tip(repo, "two")
     assert repo.git("rev-parse", "refs/heads/combined^1") == tip(repo, "main")
     assert repo.git("branch", "--show-current") == "combined"

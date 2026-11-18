@@ -261,8 +261,9 @@ again with the new list. An existing integration can have a single source.
 The new list takes effect when the build succeeds.
 
 Switch to the integration branch and use `git stack create <work>` to start
-a stack on it. `git stack info` labels its root `(integration)`. Integration
-branches and work stacked above them cannot supply inputs to an integration.
+a stack on it. `git stack info` lists the root's configured sources in merge
+order, for example `(of branch-a, branch-b)`. Integration branches and work
+stacked above them cannot supply inputs to an integration.
 
 `restack`, `pull`, and `sync` refresh the integration roots needed by the
 selected stacks. From an integration branch, they select its dependent
