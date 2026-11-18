@@ -548,8 +548,9 @@ def test_prs_falls_back_when_github_stack_ends_in_a_merged_pr(
     assert stack_section.START not in body(gh, 3)
 
 
+@pytest.mark.parametrize("dry_run", [False, True])
 def test_prs_rebuild_refuses_to_unstack_unrelated_pull_requests(
-    repo: Repo, gh: FakeGitHub, client: StackClient
+    repo: Repo, gh: FakeGitHub, client: StackClient, dry_run: bool
 ) -> None:
     repo.make_stack()
     client.push()
@@ -562,7 +563,7 @@ def test_prs_rebuild_refuses_to_unstack_unrelated_pull_requests(
     repo.git("config", "branch.pr3.stackParent", "pr1")
 
     with pytest.raises(StackError, match="other open pull requests: #2"):
-        client.prs(rebuild_stack=True)
+        client.prs(rebuild_stack=True, dry_run=dry_run)
 
     assert gh.stacks() == [[1, 2, 3]]
 
