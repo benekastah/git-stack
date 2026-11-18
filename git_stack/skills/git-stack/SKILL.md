@@ -59,7 +59,8 @@ git stack push --prs           # push both, open draft PRs, each into its parent
 | Who owns a stack | `git stack ownership show` |
 
 Keeping a stack current (restack, sync, conflicts) is the `git-stack-sync` skill. Reshaping it is
-`git-stack-rearrange`. When something looks wrong, use `git-stack-troubleshoot`.
+`git-stack-rearrange`. When something looks wrong, use `git-stack-troubleshoot`. Breaking a big change
+into a stack is `git-stack-split`.
 
 ## Reading state in scripts
 

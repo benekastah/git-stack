@@ -962,8 +962,10 @@ git stack unrevert add-api-unrevert 1a2b3c4d5e6f --stack use-api
 
 Link git-stack's [Agent Skills](https://agentskills.io) into the directories
 your coding agents read skills from, so they know how to use git-stack (for
-example, to use `git stack` rather than plain git on a tracked branch). It
-works anywhere, not just in a repository.
+example, to use `git stack` rather than plain git on a tracked branch). There
+are five: `git-stack` (the model, the rules, everyday commands), and
+`git-stack-sync`, `git-stack-rearrange`, `git-stack-troubleshoot` and
+`git-stack-split`. It works anywhere, not just in a repository.
 
 **When would I use it?** Once after installing git-stack, and again after
 moving or reinstalling it, which can leave the links dangling.
