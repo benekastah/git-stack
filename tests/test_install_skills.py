@@ -80,12 +80,39 @@ def test_a_second_run_changes_nothing(home: pathlib.Path, capsys: pytest.Capture
     assert {i["action"] for i in result["installed"]} == {"unchanged"}
 
 
-def test_it_replaces_a_link_to_somewhere_else(home: pathlib.Path, tmp_path: pathlib.Path) -> None:
-    old = tmp_path / "old"
-    old.mkdir()
-    link = home / ".claude" / "skills" / "git-stack"
-    link.parent.mkdir(parents=True)
-    link.symlink_to(old, target_is_directory=True)
+def link_to_elsewhere(home: pathlib.Path, tmp_path: pathlib.Path, skill: str = "git-stack") -> pathlib.Path:
+    """A link where Claude looks for skill, to a directory that isn't git-stack's."""
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir(exist_ok=True)
+    link = home / ".claude" / "skills" / skill
+    link.parent.mkdir(parents=True, exist_ok=True)
+    link.symlink_to(elsewhere, target_is_directory=True)
+    return link
+
+
+def test_it_leaves_a_link_to_somewhere_else_and_changes_nothing(
+    home: pathlib.Path, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    link = link_to_elsewhere(home, tmp_path, "git-stack-sync")
+
+    assert main(["install-skills", "--claude"]) == 1
+
+    assert "--reinstall" in capsys.readouterr().err
+    assert link.resolve() == (tmp_path / "elsewhere").resolve()
+    assert [p.name for p in link.parent.iterdir()] == ["git-stack-sync"]
+
+
+def test_reinstall_replaces_a_link_to_somewhere_else(home: pathlib.Path, tmp_path: pathlib.Path) -> None:
+    link = link_to_elsewhere(home, tmp_path)
+
+    assert main(["install-skills", "--claude", "--reinstall"]) == 0
+
+    assert link.resolve() == (SKILLS / "git-stack").resolve()
+
+
+def test_it_replaces_a_link_whose_target_is_gone(home: pathlib.Path, tmp_path: pathlib.Path) -> None:
+    link = link_to_elsewhere(home, tmp_path)
+    (tmp_path / "elsewhere").rmdir()
 
     assert main(["install-skills", "--claude"]) == 0
 
@@ -97,7 +124,7 @@ def test_it_refuses_to_replace_a_directory_of_your_own(home: pathlib.Path, capsy
     mine.mkdir(parents=True)
     (mine / "SKILL.md").write_text("mine", encoding="utf-8")
 
-    assert main(["install-skills", "--claude"]) == 1
+    assert main(["install-skills", "--claude", "--reinstall"]) == 1
 
     assert "git-stack" in capsys.readouterr().err
     assert (mine / "SKILL.md").read_text(encoding="utf-8") == "mine"

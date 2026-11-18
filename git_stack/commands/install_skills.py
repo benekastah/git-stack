@@ -11,6 +11,7 @@ class Args(argparse.Namespace):
     """The arguments register's parser produces."""
 
     agents: list[str]
+    reinstall: bool
     json: bool
 
 
@@ -29,6 +30,12 @@ def register(subparsers: Subparsers) -> None:
             help=f"install for {agent.name} (even if it isn't found); without any such option, "
             "install for each agent found",
         )
+    p.add_argument(
+        "--reinstall",
+        action="store_true",
+        help="replace a skill's link to somewhere else (e.g. another clone's); a link that's already right is "
+        "left alone, and a file or directory that isn't a link never replaced",
+    )
     add_json_argument(p)
     p.set_defaults(run=run, show=show)
 
@@ -39,7 +46,7 @@ class Result:
 
 
 def run(stack: StackClient, args: Args) -> Result:
-    return Result(skills.install(args.agents))
+    return Result(skills.install(args.agents, args.reinstall))
 
 
 def show(stack: StackClient, args: Args, result: Result) -> None:

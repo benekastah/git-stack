@@ -965,7 +965,7 @@ git stack unrevert add-api-unrevert 1a2b3c4d5e6f --stack use-api
 - Works on the local `--from`, without fetching, so run `git stack sync`
   first if the revert only happened on the remote. Needs a clean worktree.
 
-### `git stack install-skills [--claude] [--codex] [--json]`
+### `git stack install-skills [--claude] [--codex] [--reinstall] [--json]`
 
 Link git-stack's [Agent Skills](https://agentskills.io) into the directories
 your coding agents read skills from, so they know how to use git-stack (for
@@ -991,9 +991,11 @@ git stack install-skills --codex    # for Codex, even if it isn't found
 - Each skill is a link to the one in the installed package, so a git-stack
   upgrade updates the skills too. On Windows, where making a symlink usually
   needs a privilege, it makes a directory junction instead.
-- It replaces a link to somewhere else (say, another clone's skills) and
-  leaves a link that's already right. It refuses to replace a real file or
-  directory, so a skill of your own with the same name is safe.
+- It leaves a link that's already right, and a link to somewhere else (say,
+  another clone's skills) unless you pass `--reinstall`, which replaces it. A
+  link whose target is gone is replaced either way. It refuses to replace a
+  real file or directory, even with `--reinstall`, so a skill of your own with
+  the same name is safe, and it changes nothing if it refuses any link.
 
 ## Scripting
 
@@ -1488,9 +1490,9 @@ there and adds it to your `PATH`) and, except on Windows, the man page into
 `~/.local/share/man/man1` (an editable install doesn't install it). It makes
 the clone use the [git hooks](#git-hooks) in `git_hooks/`, makes
 `git blame` skip [reformatting commits](#skipping-reformatting-in-git-blame),
-and links the clone's [agent skills](#git-stack-install-skills---claude---codex---json)
-into the coding agents it finds (`git stack install-skills`: it replaces a
-skill link to another clone, and only warns if it finds no agent).
+and links the clone's [agent skills](#git-stack-install-skills---claude---codex---reinstall---json)
+into the coding agents it finds (`git stack install-skills`: it leaves a
+skill link to another clone, saying so, and only warns if it finds no agent).
 It's safe to rerun, e.g. when `pyproject.toml` changes, to pick up a new
 command-line entry point.
 
