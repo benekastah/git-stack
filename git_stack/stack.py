@@ -2040,6 +2040,7 @@ class StackClient(StackCore):
         adapter = self.checked_adapter(push_remote)
         github = adapter if prs and isinstance(adapter, GitHubAdapter) else None
         branches = self.skip_merged(stack, stacks, adapter)
+        self.ensure_published_pr_roots(branches, stacks, adapter, opening=prs)
         if not force:
             for b in branches:
                 self.take_upstream_rebase(b, stacks.parent(b), push_remote)
@@ -2328,6 +2329,7 @@ class StackClient(StackCore):
         adapter = ensure_github(make_adapter(self, remote, fetch=True), remote)
         adapter.ensure_available()
         branches = self.skip_merged(stack, stacks, adapter)
+        self.ensure_published_pr_roots(branches, stacks, adapter, opening=True)
         steps = self.open_pull_requests(branches, stacks, adapter, remote, dry_run, rebuild_stack)
         return PrsResult(steps, self.stack_infos(stack, adapter))
 
@@ -2397,6 +2399,44 @@ class StackClient(StackCore):
         except StackError as e:
             raise StackError(f"updating the stack in pull request descriptions failed: {e}") from e
 
+    def ensure_published_pr_roots(
+        self, branches: list[str], stacks: Stacks, adapter: GitAdapter, *, opening: bool
+    ) -> None:
+        """Check integration bases on the server before opening or retargeting PRs."""
+        if not isinstance(adapter, GitHubAdapter):
+            return
+        if opening:
+            roots = {stacks.root(branch) for branch in branches}
+        else:
+            prs = adapter.pull_requests()
+            roots = {stacks.parent(b) for b in branches if b in prs and prs[b].state is GitHubState.OPEN}
+        git, remote = self.git, adapter.remote
+        refs = {
+            root: f"refs/heads/{git.remote_branch_name(root, remote)}"
+            for root in sorted(roots)
+            if git.config_get(root, INTEGRATION_KEY)
+        }
+        if not refs:
+            return
+        # A cached remote-tracking ref can be stale or missing. The integration
+        # is outside the work push, so none of its refspecs will create this base.
+        found = {
+            line.partition("\t")[2]
+            for line in git.run("ls-remote", "--heads", "--", remote, *refs.values()).splitlines()
+        }
+        for root, ref in refs.items():
+            if ref not in found:
+                upstream = f"{remote}/{ref.removeprefix('refs/heads/')}"
+                hint = (
+                    f" If its upstream was deleted, restore it or unset it with "
+                    f"`git branch --unset-upstream {root}` before publishing under the local name."
+                    if git.config_get(root, "remote") == remote
+                    else ""
+                )
+                raise StackError(
+                    f"integration base {upstream} is missing; publish it with `git stack sync {root}`.{hint}"
+                )
+
     def ensure_on_remote(self, branches: list[str], roots: list[str], remote: str) -> None:
         """Refuse unless each of branches was pushed with `git stack push` and
         matches its remote branch, and their stacks' roots are on remote, so
@@ -2414,6 +2454,9 @@ class StackClient(StackCore):
                 f"{', '.join(unpushed)}; run `git stack push` first"
             )
         for root in roots:
+            # GitHub PR commands verify integration bases on the server before this point.
+            if git.config_get(root, INTEGRATION_KEY):
+                continue
             if git.rev(f"refs/remotes/{remote}/{git.remote_branch_name(root, remote)}") is None:
                 raise StackError(f"{root} isn't on {remote}, so pull requests can't merge into it")
 

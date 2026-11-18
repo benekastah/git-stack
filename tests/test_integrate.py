@@ -852,3 +852,43 @@ def test_recovered_parent_is_refreshed_before_work_is_rebased(repo: Repo, gh: Fa
     assert repo.config("work", "stackParent") == "combined"
     assert repo.git("show", "refs/heads/work:a") == "next input"
     assert repo.git("log", "--format=%s", "refs/heads/combined..refs/heads/work") == "work"
+
+
+@pytest.mark.parametrize("stale_tracking_ref", [False, True])
+@pytest.mark.parametrize("command", [("push", "--prs"), ("push",), ("prs",)])
+def test_pr_update_refuses_unpublished_integration_before_pushing(
+    repo: Repo, gh: FakeGitHub, stale_tracking_ref: bool, command: tuple[str, ...]
+) -> None:
+    integration(repo)
+    work(repo)
+    repo.stack("push")
+    before = tip(repo, "work", remote=True)
+    if stale_tracking_ref:
+        repo.stack("sync", "combined")
+        repo.git("update-ref", "-d", "refs/heads/combined", cwd=repo.origin)
+    gh.add_pr(
+        number=1,
+        state="OPEN",
+        headRefName="work",
+        headRefOid=before,
+        baseRefName="main",
+        mergeCommit=None,
+    )
+    repo.commit("c", "next work commit\n", "advance work")
+
+    result = repo.stack(*command, expect_success=False)
+
+    assert "publish it with `git stack sync combined`" in result.stderr
+    assert tip(repo, "work", remote=True) == before
+    assert gh.calls("pr", "edit") == []
+
+
+def test_push_prs_accepts_published_integration_without_cached_ref(repo: Repo, gh: FakeGitHub) -> None:
+    integration(repo)
+    work(repo)
+    repo.stack("sync", "combined")
+    repo.git("update-ref", "-d", "refs/remotes/origin/combined")
+
+    repo.stack("push", "--prs")
+
+    assert [(pr["headRefName"], pr["baseRefName"]) for pr in gh.load()["prs"]] == [("work", "combined")]

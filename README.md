@@ -278,8 +278,9 @@ If sync also deletes merged remote branches, those deletions wait for the
 same push. If the push fails, sync reports the remote branches it kept.
 Rerun sync with the same integration selected to retry those deletions
 with the original leases.
-Use the usual `push` and `prs` commands to publish new work branches and
-open their PRs.
+Publish the integration with `git stack sync <name>` before opening or
+retargeting PRs onto it. `push --prs` checks that the base exists on the
+remote before pushing the work branches.
 
 A source drops out of the generated history when its tip is already on the
 configured root or when a merged GitHub PR proves that exact tip landed

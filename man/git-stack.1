@@ -423,8 +423,10 @@ the same push.
 If the push fails, sync reports the remote branches it kept.
 Rerun sync with the same integration selected to retry those deletions
 with the original leases.
-Use the usual \f[CR]push\f[R] and \f[CR]prs\f[R] commands to publish new
-work branches and open their PRs.
+Publish the integration with \f[CR]git stack sync <name>\f[R] before
+opening or retargeting PRs onto it.
+\f[CR]push \-\-prs\f[R] checks that the base exists on the remote before
+pushing the work branches.
 .PP
 A source drops out of the generated history when its tip is already on
 the configured root or when a merged GitHub PR proves that exact tip
