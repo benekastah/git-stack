@@ -10,6 +10,7 @@ from git_stack.commands import (
     group,
     import_stacks,
     info,
+    install_skills,
     next_branch,
     ownership,
     parent,
@@ -52,6 +53,7 @@ COMMANDS = (
     parent,
     base,
     show_stack,
+    install_skills,
 )
 
 

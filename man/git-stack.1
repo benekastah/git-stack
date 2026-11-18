@@ -134,6 +134,11 @@ T}@T{
 \f[CR]git stack unrevert <new branch> <revert> \-\-stack <branch>\f[R]
 T}
 T{
+teach my coding agents git\-stack
+T}@T{
+\f[CR]git stack install\-skills\f[R]
+T}
+T{
 read all of this in the terminal
 T}@T{
 \f[CR]git stack \-\-help\f[R]
@@ -1311,6 +1316,42 @@ Works on the local \f[CR]\-\-from\f[R], without fetching, so run
 \f[CR]git stack sync\f[R] first if the revert only happened on the
 remote.
 Needs a clean worktree.
+.SS \f[CR]git stack install\-skills [\-\-claude] [\-\-codex] [\-\-json]\f[R]
+Link git\-stack\(aqs \c
+.UR https://agentskills.io
+Agent Skills
+.UE \c
+\ into the directories your coding agents read skills from, so they know
+how to use git\-stack (for example, to use \f[CR]git stack\f[R] rather
+than plain git on a tracked branch).
+It works anywhere, not just in a repository.
+.PP
+\f[B]When would I use it?\f[R] Once after installing git\-stack, and
+again after moving or reinstalling it, which can leave the links
+dangling.
+.IP
+.EX
+git stack install\-skills            \f[I]# for each agent it finds\f[R]
+git stack install\-skills \-\-codex    \f[I]# for Codex, even if it isn\(aqt found\f[R]
+.EE
+.IP \(bu 2
+\f[CR]\-\-claude\f[R] installs into \f[CR]$CLAUDE_CONFIG_DIR/skills\f[R]
+(default \f[CR]\(ti/.claude/skills\f[R]), and \f[CR]\-\-codex\f[R] into
+\f[CR]\(ti/.agents/skills\f[R].
+Without either, it installs for each agent it finds in use (a
+\f[CR]\(ti/.claude\f[R] or \f[CR]\(ti/.codex\f[R] directory, or
+\f[CR]$CLAUDE_CONFIG_DIR\f[R] or \f[CR]$CODEX_HOME\f[R] existing), and
+fails if it finds none.
+.IP \(bu 2
+Each skill is a link to the one in the installed package, so a
+git\-stack upgrade updates the skills too.
+On Windows, where making a symlink usually needs a privilege, it makes a
+directory junction instead.
+.IP \(bu 2
+It replaces a link to somewhere else (say, another clone\(aqs skills)
+and leaves a link that\(aqs already right.
+It refuses to replace a real file or directory, so a skill of your own
+with the same name is safe.
 .SH SCRIPTING
 The commands below print one thing per line, for use in scripts,
 aliases, shell prompts and editors.
@@ -1555,6 +1596,13 @@ T{
 \f[CR]parent\f[R], \f[CR]base\f[R]
 T}@T{
 the \f[CR]parent\f[R] or \f[CR]base\f[R]
+T}
+T{
+\f[CR]install\-skills\f[R]
+T}@T{
+\f[CR]installed\f[R]: each skill\(aqs \f[CR]agent\f[R],
+\f[CR]skill\f[R], link \f[CR]path\f[R], and \f[CR]action\f[R]:
+\f[CR]linked\f[R], \f[CR]replaced\f[R] or \f[CR]unchanged\f[R]
 T}
 T{
 \f[CR]show\-stack\f[R]
@@ -1934,16 +1982,5 @@ On Windows, \f[CR]GIT_STACK_GIT\f[R] has to name an \f[CR].exe\f[R]:
 git\-stack refuses a batch file (\f[CR].bat\f[R] or \f[CR].cmd\f[R]),
 which would run in cmd.exe, where characters a branch name can have
 (\f[CR]&\f[R], \f[CR]|\f[R], \f[CR]%\f[R]) mean something else.
-.SH AGENT SKILLS
-\f[CR]git_stack/skills/\f[R] has \c
-.UR https://agentskills.io
-Agent Skills
-.UE \c
-\ for coding agents (Claude Code, Codex, ...)
-that use git\-stack: \f[CR]git\-stack\f[R] teaches the model, the rules
-(use \f[CR]git stack\f[R] rather than plain git on a tracked branch) and
-everyday commands.
-Point your agent at that directory, e.g.
-link it from \f[CR].claude/skills\f[R] or \f[CR].agents/skills\f[R].
 .SH LICENSE
 git\-stack is released under the MIT License; see \f[CR]LICENSE\f[R].

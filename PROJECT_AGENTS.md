@@ -58,7 +58,9 @@ man page is generated from it.
 - `git_stack/skills/<name>/SKILL.md` are agent skills for people's agents, kept short and pointing at
   `git stack --help` and the README for detail. `tests/test_skills.py` checks that every
   `git stack ...` command they show parses with `cli.build_parser()`, so a renamed command or
-  flag fails there. Change a skill with the behavior it describes.
+  flag fails there. Change a skill with the behavior it describes. `git_stack/skills.py` and
+  `install-skills` link them into each agent's skills directory; `AGENTS` there says which agents
+  it knows, so another is one entry.
 
 ## Don't break output formats
 
@@ -95,7 +97,8 @@ Text meant for people (messages, `info`'s tree) can change.
   the test process, which is much quicker than starting one; only
   `tests/test_end_to_end.py` runs it as a separate process (`Repo.stack_process`),
   for what only that checks, like the entry point. A new command or `--json`
-  result needs a case in `test_json_prints_the_result_on_stdout`. The `gh`
+  result needs a case in `test_json_prints_the_result_on_stdout`, unless it doesn't use
+  the `StackClient` (`install-skills`), which tests its own. The `gh`
   fixture's fake GitHub (`tests/fake_gh.py`) answers git-stack's `gh`
   commands in the test's process too (`InProcessGh`), and as a command for
   `Repo.stack_process`.

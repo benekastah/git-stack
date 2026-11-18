@@ -50,6 +50,7 @@ git stack sync                  # catch up: drop merged PRs, rebase what's left,
 | sync several stacks at once | `git stack group add <name> <branch-or-glob>...`, then `git stack sync -g <name>` |
 | clean up merged branches in every stack | `git stack clean` |
 | bring back a PR whose merge was reverted | `git stack unrevert <new branch> <revert> --stack <branch>` |
+| teach my coding agents git-stack | `git stack install-skills` |
 | read all of this in the terminal | `git stack --help` |
 
 ## Words used here
@@ -957,6 +958,33 @@ git stack unrevert add-api-unrevert 1a2b3c4d5e6f --stack use-api
 - Works on the local `--from`, without fetching, so run `git stack sync`
   first if the revert only happened on the remote. Needs a clean worktree.
 
+### `git stack install-skills [--claude] [--codex] [--json]`
+
+Link git-stack's [Agent Skills](https://agentskills.io) into the directories
+your coding agents read skills from, so they know how to use git-stack (for
+example, to use `git stack` rather than plain git on a tracked branch). It
+works anywhere, not just in a repository.
+
+**When would I use it?** Once after installing git-stack, and again after
+moving or reinstalling it, which can leave the links dangling.
+
+```sh
+git stack install-skills            # for each agent it finds
+git stack install-skills --codex    # for Codex, even if it isn't found
+```
+
+- `--claude` installs into `$CLAUDE_CONFIG_DIR/skills` (default
+  `~/.claude/skills`), and `--codex` into `~/.agents/skills`. Without either, it
+  installs for each agent it finds in use (a `~/.claude` or `~/.codex`
+  directory, or `$CLAUDE_CONFIG_DIR` or `$CODEX_HOME` existing), and fails if
+  it finds none.
+- Each skill is a link to the one in the installed package, so a git-stack
+  upgrade updates the skills too. On Windows, where making a symlink usually
+  needs a privilege, it makes a directory junction instead.
+- It replaces a link to somewhere else (say, another clone's skills) and
+  leaves a link that's already right. It refuses to replace a real file or
+  directory, so a skill of your own with the same name is safe.
+
 ## Scripting
 
 The commands below print one thing per line, for use in scripts, aliases,
@@ -1076,6 +1104,7 @@ What each command's result has, besides `type` and `events`:
 | `prs` | `stacks`, and `steps`, one for each branch: the `branch`, its `parent`, and the `action`: `open`, `exists` (it already has a pull request) or `no-commits` (skipped, since it has no commits of its own). `title` is an opened pull request's title, and `number` and `url` an opened or existing one's (an existing one has no `url`, and a dry run opens none); each is `null` otherwise |
 | `unrevert` | the `branch` it created, the `parent` it created it on, the `reverts` it reverted, newest first, and the `children` it moved onto it |
 | `parent`, `base` | the `parent` or `base` |
+| `install-skills` | `installed`: each skill's `agent`, `skill`, link `path`, and `action`: `linked`, `replaced` or `unchanged` |
 | `show-stack` | `branches`, bottom first (`--quiet` can't be combined with `--json`) |
 
 `stacks` is the stacks the command covered, as `info --json` lists them.
@@ -1381,13 +1410,6 @@ A wrapper that needs to see what git-stack does (e.g. the commits a restack
 rewrites) then won't. On Windows, `GIT_STACK_GIT` has to name an `.exe`:
 git-stack refuses a batch file (`.bat` or `.cmd`), which would run in cmd.exe,
 where characters a branch name can have (`&`, `|`, `%`) mean something else.
-
-## Agent skills
-
-`git_stack/skills/` has [Agent Skills](https://agentskills.io) for coding agents (Claude Code, Codex, ...) that
-use git-stack: `git-stack` teaches the model, the rules (use `git stack` rather than plain git on
-a tracked branch) and everyday commands. Point your agent at that directory, e.g. link it from
-`.claude/skills` or `.agents/skills`.
 
 ## Install
 
