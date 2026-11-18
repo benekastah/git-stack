@@ -283,6 +283,11 @@ If sync also deletes merged remote branches, those deletions wait for the
 same push. If the push fails, sync reports the remote branches it kept.
 Rerun sync with the same integration selected to retry those deletions
 with the original leases.
+Sync keeps the remote integration and its work at their existing tips
+if selected work cannot be restacked, for example if another worktree has
+it checked out.
+`clean --delete remote` preserves the configured integration branches and
+their configured roots on the remote.
 Use `git stack push --prs` to publish both the integration and the work,
 then open or retarget the work PRs. To review the rebase before publishing,
 run `git stack restack <name>` first. Standalone `git stack prs` requires
@@ -298,6 +303,8 @@ configured root. To promote the work, switch to the bottom work branch,
 run `git stack restack --onto main`, then `git stack push` to update open
 PRs. Once no stack or PR uses the integration, delete its local and remote
 branches with Git.
+`git stack rename` updates the names of local sources and configured roots
+in integration metadata.
 
 If the integration tip was edited directly, refresh reports the extra
 commits. To discard those commits, run `git stack restack <name> --force`
@@ -310,6 +317,10 @@ merge, run `git merge --abort` there. Rerun the original git-stack command to
 resume the build. To discard the entire pending build, run `git stack integrate
 --abort <name>` from your regular worktree. The prior integration tip stays
 in place until a build completes.
+Sync records a selected source's tip and stack before removing the merged
+branch. Rerunning sync keeps the surviving work selected and can reuse
+recorded squash-merge proof without GitHub. If the removed source was your
+only selector, add the integration's name to the retry command.
 
 ### `git stack import [<branch>...] [--pr <number|url>]... [--author <login>] [--remote <name>] [-n | -f]`
 

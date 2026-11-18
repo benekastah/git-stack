@@ -1,4 +1,5 @@
 import enum
+import fnmatch
 import functools
 from collections.abc import Callable, Iterable, Sequence
 from concurrent.futures import ThreadPoolExecutor
@@ -21,10 +22,11 @@ from git_stack.core import (
     StackCore,
     SyncCommand,
     TrunkUpstream,
+    is_glob,
 )
 from git_stack.errors import BrokenStackError, StackError
 from git_stack.git import DEFAULT_REMOTE, SWITCH
-from git_stack.integrations import Integration, Integrations, Source
+from git_stack.integrations import Integration, Integrations, RetiredSource, Source
 from git_stack.json_fields import json_name
 from git_stack.stacks import Ownership, Stacks
 
@@ -101,6 +103,7 @@ class RefreshSelection:
     branches: list[str]
     integrations: dict[str, Integration]
     explicit: tuple[str, ...] = ()
+    recovered_sources: frozenset[str] = frozenset()
 
     def ordered(self, stacks: Stacks) -> tuple[list[str], list[str]]:
         """Process selected source stacks before refreshing integration roots."""
@@ -111,6 +114,11 @@ class RefreshSelection:
             for source in integration["sources"]
             if source["name"] in stacks
         } & selected_bottoms
+        source_bottoms.update(
+            stacks.bottom(branch)
+            for branch in self.recovered_sources
+            if branch in stacks and stacks.root(branch) not in self.integrations
+        )
         sources: list[str] = []
         remaining: list[str] = []
         for branch in self.branches:
@@ -335,8 +343,9 @@ class SyncState:
     no_verify: bool = False
     skipped: set[str] = field(default_factory=set)
     blocked: list[str] = field(default_factory=list)
+    broken: list[str] = field(default_factory=list)
     defer_delete: Callable[[RemoteDeletion], None] | None = None
-    protected_deletes: frozenset[str] = frozenset()
+    protected_deletes: frozenset[tuple[str, str]] = frozenset()
     pushable: list[str] = field(default_factory=list)
     unpushed: list[str] = field(default_factory=list)
 
@@ -848,11 +857,13 @@ class StackClient(StackCore):
             raise StackError("not on a branch; name the branch to rename")
         if not git.local_branch_exists(old):
             raise StackError(f"{old} isn't a local branch")
-        if Integrations(self).pending(old) is not None:
-            raise StackError(f"{old} has a pending integration build; run `git stack integrate --abort {old}` first")
+        integrations = Integrations(self)
+        updated_inputs = integrations.renamed_inputs(old, new)
         self.ensure_name_free_on_remotes(new)
         upstream = git.run("rev-parse", "--abbrev-ref", f"{old}@{{upstream}}", check=False) or None
         git.run("branch", "--move", old, new)
+        for name, config in updated_inputs.items():
+            integrations.save(name, config)
         # The move took old's settings, and so its place in its stack, with
         # it, but the branches stacked on it still name old.
         stacks = self.stacks()
@@ -909,6 +920,8 @@ class StackClient(StackCore):
         planned.reparent(name, parent)
         for branch in stack:
             planned.ensure_no_cycle(branch, name)
+            planned.reparent(branch, name)
+        self.validate_integrations(planned)
         commits = self.reverts_to_revert(reverts, parent)
         # The merged branches the stack is leaving, to untrack once nothing is
         # stacked on them, which they'd otherwise be left as forever.
@@ -926,11 +939,9 @@ class StackClient(StackCore):
         group = next((g for b in bottoms if (g := stacks.group(b))), None)
 
         git.run("branch", "--quiet", "--no-track", name, f"refs/heads/{parent}")
-        stacks.reparent(name, parent)
+        stacks = planned
         if group is not None:
             stacks.set_group(name, group)
-        for branch in stack:
-            stacks.reparent(branch, name)
         self.save(stacks)
         git.config_set(name, BASE_KEY, git.tip(name))
         for old in left:
@@ -1219,17 +1230,77 @@ class StackClient(StackCore):
             assert current is not None
             explicit = [current]
         ordinary = [name for name in branches if name not in names]
+        retired, replaced = self.retired_source_selectors(ordinary, stacks, integrations, names)
+        if replaced:
+            ordinary = [name for name in ordinary if name not in replaced]
+            if not (ordinary or groups or explicit):
+                raise StackError(f"{next(iter(retired))} is no longer tracked; also name its integration to resume")
         selected = self.selected_stacks(ordinary, groups, stacks, command) if ordinary or groups or not explicit else []
         expanded = dict.fromkeys(selected)
         for root in dict.fromkeys(explicit):
             expanded.update(dict.fromkeys(stacks.descendants(root)))
-        selected = list(expanded)
-        roots = dict.fromkeys([*explicit, *(stacks.root(b) for b in selected)])
+        recovered = frozenset[str]()
+        if retired:
+            roots = set(explicit) | {stacks.root(b) for b in expanded}
+            recovered = self.resume_retired_stacks(retired, replaced, roots, expanded, stacks)
+        roots = dict.fromkeys([*explicit, *(stacks.root(b) for b in expanded)])
         return RefreshSelection(
-            selected,
+            list(expanded),
             {root: integration for root in roots if (integration := integrations.read(root)) is not None},
             tuple(explicit),
+            recovered,
         )
+
+    def retired_source_selectors(
+        self, ordinary: Sequence[str], stacks: Stacks, integrations: Integrations, names: set[str]
+    ) -> tuple[dict[str, list[tuple[str, RetiredSource]]], set[str]]:
+        """Allow selectors that matched sources removed by an earlier sync."""
+        missing = {name for name in ordinary if name not in stacks}
+        if not missing:
+            return {}, set()
+        owners: dict[str, list[tuple[str, RetiredSource]]] = {}
+        for name in names:
+            config = integrations.read(name)
+            assert config is not None
+            for branch, entry in config.get("retired_sources", {}).items():
+                owners.setdefault(branch, []).append((name, entry))
+        retired = {branch: owners[branch] for branch in missing.intersection(owners)}
+        replaced = set(retired)
+        for selector in filter(is_glob, missing):
+            matched = [
+                owner
+                for branch, entries in owners.items()
+                if fnmatch.fnmatchcase(branch, selector)
+                for owner in entries
+            ]
+            if matched:
+                retired[selector] = matched
+                if not any(fnmatch.fnmatchcase(branch, selector) for branch in stacks):
+                    replaced.add(selector)
+        return retired, replaced
+
+    def resume_retired_stacks(
+        self,
+        retired: dict[str, list[tuple[str, RetiredSource]]],
+        replaced: set[str],
+        roots: set[str],
+        expanded: dict[str, None],
+        stacks: Stacks,
+    ) -> frozenset[str]:
+        """Keep surviving parts of a selected source stack in the retry's scope."""
+        recovered: dict[str, None] = {}
+        for selector, owners in retired.items():
+            entries = [entry for name, entry in owners if name in roots]
+            if not entries and selector in replaced:
+                raise StackError(f"{selector} is no longer tracked; also name its integration to resume")
+            for entry in entries:
+                parent, group = entry["parent"], entry["group"]
+                branches = stacks.bottoms_in(group) if group is not None else [parent] if parent is not None else []
+                for branch in branches:
+                    if branch in stacks and branch not in recovered:
+                        recovered.update(dict.fromkeys(stacks.stack_of(branch)))
+        expanded.update(recovered)
+        return frozenset(recovered)
 
     def validate_integrations(self, stacks: Stacks) -> None:
         """Reject stack changes that would make an integration depend on another."""
@@ -1307,7 +1378,6 @@ class StackClient(StackCore):
         expected: dict[str, str | None],
         *,
         fetch: bool,
-        captured: dict[str, Source] | None = None,
     ) -> dict[str, dict[str, str | None]]:
         integrations = Integrations(self)
         verified: dict[str, dict[str, str | None]] = {}
@@ -1316,7 +1386,7 @@ class StackClient(StackCore):
             root_remote = self.git.config_get(root, "remote")
             evidence_remote = root_remote if root_remote and root_remote != "." else remote
             desired, observed = integrations.inputs(
-                name, root, config["sources"], evidence_remote, fetch, captured, previous=config
+                name, root, config["sources"], evidence_remote, fetch, previous=config
             )
             verified[name] = integrations.build(name, desired, observed, config, expected[name])
         return verified
@@ -1511,9 +1581,9 @@ class StackClient(StackCore):
         Returns the branches that now differ from their remote branch, which
         with push are only those it didn't push, and the stacks it synced.
 
-        Raises StackError, after pushing the rest, if push is set and a branch
-        couldn't be restacked or pulled into because it's checked out in
-        another worktree, or is stacked on one that couldn't.
+        With push, raises StackError if another worktree blocks a branch or its parent.
+        For an ordinary stack, pushes the remaining eligible branches first.
+        A blocked integration dependent prevents the atomic push.
         """
         # Without push, it's `git stack pull`, which its messages must suggest
         # rerunning rather than sync, which would push.
@@ -1535,7 +1605,13 @@ class StackClient(StackCore):
         selection, upstream_remotes = self.sync_selection(selection, stacks, remote, only_remote, command)
         expected = self.preflight_integrations(selection, stacks)
         stack = selection.branches
-        self.ensure_ignorable_reverts(ignore_reverts, stack, "the stacks being synced")
+        retired = {
+            branch
+            for config in selection.integrations.values()
+            for branch in config.get("retired_sources", {})
+            if branch not in stacks
+        }
+        self.ensure_ignorable_reverts(ignore_reverts, [*stack, *retired], "the stacks being synced")
         roots = {stacks.root(b) for b in stack} | selection.integrations.keys()
         ordinary_roots = {config["root"] for config in selection.integrations.values()}
         roots_to_update = ordinary_roots | {
@@ -1591,7 +1667,7 @@ class StackClient(StackCore):
             command,
             no_verify,
         )
-        state.protected_deletes = self.integration_deletion_refs(state, roots)
+        state.protected_deletes = self.integration_deletion_refs(delete, roots, push_remote)
         self.refresh_and_push(selection, expected, adapter, state, integration_leases, rebuild_stack)
         if push and state.blocked:
             raise StackError(
@@ -1608,18 +1684,23 @@ class StackClient(StackCore):
             )
         return SyncResult(state.unpushed, shown)
 
-    def integration_deletion_refs(self, state: SyncState, roots: set[str]) -> frozenset[str]:
+    def integration_deletion_refs(
+        self, delete: Delete | None, roots: Iterable[str], fallback_remote: str
+    ) -> frozenset[tuple[str, str]]:
         """Keep the remote branches used as an integration or its configured root."""
-        if not state.delete or not state.delete.deletes_remote:
+        if not delete or not delete.deletes_remote:
             return frozenset()
         integrations = Integrations(self)
         names = integrations.names()
         if not names:
             return frozenset()
         configured = {config["root"] for name in names if (config := integrations.read(name)) is not None}
-        return frozenset(
-            f"refs/heads/{self.git.remote_branch_name(name, state.remote)}" for name in roots | names | configured
-        )
+        protected: set[tuple[str, str]] = set()
+        for name in {*roots, *names, *configured}:
+            upstream = self.git.config_get(name, "remote")
+            remote = upstream if upstream and upstream != "." else fallback_remote
+            protected.add((remote, f"refs/heads/{self.git.remote_branch_name(name, remote)}"))
+        return frozenset(protected)
 
     def refresh_and_push(
         self,
@@ -1644,6 +1725,9 @@ class StackClient(StackCore):
         try:
             verified = self.sync_selected(selection, expected, adapter, state)
             self.restore_checkout(state.original)
+            failed = [b for b in dict.fromkeys([*state.blocked, *state.broken]) if state.stacks.root(b) in leases]
+            if failed:
+                raise StackError(f"didn't push: couldn't update integration work on {', '.join(failed)}")
             integration_pushes = [
                 IntegrationPush(name, target, remote_tip, verified[name])
                 for name, (target, remote_tip) in leases.items()
@@ -1660,6 +1744,8 @@ class StackClient(StackCore):
                 integration_pushes=integration_pushes,
                 deletions=[deletion for _, deletion in pending.values()],
             )
+            if not (state.blocked or state.broken):
+                integrations.clear_retired_sources(leases, state.stacks, state.scope)
         finally:
             for journal, deletion in pending.values():
                 if self.git.rev(f"refs/remotes/{deletion.upstream}") is None:
@@ -1680,7 +1766,8 @@ class StackClient(StackCore):
             raise StackError(f"can't determine {state.remote}'s default branch; refusing queued deletions")
         for journal, deletion in recorded:
             current = self.git.rev(f"refs/remotes/{deletion.upstream}")
-            if current == deletion.tip and deletion.branch != default and deletion.ref not in state.protected_deletes:
+            protected = (deletion.remote, deletion.ref) in state.protected_deletes
+            if current == deletion.tip and deletion.branch != default and not protected:
                 pending[deletion.ref] = journal, deletion
             else:
                 integrations.forget_deletion(journal, deletion)
@@ -1693,26 +1780,52 @@ class StackClient(StackCore):
     ) -> dict[str, dict[str, str | None]]:
         """Sync selected sources first, then refresh roots before touching their work branches."""
         sources, remaining = selection.ordered(state.stacks)
-        integrations = Integrations(self)
-        # A selected, merged source may be deleted while syncing. Preserve the
-        # live input and its upstream identity so exact landing proof is still required.
-        selected_sources = set(sources)
-        captured = {
-            source["name"]: integrations.source(source["name"], self.git.tip(source["name"]), source)
-            for config in selection.integrations.values()
-            for source in config["sources"]
-            if source["name"] in selected_sources
-        }
+        preserve_source = self.source_retirement(selection, sources, state.stacks)
         for branch in sources:
-            self.sync_branch(branch, adapter, state)
+            self.sync_branch(branch, adapter, state, preserve_source)
         if selection.integrations:
             self.restore_checkout(state.original)
-        if state.blocked:
-            raise StackError(f"couldn't update selected integration source stacks: {', '.join(state.blocked)}")
-        verified = self.refresh_integrations(selection, state.remote, expected, fetch=True, captured=captured)
+        failed = dict.fromkeys([*state.blocked, *state.broken])
+        if failed:
+            raise StackError(f"couldn't update selected integration source stacks: {', '.join(failed)}")
+        verified = self.refresh_integrations(selection, state.remote, expected, fetch=True)
         for branch in remaining:
             self.sync_branch(branch, adapter, state)
         return verified
+
+    def source_retirement(
+        self, selection: RefreshSelection, branches: Sequence[str], stacks: Stacks
+    ) -> Callable[[str], None]:
+        """Capture merged sources and the selectors for their surviving stacks."""
+        integrations = Integrations(self)
+        # A selected, merged source may be deleted while syncing. Preserve the
+        # live input and its upstream identity so exact landing proof is still required.
+        selected_sources = set(branches)
+        inputs: dict[str, list[tuple[str, Integration, Source]]] = {}
+        for name, config in selection.integrations.items():
+            for source in config["sources"]:
+                if source["name"] in selected_sources:
+                    inputs.setdefault(source["name"], []).append((name, config, source))
+
+        def preserve_source(branch: str) -> None:
+            entries = inputs.get(branch)
+            if not entries:
+                return
+            tip = self.git.tip(branch)
+            parent = stacks.parent(branch)
+            group = stacks.group(stacks.bottom(branch))
+            if parent not in stacks and not group and stacks.children(branch):
+                # remove_merged gives the children a group named after their old parent.
+                group = branch
+            for name, config, source in entries:
+                config.setdefault("retired_sources", {})[branch] = RetiredSource(
+                    source=integrations.source(branch, tip, source),
+                    parent=parent if parent in stacks else None,
+                    group=group,
+                )
+                integrations.save(name, config)
+
+        return preserve_source
 
     def integration_leases(
         self, selection: RefreshSelection, remote: str, force: bool, roots: set[str]
@@ -1829,7 +1942,9 @@ class StackClient(StackCore):
         expected.update(self.preflight_integrations(added, stacks))
         selection.integrations.update(added.integrations)
 
-    def sync_branch(self, branch: str, adapter: GitAdapter, state: SyncState) -> None:
+    def sync_branch(
+        self, branch: str, adapter: GitAdapter, state: SyncState, preserve_source: Callable[[str], None] | None = None
+    ) -> None:
         """Untrack branch if it was merged, and otherwise bring it up to date (see
         sync_unmerged), unless its parent was skipped."""
         parent = state.stacks.parent(branch)
@@ -1847,6 +1962,8 @@ class StackClient(StackCore):
                     f"can't untrack {branch}: it has children outside the selected remote: {', '.join(outside)}"
                 )
             confirmed = adapter.merge_confirmed(branch, parent)
+            if preserve_source is not None:
+                preserve_source(branch)
             if not self.untrack_merged(
                 branch,
                 state.stacks,
@@ -1904,6 +2021,7 @@ class StackClient(StackCore):
             restacked = self.restack_branch(branch, parent, state.latest)
         except BrokenStackError as e:
             self.emit(events.BrokenBranch(branch, str(e)))
+            state.broken.append(branch)
             restacked = False
         if not restacked:
             state.skipped.add(branch)
@@ -1953,6 +2071,7 @@ class StackClient(StackCore):
             # is saved already, which is right whether or not this refuses.
             self.ensure_clean_worktree_for_clean(stacks, delete)
         self.fast_forward_trunks(stacks.roots())
+        protected_deletes = self.integration_deletion_refs(delete, stacks.roots(), remote)
 
         # Parent-before-child, so a branch whose parent was merged is checked
         # against its new parent.
@@ -1966,7 +2085,14 @@ class StackClient(StackCore):
             if state is MergeState.MERGED:
                 confirmed = adapter.merge_confirmed(branch, parent)
                 if (
-                    self.untrack_merged(branch, stacks, delete, confirmed=confirmed, no_verify=no_verify)
+                    self.untrack_merged(
+                        branch,
+                        stacks,
+                        delete,
+                        confirmed=confirmed,
+                        no_verify=no_verify,
+                        protected_refs=protected_deletes,
+                    )
                     and branch == original
                 ):
                     original = self.current_checkout()

@@ -429,6 +429,11 @@ the same push.
 If the push fails, sync reports the remote branches it kept.
 Rerun sync with the same integration selected to retry those deletions
 with the original leases.
+Sync keeps the remote integration and its work at their existing tips if
+selected work cannot be restacked, for example if another worktree has
+it checked out.
+\f[CR]clean \-\-delete remote\f[R] preserves the configured integration
+branches and their configured roots on the remote.
 Use \f[CR]git stack push \-\-prs\f[R] to publish both the integration
 and the work, then open or retarget the work PRs.
 To review the rebase before publishing, run
@@ -450,6 +455,8 @@ To promote the work, switch to the bottom work branch, run
 \f[CR]git stack push\f[R] to update open PRs.
 Once no stack or PR uses the integration, delete its local and remote
 branches with Git.
+\f[CR]git stack rename\f[R] updates the names of local sources and
+configured roots in integration metadata.
 .PP
 If the integration tip was edited directly, refresh reports the extra
 commits.
@@ -467,6 +474,12 @@ To discard the entire pending build, run
 \f[CR]git stack integrate \-\-abort <name>\f[R] from your regular
 worktree.
 The prior integration tip stays in place until a build completes.
+Sync records a selected source\(aqs tip and stack before removing the
+merged branch.
+Rerunning sync keeps the surviving work selected and can reuse recorded
+squash\-merge proof without GitHub.
+If the removed source was your only selector, add the integration\(aqs
+name to the retry command.
 .SS \f[CR]git stack import [<branch>...] [\-\-pr <number|url>]... [\-\-author <login>] [\-\-remote <name>] [\-n | \-f]\f[R]
 Track open pull requests on GitHub, drafts included, as stacks: each
 pull request\(aqs branch on the branch it merges into.

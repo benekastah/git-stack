@@ -27,7 +27,8 @@ single parent. Check the selected stacks and source branches first with
 
 - `git stack restack <name>` refreshes from local refs. `git stack pull <name>`
   fetches and refreshes locally. `git stack sync <name>` also publishes the
-  integration and eligible work in one atomic push with leases.
+  integration and eligible work in one atomic push with leases. If another
+  worktree blocks a selected work branch, sync stops before publishing its base.
 - From the work branch, `git stack push` rebuilds the integration from local
   tips, restacks the selected work, and publishes both atomically. To review
   that rebase before publishing, run `git stack restack <name>` first.
@@ -47,7 +48,9 @@ single parent. Check the selected stacks and source branches first with
 - If a merge conflicts, use the temporary worktree path reported by git-stack.
   Resolve and stage the conflicts there, run
   `git -C "<path>" -c core.editor=true merge --continue`, then rerun the
-  original command. To discard the interrupted build, use
+  original command. If a merged source that sync removed was the only
+  selector, add the integration's name when retrying. The retry keeps
+  surviving work in the source stack selected. To discard the build, use
   `git stack integrate --abort <name>` from the regular worktree.
 - If the integration tip has direct commits, inspect the commits listed by
   git-stack. `git stack restack <name> --force` replaces that integration's

@@ -30,7 +30,10 @@ man page is generated from it.
 - `git_stack/integrations.py` keeps integration roots out of `Stacks`. Its branch config
   records exact tips, merge evidence, build inputs and pending publication. The merge
   checkpoint stores only the step and HEAD so it can advance without rewriting those
-  inputs. The checkout recovery marker survives worktree cleanup. The refresh commands order selected source stacks before the integration builds, then
+  inputs. Sync records merged source tips and stack selectors before untracking
+  them so a retry can recover the inputs and scope. The checkout recovery marker
+  survives worktree cleanup.
+  The refresh commands order selected source stacks before the integration builds, then
   use the ordinary single-parent rebase path for the work above each integration.
 - Each command is a module in `git_stack/commands/` with `register`, `run` and
   `show`: `run` does the command and returns a dataclass result, and `show`

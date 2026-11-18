@@ -863,7 +863,7 @@ class StackCore:
         confirmed: bool = True,
         no_verify: bool = False,
         defer: Callable[[RemoteDeletion], None] | None = None,
-        protected_refs: frozenset[str] = frozenset(),
+        protected_refs: frozenset[tuple[str, str]] = frozenset(),
     ) -> bool:
         """Stop tracking merged branch, deleting what delete says, and moving its children onto its parent (see remove_merged).
         Returns False, leaving branch alone, if its remote branch couldn't be
@@ -889,7 +889,7 @@ class StackCore:
         remote_name, ref, tip = remote
         root = stacks.root(branch)
         root_ref = f"refs/heads/{git.remote_branch_name(root, remote_name)}"
-        if ref == root_ref or ref in protected_refs:
+        if ref == root_ref or (remote_name, ref) in protected_refs:
             self.remove_merged(branch, stacks, delete_local)
             return True
         if delete is not None and delete.deletes_remote:

@@ -4,7 +4,7 @@ import hashlib
 import json
 import pathlib
 import time
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from typing import NotRequired, TypedDict, cast
 
 from git_stack import events
@@ -33,11 +33,18 @@ class Source(TypedDict):
     checked_at: NotRequired[float]
 
 
+class RetiredSource(TypedDict):
+    source: Source
+    group: str | None
+    parent: str | None
+
+
 class Integration(TypedDict):
     root: str
     sources: list[Source]
     root_tip: str | None
     evidence_remote: NotRequired[str]
+    retired_sources: NotRequired[dict[str, RetiredSource]]
     tip: str
 
 
@@ -82,6 +89,71 @@ class Integrations:
 
     def save(self, name: str, integration: Integration) -> None:
         self.git.config_set(name, INTEGRATION_KEY, json.dumps(integration))
+
+    def clear_retired_sources(self, names: Iterable[str], stacks: Stacks, scope: frozenset[str]) -> None:
+        """Drop retry selectors whose surviving work was included in this push."""
+        configs = {name: config for name in names if (config := self.read(name)) and config.get("retired_sources")}
+        if not configs:
+            return
+        outside = {stacks.bottom(branch) for branch in stacks if branch not in scope}
+        groups_outside = {stacks.group(bottom) for bottom in outside} - {None}
+        for name, config in configs.items():
+            retired = config.get("retired_sources", {})
+            remaining = {
+                branch: entry
+                for branch, entry in retired.items()
+                if entry["group"] in groups_outside
+                or ((parent := entry["parent"]) is not None and parent in stacks and stacks.bottom(parent) in outside)
+            }
+            if remaining != retired:
+                if remaining:
+                    config["retired_sources"] = remaining
+                else:
+                    del config["retired_sources"]
+                self.save(name, config)
+
+    def renamed_inputs(self, old: str, new: str) -> dict[str, Integration]:
+        """Prepare integration metadata for a local source or root rename."""
+        self.check_pending_rename(old, new)
+        updated: dict[str, Integration] = {}
+        for name in self.names():
+            config = self.read(name)
+            assert config is not None
+            source_names = {source["name"] for source in config["sources"]}
+            retired = config.get("retired_sources", {})
+            continuations = [entry for entry in retired.values() if entry["parent"] == old]
+            if config["root"] != old and old not in source_names and not continuations:
+                continue
+            if old in source_names and new in source_names:
+                raise StackError(f"{new} is already a source for integration {name}")
+            if self.pending(name):
+                raise StackError(
+                    f"{name} has a pending integration build; run `git stack integrate --abort {name}` first"
+                )
+            if config["root"] == old:
+                config["root"] = new
+            for source in config["sources"]:
+                if source["name"] == old:
+                    source["name"] = new
+            if old in retired:
+                retired[new] = retired.pop(old)
+                retired[new]["source"]["name"] = new
+            for entry in continuations:
+                entry["parent"] = new
+            updated[name] = config
+        return updated
+
+    def check_pending_rename(self, old: str, new: str) -> None:
+        """Protect the branch and inputs pinned by an in-progress build."""
+        for name, key in self.git.branch_config():
+            if (
+                key == PENDING_KEY.lower()
+                and (build := self.pending(name))
+                and ({old, new}.intersection(build["observed"]) or name in (old, new))
+            ):
+                raise StackError(
+                    f"{name} has a pending integration build; run `git stack integrate --abort {name}` first"
+                )
 
     def journal(self, name: str, build: Build) -> None:
         self.git.config_set(name, PENDING_KEY, json.dumps(build))
@@ -254,7 +326,6 @@ class Integrations:
         sources: Sequence[Source],
         remote: str,
         fetch: bool,
-        captured: dict[str, Source] | None = None,
         *,
         previous: Integration | None = None,
     ) -> tuple[Integration, dict[str, str | None]]:
@@ -263,13 +334,20 @@ class Integrations:
         same_root = bool(previous and previous["root_tip"] == root_tip and previous.get("evidence_remote") == remote)
         inputs: list[Source] = []
         unresolved: list[Source] = []
+        retired = previous.get("retired_sources", {}) if previous else {}
+        pending = self.pending(name) if retired else None
+        pending_sources = {source["name"]: source for source in pending["integration"]["sources"]} if pending else {}
+        still_retired: dict[str, RetiredSource] = {}
         for source in sources:
             branch = source["name"]
             live = self.git.rev(f"refs/heads/{branch}")
             observed[branch] = live
-            if live is None and captured and branch in captured:
-                source = captured[branch]
+            entry = retired.get(branch)
+            if entry and live is None:
+                source = self.retired_input(source, entry["source"], pending_sources.get(branch))
             current = self.source(branch, live or source["tip"], source)
+            if entry and live in (None, entry["source"]["tip"]):
+                still_retired[branch] = RetiredSource(source=current, group=entry["group"], parent=entry["parent"])
             if self.local_landing(current, root_tip):
                 pass
             elif live and same_root and self.same_evidence(source, current, fetch):
@@ -286,7 +364,22 @@ class Integrations:
                     f"hasn't been proven to land on {root}. Replace the sources with "
                     f"`git stack integrate {name} <source>...`."
                 )
-        return Integration(root=root, sources=inputs, root_tip=root_tip, evidence_remote=remote, tip=root_tip), observed
+        desired = Integration(root=root, sources=inputs, root_tip=root_tip, evidence_remote=remote, tip=root_tip)
+        if still_retired:
+            desired["retired_sources"] = still_retired
+        return desired, observed
+
+    @staticmethod
+    def retired_input(source: Source, captured: Source, pending: Source | None) -> Source:
+        """Use existing landing proof only for the exact captured source identity."""
+        for candidate in (pending, source):
+            if (
+                candidate
+                and candidate["landing"]
+                and all(candidate[k] == captured[k] for k in ("tip", "remote", "head"))
+            ):
+                return candidate
+        return captured
 
     def local_landing(self, source: Source, root_tip: str) -> bool:
         """Keep a recorded proof only while its commit is still on the root."""
