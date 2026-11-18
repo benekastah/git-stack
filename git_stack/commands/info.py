@@ -8,6 +8,7 @@ from dataclasses import dataclass
 
 from git_stack.adapters.git import PullRequestState
 from git_stack.commands import Subparsers, add_stack_arguments
+from git_stack.core import INTEGRATION_KEY
 from git_stack.errors import StackError
 from git_stack.json_fields import to_json
 from git_stack.stack import BranchInfo, BranchStatus, StackClient
@@ -119,11 +120,13 @@ class GroupHeader:
     root: str
 
 
-def label(branch: BranchInfo | GroupHeader, paint: Paint, color: bool) -> str:
+def label(branch: BranchInfo | GroupHeader, paint: Paint, color: bool, integrations: set[str]) -> str:
     if isinstance(branch, GroupHeader):
         return paint(f"group {branch.group}", ROOT)
     if branch.parent is None:
         parts = [paint(branch.name, ROOT)]
+        if branch.name in integrations:
+            parts.append("(integration)" + (" *" if branch.current else ""))
     elif branch.status is BranchStatus.NEEDS_RESTACK and color:
         parts = [paint(branch.name + (" *" if branch.current else ""), "1;33" if branch.current else "33"), "!"]
     elif branch.current:
@@ -212,11 +215,12 @@ def print_tree(
             # Upside down, the tree reads the same, mirrored.
             rows.extend(reversed(drawn) if flip else drawn)
     # Pull request links go in a right-aligned column after the longest line.
-    widths = [len(tree) + len(label(row, painter(False), color)) for tree, row in rows]
+    integrations = {b.name for b in branches if b.parent is None and stack.git.config_get(b.name, INTEGRATION_KEY)}
+    widths = [len(tree) + len(label(row, painter(False), color, integrations)) for tree, row in rows]
     links = [link_of(row, new_links) for _, row in rows]
     link_width = max(len(link[0]) if link else 0 for link in links)
     for (tree, row), width, link in zip(rows, widths, links, strict=True):
-        line = paint(tree, TREE) + label(row, paint, color)
+        line = paint(tree, TREE) + label(row, paint, color, integrations)
         if link:
             text, link_color = link
             line += " " * (max(widths) - width + 2) + paint(text.rjust(link_width), link_color)

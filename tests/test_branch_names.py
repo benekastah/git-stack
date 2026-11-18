@@ -176,3 +176,14 @@ def test_import_tracks_a_local_branch_on_a_trunk_checked_out_elsewhere(
     client.import_stacks()
 
     assert stacked_on(repo, "pr1", "main")
+
+
+@pytest.mark.usefixtures("no_ambiguous_names")
+def test_integration_uses_branches_even_with_same_named_tags(repo: Repo) -> None:
+    repo.make_stack()
+    shadow(repo, "main", "pr1", "pr2")
+    repo.git("tag", "combined", "refs/heads/main")
+
+    repo.stack("integrate", "combined", "pr1", "pr2")
+
+    assert repo.git("rev-parse", "refs/heads/combined^2") == repo.git("rev-parse", "refs/heads/pr2")

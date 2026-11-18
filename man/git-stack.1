@@ -387,6 +387,44 @@ that.
 .IP \(bu 2
 Nothing is written unless every branch can be tracked, so a bad argument
 doesn\(aqt leave the stack half\-tracked.
+.SS \f[CR]git stack integrate <name> <source> <source>... [\-\-root <branch>] [\-\-adopt]\f[R]
+Build a local integration branch by merging the source branches in the
+order given, starting from \f[CR]main\f[R] or the ordinary untracked
+branch named by \f[CR]\-\-root\f[R].
+Name at least two distinct local sources when creating an integration.
+To register an existing snapshot, use \f[CR]\-\-adopt\f[R].
+Its tip stays where it is until the next refresh.
+To change the sources, run \f[CR]integrate\f[R] again with the new list.
+An existing integration can have a single source.
+The new list takes effect when the build succeeds.
+.PP
+Switch to the integration branch and use
+\f[CR]git stack create <work>\f[R] to start a stack on it.
+\f[CR]git stack info\f[R] labels its root \f[CR](integration)\f[R].
+Integration branches and work stacked above them cannot supply inputs to
+an integration.
+.PP
+Rerun \f[CR]integrate\f[R] to rebuild after changing a local input, then
+run \f[CR]git stack restack\f[R] from a work branch to rebase that
+stack.
+Use Git to publish the integration branch before opening PRs that target
+it.
+\f[CR]sync\f[R] and \f[CR]pull\f[R] require an ordinary stack root.
+.PP
+If the integration tip was edited directly, the build reports the extra
+commits and the last generated tip.
+Restore that tip before rebuilding.
+Move the integration out of any other worktree before rebuilding it.
+.PP
+If a merge conflicts, git\-stack reports the temporary worktree.
+Resolve and stage the files there, then run
+\f[CR]git merge \-\-continue\f[R].
+To undo the current merge, run \f[CR]git merge \-\-abort\f[R] there.
+Rerun the original git\-stack command to resume the build.
+To discard the entire pending build, run
+\f[CR]git stack integrate \-\-abort <name>\f[R] from your regular
+worktree.
+The prior integration tip stays in place until a build completes.
 .SS \f[CR]git stack import [<branch>...] [\-\-pr <number|url>]... [\-\-author <login>] [\-\-remote <name>] [\-n | \-f]\f[R]
 Track open pull requests on GitHub, drafts included, as stacks: each
 pull request\(aqs branch on the branch it merges into.
@@ -1566,6 +1604,11 @@ T{
 \f[CR]next\f[R], \f[CR]prev\f[R]
 T}@T{
 the \f[CR]branch\f[R] it switched to
+T}
+T{
+\f[CR]integrate\f[R]
+T}@T{
+\f[CR]name\f[R] and \f[CR]tip\f[R] (null after abort)
 T}
 T{
 \f[CR]restack\f[R]

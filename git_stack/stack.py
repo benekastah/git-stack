@@ -12,6 +12,7 @@ from git_stack.adapters.github import GitHubAdapter, GitHubState, OpenPullReques
 from git_stack.adapters.merge_state import MergeState
 from git_stack.core import (
     BASE_KEY,
+    INTEGRATION_KEY,
     PULLED_KEY,
     PULLED_UPSTREAM_KEY,
     TRACK_UPSTREAM_KEY,
@@ -22,6 +23,7 @@ from git_stack.core import (
 )
 from git_stack.errors import BrokenStackError, StackError
 from git_stack.git import DEFAULT_REMOTE, SWITCH
+from git_stack.integrations import Integration, Integrations
 from git_stack.json_fields import json_name
 from git_stack.stacks import Ownership, Stacks
 
@@ -81,6 +83,23 @@ class BranchInfo:
     current: bool
     pull_request: PullRequestLink | None = field(default=None, metadata=json_name("pr"))
     group: str | None = None
+
+
+@dataclass(frozen=True)
+class Integrated:
+    """The integration branch and its tip, or None after aborting a build."""
+
+    name: str
+    tip: str | None
+
+
+@dataclass
+class RefreshSelection:
+    """Selected work branches and the integration roots they need."""
+
+    branches: list[str]
+    integrations: dict[str, Integration]
+    explicit: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -421,6 +440,7 @@ class StackClient(StackCore):
             plan.append(Tracked(branch, parent, base))
             parent, base_arg = branch, None
 
+        self.validate_integrations(stacks)
         self.save(stacks)
         for tracked in plan:
             git.config_set(tracked.branch, BASE_KEY, tracked.base)
@@ -990,12 +1010,15 @@ class StackClient(StackCore):
         branches, parent-before-child. offline checks for merges like the git
         adapter does, without asking GitHub about pull requests."""
         stacks = self.settled_stacks()
+        integration_roots = Integrations(self).names() & self.git.local_branches()
         if current or branches or groups:
-            stacks = stacks.restricted(self.selected_stacks(branches, groups, stacks, "show"))
+            selected = self.refresh_selection(branches, groups, stacks, "show")
+            stacks = stacks.restricted(selected.branches)
+            integration_roots &= selected.integrations.keys()
         adapter = GitAdapter(self) if offline else make_adapter(self, self.default_remote(stacks, stacks), fetch=False)
-        return self.branch_infos(stacks, adapter)
+        return self.branch_infos(stacks, adapter, integration_roots)
 
-    def branch_infos(self, stacks: Stacks, adapter: GitAdapter) -> list[BranchInfo]:
+    def branch_infos(self, stacks: Stacks, adapter: GitAdapter, extra_roots: Iterable[str] = ()) -> list[BranchInfo]:
         """The branches in stacks, as info() lists them, checked with adapter,
         so a command that already has one (and its pull requests) can show
         them without looking them up again."""
@@ -1034,7 +1057,7 @@ class StackClient(StackCore):
             b: g for b, g in stacks.groups().items() if stacks.is_bottom(b) and len(stacks.group_bottoms(b)) > 1
         }
         result: list[BranchInfo] = []
-        for root in stacks.roots():
+        for root in sorted(set(stacks.roots()) | set(extra_roots)):
             result.append(BranchInfo(root, None, None, root == current))
             result.extend(
                 BranchInfo(
@@ -1098,6 +1121,83 @@ class StackClient(StackCore):
         return remaining
 
     @exclusive
+    def integrate(
+        self, name: str, sources: Sequence[str], *, root: str | None = None, adopt: bool = False, abort: bool = False
+    ) -> Integrated:
+        """Create, replace or adopt an integration root, or abort its pending build."""
+        git = self.git
+        integrations = Integrations(self)
+        if not git.ok("check-ref-format", "--branch", name) or not git.ok("check-ref-format", f"refs/heads/{name}"):
+            raise StackError(f"{name} isn't a valid integration branch name")
+        integrations.restore_pending_checkout()
+        if abort:
+            if sources or root is not None:
+                raise StackError("--abort takes only the integration name")
+            integrations.abort(name)
+            return Integrated(name, None)
+        integrations.finish_interrupted(name)
+        previous = integrations.read(name)
+        expected = git.rev(f"refs/heads/{name}")
+        if previous:
+            if adopt:
+                raise StackError(f"{name} is already a registered integration")
+            integrations.preflight(name)
+        elif adopt != (expected is not None):
+            raise StackError(f"{name} already exists; use --adopt" if expected else f"{name} isn't a local branch")
+        minimum = 1 if previous else 2
+        if len(sources) < minimum or len(set(sources)) != len(sources):
+            raise StackError(f"an integration needs at least {minimum} distinct local sources")
+        root = root if root is not None else previous["root"] if previous else "main"
+        stacks = self.stacks()
+        if adopt and name in stacks:
+            stacks.untrack([name])
+        integrations.validate(name, root, sources, stacks, expected)
+        integrations.ensure_independent(name, stacks)
+        captured = [integrations.source(source, git.tip(source)) for source in sources]
+        if adopt:
+            assert expected is not None
+            self.save(stacks)
+            integrations.save(name, Integration(root=root, sources=captured, root_tip=None, tip=expected))
+        else:
+            remote = self.stack_remote(set(), self.upstream_remotes([root]))
+            desired, observed = integrations.inputs(name, root, captured, remote, fetch=False)
+            integrations.build(name, desired, observed, previous, expected)
+        return Integrated(name, git.tip(name))
+
+    def refresh_selection(
+        self, branches: Sequence[str], groups: Sequence[str], stacks: Stacks, command: str
+    ) -> RefreshSelection:
+        """Use ordinary selection, also allowing an integration root as a selector."""
+        integrations = Integrations(self)
+        names = integrations.names()
+        explicit = [name for name in branches if name in names]
+        current = self.git.current_branch()
+        if not branches and not groups and current in names:
+            assert current is not None
+            explicit = [current]
+        ordinary = [name for name in branches if name not in names]
+        selected = self.selected_stacks(ordinary, groups, stacks, command) if ordinary or groups or not explicit else []
+        for root in explicit:
+            for child in stacks.children(root):
+                selected.extend(stacks.stack_of(child))
+        selected = list(dict.fromkeys(selected))
+        roots = dict.fromkeys([*explicit, *(stacks.root(b) for b in selected)])
+        return RefreshSelection(
+            selected,
+            {root: integration for root in roots if (integration := integrations.read(root)) is not None},
+            tuple(explicit),
+        )
+
+    def validate_integrations(self, stacks: Stacks) -> None:
+        """Reject stack changes that would make an integration depend on another."""
+        integrations = Integrations(self)
+        for name in integrations.names():
+            if (config := integrations.read(name)) is not None:
+                integrations.validate(
+                    name, config["root"], [source["name"] for source in config["sources"]], stacks, config["tip"]
+                )
+
+    @exclusive
     def restack(
         self,
         branches: Sequence[str] = (),
@@ -1140,6 +1240,7 @@ class StackClient(StackCore):
             # Only in stacks, which isn't saved: restack_branch records the
             # new parent once the rebase has finished.
             stacks.reparent(branch, onto)
+            self.validate_integrations(stacks)
         else:
             selected = self.selected_stacks(branches, groups, stacks, "restack")
             self.ensure_owned(selected, stacks, allow_shared, "restack")
@@ -1164,6 +1265,11 @@ class StackClient(StackCore):
             stack = [b for b in stack if self.git.config_get(b, "remote") == remote]
             if not stack:
                 raise StackError(f"none of the selected branches track {remote}")
+        if any(self.git.config_get(stacks.root(branch), INTEGRATION_KEY) for branch in stack):
+            raise StackError(
+                f"can't {command.value} a stack on an integration; rebuild it with `git stack integrate`, "
+                "then use `git stack restack`"
+            )
         remotes = self.upstream_remotes(stack)
         if len(remotes) > 1:
             raise StackError(f"can't {command.value} branches on multiple remotes atomically; select one with --remote")

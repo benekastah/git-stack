@@ -13,6 +13,7 @@ from git_stack.git import GitClient
 from git_stack.stacks import Ownership, StackNode, Stacks
 
 PARENT_KEY = "stackParent"
+INTEGRATION_KEY = "stackIntegration"
 BASE_KEY = "stackBase"
 # The last upstream tip the branch caught up with, by pulling it or pushing it.
 # Commits it contains aren't new to the branch, even if the branch has since
@@ -424,7 +425,11 @@ class StackCore:
         """
         if base == parent_tip:
             return False
-        if base is None or latest or self.git.config_get(parent, PARENT_KEY) is not None:
+        if (
+            base is None
+            or latest
+            or any(self.git.config_get(parent, key) is not None for key in (PARENT_KEY, INTEGRATION_KEY))
+        ):
             return True
         return not self.git.is_ancestor(base, parent_tip) or self.conflicts(branch, parent_tip)
 
@@ -737,10 +742,9 @@ class StackCore:
         self.git.fetch(remote)
 
     def trunk_upstream(self, root: str) -> TrunkUpstream | None:
-        """root's upstream, if root is a local branch whose upstream exists
-        and is at another commit."""
+        """An ordinary local root's upstream if it exists and is at another commit."""
         git = self.git
-        if not git.local_branch_exists(root):
+        if git.config_get(root, INTEGRATION_KEY) is not None or not git.local_branch_exists(root):
             return None
         upstream = git.run("rev-parse", "--abbrev-ref", f"{root}@{{upstream}}", check=False)
         if not upstream:

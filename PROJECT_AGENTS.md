@@ -27,6 +27,9 @@ man page is generated from it.
   `StackCore.stacks()` reads it, a command changes it in memory, and
   `StackCore.save()` writes only what changed. Walk and change the tree through
   it rather than with a `{branch: parent}` map of your own.
+- `git_stack/integrations.py` keeps integration roots out of `Stacks`. Its branch config
+  records exact tips and merge evidence, and journals the detached worktree's progress.
+  Work above an integration uses the ordinary single-parent rebase path.
 - Each command is a module in `git_stack/commands/` with `register`, `run` and
   `show`: `run` does the command and returns a dataclass result, and `show`
   prints it as text. With `--json`, the CLI prints the result as JSON instead

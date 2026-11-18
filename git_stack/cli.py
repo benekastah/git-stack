@@ -11,6 +11,7 @@ from git_stack.commands import (
     import_stacks,
     info,
     install_skills,
+    integrate,
     next_branch,
     ownership,
     parent,
@@ -34,6 +35,7 @@ from git_stack.stack import StackClient
 # In the order `git stack -h` lists them.
 COMMANDS = (
     branch,
+    integrate,
     track,
     import_stacks,
     untrack,

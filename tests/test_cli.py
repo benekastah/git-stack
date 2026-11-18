@@ -23,6 +23,7 @@ from git_stack.stack import (
     ImportResult,
     ImportStep,
     ImportStepWithoutPr,
+    Integrated,
     PrsResult,
     PullRequestAction,
     PullRequestStep,
@@ -63,6 +64,8 @@ def stack(autospec_stack: Any) -> Any:
     stack.git.run.return_value = ""
     stack.git.config_value.return_value = None  # every setting unset
     stack.branch.return_value = "main"
+    stack.integrate.return_value = Integrated("combined", "abc")
+    stack.git.config_get.return_value = None
     stack.track.return_value = []
     stack.import_stacks.return_value = ImportResult([], [])
     stack.untrack.return_value = [Untracked("pr1", children=())]
@@ -149,6 +152,12 @@ def stack(autospec_stack: Any) -> Any:
         (["next"], "next", (), {}),
         (["prev"], "prev", (), {}),
         (["restack"], "restack", ([], []), {"onto": None, "latest": False}),
+        (
+            ["integrate", "--adopt", "combined", "a", "b", "--root", "release"],
+            "integrate",
+            ("combined", ["a", "b"]),
+            {"root": "release", "adopt": True, "abort": False},
+        ),
         (["restack", "-l"], "restack", ([], []), {"onto": None, "latest": True}),
         (["restack", "--allow-shared"], "restack", ([], []), {"onto": None, "latest": False}),
         (["restack", "pr2", "--onto", "main"], "restack", (["pr2"], []), {"onto": "main", "latest": False}),
@@ -766,6 +775,12 @@ def test_clean_json_ends_with_the_error_when_it_fails(stack: Any, capsys: pytest
             },
         ),
         (["restack"], "restack", None, {}),
+        (
+            ["integrate", "combined", "a", "b"],
+            "integrate",
+            Integrated("combined", "abc"),
+            {"name": "combined", "tip": "abc"},
+        ),
         (
             ["unrevert", "pr1-unrevert", "abc", "--stack", "pr2"],
             "unrevert",

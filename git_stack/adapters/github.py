@@ -5,7 +5,7 @@ import re
 import subprocess
 import threading
 import urllib.parse
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, replace
 from typing import Self
 
@@ -549,6 +549,51 @@ class GitHubAdapter(GitAdapter):
             for pr in field(field(repository, "h0", dict), "nodes", list)
             if not field(pr, "isCrossRepository", bool) and field(pr, "baseRefName", str) == base
         ]
+
+    def source_landing(self, head: str, tip: str, root_tip: str) -> str | None:
+        """Find a merged PR whose head contains tip and whose merge is on root_tip."""
+        if self.git.rev(tip) is None:
+            return None
+        for page in self.source_pull_request_pages(head):
+            candidates = [
+                pr
+                for pr in page
+                if pr.state is GitHubState.MERGED
+                and pr.merge_oid
+                and self.git.rev(pr.merge_oid)
+                and self.git.is_ancestor(pr.merge_oid, root_tip)
+            ]
+            self.fetch_missing_heads((pr.number, pr.head_oid) for pr in candidates)
+            for pr in candidates:
+                if self.git.rev(pr.head_oid) and self.git.is_ancestor(tip, pr.head_oid):
+                    return pr.merge_oid
+        return None
+
+    def source_pull_request_pages(self, head: str) -> Iterator[list[PullRequest]]:
+        """Find candidate PRs by head name, including branches deleted after landing."""
+        query = (
+            "query($owner: String!, $name: String!, $h0: String!, $after: String) "
+            "{ repository(owner: $owner, name: $name) "
+            f"{{ h0: pullRequests(headRefName: $h0, states: MERGED, first: {PRS_PER_BRANCH}, after: $after, "
+            "orderBy: {field: UPDATED_AT, direction: DESC}) "
+            f"{{ nodes {{ {PR_FIELDS} }} pageInfo {{ hasNextPage endCursor }} }} }} }}"
+        )
+        args = ["api", "graphql", "--hostname", self.host, "-f", f"owner={self.owner}", "-f", f"name={self.name}"]
+        args += ["-f", f"h0={head}", "-f", f"query={query}"]
+        cursors: set[str] = set()
+        after: list[str] = []
+        while True:
+            repository = field(field(parse_json(self.gh(*args, *after)), "data", dict), "repository", dict)
+            page = field(repository, "h0", dict)
+            yield [PullRequest.from_json(pr) for pr in field(page, "nodes", list)]
+            info = field(page, "pageInfo", dict)
+            if not field(info, "hasNextPage", bool):
+                return
+            cursor = field(info, "endCursor", str)
+            if cursor in cursors:
+                raise StackError(f"GitHub repeated a pull request page for {head}")
+            cursors.add(cursor)
+            after = ["-f", f"after={cursor}"]
 
     def local_branch_of(self, name: str) -> str | None:
         """The local branch of name, a branch on remote: the one whose

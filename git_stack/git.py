@@ -508,12 +508,12 @@ class GitClient:
         conflict, anywhere in the worktree, even with diff.relative set."""
         return bool(self.run("diff", "--no-relative", "--name-only", "--diff-filter=U"))
 
-    def worktree_of(self, branch: str) -> pathlib.Path | None:
+    def worktree_of(self, branch: str, *, fresh: bool = False) -> pathlib.Path | None:
         """The path of the worktree branch is checked out in, if any, or that a
         rebase of branch is in progress in. The rebase detaches that worktree's
         HEAD, so `git worktree list` doesn't show the branch."""
         path = None
-        for line in self._worktree_list().splitlines():
+        for line in self._worktree_list(fresh=fresh).splitlines():
             if line.startswith("worktree "):
                 path = pathlib.Path(line.removeprefix("worktree "))
             elif path is not None and (
@@ -522,12 +522,12 @@ class GitClient:
                 return path
         return None
 
-    def _worktree_list(self) -> str:
+    def _worktree_list(self, *, fresh: bool = False) -> str:
         """`git worktree list --porcelain`'s output, read once per snapshot."""
         if not self._snapshot_depth:
             return self.run("worktree", "list", "--porcelain")
         with self._refs_lock:
-            if self._worktrees is None:
+            if fresh or self._worktrees is None:
                 self._worktrees = self.run("worktree", "list", "--porcelain")
             return self._worktrees
 
@@ -556,11 +556,11 @@ class GitClient:
             return head.removeprefix("refs/heads/") if head.startswith("refs/heads/") else None
         return None
 
-    def other_worktree_of(self, branch: str) -> pathlib.Path | None:
+    def other_worktree_of(self, branch: str, *, fresh: bool = False) -> pathlib.Path | None:
         """The path of the worktree branch is checked out (or being rebased) in,
         if that isn't this one. git won't check out, rebase or delete a branch
         that's checked out or being rebased elsewhere."""
-        path = self.worktree_of(branch)
+        path = self.worktree_of(branch, fresh=fresh)
         if path is None or same_file(path, self.toplevel()):
             return None
         return path

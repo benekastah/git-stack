@@ -250,6 +250,36 @@ entry, it's their merge-base.
 - Nothing is written unless every branch can be tracked, so a bad argument
   doesn't leave the stack half-tracked.
 
+### `git stack integrate <name> <source> <source>... [--root <branch>] [--adopt]`
+
+Build a local integration branch by merging the source branches in the order
+given, starting from `main` or the ordinary untracked branch named by
+`--root`. Name at least two distinct local sources when creating an
+integration. To register an existing snapshot, use `--adopt`. Its tip stays
+where it is until the next refresh. To change the sources, run `integrate`
+again with the new list. An existing integration can have a single source.
+The new list takes effect when the build succeeds.
+
+Switch to the integration branch and use `git stack create <work>` to start
+a stack on it. `git stack info` labels its root `(integration)`. Integration
+branches and work stacked above them cannot supply inputs to an integration.
+
+Rerun `integrate` to rebuild after changing a local input, then run
+`git stack restack` from a work branch to rebase that stack. Use Git to
+publish the integration branch before opening PRs that target it.
+`sync` and `pull` require an ordinary stack root.
+
+If the integration tip was edited directly, the build reports the extra
+commits and the last generated tip. Restore that tip before rebuilding.
+Move the integration out of any other worktree before rebuilding it.
+
+If a merge conflicts, git-stack reports the temporary worktree. Resolve and
+stage the files there, then run `git merge --continue`. To undo the current
+merge, run `git merge --abort` there. Rerun the original git-stack command to
+resume the build. To discard the entire pending build, run `git stack integrate
+--abort <name>` from your regular worktree. The prior integration tip stays
+in place until a build completes.
+
 ### `git stack import [<branch>...] [--pr <number|url>]... [--author <login>] [--remote <name>] [-n | -f]`
 
 Track open pull requests on GitHub, drafts included, as stacks: each pull
@@ -1111,6 +1141,7 @@ What each command's result has, besides `type` and `events`:
 | `group rename` | `old`, `new`, and the `branches` in it |
 | `ownership` | `ownership` and the `branches` marked |
 | `next`, `prev` | the `branch` it switched to |
+| `integrate` | `name` and `tip` (null after abort) |
 | `restack` | nothing; what it did is in its events |
 | `sync`, `pull` | `stacks`, and `unpushed`, the branches whose remote branch is out of date because they weren't pushed |
 | `clean` | `stacks`: every stack |
