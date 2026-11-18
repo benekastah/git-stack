@@ -3,6 +3,7 @@
 import pytest
 
 from git_stack import events
+from git_stack.core import PULLED_KEY, PULLED_UPSTREAM_KEY
 from git_stack.errors import StackError
 from git_stack.stack import PullRequestAction, StackClient
 from git_stack.stacks import StackNode, Stacks
@@ -143,6 +144,31 @@ def test_push_force_targets_the_configured_upstream_name(repo: Repo, client: Sta
     assert repo.git("rev-parse", "remote-feature", cwd=repo.origin) == repo.git("rev-parse", "local-feature")
     assert not repo.git("branch", "--list", "local-feature", cwd=repo.origin)
     assert repo.git("rev-parse", "--abbrev-ref", "local-feature@{upstream}") == "origin/remote-feature"
+
+
+def test_up_to_date_push_does_not_rewrite_unchanged_pulled_markers(
+    repo: Repo, client: StackClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo.make_stack()
+    client.push()
+    writes: list[tuple[str, str]] = []
+    config_set = client.git.config_set
+
+    def record_write(branch: str, key: str, value: str) -> None:
+        writes.append((branch, key))
+        config_set(branch, key, value)
+
+    monkeypatch.setattr(client.git, "config_set", record_write)
+    client.push()
+
+    assert not [(branch, key) for branch, key in writes if key in (PULLED_KEY, PULLED_UPSTREAM_KEY)]
+
+    repo.commit("c", "new work\n", "new work")
+    client.push()
+    assert [(branch, key) for branch, key in writes if key in (PULLED_KEY, PULLED_UPSTREAM_KEY)] == [
+        ("pr3", PULLED_KEY)
+    ]
+    assert repo.config("pr3", PULLED_KEY) == repo.git("rev-parse", "pr3")
 
 
 def test_push_refuses_to_drop_unpulled_commits(repo: Repo, client: StackClient) -> None:

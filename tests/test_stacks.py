@@ -93,6 +93,51 @@ def test_multiple_bases_join_stacks_on_different_roots() -> None:
     assert stacks.stack_of("b") == ["b", "a", "combined", "child"]
 
 
+def test_stack_union_expands_each_connected_stack_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    stacks = tree()
+    expanded: list[str] = []
+    stack_of = stacks.stack_of
+
+    def expand(branch: str, groups: bool = True) -> list[str]:
+        expanded.append(branch)
+        return stack_of(branch, groups)
+
+    monkeypatch.setattr(stacks, "stack_of", expand)
+    assert stacks.stack_union(["c", "d", "r", "a"]) == ["a", "b", "c", "d", "r"]
+    assert expanded == ["c", "r"]
+
+
+def test_stack_expansion_walks_a_shared_tail_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    bases = tuple(f"base{i}" for i in range(20))
+    stacks = Stacks(
+        [
+            *(StackNode(base, "main") for base in bases),
+            StackNode("combined", bases[0], additional_parents=bases[1:]),
+            StackNode("tail", "combined"),
+        ]
+    )
+    visited: list[str] = []
+    children = stacks.children
+
+    def count_children(branch: str) -> list[str]:
+        visited.append(branch)
+        return children(branch)
+
+    monkeypatch.setattr(stacks, "children", count_children)
+    assert stacks.stack_of("combined") == [*bases, "combined", "tail"]
+    assert visited.count("tail") == 1
+
+
+def test_multi_base_status_changes_with_the_graph() -> None:
+    stacks = tree()
+    assert not stacks.has_multiple_base_ancestor("c")
+    stacks.set_additional_parents("a", ("r",))
+    assert stacks.has_multiple_base_ancestor("c")
+    assert not stacks.has_multiple_base_ancestor("r")
+    stacks.set_additional_parents("a", ())
+    assert not stacks.has_multiple_base_ancestor("c")
+
+
 @pytest.mark.parametrize("method", ["drop", "remove_merged"])
 def test_removing_a_secondary_base_preserves_the_primary_parent(method: str) -> None:
     stacks = Stacks(

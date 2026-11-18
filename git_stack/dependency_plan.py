@@ -31,11 +31,10 @@ class DependencyPlan:
 
     def remaining(self, index: int, stacks: Stacks, skipped: AbstractSet[str]) -> Iterable[PlannedBranch]:
         """Queue after a replay, excluding dependents of earlier skips."""
-        return (
-            (branch, stacks.dependencies(branch))
-            for branch in islice(self.order, index + 1, None)
-            if not skipped or skipped.isdisjoint(stacks.dependency_ancestry(branch))
-        )
+        blocked: set[str] = stacks.dependent_branches(skipped) if skipped else set()
+        for branch in islice(self.order, index + 1, None):
+            if branch not in blocked:
+                yield branch, stacks.dependencies(branch)
 
 
 def project_remaining(stacks: Stacks, remaining: tuple[PlannedBranch, ...]) -> Stacks:

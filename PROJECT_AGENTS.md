@@ -24,6 +24,8 @@ man page is generated from it.
   started or read in py-git-client, not here.
 - `git_stack/stacks.py` (`Stacks`) holds the tracked branches as a dependency graph, with
   the rules for groups and ownership, without touching the repository.
+  It indexes children, groups, and primary paths, and reuses graph walks across a
+  selection. Keep those indexes in step when changing dependencies or groups.
   `StackCore.stacks()` reads it, a command changes it in memory, and
   `StackCore.save()` writes only what changed. Walk and change the graph through
   it rather than with a `{branch: parent}` map of your own. `stackParent` holds

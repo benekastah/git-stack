@@ -301,12 +301,7 @@ class StackCore:
         current stack. Each stack is parent-before-child."""
         if not branches and not groups:
             return stacks.stack_of(self.current_stacked_branch(stacks, command))
-        result: list[str] = []
-        for branch in self.named(branches, groups, stacks):
-            # Stacks never overlap, so one with branch in it is already all there.
-            if branch not in result:
-                result.extend(stacks.stack_of(branch))
-        return result
+        return stacks.stack_union(self.named(branches, groups, stacks))
 
     def selected_bottoms(
         self, branches: Sequence[str], groups: Sequence[str], stacks: Stacks, command: str
@@ -320,8 +315,7 @@ class StackCore:
         return list(
             dict.fromkeys(
                 stacks.bottom(member)
-                for branch in self.named(branches, groups, stacks)
-                for member in stacks.stack_of(branch, groups=False)
+                for member in stacks.stack_union(self.named(branches, groups, stacks), groups=False)
             )
         )
 
@@ -497,9 +491,11 @@ class StackCore:
         if cached[:-1] == inputs and cached[-1:] in (["true"], ["false"]):
             return cached[-1] == "true"
         result = check()
-        tracked = {b for (b, k) in self.git.branch_config() if k == PARENT_KEY.lower()}
-        self.checks.set(branch, key, " ".join([*inputs, str(result).lower()]), tracked)
+        self.checks.set(branch, key, " ".join([*inputs, str(result).lower()]), self.tracked_for_checks)
         return result
+
+    def tracked_for_checks(self) -> set[str]:
+        return {b for (b, k) in self.git.branch_config() if k == PARENT_KEY.lower()}
 
     def restack_branch(self, branch: str, parent: str, latest: bool = False) -> bool:
         """Rebase branch's own commits onto parent's current tip, if it needs it
@@ -520,8 +516,10 @@ class StackCore:
             )
         base = self.recorded_base(branch, parent)
         if not self.needs_restack(branch, parent, base, parent_tip, latest):
-            # There's no rebase to wait for.
-            self.set_parent(branch, parent)
+            if git.config_get(branch, PARENT_KEY) != parent or (
+                git.config_get(branch, GROUP_KEY) is not None and git.config_get(parent, PARENT_KEY) is not None
+            ):
+                self.set_parent(branch, parent)
             return True
         if git.run("rev-list", "--merges", f"{base}..refs/heads/{branch}"):
             raise StackError(

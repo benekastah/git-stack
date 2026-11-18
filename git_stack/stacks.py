@@ -77,7 +77,10 @@ class Stacks:
         # The nodes as they were when read, or last saved.
         self._saved = dict(self._nodes)
         # {branch: the branches stacked on it, sorted}, worked out when needed.
-        self._children: dict[str, list[str]] | None = None
+        self._children: dict[str, set[str]] | None = None
+        self._multiple_base: set[str] | None = None
+        self._primary: dict[str, tuple[str, str]] = {}
+        self._bottoms_by_group: dict[str, list[str]] | None = None
 
     def __contains__(self, branch: object) -> bool:
         return branch in self._nodes
@@ -117,17 +120,20 @@ class Stacks:
         """The branches stacked on branch, sorted."""
         if self._children is None:
             self._children = {}
-            for name in sorted(self._nodes):
-                for parent in dict.fromkeys(self.dependencies(name)):
-                    self._children.setdefault(parent, []).append(name)
-        return list(self._children.get(branch, ()))
+            for name in self._nodes:
+                for parent in self.dependencies(name):
+                    self._children.setdefault(parent, set()).add(name)
+        return sorted(self._children.get(branch, ()))
 
     def descendants(self, branch: str) -> list[str]:
         """The branches stacked on branch, on those, and so on,
         parent-before-child (branch excluded)."""
-        order: list[str] = []
-        seen = {branch}
+        order = [branch] if branch in self._nodes else []
+        self._walk_descendants(branch, {branch}, order)
+        ordered = dependency_order(order, {b: self.dependencies(b) for b in order})
+        return [b for b in ordered if b != branch]
 
+    def _walk_descendants(self, branch: str, seen: set[str], order: list[str]) -> None:
         pending = list(reversed(self.children(branch)))
         while pending:
             child = pending.pop()
@@ -135,23 +141,36 @@ class Stacks:
                 seen.add(child)
                 order.append(child)
                 pending.extend(reversed(self.children(child)))
-        selected = [branch, *order] if branch in self._nodes else order
-        ordered = dependency_order(selected, {b: self.dependencies(b) for b in selected})
-        return [b for b in ordered if b != branch]
+
+    def dependent_branches(self, branches: Iterable[str]) -> set[str]:
+        """The given branches and every branch that depends on them."""
+        seeds = set(branches)
+        seen = set(seeds)
+        order: list[str] = []
+        for branch in seeds:
+            self._walk_descendants(branch, seen, order)
+        return seen
 
     def ancestry(self, branch: str) -> list[str]:
         """[branch, its primary parent, ..., its stack's primary root]"""
         chain = [branch]
+        seen = {branch}
         while chain[-1] in self._nodes:
             parent = self._nodes[chain[-1]].parent
-            if parent in chain:
+            if parent in seen:
                 raise StackError(f"cycle in stack metadata involving {parent}")
+            seen.add(parent)
             chain.append(parent)
         return chain
 
     def dependency_ancestry(self, branch: str) -> list[str]:
         """All of branch's bases and branch, each after its own bases."""
-        pending = [branch]
+        selected = self.dependencies_of((branch,))
+        return dependency_order(selected, {b: self.dependencies(b) for b in selected if b in self._nodes})
+
+    def dependencies_of(self, branches: Iterable[str]) -> list[str]:
+        """The branches and everything they depend on, each visited once."""
+        pending = list(branches)
         selected: list[str] = []
         seen: set[str] = set()
         while pending:
@@ -162,19 +181,40 @@ class Stacks:
             selected.append(current)
             if current in self._nodes:
                 pending.extend(self.dependencies(current))
-        return dependency_order(selected, {b: self.dependencies(b) for b in selected if b in self._nodes})
+        return selected
 
     def has_multiple_base_ancestor(self, branch: str) -> bool:
         """Whether branch or any tracked dependency has several bases."""
-        return any(len(self.dependencies(b)) > 1 for b in self.dependency_ancestry(branch) if b in self._nodes)
+        if branch not in self._nodes:
+            return False
+        if self._multiple_base is None:
+            parents = {b: self.dependencies(b) for b in self._nodes}
+            affected: set[str] = set()
+            for b in dependency_order(self._nodes, parents):
+                if len(parents[b]) > 1 or parents[b][0] in affected:
+                    affected.add(b)
+            self._multiple_base = affected
+        return branch in self._multiple_base
+
+    def _primary_endpoints(self, branch: str) -> tuple[str, str]:
+        path: set[str] = set()
+        bottom = branch
+        while branch in self._nodes and branch not in self._primary:
+            if branch in path:
+                raise StackError(f"cycle in stack metadata involving {branch}")
+            path.add(branch)
+            bottom, branch = branch, self.parent(branch)
+        endpoints = self._primary.get(branch, (bottom, branch))
+        self._primary.update(dict.fromkeys(path, endpoints))
+        return endpoints
 
     def root(self, branch: str) -> str:
         """The root of branch's stack (usually main)."""
-        return self.ancestry(branch)[-1]
+        return self._primary_endpoints(branch)[1]
 
     def bottom(self, branch: str) -> str:
         """The branch at the bottom of tracked branch's stack, on its root."""
-        return self.ancestry(branch)[-2]
+        return self._primary_endpoints(branch)[0]
 
     def is_bottom(self, branch: str) -> bool:
         """Whether tracked branch is at the bottom of its stack."""
@@ -187,12 +227,22 @@ class Stacks:
 
     def in_order(self) -> list[str]:
         """Every tracked branch, by root, parent-before-child."""
-        branches = [branch for root in self.roots() for branch in self.descendants(root)]
+        branches: list[str] = []
+        seen: set[str] = set()
+        for root in self.roots():
+            found: list[str] = []
+            self._walk_descendants(root, seen, found)
+            branches.extend(dependency_order(found, {b: self.dependencies(b) for b in found}))
         return dependency_order(branches, {b: self.dependencies(b) for b in self._nodes})
 
     def bottoms_in(self, group: str) -> list[str]:
         """The branches at the bottom of a stack in group."""
-        return [name for name, node in self._nodes.items() if node.group == group and self.is_bottom(name)]
+        if self._bottoms_by_group is None:
+            self._bottoms_by_group = {}
+            for node in self._nodes.values():
+                if node.group is not None and self.is_bottom(node.name):
+                    self._bottoms_by_group.setdefault(node.group, []).append(node.name)
+        return list(self._bottoms_by_group.get(group, ()))
 
     def group_bottoms(self, bottom: str) -> list[str]:
         """bottom, a branch at the bottom of a stack, followed by the others
@@ -212,12 +262,6 @@ class Stacks:
         selected: list[str] = []
         seen: set[str] = set()
 
-        def add_stack(base: str) -> None:
-            for member in (base, *self.descendants(base)):
-                if member not in seen:
-                    seen.add(member)
-                    selected.append(member)
-
         expanded: set[str] = set()
 
         def add_bottom(base: str) -> None:
@@ -225,7 +269,12 @@ class Stacks:
                 bottoms = self.group_bottoms(base) if groups else [base]
                 expanded.update(bottoms)
                 for member in bottoms:
-                    add_stack(member)
+                    if member not in seen:
+                        seen.add(member)
+                        selected.append(member)
+                        found: list[str] = []
+                        self._walk_descendants(member, seen, found)
+                        selected.extend(dependency_order(found, {b: self.dependencies(b) for b in found}))
 
         add_bottom(bottom)
         index = 0
@@ -236,6 +285,17 @@ class Stacks:
                 add_bottom(base)
             index += 1
         return dependency_order(selected, {b: self.dependencies(b) for b in selected})
+
+    def stack_union(self, branches: Iterable[str], groups: bool = True) -> list[str]:
+        """Expand each selected connected stack once, keeping selection order."""
+        selected: list[str] = []
+        seen: set[str] = set()
+        for branch in branches:
+            if branch not in seen:
+                stack = self.stack_of(branch, groups)
+                selected.extend(b for b in stack if b not in seen)
+                seen.update(stack)
+        return selected
 
     def unvisited_bottoms(self, branch: str, seen: set[str]) -> list[str]:
         bottoms = [branch] if self.is_bottom(branch) else []
@@ -275,13 +335,30 @@ class Stacks:
 
     def _set(self, node: StackNode) -> None:
         old = self._nodes.get(node.name)
-        if old is None or self.dependencies(node.name) != (node.parent, *node.additional_parents):
-            self._children = None
+        before = self.dependencies(node.name) if old is not None else ()
+        after = (node.parent, *node.additional_parents)
+        if before != after:
+            self._update_edges(node.name, before, after)
+        elif old is not None and old.group != node.group:
+            self._bottoms_by_group = None
         self._nodes[node.name] = node
 
     def _remove(self, branch: str) -> None:
+        self._update_edges(branch, self.dependencies(branch), ())
         del self._nodes[branch]
-        self._children = None
+
+    def _update_edges(self, branch: str, before: Sequence[str], after: Sequence[str]) -> None:
+        if self._children is not None:
+            for parent in set(before).difference(after):
+                children = self._children[parent]
+                children.remove(branch)
+                if not children:
+                    del self._children[parent]
+            for parent in set(after).difference(before):
+                self._children.setdefault(parent, set()).add(branch)
+        self._multiple_base = None
+        self._primary.clear()
+        self._bottoms_by_group = None
 
     def reparent(self, branch: str, parent: str) -> None:
         """Stack branch on parent, tracking branch if it isn't.
@@ -394,11 +471,18 @@ class Stacks:
         """Stop tracking branches. The branches stacked on them stay on them,
         at the bottom of their stacks now, and are shared from now on if their
         stack was."""
-        branches = list(branches)
+        branches = list(dict.fromkeys(branches))
+        classified: set[str] = set()
+        shared: set[str] = set()
         for branch in branches:
-            if any(self.is_shared(b) for b in self.stack_of(branch, False)):
-                self.share_descendants(branch)
-        for branch in dict.fromkeys(branches):
+            if branch not in classified:
+                connected = self.stack_of(branch, False)
+                classified.update(connected)
+                if any(self.is_shared(b) for b in connected):
+                    shared.update(connected)
+        for member in self.dependent_branches(b for b in branches if b in shared):
+            self.set_ownership(member, Ownership.SHARED)
+        for branch in branches:
             self._remove(branch)
 
     def changes(self) -> list[tuple[str, StackNode | None, StackNode | None]]:

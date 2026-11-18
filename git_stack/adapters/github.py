@@ -901,7 +901,8 @@ class GitHubAdapter(GitAdapter):
         def node(branch: str) -> stack_section.Node:
             return prs[branch].number if branch in prs else branch
 
-        current = {node(b): node(stacks.parent(b)) if stacks.parent(b) in branches else root for b in branches}
+        scope = set(branches)
+        current = {node(b): node(stacks.parent(b)) if stacks.parent(b) in scope else root for b in branches}
         to_update = {b: prs[b].number for b in branches if b in prs and prs[b].state is GitHubState.OPEN}
         try:
             fields = self.pull_request_fields(to_update.values(), f"body {BASE_CHANGES} {STACK_FIELDS}")
@@ -910,7 +911,7 @@ class GitHubAdapter(GitAdapter):
             # doesn't know the field.
             fields = self.pull_request_fields(to_update.values(), f"body {BASE_CHANGES}")
         bodies = {n: field(pr, "body", str) for n, pr in fields.items()}
-        on_root = [n for b, n in to_update.items() if stacks.parent(b) not in branches]
+        on_root = [n for b, n in to_update.items() if stacks.parent(b) not in scope]
         merged = self.merged_parents({n: fields[n] for n in on_root}, root)
         # Each pull request on root goes on the merged one it was on, on root.
         tree = dict(current)

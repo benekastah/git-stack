@@ -6,7 +6,7 @@ import os
 import pathlib
 import tempfile
 import threading
-from collections.abc import Collection
+from collections.abc import Callable, Collection, Generator
 from typing import cast
 
 
@@ -25,21 +25,47 @@ class CheckCache:
         self.path = path
         self._lock = threading.Lock()
         self._entries: dict[str, dict[str, str]] | None = None
+        self._pending: dict[str, dict[str, str]] | None = None
 
     def get(self, branch: str, key: str) -> str | None:
         with self._lock:
+            if self._pending is not None and key in self._pending.get(branch, {}):
+                return self._pending[branch][key]
             if self._entries is None:
                 self._entries = self._read()
             return self._entries.get(branch, {}).get(key)
 
-    def set(self, branch: str, key: str, value: str, tracked: Collection[str]) -> None:
+    def set(self, branch: str, key: str, value: str, tracked: Collection[str] | Callable[[], Collection[str]]) -> None:
         """Remember value for branch's key, and forget the branches not in
         tracked, so the file doesn't grow with every branch ever checked."""
         with self._lock:
-            # Read again, to keep what other processes wrote since.
-            entries = {b: keys for b, keys in self._read().items() if b in tracked}
-            entries.setdefault(branch, {})[key] = value
-            self._write(entries)
+            if self._pending is not None:
+                self._pending.setdefault(branch, {})[key] = value
+            else:
+                self._store({branch: {key: value}}, tracked() if callable(tracked) else tracked)
+
+    @contextlib.contextmanager
+    def batch(self, tracked: Callable[[], Collection[str]]) -> Generator[None]:
+        """Collect concurrent status checks and merge them into one cache write."""
+        with self._lock:
+            if self._pending is not None:
+                raise RuntimeError("the check cache already has a batch in progress")
+            self._pending = {}
+        try:
+            yield
+        finally:
+            with self._lock:
+                updates, self._pending = self._pending, None
+                if updates:
+                    self._store(updates, tracked())
+
+    def _store(self, updates: dict[str, dict[str, str]], tracked: Collection[str]) -> None:
+        # Read again, to keep what other processes wrote since.
+        live = set(tracked)
+        entries = {b: keys for b, keys in self._read().items() if b in live}
+        for branch, keys in updates.items():
+            entries.setdefault(branch, {}).update(keys)
+        self._write(entries)
 
     def forget(self, branch: str, keys: Collection[str] | None = None) -> None:
         """Forget keys (default: all) of branch."""

@@ -1,5 +1,6 @@
 import enum
 import functools
+from collections import Counter
 from collections.abc import Callable, Iterable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -309,7 +310,7 @@ class SyncState:
     command: SyncCommand = SyncCommand.SYNC
     no_verify: bool = False
     skipped: set[str] = field(default_factory=set)
-    blocked: list[str] = field(default_factory=list)
+    blocked: dict[str, None] = field(default_factory=dict)
     pushable: list[str] = field(default_factory=list)
     unpushed: list[str] = field(default_factory=list)
 
@@ -862,13 +863,13 @@ class StackClient(StackCore):
             self.matching(selector, initial)
         self.settle_all()
         stacks = self.stacks()
-        branches = [branch for selector in selectors for branch in self.matching(selector, stacks)]
+        selected = dict.fromkeys(branch for selector in selectors for branch in self.matching(selector, stacks))
         # Children untracked along with their parent aren't still stacked on it.
         untracked = [
-            Untracked(branch, tuple(child for child in stacks.children(branch) if child not in branches))
-            for branch in dict.fromkeys(branches)
+            Untracked(branch, tuple(child for child in stacks.children(branch) if child not in selected))
+            for branch in selected
         ]
-        stacks.untrack(branches)
+        stacks.untrack(selected)
         self.save(stacks)
         return untracked
 
@@ -1155,15 +1156,15 @@ class StackClient(StackCore):
         # main conflicts with it can take a second or more in a big repository
         # if the branch is far behind, so they're worked out in parallel, while
         # the adapter looks up pull requests (about a second on GitHub).
-        with ThreadPoolExecutor() as pool:
+        with self.checks.batch(self.tracked_for_checks), ThreadPoolExecutor() as pool:
             prefetched = pool.submit(adapter.prefetch)
             branches = list(stacks)
             statuses = dict(zip(branches, pool.map(status, branches), strict=True))
             prefetched.result()
         self.propagate_graph_status(ordered, graph, stacks, statuses)
-        shown_groups = {
-            b: g for b, g in stacks.groups().items() if stacks.is_bottom(b) and len(stacks.group_bottoms(b)) > 1
-        }
+        bottom_groups = {b: g for b, g in stacks.groups().items() if stacks.is_bottom(b)}
+        group_counts = Counter(bottom_groups.values())
+        shown_groups = {b: g for b, g in bottom_groups.items() if group_counts[g] > 1}
         result: list[BranchInfo] = []
         for b in ordered:
             if b not in stacks:
@@ -1225,9 +1226,7 @@ class StackClient(StackCore):
         other stacks in their groups, as info() lists them (see branch_infos),
         for a command to show what it left them as."""
         stacks = self.stacks()
-        return self.branch_infos(
-            stacks.restricted(s for b in branches if b in stacks for s in stacks.stack_of(b)), adapter
-        )
+        return self.branch_infos(stacks.restricted(stacks.stack_union(b for b in branches if b in stacks)), adapter)
 
     def checked_adapter(self, remote: str) -> GitAdapter:
         """The adapter for sync, clean and push, which fetch and change
@@ -1254,32 +1253,35 @@ class StackClient(StackCore):
         skipped: set[str] = set()
         branches = list(branches)
         ineligible = {branch for branch in branches if stacks.has_multiple_base_ancestor(branch)}
-        preserved = {dependency for branch in ineligible for dependency in stacks.dependency_ancestry(branch)}
-        for branch in branches:
-            parent = stacks.parent(branch)
-            blocked = blocked_base(branch, stacks, skipped)
-            if blocked is not None:
-                self.emit(events.ParentSkipped(branch, blocked))
-                skipped.add(branch)
-                continue
-            state = (
-                MergeState.NOT_MERGED
-                if branch == retargeted
-                else self.cleanup_merge_state(branch, stacks, adapter, ignore_revert=False)
-            )
-            if state is MergeState.MERGED:
-                self.emit(events.SkippedMerged(branch, parent))
-                if branch not in preserved:
-                    stacks.drop(branch)
-            elif state is MergeState.MERGED_WITH_NEW_COMMITS and branch in ineligible:
-                self.emit(events.MergedWithNewCommits(branch, parent))
-                skipped.add(branch)
-            elif state is MergeState.REVERTED:
-                # Restacking it could drop its commits, as already in parent.
-                self.emit(self.reverted(branch, stacks, adapter))
-                skipped.add(branch)
-            else:
-                remaining.append(branch)
+        preserved = set(stacks.dependencies_of(ineligible))
+        with self.checks.batch(self.tracked_for_checks):
+            for branch in branches:
+                parent = stacks.parent(branch)
+                blocked = blocked_base(branch, stacks, skipped)
+                if blocked is not None:
+                    self.emit(events.ParentSkipped(branch, blocked))
+                    skipped.add(branch)
+                    continue
+                state = (
+                    MergeState.NOT_MERGED
+                    if branch == retargeted
+                    else self.cleanup_merge_state(
+                        branch, stacks, adapter, ignore_revert=False, graph=branch in ineligible
+                    )
+                )
+                if state is MergeState.MERGED:
+                    self.emit(events.SkippedMerged(branch, parent))
+                    if branch not in preserved:
+                        stacks.drop(branch)
+                elif state is MergeState.MERGED_WITH_NEW_COMMITS and branch in ineligible:
+                    self.emit(events.MergedWithNewCommits(branch, parent))
+                    skipped.add(branch)
+                elif state is MergeState.REVERTED:
+                    # Restacking it could drop its commits, as already in parent.
+                    self.emit(self.reverted(branch, stacks, adapter))
+                    skipped.add(branch)
+                else:
+                    remaining.append(branch)
         return remaining
 
     @exclusive
@@ -1602,7 +1604,7 @@ class StackClient(StackCore):
             self.emit(events.ParentSkipped(branch, blocked))
             state.skipped.add(branch)
             if blocked in state.blocked:
-                state.blocked.append(branch)
+                state.blocked[branch] = None
             return
         merge_state = self.cleanup_merge_state(branch, state.stacks, adapter, branch in state.ignore_reverts)
         if merge_state is MergeState.MERGED:
@@ -1688,11 +1690,11 @@ class StackClient(StackCore):
             state.skipped.add(branch)
             # Restacking only fails without an error for another worktree.
             if git.other_worktree_of(branch) is not None:
-                state.blocked.append(branch)
+                state.blocked[branch] = None
             return
         if not self.pull_upstream(branch, parent, state.remote, state.pull_tracked_upstream, state.command):
             state.skipped.add(branch)
-            state.blocked.append(branch)
+            state.blocked[branch] = None
             return
         upstream_tip = git.rev(f"{branch}@{{upstream}}")
         if upstream_tip and upstream_tip != git.rev(f"refs/heads/{branch}"):
@@ -1701,9 +1703,13 @@ class StackClient(StackCore):
             else:
                 state.unpushed.append(branch)
 
-    def cleanup_merge_state(self, branch: str, stacks: Stacks, adapter: GitAdapter, ignore_revert: bool) -> MergeState:
+    def cleanup_merge_state(
+        self, branch: str, stacks: Stacks, adapter: GitAdapter, ignore_revert: bool, *, graph: bool | None = None
+    ) -> MergeState:
         parent = stacks.parent(branch)
-        if not stacks.has_multiple_base_ancestor(branch):
+        if graph is None:
+            graph = stacks.has_multiple_base_ancestor(branch)
+        if not graph:
             return adapter.merge_state(branch, parent, ignore_revert=ignore_revert)
         # A graph branch has no authoritative PR. Require the primary
         # parent to actually contain its tip before removing dependencies.
@@ -1960,9 +1966,12 @@ class StackClient(StackCore):
                 "push failed, so nothing was pushed; if the remote has new commits, run `git stack sync` and try "
                 f"again{self.changes_left(adapter)}"
             )
-        for b in branches:
-            git.config_set(b, PULLED_KEY, git.tip(b))
-            if (identity := self.upstream_identity(b)) is not None:
+        upstreams = [(b, git.tip(b), self.upstream_identity(b)) for b in branches]
+        recorded = git.branch_config()
+        for b, tip, identity in upstreams:
+            if recorded.get((b, PULLED_KEY.lower())) != tip:
+                git.config_set(b, PULLED_KEY, tip)
+            if identity is not None and recorded.get((b, PULLED_UPSTREAM_KEY.lower())) != identity:
                 git.config_set(b, PULLED_UPSTREAM_KEY, identity)
         try:
             adapter.after_push(pr_branches, stacks, opening, rebuild_stack, pr_scope)
@@ -2049,7 +2058,7 @@ class StackClient(StackCore):
         remote = remote or self.default_remote(stack, stacks)
         adapter = ensure_github(make_adapter(self, remote, fetch=True), remote)
         adapter.ensure_available()
-        eligible = self.skip_merged([branch for branch in stack if branch not in ineligible], stacks, adapter)
+        eligible = set(self.skip_merged([branch for branch in stack if branch not in ineligible], stacks, adapter))
         branches = [branch for branch in stack if branch in ineligible or branch in eligible]
         steps = self.open_pull_requests(
             branches, stacks, adapter, remote, dry_run, rebuild_stack, frozenset(ineligible)
@@ -2121,11 +2130,12 @@ class StackClient(StackCore):
         """Update the stack sections of branches' pull requests (see
         GitHubAdapter.update_stack_sections), one for each root, since a
         group's stacks can be on several."""
+        by_root: dict[str, list[str]] = {}
+        for branch in branches:
+            by_root.setdefault(stacks.root(branch), []).append(branch)
         try:
-            for root in sorted({stacks.root(b) for b in branches}):
-                adapter.update_stack_sections(
-                    [b for b in branches if stacks.root(b) == root], stacks, rebuild_stack, dry_run
-                )
+            for root in sorted(by_root):
+                adapter.update_stack_sections(by_root[root], stacks, rebuild_stack, dry_run)
         except StackError as e:
             raise StackError(f"updating the stack in pull request descriptions failed: {e}") from e
 
