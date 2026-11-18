@@ -139,24 +139,28 @@ class Integrations:
             if (remote := self.git.config_get(source["name"], "remote") or source["remote"]) and remote in remotes
         }
 
-    def validate(self, name: str, root: str, sources: Sequence[str], stacks: Stacks, tip: str | None) -> None:
+    def validate(
+        self,
+        name: str,
+        root: str,
+        sources: Sequence[str],
+        stacks: Stacks,
+        tip: str | None,
+        *,
+        names: set[str] | None = None,
+    ) -> None:
         if name in stacks:
             raise StackError(f"{name} is tracked; untrack it before registering it as an integration")
-        integrations = self.names() | {name}
+        integrations = self.names() | {name} if names is None else names
         if root in stacks or root in integrations:
             raise StackError(f"{root} must be an ordinary untracked root")
         root_tip = self.git.tip(root)
+        generated = tip if tip and not self.git.is_ancestor(tip, root_tip) else None
         for source in sources:
             if stacks.root(source) in integrations:
                 raise StackError(f"{source} is an integration or depends on one")
             source_tip = self.git.rev(f"refs/heads/{source}")
-            if (
-                tip
-                and source_tip
-                and tip != source_tip
-                and not self.git.is_ancestor(tip, root_tip)
-                and self.git.is_ancestor(tip, source_tip)
-            ):
+            if generated and source_tip and generated != source_tip and self.git.is_ancestor(generated, source_tip):
                 raise StackError(f"{source} contains the generated tip of {name} and depends on it")
 
     def ensure_independent(self, name: str, stacks: Stacks) -> None:

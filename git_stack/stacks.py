@@ -51,6 +51,8 @@ class Stacks:
         self._saved = dict(self._nodes)
         # {branch: the branches stacked on it, sorted}, worked out when needed.
         self._children: dict[str, list[str]] | None = None
+        self._locations: dict[str, tuple[str, str]] = {}
+        self._group_bottoms: dict[str, list[str]] | None = None
 
     def __contains__(self, branch: object) -> bool:
         return branch in self._nodes
@@ -93,28 +95,47 @@ class Stacks:
         """The branches stacked on branch, on those, and so on,
         parent-before-child (branch excluded)."""
         order: list[str] = []
-        for child in self.children(branch):
+        pending = self.children(branch)[::-1]
+        while pending:
+            child = pending.pop()
             order.append(child)
-            order.extend(self.descendants(child))
+            pending.extend(reversed(self.children(child)))
         return order
 
     def ancestry(self, branch: str) -> list[str]:
         """[branch, its parent, ..., its stack's root]"""
-        chain = [branch]
-        while chain[-1] in self._nodes:
-            parent = self._nodes[chain[-1]].parent
-            if parent in chain:
-                raise StackError(f"cycle in stack metadata involving {parent}")
-            chain.append(parent)
-        return chain
+        chain: list[str] = []
+        seen: set[str] = set()
+        while branch in self._nodes:
+            if branch in seen:
+                raise StackError(f"cycle in stack metadata involving {branch}")
+            chain.append(branch)
+            seen.add(branch)
+            branch = self._nodes[branch].parent
+        return [*chain, branch]
+
+    def location(self, branch: str) -> tuple[str, str]:
+        """Root and bottom, memoized for the traversed path."""
+        pending: list[str] = []
+        seen: set[str] = set()
+        while branch in self._nodes and branch not in self._locations:
+            if branch in seen:
+                raise StackError(f"cycle in stack metadata involving {branch}")
+            seen.add(branch)
+            pending.append(branch)
+            branch = self._nodes[branch].parent
+        location = self._locations.get(branch, (branch, pending[-1] if pending else branch))
+        for node in pending:
+            self._locations[node] = location
+        return location
 
     def root(self, branch: str) -> str:
         """The root of branch's stack (usually main)."""
-        return self.ancestry(branch)[-1]
+        return self.location(branch)[0]
 
     def bottom(self, branch: str) -> str:
-        """The branch at the bottom of tracked branch's stack, on its root."""
-        return self.ancestry(branch)[-2]
+        """The branch at the bottom of a tracked branch's stack, on its root."""
+        return self.location(branch)[1]
 
     def is_bottom(self, branch: str) -> bool:
         """Whether tracked branch is at the bottom of its stack."""
@@ -130,7 +151,12 @@ class Stacks:
 
     def bottoms_in(self, group: str) -> list[str]:
         """The branches at the bottom of a stack in group."""
-        return [name for name, node in self._nodes.items() if node.group == group and self.is_bottom(name)]
+        if self._group_bottoms is None:
+            self._group_bottoms = {}
+            for name, node in self._nodes.items():
+                if node.group is not None and self.is_bottom(name):
+                    self._group_bottoms.setdefault(node.group, []).append(name)
+        return list(self._group_bottoms.get(group, ()))
 
     def group_bottoms(self, bottom: str) -> list[str]:
         """bottom, a branch at the bottom of a stack, followed by the others
@@ -182,11 +208,16 @@ class Stacks:
         old = self._nodes.get(node.name)
         if old is None or old.parent != node.parent:
             self._children = None
+            self._locations.clear()
+            self._group_bottoms = None
+        elif old.group != node.group:
+            self._group_bottoms = None
         self._nodes[node.name] = node
 
     def _remove(self, branch: str) -> None:
         del self._nodes[branch]
-        self._children = None
+        self._children = self._group_bottoms = None
+        self._locations.clear()
 
     def reparent(self, branch: str, parent: str) -> None:
         """Stack branch on parent, tracking branch if it isn't.

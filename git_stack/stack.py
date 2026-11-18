@@ -104,17 +104,18 @@ class RefreshSelection:
 
     def ordered(self, stacks: Stacks) -> tuple[list[str], list[str]]:
         """Process selected source stacks before refreshing integration roots."""
-        sources = {
-            branch
+        selected_bottoms = {stacks.bottom(branch) for branch in self.branches}
+        source_bottoms = {
+            stacks.bottom(source["name"])
             for integration in self.integrations.values()
             for source in integration["sources"]
-            if (name := source["name"]) in stacks
-            for branch in stacks.stack_of(name, groups=False)
-        }
-        return (
-            [branch for branch in self.branches if branch in sources],
-            [branch for branch in self.branches if branch not in sources],
-        )
+            if source["name"] in stacks
+        } & selected_bottoms
+        sources: list[str] = []
+        remaining: list[str] = []
+        for branch in self.branches:
+            (sources if stacks.bottom(branch) in source_bottoms else remaining).append(branch)
+        return sources, remaining
 
 
 @dataclass(frozen=True)
@@ -565,12 +566,23 @@ class StackClient(StackCore):
         if dry_run:
             return ImportResult(plan, [], without_prs, remote)
         stacks = self.stacks()
+        self.validate_import_integrations(stacks, plan, without_prs)
         self.fast_forward_import_trunks(plan, without_prs, stacks)
         previous_ownership = {b: stacks[b].ownership for b in stacks}
         self.apply_import(plan, without_prs, remote, stacks)
         self.classify_imported_stacks(plan, without_prs, open_prs, adapter.viewer, previous_ownership, stacks)
         shown = [s.branch for s in plan] + [s.branch for s in without_prs]
         return ImportResult(plan, self.stack_infos(shown, adapter), without_prs, remote)
+
+    def validate_import_integrations(
+        self, stacks: Stacks, plan: list[ImportStep], without_prs: list[ImportStepWithoutPr]
+    ) -> None:
+        if Integrations(self).names():
+            proposed = stacks.copy()
+            for step in [*without_prs, *plan]:
+                if step.base is not None and step.parent is not None:
+                    proposed.reparent(step.branch, step.parent)
+            self.validate_integrations(proposed)
 
     def classify_imported_stacks(
         self,
@@ -1177,7 +1189,9 @@ class StackClient(StackCore):
         stacks = self.stacks()
         if adopt and name in stacks:
             stacks.untrack([name])
-        integrations.validate(name, root, sources, stacks, expected)
+        integrations.validate(
+            name, root, sources, stacks, previous["tip"] if previous and previous["root_tip"] else None
+        )
         integrations.ensure_independent(name, stacks)
         captured = [integrations.source(source, git.tip(source)) for source in sources]
         if adopt:
@@ -1203,10 +1217,10 @@ class StackClient(StackCore):
             explicit = [current]
         ordinary = [name for name in branches if name not in names]
         selected = self.selected_stacks(ordinary, groups, stacks, command) if ordinary or groups or not explicit else []
-        for root in explicit:
-            for child in stacks.children(root):
-                selected.extend(stacks.stack_of(child))
-        selected = list(dict.fromkeys(selected))
+        expanded = dict.fromkeys(selected)
+        for root in dict.fromkeys(explicit):
+            expanded.update(dict.fromkeys(stacks.descendants(root)))
+        selected = list(expanded)
         roots = dict.fromkeys([*explicit, *(stacks.root(b) for b in selected)])
         return RefreshSelection(
             selected,
@@ -1217,11 +1231,22 @@ class StackClient(StackCore):
     def validate_integrations(self, stacks: Stacks) -> None:
         """Reject stack changes that would make an integration depend on another."""
         integrations = Integrations(self)
-        for name in integrations.names():
-            if (config := integrations.read(name)) is not None:
-                integrations.validate(
-                    name, config["root"], [source["name"] for source in config["sources"]], stacks, config["tip"]
-                )
+        names = integrations.names()
+        if not names:
+            return
+        previous = self.stacks()
+        for name in names:
+            config = integrations.read(name)
+            assert config is not None
+            root = config["root"]
+            for branch in (name, root):
+                if branch in stacks and branch not in previous:
+                    raise StackError(f"{branch} must remain an untracked root for integration {name}")
+            for source in config["sources"]:
+                branch = source["name"]
+                root_after = stacks.root(branch)
+                if root_after in names and root_after != previous.root(branch):
+                    raise StackError(f"{branch} is an integration or depends on one")
 
     def preflight_integrations(
         self, selection: RefreshSelection, stacks: Stacks, force: str | None = None
@@ -1229,13 +1254,19 @@ class StackClient(StackCore):
         """Check each integration before any selected branch can be updated."""
         integrations = Integrations(self)
         expected: dict[str, str | None] = {}
+        names = integrations.names()
         for name in selection.integrations:
             config = integrations.preflight(name, force=name == force)
             tip = self.git.tip(name)
             if tip != config["tip"] and name != force:
                 raise StackError(f"integration {name} moved during preflight; retry")
             integrations.validate(
-                name, config["root"], [source["name"] for source in config["sources"]], stacks, config["tip"]
+                name,
+                config["root"],
+                [source["name"] for source in config["sources"]],
+                stacks,
+                config["tip"] if config["root_tip"] else None,
+                names=names,
             )
             selection.integrations[name] = config
             expected[name] = tip
@@ -2287,6 +2318,8 @@ class ImportPlanner:
 
     def plan_one(self, pr: OpenPullRequest) -> ImportStep:
         branch, parent = pr.head, pr.base
+        if self.git.config_get(branch, INTEGRATION_KEY):
+            return self.skip(pr, "it's an integration root")
         if branch not in self.stacks:
             return self.plan_untracked(pr)
         if self.stacks.parent(branch) == parent:
@@ -2326,6 +2359,8 @@ class ImportPlanner:
         into, after planning it if it's to be created. Raises StackError if the
         pull request has to be skipped for it."""
         git, remote = self.git, self.remote
+        if git.config_get(parent, INTEGRATION_KEY) and git.local_branch_exists(parent):
+            return f"refs/heads/{parent}"
         if parent in self.by_head:
             if parent in self.visiting:
                 raise StackError("the pull requests it's based on are based on it")

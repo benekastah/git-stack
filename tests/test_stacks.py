@@ -187,3 +187,20 @@ def test_save_writes_what_changed(repo: Repo, client: StackClient) -> None:
     assert repo.git("config", "branch.pr1.stackGroup") == "g"
     assert repo.git("config", "branch.pr2.stackOwnership") == "shared"
     assert not [key for branch, key in client.git.branch_config() if branch == "pr3" and key.startswith("stack")]
+
+
+def test_deep_stack_walk_and_cached_locations_after_reparent() -> None:
+    branches = [f"branch-{i}" for i in range(1500)]
+    stacks = Stacks(
+        StackNode(branch, parent) for branch, parent in zip(branches, ["main", *branches[:-1]], strict=True)
+    )
+    assert stacks.descendants("main") == branches
+    assert stacks.root(branches[-1]) == "main"
+    assert stacks.bottom(branches[-1]) == branches[0]
+
+    middle = branches[len(branches) // 2]
+    stacks.reparent(middle, "release")
+
+    assert stacks.root(branches[-1]) == "release"
+    assert stacks.bottom(branches[-1]) == middle
+    assert stacks.descendants("release") == branches[len(branches) // 2 :]

@@ -266,10 +266,11 @@ branches and work stacked above them cannot supply inputs to an integration.
 
 `restack`, `pull`, and `sync` refresh the integration roots needed by the
 selected stacks. From an integration branch, they select its dependent
-stacks. An explicitly named integration selects the same scope. A selected
-source stack updates before the integration is rebuilt. An excluded source
-contributes its local tip. `restack` uses local refs. `pull` and `sync` fetch
-and fast-forward the configured root when possible before rebuilding.
+stacks. An explicitly named integration selects the same scope. Use a group
+selector to include its other stacks. A selected source stack updates
+before the integration is rebuilt. An excluded source contributes its local
+tip. `restack` uses local refs. `pull` and `sync` fetch and fast-forward the
+configured root when possible before rebuilding.
 `sync` publishes the integration and eligible selected work in the same
 atomic push with leases. The first sync sets the integration's upstream.
 If sync also deletes merged remote branches, those deletions wait for the

@@ -10,6 +10,7 @@ from git_client.testing import GitCall
 from git_stack.errors import StackError
 from git_stack.git import GitClient
 from git_stack.integrations import Integration, Integrations
+from git_stack.stacks import StackNode, Stacks
 from tests.helpers import FakeGitHub, Repo
 
 
@@ -98,6 +99,8 @@ def test_adopt_preserves_snapshot_until_refresh(repo: Repo, tracked: bool) -> No
     assert tip(repo, "combined") == before
     assert repo.config("work", "stackParent") == "combined"
     assert "combined" not in repo.client.stacks()
+    repo.git("switch", "--quiet", "one")
+    repo.commit("a", "advanced\n", "advance source before first refresh")
     repo.stack("restack", "combined")
     assert tip(repo, "combined") != before
     assert repo.git("show", "refs/heads/combined:b") == "two"
@@ -481,3 +484,71 @@ def test_clean_leaves_integration_tip_in_place(repo: Repo) -> None:
     repo.stack("clean")
 
     assert tip(repo, "combined") == before
+
+
+def test_import_keeps_registered_integration_as_an_untracked_root(repo: Repo, gh: FakeGitHub) -> None:
+    integration(repo)
+    work(repo)
+    repo.stack("sync")
+    repo.stack("push")
+    for number, name, base in ((1, "combined", "main"), (2, "work", "combined")):
+        gh.add_pr(
+            number=number,
+            state="OPEN",
+            author="me",
+            headRefName=name,
+            baseRefName=base,
+            headRefOid=tip(repo, name),
+            mergeCommit=None,
+        )
+    repo.stack("untrack", "work")
+
+    repo.stack("import")
+
+    assert "combined" not in repo.client.stacks()
+    assert repo.config("work", "stackParent") == "combined"
+
+
+def test_missing_integration_root_does_not_block_unrelated_track(repo: Repo) -> None:
+    source(repo, "one", "a")
+    source(repo, "two", "b")
+    repo.git("branch", "release", "refs/heads/main")
+    repo.stack("integrate", "combined", "one", "two", "--root", "release")
+    repo.git("branch", "--delete", "release")
+    repo.git("branch", "ordinary", "refs/heads/main")
+
+    repo.stack("track", "main", "ordinary")
+
+    assert repo.config("ordinary", "stackParent") == "main"
+
+
+def test_selecting_grouped_integration_traverses_group_once(repo: Repo, monkeypatch: pytest.MonkeyPatch) -> None:
+    integration(repo)
+    count = 32
+    graph = Stacks(StackNode(f"leaf-{index}", "combined", "group") for index in range(count))
+    children = Stacks.children
+    expanded: list[str] = []
+
+    def count_children(stacks: Stacks, branch: str) -> list[str]:
+        expanded.append(branch)
+        return children(stacks, branch)
+
+    monkeypatch.setattr(Stacks, "children", count_children)
+
+    selected = repo.client.refresh_selection(["combined"], (), graph, "restack")
+
+    assert len(selected.branches) == count
+    assert len(expanded) == count + 1
+
+
+def test_naming_integration_root_does_not_select_cross_root_group_peers(repo: Repo) -> None:
+    integration(repo, tracked=True)
+    work(repo)
+    repo.stack("group", "add", "both", "work", "one")
+    original = tip(repo, "one")
+    repo.commit_on_forge("main", "d", "upstream\n", "upstream")
+
+    repo.stack("pull", "combined", "--latest")
+
+    assert tip(repo, "one") == original
+    assert repo.git("rev-parse", "refs/heads/combined^1^1") == tip(repo, "main")
