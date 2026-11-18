@@ -17,13 +17,14 @@ from git_stack.core import (
     PULLED_UPSTREAM_KEY,
     TRACK_UPSTREAM_KEY,
     Delete,
+    RemoteDeletion,
     StackCore,
     SyncCommand,
     TrunkUpstream,
 )
 from git_stack.errors import BrokenStackError, StackError
 from git_stack.git import DEFAULT_REMOTE, SWITCH
-from git_stack.integrations import Integration, Integrations
+from git_stack.integrations import Integration, Integrations, Source
 from git_stack.json_fields import json_name
 from git_stack.stacks import Ownership, Stacks
 
@@ -100,6 +101,30 @@ class RefreshSelection:
     branches: list[str]
     integrations: dict[str, Integration]
     explicit: tuple[str, ...] = ()
+
+    def ordered(self, stacks: Stacks) -> tuple[list[str], list[str]]:
+        """Process selected source stacks before refreshing integration roots."""
+        sources = {
+            branch
+            for integration in self.integrations.values()
+            for source in integration["sources"]
+            if (name := source["name"]) in stacks
+            for branch in stacks.stack_of(name, groups=False)
+        }
+        return (
+            [branch for branch in self.branches if branch in sources],
+            [branch for branch in self.branches if branch not in sources],
+        )
+
+
+@dataclass(frozen=True)
+class IntegrationPush:
+    """The observed local inputs and leased remote destination of a rebuild."""
+
+    name: str
+    target: str
+    remote_tip: str | None
+    refs: dict[str, str | None]
 
 
 @dataclass(frozen=True)
@@ -309,6 +334,7 @@ class SyncState:
     no_verify: bool = False
     skipped: set[str] = field(default_factory=set)
     blocked: list[str] = field(default_factory=list)
+    deferred_deletes: list[RemoteDeletion] | None = None
     pushable: list[str] = field(default_factory=list)
     unpushed: list[str] = field(default_factory=list)
 
@@ -1197,6 +1223,43 @@ class StackClient(StackCore):
                     name, config["root"], [source["name"] for source in config["sources"]], stacks, config["tip"]
                 )
 
+    def preflight_integrations(
+        self, selection: RefreshSelection, stacks: Stacks, force: str | None = None
+    ) -> dict[str, str | None]:
+        """Check each integration before any selected branch can be updated."""
+        integrations = Integrations(self)
+        expected: dict[str, str | None] = {}
+        for name in selection.integrations:
+            config = integrations.preflight(name, force=name == force)
+            tip = self.git.tip(name)
+            if tip != config["tip"] and name != force:
+                raise StackError(f"integration {name} moved during preflight; retry")
+            integrations.validate(
+                name, config["root"], [source["name"] for source in config["sources"]], stacks, config["tip"]
+            )
+            selection.integrations[name] = config
+            expected[name] = tip
+        return expected
+
+    def refresh_integrations(
+        self,
+        selection: RefreshSelection,
+        remote: str,
+        expected: dict[str, str | None],
+        *,
+        fetch: bool,
+        captured: dict[str, Source] | None = None,
+    ) -> dict[str, dict[str, str | None]]:
+        integrations = Integrations(self)
+        verified: dict[str, dict[str, str | None]] = {}
+        for name, config in selection.integrations.items():
+            root = config["root"]
+            root_remote = self.git.config_get(root, "remote")
+            evidence_remote = root_remote if root_remote and root_remote != "." else remote
+            desired, observed = integrations.inputs(name, root, config["sources"], evidence_remote, fetch, captured)
+            verified[name] = integrations.build(name, desired, observed, config, expected[name])
+        return verified
+
     @exclusive
     def restack(
         self,
@@ -1205,6 +1268,7 @@ class StackClient(StackCore):
         onto: str | None = None,
         latest: bool = False,
         allow_shared: bool = False,
+        force: bool = False,
     ) -> None:
         """Rebase every branch that needs it onto its parent, bottom-up (see
         needs_restack), in the current stack, or in the stacks of the branches
@@ -1219,8 +1283,15 @@ class StackClient(StackCore):
             raise StackError(
                 "--onto moves one branch: name just that branch (or none, for the current one), without --group"
             )
+        force_name = None
+        if force:
+            named_integrations = set(branches) & Integrations(self).names()
+            if len(named_integrations) != 1 or onto:
+                raise StackError("--force requires one explicitly named integration branch")
+            force_name = named_integrations.pop()
         self.ensure_no_operation_in_progress()
         self.ensure_clean_worktree()
+        Integrations(self).restore_pending_checkout()
         self.settle_all()
         stacks = self.stacks()
         original = self.current_checkout()
@@ -1239,14 +1310,26 @@ class StackClient(StackCore):
             selected = [branch, *stacks.descendants(branch)]
             # Only in stacks, which isn't saved: restack_branch records the
             # new parent once the rebase has finished.
+            was_integrated = self.git.config_get(stacks.root(branch), INTEGRATION_KEY) is not None
             stacks.reparent(branch, onto)
             self.validate_integrations(stacks)
+            root = stacks.root(branch)
+            config = Integrations(self).read(root)
+            selection = RefreshSelection(selected, {root: config} if config else {})
+            latest = latest or was_integrated
         else:
-            selected = self.selected_stacks(branches, groups, stacks, "restack")
-            self.ensure_owned(selected, stacks, allow_shared, "restack")
-        adapter = make_adapter(self, self.default_remote(selected, stacks), fetch=False)
-        to_restack = self.skip_merged(selected, stacks, adapter)
-        self.restack_all(to_restack, stacks, latest)
+            selection = self.refresh_selection(branches, groups, stacks, "restack")
+            self.ensure_owned(selection.branches, stacks, allow_shared, "restack")
+        expected = self.preflight_integrations(selection, stacks, force_name)
+        remote = self.default_remote(selection.branches, stacks)
+        adapter = make_adapter(self, remote, fetch=False)
+        sources, remaining = selection.ordered(stacks)
+        if sources:
+            blocked = self.restack_all(self.skip_merged(sources, stacks, adapter), stacks, latest)
+            if blocked:
+                raise StackError(f"couldn't update selected integration source stacks: {', '.join(blocked)}")
+        self.refresh_integrations(selection, remote, expected, fetch=False)
+        self.restack_all(self.skip_merged(remaining, stacks, adapter), stacks, latest)
         self.restore_checkout(original)
 
     def sync_selection(
@@ -1257,23 +1340,24 @@ class StackClient(StackCore):
         remote: str,
         only_remote: bool,
         command: SyncCommand,
-    ) -> tuple[list[str], set[str]]:
-        """Select one remote's stack branches before changing repository state,
-        for command."""
-        stack = self.selected_stacks(branches, groups, stacks, command.value)
+    ) -> tuple[RefreshSelection, set[str]]:
+        """Select one remote's stack branches and their integration roots."""
+        selection = self.refresh_selection(branches, groups, stacks, command.value)
         if only_remote:
-            stack = [b for b in stack if self.git.config_get(b, "remote") == remote]
-            if not stack:
+            selection.branches = [b for b in selection.branches if self.git.config_get(b, "remote") == remote]
+            needed = {stacks.root(b) for b in selection.branches}
+            selection.integrations = {
+                name: config
+                for name, config in selection.integrations.items()
+                if name in needed
+                or (name in selection.explicit and self.git.config_get(name, "remote") in (None, remote))
+            }
+            if not selection.branches and not selection.integrations:
                 raise StackError(f"none of the selected branches track {remote}")
-        if any(self.git.config_get(stacks.root(branch), INTEGRATION_KEY) for branch in stack):
-            raise StackError(
-                f"can't {command.value} a stack on an integration; rebuild it with `git stack integrate`, "
-                "then use `git stack restack`"
-            )
-        remotes = self.upstream_remotes(stack)
-        if len(remotes) > 1:
+        remotes = self.upstream_remotes([*selection.branches, *selection.integrations])
+        if len(remotes) > 1 or (only_remote and remotes - {remote}):
             raise StackError(f"can't {command.value} branches on multiple remotes atomically; select one with --remote")
-        return stack, remotes
+        return selection, remotes
 
     def upstream_remotes(self, branches: Iterable[str]) -> set[str]:
         """The remotes branches' upstreams are on."""
@@ -1376,36 +1460,61 @@ class StackClient(StackCore):
         command = SyncCommand.SYNC if push else SyncCommand.PULL
         self.ensure_no_operation_in_progress()
         self.ensure_clean_worktree()
-        initial_stack, _ = self.sync_selection(branches, groups, self.stacks(), remote, only_remote, command)
+        Integrations(self).restore_pending_checkout()
+        stacks = self.stacks()
+        initial, _ = self.sync_selection(branches, groups, stacks, remote, only_remote, command)
         if only_remote:
-            for branch in initial_stack:
-                if self.git.config_get(branch, "remote") == remote:
-                    self.settle(branch)
+            for branch in initial.branches:
+                self.settle(branch)
         else:
             self.settle_all()
         stacks = self.stacks()
         self.ensure_owned(
-            self.selected_stacks(branches, groups, stacks, command.value), stacks, allow_shared, command.value
+            self.refresh_selection(branches, groups, stacks, command.value).branches,
+            stacks,
+            allow_shared,
+            command.value,
         )
-        stack, upstream_remotes = self.sync_selection(branches, groups, stacks, remote, only_remote, command)
+        selection, upstream_remotes = self.sync_selection(branches, groups, stacks, remote, only_remote, command)
+        expected = self.preflight_integrations(selection, stacks)
+        stack = selection.branches
         self.ensure_ignorable_reverts(ignore_reverts, stack, "the stacks being synced")
-        roots = {stacks.root(b) for b in stack}
-        roots_to_update = {root for root in roots if not only_remote or self.git.config_get(root, "remote") == remote}
+        roots = {stacks.root(b) for b in stack} | selection.integrations.keys()
+        ordinary_roots = {config["root"] for config in selection.integrations.values()}
+        roots_to_update = ordinary_roots | {
+            root
+            for root in roots - selection.integrations.keys()
+            if not only_remote or self.git.config_get(root, "remote") == remote
+        }
         root_remotes = self.upstream_remotes(roots_to_update)
         push_remote = remote if only_remote else self.stack_remote(upstream_remotes, root_remotes)
-        protected = self.protected_sync_destinations(stack, roots, push_remote) if push and not force else set[str]()
+        destinations = [*stack, *selection.integrations]
+        protected_roots = roots | ordinary_roots
+        protected = (
+            self.protected_sync_destinations(destinations, protected_roots, push_remote)
+            if push and not force
+            else set[str]()
+        )
         original = self.current_checkout()
         adapter = self.checked_adapter(push_remote)
-        remotes = {push_remote} | upstream_remotes | root_remotes | ({remote} if only_remote else set[str]())
+        source_remotes = (
+            Integrations(self).source_remotes(selection.integrations.values()) if selection.integrations else set[str]()
+        )
+        remotes = {push_remote} | upstream_remotes | root_remotes | source_remotes
         for name in sorted(remotes, key=lambda name: (name != remote, name)):
             self.fetch(name)
+        integration_leases = self.integration_leases(selection, push_remote, force, protected_roots) if push else {}
         if self.move_off_deleted_parents(stack, stacks, adapter, push_remote):
             roots = {stacks.root(b) for b in stack}
-            roots_to_update = {r for r in roots if not only_remote or self.git.config_get(r, "remote") == remote}
+            roots_to_update = ordinary_roots | {
+                r
+                for r in roots - selection.integrations.keys()
+                if not only_remote or self.git.config_get(r, "remote") == remote
+            }
             for name in sorted(self.upstream_remotes(roots_to_update) - remotes):
                 self.fetch(name)
             if push and not force:
-                protected = self.protected_sync_destinations(stack, roots, push_remote)
+                protected = self.protected_sync_destinations(destinations, roots | ordinary_roots, push_remote)
         # A group's stacks can be on different roots.
         self.fast_forward_trunks(sorted(roots_to_update))
 
@@ -1424,32 +1533,111 @@ class StackClient(StackCore):
             command,
             no_verify,
         )
-        # Parent-before-child, so by the time we reach a branch its parent is
-        # final: merged branches have been removed (and their children reparented
-        # in stacks), and the rest have been restacked and pulled.
-        for branch in stack:
-            self.sync_branch(branch, adapter, state)
-
-        self.restore_checkout(state.original)
-        self.push_branches(
-            state.pushable,
-            stacks,
-            adapter,
-            push_remote,
-            rebuild_stack=rebuild_stack,
-            scope=stack,
-            use_upstreams=True,
-            no_verify=no_verify,
-        )
+        self.refresh_and_push(selection, expected, adapter, state, integration_leases, rebuild_stack)
         if push and state.blocked:
             raise StackError(
                 f"didn't push {', '.join(state.blocked)}: checked out in another worktree, or stacked on a branch "
                 f"that is"
             )
-        shown = (
-            self.branch_infos(stacks.restricted(stack), adapter) if only_remote else self.stack_infos(stack, adapter)
-        )
+        if selection.integrations:
+            shown = self.branch_infos(stacks.restricted(stack), adapter, selection.integrations)
+        else:
+            shown = (
+                self.branch_infos(stacks.restricted(stack), adapter)
+                if only_remote
+                else self.stack_infos(stack, adapter)
+            )
         return SyncResult(state.unpushed, shown)
+
+    def refresh_and_push(
+        self,
+        selection: RefreshSelection,
+        expected: dict[str, str | None],
+        adapter: GitAdapter,
+        state: SyncState,
+        leases: dict[str, tuple[str, str | None]],
+        rebuild_stack: bool,
+    ) -> None:
+        if selection.integrations:
+            state.deferred_deletes = []
+        try:
+            verified = self.sync_selected(selection, expected, adapter, state)
+            self.restore_checkout(state.original)
+            integration_pushes = [
+                IntegrationPush(name, target, remote_tip, verified[name])
+                for name, (target, remote_tip) in leases.items()
+            ]
+            self.push_branches(
+                state.pushable,
+                state.stacks,
+                adapter,
+                state.remote,
+                rebuild_stack=rebuild_stack,
+                scope=selection.branches,
+                use_upstreams=True,
+                no_verify=state.no_verify,
+                integration_pushes=integration_pushes,
+                deletions=state.deferred_deletes,
+            )
+        finally:
+            for deletion in state.deferred_deletes or ():
+                self.emit(events.RemoteBranchKept(deletion.upstream, deletion.remote, deletion.branch))
+
+    def sync_selected(
+        self, selection: RefreshSelection, expected: dict[str, str | None], adapter: GitAdapter, state: SyncState
+    ) -> dict[str, dict[str, str | None]]:
+        """Sync selected sources first, then refresh roots before touching their work branches."""
+        sources, remaining = selection.ordered(state.stacks)
+        integrations = Integrations(self)
+        # A selected, merged source may be deleted while syncing. Preserve the
+        # live input and its upstream identity so exact landing proof is still required.
+        captured = {
+            source["name"]: integrations.source(source["name"], self.git.tip(source["name"]), source)
+            for config in selection.integrations.values()
+            for source in config["sources"]
+            if source["name"] in sources
+        }
+        for branch in sources:
+            self.sync_branch(branch, adapter, state)
+        if selection.integrations:
+            self.restore_checkout(state.original)
+        if state.blocked:
+            raise StackError(f"couldn't update selected integration source stacks: {', '.join(state.blocked)}")
+        verified = self.refresh_integrations(selection, state.remote, expected, fetch=True, captured=captured)
+        for branch in remaining:
+            self.sync_branch(branch, adapter, state)
+        return verified
+
+    def integration_leases(
+        self, selection: RefreshSelection, remote: str, force: bool, roots: set[str]
+    ) -> dict[str, tuple[str, str | None]]:
+        """Pin the integration destinations before rebuilding their local refs."""
+        git = self.git
+        self.ensure_remote_branches_ours(list(selection.integrations), remote)
+        protected = {git.remote_branch_name(root, remote) for root in roots - selection.integrations.keys()}
+        if selection.integrations and not force:
+            default = git.remote_default_branch(remote)
+            if default is None:
+                raise StackError(f"{remote}'s default branch isn't known; rerun `git stack sync --force`")
+            protected.add(default)
+        leases: dict[str, tuple[str, str | None]] = {}
+        for name, config in selection.integrations.items():
+            target = git.remote_branch_name(name, remote)
+            if not force and target in protected:
+                raise StackError(f"{name} targets a protected remote branch; rerun `git stack sync --force`")
+            remote_tip = git.rev(f"refs/remotes/{remote}/{target}")
+            known = self.pulled_tip(name)
+            safe_tip = (
+                remote_tip in (known, config["tip"])
+                if known
+                else (not remote_tip or git.is_ancestor(remote_tip, config["tip"]))
+            )
+            if remote_tip and not force and not safe_tip:
+                raise StackError(
+                    f"{remote}/{target} has unexpected commits; rerun `git stack sync --force` to replace it"
+                )
+            leases[name] = target, remote_tip
+        return leases
 
     def move_off_deleted_parents(
         self, branches: Sequence[str], stacks: Stacks, adapter: GitAdapter, remote: str
@@ -1515,6 +1703,7 @@ class StackClient(StackCore):
                 allow_different_upstream=True,
                 confirmed=confirmed,
                 no_verify=state.no_verify,
+                deferred=state.deferred_deletes,
             ):
                 state.skipped.add(branch)
             elif branch == state.original:
@@ -1763,6 +1952,8 @@ class StackClient(StackCore):
         scope: list[str] | None = None,
         use_upstreams: bool = False,
         no_verify: bool = False,
+        integration_pushes: Sequence[IntegrationPush] = (),
+        deletions: list[RemoteDeletion] | None = None,
     ) -> list[str]:
         """Force-push (with lease) branches, which must be unmerged, in one atomic
         push, then let the adapter update their pull requests (see
@@ -1771,7 +1962,7 @@ class StackClient(StackCore):
         Checks and fails as push does.
         """
         git = self.git
-        if not branches:
+        if not branches and not integration_pushes and not deletions:
             return []
         self.ensure_remote_branches_ours(branches, remote)
 
@@ -1780,6 +1971,10 @@ class StackClient(StackCore):
         # them), and pin each lease to the remote-tracking ref we checked, so a
         # push that raced with someone else's fails instead of overwriting it.
         leases, refspecs = self.push_refspecs(branches, stacks, remote, force, use_upstreams)
+        self.add_integration_refspecs(integration_pushes, deletions or (), leases, refspecs, remote)
+        integrations = Integrations(self)
+        for integration in integration_pushes:
+            integrations.verify(integration.refs)
         # Before the adapter changes anything (e.g. retargets pull requests),
         # so a push that's bound to fail, e.g. because a remote branch moved
         # since it was fetched, leaves nothing changed. The remote can still
@@ -1800,15 +1995,14 @@ class StackClient(StackCore):
         # Atomic, so a branch that can't be pushed doesn't leave the rest of the
         # stack pushed without it, and its pull requests not retargeted.
         verify_options = ["--no-verify"] if no_verify else []
+        for integration in integration_pushes:
+            integrations.verify(integration.refs)
         if not git.passthrough("push", "--atomic", *verify_options, *leases, "--set-upstream", remote, *refspecs):
             raise StackError(
                 "push failed, so nothing was pushed; if the remote has new commits, run `git stack sync` and try "
                 f"again{self.changes_left(adapter)}"
             )
-        for b in branches:
-            git.config_set(b, PULLED_KEY, git.tip(b))
-            if (identity := self.upstream_identity(b)) is not None:
-                git.config_set(b, PULLED_UPSTREAM_KEY, identity)
+        self.record_pushed(branches, integration_pushes, deletions, remote)
         try:
             adapter.after_push(branches, stacks, opening, rebuild_stack, scope)
         except StackError as e:
@@ -1816,6 +2010,62 @@ class StackClient(StackCore):
                 f"pushed, but updating pull requests failed (set {ADAPTER_SETTING} to git to stop using GitHub): {e}"
             ) from e
         return branches
+
+    def add_integration_refspecs(
+        self,
+        integrations: Sequence[IntegrationPush],
+        deletions: Sequence[RemoteDeletion],
+        leases: list[str],
+        refspecs: list[str],
+        remote: str,
+    ) -> None:
+        """Add integration updates to the same atomic push as the work."""
+        for integration in integrations:
+            tip = integration.refs[integration.name]
+            assert tip is not None
+            self.add_leased_refspec(
+                leases, refspecs, remote, f"refs/heads/{integration.target}", integration.remote_tip, tip
+            )
+
+        for deletion in deletions:
+            assert deletion.remote == remote
+            self.add_leased_refspec(leases, refspecs, remote, deletion.ref, deletion.tip, "")
+
+    @staticmethod
+    def add_leased_refspec(
+        leases: list[str], refspecs: list[str], remote: str, target: str, remote_tip: str | None, tip: str
+    ) -> None:
+        lease = f"--force-with-lease={target}:"
+        if any(existing.startswith(lease) for existing in leases):
+            raise StackError(f"multiple updates target {remote}/{target.removeprefix('refs/heads/')}; refusing to push")
+        leases.append(lease + (remote_tip or ""))
+        refspecs.append(f"{tip}:{target}")
+
+    def record_pushed(
+        self,
+        branches: list[str],
+        integrations: Sequence[IntegrationPush],
+        deletions: list[RemoteDeletion] | None,
+        remote: str,
+    ) -> None:
+        """Remember successful pushes and configure a newly published integration's upstream."""
+        for deletion in deletions or ():
+            self.emit(events.RemoteBranchDeleted(deletion.upstream))
+        if deletions is not None:
+            deletions.clear()
+        git = self.git
+        tips = {branch: git.tip(branch) for branch in branches}
+        for integration in integrations:
+            name = integration.name
+            if git.config_get(name, "remote") is None:
+                git.run("branch", f"--set-upstream-to=refs/remotes/{remote}/{integration.target}", "--", name)
+            tip = integration.refs[name]
+            assert tip is not None
+            tips[name] = tip
+        for branch, tip in tips.items():
+            git.config_set(branch, PULLED_KEY, tip)
+            if (identity := self.upstream_identity(branch)) is not None:
+                git.config_set(branch, PULLED_UPSTREAM_KEY, identity)
 
     def changes_left(self, adapter: GitAdapter) -> str:
         """What adapter changed before a push failed, for its error, or ""."""

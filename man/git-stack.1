@@ -404,17 +404,44 @@ Switch to the integration branch and use
 Integration branches and work stacked above them cannot supply inputs to
 an integration.
 .PP
-Rerun \f[CR]integrate\f[R] to rebuild after changing a local input, then
-run \f[CR]git stack restack\f[R] from a work branch to rebase that
-stack.
-Use Git to publish the integration branch before opening PRs that target
-it.
-\f[CR]sync\f[R] and \f[CR]pull\f[R] require an ordinary stack root.
+\f[CR]restack\f[R], \f[CR]pull\f[R], and \f[CR]sync\f[R] refresh the
+integration roots needed by the selected stacks.
+From an integration branch, they select its dependent stacks.
+An explicitly named integration selects the same scope.
+A selected source stack updates before the integration is rebuilt.
+An excluded source contributes its local tip.
+\f[CR]restack\f[R] uses local refs.
+\f[CR]pull\f[R] and \f[CR]sync\f[R] fetch and fast\-forward the
+configured root when possible before rebuilding.
+\f[CR]sync\f[R] publishes the integration and eligible selected work in
+the same atomic push with leases.
+The first sync sets the integration\(aqs upstream.
+If sync also deletes merged remote branches, those deletions wait for
+the same push.
+If the push fails, locally untracked branches stay untracked and sync
+reports the remote branches it kept.
+Use the usual \f[CR]push\f[R] and \f[CR]prs\f[R] commands to publish new
+work branches and open their PRs.
 .PP
-If the integration tip was edited directly, the build reports the extra
-commits and the last generated tip.
-Restore that tip before rebuilding.
-Move the integration out of any other worktree before rebuilding it.
+A source drops out of the generated history when its tip is already on
+the configured root or when a merged GitHub PR proves that exact tip
+landed there.
+A deleted source requires the same proof for its last included tip.
+If there\(aqs no proof, replace the source list with
+\f[CR]git stack integrate <name> <source>...\f[R].
+When all sources land, the integration follows the configured root.
+To promote the work, switch to the bottom work branch, run
+\f[CR]git stack restack \-\-onto main\f[R], then
+\f[CR]git stack push\f[R] to update open PRs.
+Once no stack or PR uses the integration, delete its local and remote
+branches with Git.
+.PP
+If the integration tip was edited directly, refresh reports the extra
+commits.
+To discard those commits, run
+\f[CR]git stack restack <name> \-\-force\f[R] with the integration named
+explicitly.
+Move an integration out of any other worktree before refreshing it.
 .PP
 If a merge conflicts, git\-stack reports the temporary worktree.
 Resolve and stage the files there, then run
@@ -784,7 +811,7 @@ choice can change the default.
 Existing stacks default to owned.
 Ownership is local to this clone, not a permission or a substitute for
 coordinating with contributors.
-.SS \f[CR]git stack restack [<branch|glob>...] [\-g <group>] [\-\-onto <parent>] [\-l] [\-\-allow\-shared]\f[R]
+.SS \f[CR]git stack restack [<branch|glob>...] [\-g <group>] [\-\-onto <parent>] [\-l] [\-\-allow\-shared] [\-\-force]\f[R]
 Rebase every branch in the current stack (or the ones named, see Groups)
 onto its parent, bottom\-up, except that a branch on the stack\(aqs root
 (e.g.

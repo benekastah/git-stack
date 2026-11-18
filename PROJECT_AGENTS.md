@@ -29,7 +29,8 @@ man page is generated from it.
   it rather than with a `{branch: parent}` map of your own.
 - `git_stack/integrations.py` keeps integration roots out of `Stacks`. Its branch config
   records exact tips and merge evidence, and journals the detached worktree's progress.
-  Work above an integration uses the ordinary single-parent rebase path.
+  The refresh commands order selected source stacks before the integration builds, then
+  use the ordinary single-parent rebase path for the work above each integration.
 - Each command is a module in `git_stack/commands/` with `register`, `run` and
   `show`: `run` does the command and returns a dataclass result, and `show`
   prints it as text. With `--json`, the CLI prints the result as JSON instead

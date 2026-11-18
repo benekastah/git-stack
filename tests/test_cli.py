@@ -152,6 +152,7 @@ def stack(autospec_stack: Any) -> Any:
         (["next"], "next", (), {}),
         (["prev"], "prev", (), {}),
         (["restack"], "restack", ([], []), {"onto": None, "latest": False}),
+        (["restack", "combined", "--force"], "restack", (["combined"], []), {"onto": None, "latest": False}),
         (
             ["integrate", "--adopt", "combined", "a", "b", "--root", "release"],
             "integrate",
@@ -262,6 +263,8 @@ def test_command_calls_its_client_method(
 
     if method in ("restack", "sync", "push", "clean", "unrevert"):
         kwargs = {**kwargs, "allow_shared": "--allow-shared" in argv}
+    if method == "restack":
+        kwargs = {**kwargs, "force": "--force" in argv}
     if method == "clean":
         kwargs = {**kwargs, "no_verify": "--no-verify" in argv}
     if method in ("sync", "push"):

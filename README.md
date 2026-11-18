@@ -264,14 +264,33 @@ Switch to the integration branch and use `git stack create <work>` to start
 a stack on it. `git stack info` labels its root `(integration)`. Integration
 branches and work stacked above them cannot supply inputs to an integration.
 
-Rerun `integrate` to rebuild after changing a local input, then run
-`git stack restack` from a work branch to rebase that stack. Use Git to
-publish the integration branch before opening PRs that target it.
-`sync` and `pull` require an ordinary stack root.
+`restack`, `pull`, and `sync` refresh the integration roots needed by the
+selected stacks. From an integration branch, they select its dependent
+stacks. An explicitly named integration selects the same scope. A selected
+source stack updates before the integration is rebuilt. An excluded source
+contributes its local tip. `restack` uses local refs. `pull` and `sync` fetch
+and fast-forward the configured root when possible before rebuilding.
+`sync` publishes the integration and eligible selected work in the same
+atomic push with leases. The first sync sets the integration's upstream.
+If sync also deletes merged remote branches, those deletions wait for the
+same push. If the push fails, locally untracked branches stay untracked and
+sync reports the remote branches it kept. Use the usual `push` and `prs`
+commands to publish new work branches and open their PRs.
 
-If the integration tip was edited directly, the build reports the extra
-commits and the last generated tip. Restore that tip before rebuilding.
-Move the integration out of any other worktree before rebuilding it.
+A source drops out of the generated history when its tip is already on the
+configured root or when a merged GitHub PR proves that exact tip landed
+there. A deleted source requires the same proof for its last included tip.
+If there's no proof, replace the source list with `git stack integrate
+<name> <source>...`. When all sources land, the integration follows the
+configured root. To promote the work, switch to the bottom work branch,
+run `git stack restack --onto main`, then `git stack push` to update open
+PRs. Once no stack or PR uses the integration, delete its local and remote
+branches with Git.
+
+If the integration tip was edited directly, refresh reports the extra
+commits. To discard those commits, run `git stack restack <name> --force`
+with the integration named explicitly. Move an integration out of any other
+worktree before refreshing it.
 
 If a merge conflicts, git-stack reports the temporary worktree. Resolve and
 stage the files there, then run `git merge --continue`. To undo the current
@@ -561,7 +580,7 @@ explicit `ownership owned` or `ownership shared` choice can change the default.
 Existing stacks default to owned. Ownership is local to this clone, not a
 permission or a substitute for coordinating with contributors.
 
-### `git stack restack [<branch|glob>...] [-g <group>] [--onto <parent>] [-l] [--allow-shared]`
+### `git stack restack [<branch|glob>...] [-g <group>] [--onto <parent>] [-l] [--allow-shared] [--force]`
 
 Rebase every branch in the current stack (or the ones named, see
 [Groups](#groups)) onto its parent, bottom-up, except

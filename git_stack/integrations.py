@@ -3,7 +3,7 @@
 import hashlib
 import json
 import pathlib
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from typing import NotRequired, TypedDict, cast
 
 from git_stack import events
@@ -130,6 +130,15 @@ class Integrations:
             landing=previous["landing"] if previous and tip == previous["tip"] else None,
         )
 
+    def source_remotes(self, integrations: Iterable[Integration]) -> set[str]:
+        remotes = set(self.git.remotes())
+        return {
+            remote
+            for integration in integrations
+            for source in integration["sources"]
+            if (remote := self.git.config_get(source["name"], "remote") or source["remote"]) and remote in remotes
+        }
+
     def validate(self, name: str, root: str, sources: Sequence[str], stacks: Stacks, tip: str | None) -> None:
         if name in stacks:
             raise StackError(f"{name} is tracked; untrack it before registering it as an integration")
@@ -158,19 +167,20 @@ class Integrations:
             if config["root"] == name or any(stacks.root(src["name"]) == name for src in config["sources"]):
                 raise StackError(f"{name} is an input of integration {other}")
 
-    def preflight(self, name: str) -> Integration:
+    def preflight(self, name: str, *, force: bool = False) -> Integration:
         self.finish_interrupted(name)
         integration = self.read(name)
         if integration is None:
             raise StackError(f"{name} isn't a registered integration")
         recorded = integration["tip"]
         current = self.git.tip(name)
-        if current != recorded:
+        if current != recorded and not force:
             extra = self.git.run("log", "--format=%h %s", f"{recorded}..{current}") if self.git.rev(recorded) else ""
             detail = extra or f"Recorded tip: {recorded}\nCurrent tip:  {current}"
             raise StackError(
                 f"{name} differs from its last generated tip:\n{detail}\n"
-                f"Restore {name} to {recorded} before rebuilding it."
+                f"Run `git stack restack {name} --force` to replace the tip and remove any extra commits "
+                f"from {name}."
             )
         return integration
 
@@ -181,6 +191,7 @@ class Integrations:
         sources: Sequence[Source],
         remote: str,
         fetch: bool,
+        captured: dict[str, Source] | None = None,
     ) -> tuple[Integration, dict[str, str | None]]:
         root_tip = self.git.tip(root)
         observed: dict[str, str | None] = {root: root_tip}
@@ -189,6 +200,8 @@ class Integrations:
             branch = source["name"]
             live = self.git.rev(f"refs/heads/{branch}")
             observed[branch] = live
+            if live is None and captured and branch in captured:
+                source = captured[branch]
             tip = live or source["tip"]
             current = self.source(branch, tip, source)
             landing = source["landing"] if source["tip"] == tip else None

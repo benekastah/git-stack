@@ -185,5 +185,6 @@ def test_integration_uses_branches_even_with_same_named_tags(repo: Repo) -> None
     repo.git("tag", "combined", "refs/heads/main")
 
     repo.stack("integrate", "combined", "pr1", "pr2")
+    repo.stack("sync", "combined")
 
     assert repo.git("rev-parse", "refs/heads/combined^2") == repo.git("rev-parse", "refs/heads/pr2")

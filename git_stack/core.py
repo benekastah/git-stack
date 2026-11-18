@@ -83,6 +83,23 @@ class TrunkUpstream:
     new: str
 
 
+@dataclass(frozen=True)
+class RemoteDeletion:
+    """A merged branch's upstream and the tip a delete is allowed to remove."""
+
+    remote: str
+    ref: str
+    tip: str
+
+    @property
+    def branch(self) -> str:
+        return self.ref.removeprefix("refs/heads/")
+
+    @property
+    def upstream(self) -> str:
+        return f"{self.remote}/{self.branch}"
+
+
 class Delete(enum.Enum):
     """What sync and clean delete of a merged branch besides untracking it,
     as -d says. Values are what -d takes."""
@@ -494,9 +511,8 @@ class StackCore:
         git.config_unset(branch, PENDING_RESTACK_KEY)
         raise StackError(f"restacking {branch} onto {parent} failed; see git's output above")
 
-    def restack_all(self, branches: Iterable[str], stacks: Stacks, latest: bool = False) -> None:
-        """Restack branches, parent-before-child, skipping those stacked on a
-        branch that couldn't be restacked."""
+    def restack_all(self, branches: Iterable[str], stacks: Stacks, latest: bool = False) -> list[str]:
+        """Restack branches, parent-before-child, returning the ones blocked by another worktree."""
         original = self.git.current_branch()
         skipped: set[str] = set()
         for branch in branches:
@@ -508,6 +524,7 @@ class StackCore:
                 skipped.add(branch)
         if original and self.git.current_branch() != original:
             self.git.switch(original)
+        return sorted(skipped)
 
     def unpulled_commits(self, branch: str, parent: str, upstream_tip: str) -> list[str]:
         """Non-merge commits on upstream_tip that branch doesn't have, oldest first.
@@ -845,6 +862,7 @@ class StackCore:
         allow_different_upstream: bool = False,
         confirmed: bool = True,
         no_verify: bool = False,
+        deferred: list[RemoteDeletion] | None = None,
     ) -> bool:
         """Stop tracking merged branch, deleting what delete says, and moving its children onto its parent (see remove_merged).
         Returns False, leaving branch alone, if its remote branch couldn't be
@@ -880,14 +898,25 @@ class StackCore:
             if ref == f"refs/heads/{default}":
                 self.remove_merged(branch, stacks, delete_local)
                 return True
-            if not git.delete_remote_branch(remote_name, ref, tip, no_verify=no_verify):
-                self.emit(events.RemoteBranchDeleteFailed(branch, upstream))
+            if not self.delete_merged_upstream(branch, RemoteDeletion(remote_name, ref, tip), no_verify, deferred):
                 return False
-            self.emit(events.RemoteBranchDeleted(upstream))
             self.remove_merged(branch, stacks, delete_local)
         else:
             self.remove_merged(branch, stacks, delete_local)
             self.emit(events.RemoteBranchKept(upstream, remote_name, ref.removeprefix("refs/heads/")))
+        return True
+
+    def delete_merged_upstream(
+        self, branch: str, deletion: RemoteDeletion, no_verify: bool, deferred: list[RemoteDeletion] | None
+    ) -> bool:
+        """Queue a deletion for an atomic sync push, or delete it now."""
+        if deferred is not None:
+            deferred.append(deletion)
+        elif self.git.delete_remote_branch(deletion.remote, deletion.ref, deletion.tip, no_verify=no_verify):
+            self.emit(events.RemoteBranchDeleted(deletion.upstream))
+        else:
+            self.emit(events.RemoteBranchDeleteFailed(branch, deletion.upstream))
+            return False
         return True
 
     def restore_checkout(self, original: str) -> None:
