@@ -1557,9 +1557,11 @@ class StackClient(StackCore):
         remotes = {push_remote} | upstream_remotes | root_remotes
         for name in sorted(remotes, key=lambda name: (name != remote, name)):
             self.fetch(name)
-        integration_leases = self.integration_leases(selection, push_remote, force, protected_roots) if push else {}
-        if self.move_off_deleted_parents(stack, stacks, adapter, push_remote):
-            roots = {stacks.root(b) for b in stack}
+        if self.move_off_deleted_parents(stack, stacks, adapter, push_remote, selection, expected):
+            roots = {stacks.root(b) for b in stack} | selection.integrations.keys()
+            ordinary_roots = {config["root"] for config in selection.integrations.values()}
+            protected_roots = roots | ordinary_roots
+            destinations = [*stack, *selection.integrations]
             roots_to_update = ordinary_roots | {
                 r
                 for r in roots - selection.integrations.keys()
@@ -1568,7 +1570,8 @@ class StackClient(StackCore):
             for name in sorted(self.upstream_remotes(roots_to_update) - remotes):
                 self.fetch(name)
             if push and not force:
-                protected = self.protected_sync_destinations(destinations, roots | ordinary_roots, push_remote)
+                protected = self.protected_sync_destinations(destinations, protected_roots, push_remote)
+        integration_leases = self.integration_leases(selection, push_remote, force, protected_roots) if push else {}
         # A group's stacks can be on different roots.
         self.preflight_integration_worktrees(selection, expected, roots_to_update)
         self.fast_forward_trunks(sorted(roots_to_update))
@@ -1759,7 +1762,13 @@ class StackClient(StackCore):
                 self.record_integration_push(integrations, name, remote, target, tip)
 
     def move_off_deleted_parents(
-        self, branches: Sequence[str], stacks: Stacks, adapter: GitAdapter, remote: str
+        self,
+        branches: Sequence[str],
+        stacks: Stacks,
+        adapter: GitAdapter,
+        remote: str,
+        selection: RefreshSelection | None = None,
+        expected: dict[str, str | None] | None = None,
     ) -> bool:
         """Move each of branches stacked on a root that's gone, locally and on
         remote, onto the branch the root was merged into, if the adapter can
@@ -1792,10 +1801,33 @@ class StackClient(StackCore):
             except StackError:
                 continue
             stacks.reparent(branch, new_parent)
+            self.check_recovered_integration(new_parent, stacks, remote, selection, expected)
             self.save(stacks)
             self.emit(events.MovedOffDeletedParent(branch, parent, new_parent))
             moved = True
         return moved
+
+    def check_recovered_integration(
+        self,
+        parent: str,
+        stacks: Stacks,
+        remote: str,
+        selection: RefreshSelection | None,
+        expected: dict[str, str | None] | None,
+    ) -> None:
+        """Check a managed root found during recovery before saving the new parent."""
+        root = stacks.root(parent)
+        config = Integrations(self).read(root)
+        if config is None:
+            return
+        self.validate_integrations(stacks)
+        if selection is None or expected is None or root in selection.integrations:
+            return
+        if self.upstream_remotes([root]) - {remote}:
+            raise StackError(f"recovered integration {root} tracks another remote; select its upstream remote")
+        added = RefreshSelection([], {root: config})
+        expected.update(self.preflight_integrations(added, stacks))
+        selection.integrations.update(added.integrations)
 
     def sync_branch(self, branch: str, adapter: GitAdapter, state: SyncState) -> None:
         """Untrack branch if it was merged, and otherwise bring it up to date (see

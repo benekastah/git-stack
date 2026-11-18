@@ -776,3 +776,78 @@ def test_negative_evidence_expires_with_unchanged_root_and_source(
     repo.stack("restack", "combined")
 
     assert repo.git("rev-parse", "refs/heads/combined^1") == tip(repo, "main")
+
+
+@pytest.mark.parametrize("command", ["pull", "sync"])
+def test_recovering_deleted_parent_checks_integration_tip(repo: Repo, gh: FakeGitHub, command: str) -> None:
+    integration(repo)
+    repo.stack("sync", "combined")
+    repo.git("switch", "--quiet", "combined")
+    repo.git("switch", "--quiet", "-c", "retired")
+    repo.commit("a", "retired\n", "retired")
+    repo.stack("create", "work")
+    repo.commit("c", "work\n", "work")
+    repo.stack("push")
+    retired, work_tip = tip(repo, "retired"), tip(repo, "work")
+    repo.git("switch", "--quiet", "combined")
+    repo.git("merge", "--ff-only", "refs/heads/retired")
+    repo.git("branch", "--delete", "retired")
+    gh.add_pr(
+        number=1,
+        state="MERGED",
+        headRefName="retired",
+        headRefOid=retired,
+        baseRefName="combined",
+        mergeCommit={"oid": tip(repo, "combined")},
+    )
+    gh.add_pr(
+        number=2,
+        state="OPEN",
+        headRefName="work",
+        headRefOid=work_tip,
+        baseRefName="combined",
+        mergeCommit=None,
+    )
+
+    result = repo.stack(command, "work", expect_success=False)
+
+    assert "differs from its last generated tip" in result.stderr
+    assert repo.config("work", "stackParent") == "retired"
+    assert tip(repo, "work") == tip(repo, "work", remote=True) == work_tip
+
+
+def test_recovered_parent_is_refreshed_before_work_is_rebased(repo: Repo, gh: FakeGitHub) -> None:
+    integration(repo)
+    repo.stack("sync", "combined")
+    previous = tip(repo, "combined")
+    repo.git("switch", "--quiet", "combined")
+    repo.git("switch", "--quiet", "-c", "retired")
+    repo.stack("create", "work")
+    repo.commit("c", "work\n", "work")
+    repo.stack("push")
+    repo.git("branch", "--delete", "retired")
+    gh.add_pr(
+        number=1,
+        state="MERGED",
+        headRefName="retired",
+        headRefOid=previous,
+        baseRefName="combined",
+        mergeCommit={"oid": previous},
+    )
+    gh.add_pr(
+        number=2,
+        state="OPEN",
+        headRefName="work",
+        headRefOid=tip(repo, "work"),
+        baseRefName="combined",
+        mergeCommit=None,
+    )
+    repo.git("switch", "--quiet", "one")
+    repo.commit("a", "next input\n", "advance input")
+
+    repo.stack("pull", "work")
+
+    assert tip(repo, "combined") != previous
+    assert repo.config("work", "stackParent") == "combined"
+    assert repo.git("show", "refs/heads/work:a") == "next input"
+    assert repo.git("log", "--format=%s", "refs/heads/combined..refs/heads/work") == "work"
