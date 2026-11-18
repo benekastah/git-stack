@@ -1,5 +1,6 @@
 """Integration roots and the ordinary stacks that use them."""
 
+import json
 import pathlib
 import shlex
 import shutil
@@ -9,6 +10,7 @@ from git_client.testing import GitCall
 
 from git_stack import cli
 from git_stack import integrations as integration_module
+from git_stack.core import RemoteDeletion
 from git_stack.errors import StackError
 from git_stack.git import GitClient
 from git_stack.integrations import Integration, Integrations
@@ -61,6 +63,17 @@ def test_create_refresh_and_replace_ordered_sources(repo: Repo, git_calls: list[
     assert repo.git("rev-parse", "refs/heads/combined^1") == tip(repo, "main")
     assert repo.git("branch", "--show-current") == "combined"
     assert repo.git("status", "--porcelain") == ""
+
+
+def test_integration_rejects_alias_of_generated_tip(repo: Repo) -> None:
+    integration(repo)
+    before = tip(repo, "combined")
+    repo.git("branch", "copied-base", "combined")
+
+    failure = repo.stack("integrate", "combined", "copied-base", "two", expect_success=False)
+
+    assert "copied-base contains the generated tip" in failure.stderr
+    assert tip(repo, "combined") == before
 
 
 def test_unchanged_integration_verifies_refs_without_reloading_snapshot(repo: Repo, git_calls: list[GitCall]) -> None:
@@ -514,8 +527,10 @@ def test_sync_resumes_conflict_after_deleting_rewritten_source(
     assert saved is not None and "retired_sources" not in saved
 
 
-@pytest.mark.parametrize("conflict", [False, True])
-def test_retired_source_keeps_squash_evidence_offline(repo: Repo, gh: FakeGitHub, conflict: bool) -> None:
+@pytest.mark.parametrize(("conflict", "delete_local"), [(False, True), (True, True), (True, False)])
+def test_retired_source_keeps_squash_evidence_offline(
+    repo: Repo, gh: FakeGitHub, conflict: bool, delete_local: bool
+) -> None:
     integration(repo, tracked=True)
     repo.git("branch", "-f", "one", "main")
     repo.git("switch", "one")
@@ -534,9 +549,9 @@ def test_retired_source_keeps_squash_evidence_offline(repo: Repo, gh: FakeGitHub
     repo.git("switch", "two")
     if conflict:
         repo.commit("a", "conflicting change\n", "conflict")
-    command = ("sync", "combined", "one", "--delete", "local")
+    command = ("sync", "combined", "one", "--delete", "local") if delete_local else ("sync", "combined", "one")
     result = repo.stack(*command, expect_success=not conflict)
-    assert repo.git("branch", "--list", "one") == ""
+    assert (repo.git("branch", "--list", "one") == "") is delete_local
     repo.git("config", "stack.adapter", "git")
     if conflict:
         path = conflict_worktree(result.stderr)
@@ -546,6 +561,228 @@ def test_retired_source_keeps_squash_evidence_offline(repo: Repo, gh: FakeGitHub
         repo.stack(*command)
     repo.stack("restack", "combined")
     assert repo.git("show", "combined:a") == ("resolved" if conflict else "landed replacement")
+
+
+def test_retry_with_only_retired_source_preserves_group_scope(repo: Repo) -> None:
+    integration(repo, tracked=True)
+    work(repo)
+    repo.stack("create", "outside", "--from", "combined")
+    repo.commit("c", "outside work\n", "outside work")
+    before = tip(repo, "outside")
+    old_work = tip(repo, "work")
+    repo.stack("group", "add", "both", "one", "work")
+    repo.git("switch", "main")
+    repo.git("merge", "--ff-only", "one")
+    repo.git("switch", "two")
+    repo.commit("a", "conflict\n", "conflict")
+    command = ("sync", "one", "--delete", "local")
+    path = conflict_worktree(repo.stack(*command, expect_success=False).stderr)
+    (path / "a").write_text("resolved\n", encoding="utf-8")
+    repo.git("add", "a", cwd=path)
+    repo.git("-c", "core.editor=true", "merge", "--continue", cwd=path)
+
+    repo.stack(*command)
+
+    assert tip(repo, "outside") == before
+    assert tip(repo, "work") != old_work
+
+
+def test_retry_selects_recorded_integration_after_its_last_work_lands(
+    repo: Repo, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    integration(repo, tracked=True)
+    work(repo)
+    landed = tip(repo, "work")
+    repo.stack("group", "add", "both", "one", "work")
+    repo.git("switch", "main")
+    repo.git("merge", "--ff-only", "one")
+    repo.git("switch", "two")
+    repo.git("cherry-pick", landed)
+    command = ("sync", "one", "--delete", "local")
+    passthrough = GitClient.passthrough
+
+    def reject_push(git: GitClient, *args: str) -> bool:
+        return False if args[:2] == ("push", "--atomic") else passthrough(git, *args)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(GitClient, "passthrough", reject_push)
+        assert "push failed" in repo.stack(*command, expect_success=False).stderr
+    assert not {"one", "work"}.intersection(repo.client.stacks())
+
+    repo.stack(*command)
+
+    assert tip(repo, "combined", remote=True) == tip(repo, "combined")
+
+
+def test_retry_keeps_surviving_child_after_source_parent_merges(repo: Repo, monkeypatch: pytest.MonkeyPatch) -> None:
+    source(repo, "parent", "a", tracked=True)
+    repo.stack("create", "one")
+    repo.commit("b", "source work\n", "source work")
+    repo.stack("create", "child")
+    repo.commit("c", "child work\n", "child work")
+    repo.git("push", "--set-upstream", "origin", "child")
+    repo.commit("c", "unpublished child work\n", "advance child")
+    source(repo, "two", "c")
+    repo.git("branch", "release", "one")
+    repo.stack("integrate", "combined", "one", "two", "--root", "release")
+    repo.git("branch", "-f", "parent", "one")
+    command = ("sync", "combined", "one", "--delete", "local")
+
+    def interrupt(*args: object, **kwargs: object) -> None:
+        raise StackError("interrupted before build")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Integrations, "build", interrupt)
+        assert "interrupted before build" in repo.stack(*command, expect_success=False).stderr
+        assert repo.git("branch", "--list", "one") == ""
+        repo.git("switch", "main")
+        repo.git("merge", "--ff-only", "parent")
+        assert "interrupted before build" in repo.stack(*command, expect_success=False).stderr
+        assert repo.git("branch", "--list", "parent") == ""
+
+    repo.stack(*command)
+
+    assert tip(repo, "child", remote=True) == tip(repo, "child")
+
+
+@pytest.mark.parametrize("mode", ["squash", "fast-forward", "untracked", "no-upstream", "invalid-upstream"])
+def test_narrow_retry_keeps_queued_source_deletion_until_child_is_selected(
+    repo: Repo, gh: FakeGitHub, mode: str
+) -> None:
+    integration(repo, tracked=True)
+    repo.stack("create", "source-child", "--from", "one")
+    repo.commit("c", "child work\n", "child work")
+    repo.stack("push")
+    old_child = tip(repo, "source-child", remote=True)
+    if mode == "no-upstream":
+        repo.git("branch", "--unset-upstream", "source-child")
+    elif mode == "invalid-upstream":
+        repo.git("config", "--unset", "branch.source-child.merge")
+    if mode == "squash":
+        repo.squash_merge_on_forge("one", delete_branch=False)
+    else:
+        repo.git("fetch", "origin", cwd=repo.forge)
+        repo.git("merge", "--ff-only", "origin/one", cwd=repo.forge)
+        repo.git("push", "origin", "main", cwd=repo.forge)
+    gh.add_pr(
+        number=1,
+        state="MERGED",
+        headRefName="one",
+        headRefOid=tip(repo, "one"),
+        baseRefName="main",
+        mergeCommit={"oid": tip(repo, "main", remote=True)},
+    )
+    gh.add_pr(
+        number=2, state="OPEN", headRefName="source-child", headRefOid=old_child, baseRefName="one", mergeCommit=None
+    )
+    repo.git("switch", "two")
+    repo.commit("a", "conflict\n", "conflict")
+    command = ("sync", "combined", "one", "--delete", "both")
+    path = conflict_worktree(repo.stack(*command, expect_success=False).stderr)
+    (path / "a").write_text("resolved\n", encoding="utf-8")
+    repo.git("add", "a", cwd=path)
+    repo.git("-c", "core.editor=true", "merge", "--continue", cwd=path)
+    if mode == "untracked":
+        repo.stack("untrack", "source-child")
+
+    repo.stack("sync", "combined", "--delete", "both")
+
+    assert repo.git("ls-remote", "origin", "refs/heads/one")
+    assert tip(repo, "source-child", remote=True) == old_child
+    assert gh.load()["prs"][1]["baseRefName"] == "one"
+    if mode == "untracked":
+        return
+    if mode in ("no-upstream", "invalid-upstream"):
+        repo.stack(*command)
+        assert repo.git("ls-remote", "origin", "refs/heads/one")
+        repo.git("branch", "--set-upstream-to=origin/source-child", "source-child")
+    repo.stack(*command)
+    assert repo.git("ls-remote", "origin", "refs/heads/one") == ""
+    assert tip(repo, "source-child", remote=True) == tip(repo, "source-child")
+    assert (tip(repo, "source-child") != old_child) is (mode == "squash")
+    assert gh.load()["prs"][1]["baseRefName"] == "main"
+
+
+def test_sync_keeps_old_pr_base_until_new_base_exists_remotely(repo: Repo, gh: FakeGitHub) -> None:
+    source(repo, "parent", "a", tracked=True)
+    repo.stack("create", "one")
+    repo.commit("b", "source work\n", "source work")
+    repo.stack("create", "child")
+    repo.commit("c", "child work\n", "child work")
+    repo.git("push", "--set-upstream", "origin", "one", "child")
+    gh.add_pr(
+        number=1, state="OPEN", headRefName="child", headRefOid=tip(repo, "child"), baseRefName="one", mergeCommit=None
+    )
+    source(repo, "two", "c")
+    repo.stack("integrate", "combined", "one", "two")
+    repo.git("branch", "-f", "parent", "one")
+    command = ("sync", "combined", "one", "--delete", "remote")
+
+    repo.stack(*command)
+
+    assert repo.git("ls-remote", "origin", "refs/heads/one")
+    assert repo.git("ls-remote", "origin", "refs/heads/parent") == ""
+    assert gh.load()["prs"][0]["baseRefName"] == "one"
+    repo.git("push", "--set-upstream", "origin", "parent")
+    repo.stack(*command)
+    assert repo.git("ls-remote", "origin", "refs/heads/one") == ""
+    assert gh.load()["prs"][0]["baseRefName"] == "parent"
+
+
+def test_queued_alias_deletions_keep_both_child_dependencies(repo: Repo, monkeypatch: pytest.MonkeyPatch) -> None:
+    integration(repo, tracked=True)
+    repo.stack("integrate", "other-base", "one", "two")
+    repo.stack("create", "child-one", "--from", "one")
+    repo.commit("c", "first child\n", "first child")
+    repo.git("branch", "alias", "one")
+    repo.stack("track", "main", "alias")
+    repo.stack("create", "child-alias", "--from", "alias")
+    repo.commit("c", "second child\n", "second child")
+    repo.git("push", "--set-upstream", "origin", "one", "child-one", "child-alias")
+    repo.git("branch", "--set-upstream-to=origin/one", "alias")
+    repo.git("switch", "main")
+    repo.git("merge", "--ff-only", "one")
+    passthrough = GitClient.passthrough
+
+    def reject_push(git: GitClient, *args: str) -> bool:
+        return False if args[:2] == ("push", "--atomic") else passthrough(git, *args)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(GitClient, "passthrough", reject_push)
+        failed = repo.stack("sync", "combined", "one", "alias", "--delete", "both", expect_success=False)
+        assert "push failed" in failed.stderr
+    assert repo.git("branch", "--list", "one", "alias") == ""
+    integrations = Integrations(repo.client)
+    [(_, deletion)] = integrations.pending_deletions({"combined"}, "origin")
+    integrations.remember_deletion("other-base", deletion)
+
+    repo.stack("sync", "combined", "child-alias", "--delete", "both")
+
+    assert repo.git("ls-remote", "origin", "refs/heads/one")
+    repo.stack("sync", "combined", "child-one", "child-alias", "--delete", "both")
+    assert repo.git("ls-remote", "origin", "refs/heads/one") == ""
+    assert integrations.pending_deletions({"combined", "other-base"}, "origin") == []
+
+
+def test_legacy_queued_deletion_does_not_require_other_remote_stacks(repo: Repo) -> None:
+    integration(repo, tracked=True)
+    work(repo)
+    repo.git("push", "--set-upstream", "origin", "one")
+    deletion = RemoteDeletion("origin", "refs/heads/one", tip(repo, "one"))
+    key = Integrations(repo.client).deletion_key(deletion)
+    repo.git("config", f"branch.combined.{key}", json.dumps([deletion.remote, deletion.ref, deletion.tip]))
+    repo.git("switch", "main")
+    repo.git("merge", "--ff-only", "one")
+    source(repo, "unrelated", "c", tracked=True)
+    other = repo.tmp / "other.git"
+    repo.git("init", "--bare", str(other))
+    repo.git("remote", "add", "other", str(other))
+    repo.git("push", "--set-upstream", "other", "unrelated")
+
+    repo.stack("sync", "combined", "one", "--delete", "remote")
+
+    assert repo.git("ls-remote", "origin", "refs/heads/one") == ""
+    assert repo.git("ls-remote", "other", "refs/heads/unrelated")
 
 
 def test_resume_from_detached_checkout_after_publication_is_interrupted(

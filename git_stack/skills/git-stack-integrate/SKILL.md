@@ -48,9 +48,10 @@ single parent. Check the selected stacks and source branches first with
 - If a merge conflicts, use the temporary worktree path reported by git-stack.
   Resolve and stage the conflicts there, run
   `git -C "<path>" -c core.editor=true merge --continue`, then rerun the
-  original command. If a merged source that sync removed was the only
-  selector, add the integration's name when retrying. The retry keeps
-  surviving work in the source stack selected. To discard the build, use
+  original command with the same selectors. The retry keeps surviving work
+  in the source stack selected even if sync removed the branch you named.
+  Keep that work selected when retrying a queued remote branch deletion.
+  To discard the build, use
   `git stack integrate --abort <name>` from the regular worktree.
 - If the integration tip has direct commits, inspect the commits listed by
   git-stack. `git stack restack <name> --force` replaces that integration's

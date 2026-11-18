@@ -90,6 +90,14 @@ class RemoteDeletion:
     remote: str
     ref: str
     tip: str
+    children: tuple[tuple[str, str | None], ...] | None = None
+
+    def with_dependents_from(self, earlier: RemoteDeletion) -> RemoteDeletion:
+        """Preserve all dependents when aliases queue the same leased ref."""
+        children = None
+        if self.children is not None and earlier.children is not None:
+            children = tuple(dict.fromkeys((*earlier.children, *self.children)))
+        return RemoteDeletion(self.remote, self.ref, self.tip, children)
 
     @property
     def branch(self) -> str:
@@ -899,7 +907,9 @@ class StackCore:
             if ref == f"refs/heads/{default}":
                 self.remove_merged(branch, stacks, delete_local)
                 return True
-            if not self.delete_merged_upstream(branch, RemoteDeletion(remote_name, ref, tip), no_verify, defer):
+            children = tuple((child, git.remote_branch_name(child, remote_name)) for child in stacks.children(branch))
+            deletion = RemoteDeletion(remote_name, ref, tip, children)
+            if not self.delete_merged_upstream(branch, deletion, no_verify, defer):
                 return False
             self.remove_merged(branch, stacks, delete_local)
         else:

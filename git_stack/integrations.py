@@ -97,14 +97,17 @@ class Integrations:
             return
         outside = {stacks.bottom(branch) for branch in stacks if branch not in scope}
         groups_outside = {stacks.group(bottom) for bottom in outside} - {None}
+
+        def has_outside_work(entry: RetiredSource) -> bool:
+            group, parent = entry["group"], entry["parent"]
+            if group is None and parent in stacks:
+                assert parent is not None
+                return stacks.bottom(parent) in outside
+            return (group or parent) in groups_outside
+
         for name, config in configs.items():
             retired = config.get("retired_sources", {})
-            remaining = {
-                branch: entry
-                for branch, entry in retired.items()
-                if entry["group"] in groups_outside
-                or ((parent := entry["parent"]) is not None and parent in stacks and stacks.bottom(parent) in outside)
-            }
+            remaining = {branch: entry for branch, entry in retired.items() if has_outside_work(entry)}
             if remaining != retired:
                 if remaining:
                     config["retired_sources"] = remaining
@@ -175,7 +178,9 @@ class Integrations:
 
     def remember_deletion(self, name: str, deletion: RemoteDeletion) -> None:
         self.git.config_set(
-            name, self.deletion_key(deletion), json.dumps([deletion.remote, deletion.ref, deletion.tip])
+            name,
+            self.deletion_key(deletion),
+            json.dumps([deletion.remote, deletion.ref, deletion.tip, deletion.children]),
         )
 
     def forget_deletion(self, name: str, deletion: RemoteDeletion) -> None:
@@ -187,8 +192,17 @@ class Integrations:
             for (name, key), value in self.git.branch_config().items()
             if name in names
             and key.startswith(DELETE_PREFIX.lower())
-            and (deletion := RemoteDeletion(*cast(tuple[str, str, str], json.loads(value)))).remote == remote
+            and (deletion := self.read_deletion(value)).remote == remote
         ]
+
+    @staticmethod
+    def read_deletion(value: str) -> RemoteDeletion:
+        record = cast(
+            tuple[str, str, str] | tuple[str, str, str, list[tuple[str, str | None]] | None], json.loads(value)
+        )
+        remote, ref, tip = record[:3]
+        children = record[3] if len(record) == 4 else None
+        return RemoteDeletion(remote, ref, tip, None if children is None else tuple((b, r) for b, r in children))
 
     def path(self, name: str) -> pathlib.Path:
         key = hashlib.sha256(name.encode()).hexdigest()[:24]
@@ -291,7 +305,7 @@ class Integrations:
             if stacks.root(source) in integrations:
                 raise StackError(f"{source} is an integration or depends on one")
             source_tip = self.git.rev(f"refs/heads/{source}")
-            if generated and source_tip and generated != source_tip and self.git.is_ancestor(generated, source_tip):
+            if generated and source_tip and self.git.is_ancestor(generated, source_tip):
                 raise StackError(f"{source} contains the generated tip of {name} and depends on it")
 
     def ensure_independent(self, name: str, stacks: Stacks) -> None:
@@ -343,9 +357,10 @@ class Integrations:
             live = self.git.rev(f"refs/heads/{branch}")
             observed[branch] = live
             entry = retired.get(branch)
-            if entry and live is None:
-                source = self.retired_input(source, entry["source"], pending_sources.get(branch))
-            current = self.source(branch, live or source["tip"], source)
+            recorded = entry["source"] if entry and live is None else source
+            current = self.source(branch, live or recorded["tip"], recorded)
+            if entry:
+                current = self.retired_input(source, current, pending_sources.get(branch))
             if entry and live in (None, entry["source"]["tip"]):
                 still_retired[branch] = RetiredSource(source=current, group=entry["group"], parent=entry["parent"])
             if self.local_landing(current, root_tip):

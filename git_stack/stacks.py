@@ -166,6 +166,17 @@ class Stacks:
             return [bottom]
         return [bottom, *sorted(b for b in self.bottoms_in(group) if b != bottom)]
 
+    def continuation_bottoms(self, parent: str | None, group: str | None) -> list[str]:
+        """Find a retired branch's stack after merged bottoms promote their children."""
+        if group is not None:
+            return self.bottoms_in(group)
+        if parent is None:
+            return []
+        if parent in self:
+            return [self.bottom(parent)]
+        # Removing an ungrouped bottom gives its children a group with its name.
+        return self.bottoms_in(parent)
+
     def stack_of(self, branch: str, groups: bool = True) -> list[str]:
         """The branches in tracked branch's stack, parent-before-child: its
         bottom branch and everything stacked on that. With groups, also the

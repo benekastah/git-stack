@@ -281,8 +281,9 @@ Git-stack reports when it starts rebuilding the integration, removes the
 temporary worktree, and checks the atomic push with the remote.
 If sync also deletes merged remote branches, those deletions wait for the
 same push. If the push fails, sync reports the remote branches it kept.
-Rerun sync with the same integration selected to retry those deletions
-with the original leases.
+Rerun sync with the same integration and any surviving child stacks selected
+to retry those deletions with the original leases. Sync updates their work
+and PR bases before removing the old remote branches.
 Sync keeps the remote integration and its work at their existing tips
 if selected work cannot be restacked, for example if another worktree has
 it checked out.
@@ -318,9 +319,9 @@ resume the build. To discard the entire pending build, run `git stack integrate
 --abort <name>` from your regular worktree. The prior integration tip stays
 in place until a build completes.
 Sync records a selected source's tip and stack before removing the merged
-branch. Rerunning sync keeps the surviving work selected and can reuse
-recorded squash-merge proof without GitHub. If the removed source was your
-only selector, add the integration's name to the retry command.
+branch. Rerun the original command with the same selectors. Sync keeps the
+surviving work selected and can reuse recorded squash-merge proof without
+GitHub, including when the source branch still exists locally.
 
 ### `git stack import [<branch>...] [--pr <number|url>]... [--author <login>] [--remote <name>] [-n | -f]`
 
