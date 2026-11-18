@@ -1494,8 +1494,8 @@ On macOS and Windows, the tests are split over several jobs
 (`dev.py tests --shard I/N`), so each finishes within CI's 5-minute limit. A new push to a pull request, or
 to `main`, cancels the run on the older commit, and so does merging or closing
 a pull request. A pull request that changes only docs skips the tests, but
-still checks that the man page is up to date with this README
-(`dev.py man --check`).
+if it changes this README, it still runs the static checks, which check that
+the man page is up to date with it (`dev.py man --check`).
 
 ### Git hooks
 
@@ -1507,7 +1507,10 @@ change that adds one) is installed by the next commit or push that uses it.
 - `pre-commit` formats the staged Python files with Ruff and applies its safe
   lint fixes, then regenerates the man page, `man/git-stack.1`, and adds it to
   any commit that changes this README. It works on what's staged, so a partly
-  staged file commits just its staged part, formatted.
+  staged file commits just its staged part, formatted. A commit that names its
+  files (`git commit README.md`) can't have the page added, so the hook stops
+  it if the page changes: run `python3 dev.py man`, `git add` the page, then
+  commit without naming files.
 - `pre-push` runs `dev.py static` (formatting, lint and types) before every
   push; CI runs the tests. Skip it with `git push --no-verify` (or
   `git stack push --no-verify`).
@@ -1530,11 +1533,12 @@ request with a merge commit rather than squashing it.
 
 ### Generating the man page
 
-`man/git-stack.1` is generated from this README by `man/build.py`, with pandoc
-(from the `pypandoc_binary` dev dependency) and the filter `man/git-stack.lua`,
-which leaves out the Install and Development sections. The pre-commit hook
-keeps it up to date; without the hook, regenerate it with
-`python3 dev.py man`. The tests fail if it's out of date.
+`man/git-stack.1` is generated from this README by `dev.py man` (the
+template's), with pandoc (from the `pypandoc_binary` dev dependency), leaving
+out the Install and Development sections; its SYNOPSIS is in
+`dev_project.py`. The pre-commit hook keeps it up to date; without the hook,
+regenerate it with `python3 dev.py man`. `dev.py static` (so the pre-push hook
+and CI) fails if it's out of date.
 
 ### The project template
 
@@ -1552,7 +1556,7 @@ uvx copier update --defaults
 and resolve any conflicts it marks, keeping what's git-stack's own (see
 `PROJECT_AGENTS.md`'s "Where git-stack differs from the template"). `dev.py`
 and `AGENTS.md` stay the template's: git-stack's own commands and install
-steps (the man page, `git blame`) are in `dev_project.py`, and its own rules
+steps (the man page's SYNOPSIS, `git blame`) are in `dev_project.py`, and its own rules
 for agents (and people) changing it are in `PROJECT_AGENTS.md`. It never
 changes this README, `PROJECT_AGENTS.md`, `docs/` or
 `.github/workflows/project.yml`.

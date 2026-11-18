@@ -1,15 +1,12 @@
-"""dev_project.py: git-stack's additions to dev.py's install and pre-commit hook."""
+"""dev_project.py: git-stack's additions to dev.py's install."""
 
 import os
 import re
 import subprocess
-import sys
 from pathlib import Path
 from types import ModuleType
 
 import pytest
-
-from tests.helpers import Repo
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -36,7 +33,7 @@ def dev_project(dev: ModuleType) -> ModuleType:
     ("optional_paths", "ignore_revs_file"),
     [(True, ":(optional).git-blame-ignore-revs"), (False, ".git-blame-ignore-revs")],
 )
-def test_install_links_the_man_page_and_sets_up_git_blame(
+def test_install_sets_up_git_blame(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     dev: ModuleType,
@@ -58,34 +55,6 @@ def test_install_links_the_man_page_and_sets_up_git_blame(
     dev.install([])
 
     assert commands[-1] == ("git", "config", "blame.ignoreRevsFile", ignore_revs_file)
-    man_link = tmp_path / ".local" / "share" / "man" / "man1" / "git-stack.1"
-    if sys.platform == "win32":
-        assert not man_link.exists()
-    else:
-        assert man_link.readlink() == ROOT / "man" / "git-stack.1"
-
-
-@pytest.mark.skipif(sys.platform == "win32", reason="git-stack links no man page on Windows")
-def test_install_changes_nothing_when_another_clone_has_the_man_page(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, dev: ModuleType
-) -> None:
-    bin_dir = tmp_path / ".local" / "bin"
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
-    monkeypatch.setattr(dev, "venv", lambda: None)
-    monkeypatch.setattr(dev, "run", lambda *args: None)
-    other_page = tmp_path / "other-clone" / "man" / "git-stack.1"
-    other_page.parent.mkdir(parents=True)
-    other_page.touch()
-    man_link = tmp_path / ".local" / "share" / "man" / "man1" / "git-stack.1"
-    man_link.parent.mkdir(parents=True)
-    man_link.symlink_to(other_page)
-
-    with pytest.raises(SystemExit, match="git-stack.1 points at"):
-        dev.install([])
-
-    assert man_link.readlink() == other_page
-    assert not (bin_dir / "git-stack").is_symlink()
 
 
 def git_version() -> tuple[int, int]:
@@ -100,56 +69,3 @@ def test_the_optional_paths_probe_says_yes_on_a_git_that_takes_them(dev_project:
     # The real probe, in this clone: a broken one would answer no, and install would set a
     # blame.ignoreRevsFile that fails on checkouts without the file.
     assert dev_project._git_has_optional_paths()  # pyright: ignore[reportPrivateUsage]
-
-
-def commit_new(repo: Repo, files: dict[str, str]) -> None:
-    for name, content in files.items():
-        (repo.path / name).parent.mkdir(parents=True, exist_ok=True)
-        repo.write(name, content)
-    repo.git("add", *files)
-    repo.git("commit", "--quiet", "-m", "add files")
-
-
-def built_from(monkeypatch: pytest.MonkeyPatch, dev_project: ModuleType, repo: Repo) -> list[str]:
-    """Point dev_project at repo, with `man` recording the README each build reads and
-    writing a page from it."""
-    monkeypatch.setattr(dev_project, "ROOT", repo.path)
-    monkeypatch.setattr(dev_project, "PAGE", repo.path / "man" / "git-stack.1")
-    readmes: list[str] = []
-
-    def man(args: list[str]) -> None:
-        assert args[0] == "--readme"
-        readmes.append(Path(args[1]).read_text(encoding="utf-8"))
-        (repo.path / "man" / "git-stack.1").write_text(f"page of {readmes[-1]}", encoding="utf-8")
-
-    monkeypatch.setattr(dev_project, "man", man)
-    return readmes
-
-
-def test_pre_commit_man_builds_the_page_from_the_staged_readme_and_stages_it(
-    monkeypatch: pytest.MonkeyPatch, dev_project: ModuleType, repo: Repo
-) -> None:
-    commit_new(repo, {"README.md": "old\n", "man/git-stack.1": "page of old\n"})
-    repo.write("README.md", "staged\n")
-    repo.git("add", "README.md")
-    repo.write("README.md", "unstaged\n")
-    readmes = built_from(monkeypatch, dev_project, repo)
-
-    dev_project.pre_commit_man([])
-
-    assert readmes == ["staged\n"]
-    assert repo.git("show", ":man/git-stack.1") == "page of staged"
-
-
-def test_pre_commit_man_does_nothing_when_the_page_s_inputs_are_not_staged(
-    monkeypatch: pytest.MonkeyPatch, dev_project: ModuleType, repo: Repo
-) -> None:
-    commit_new(repo, {"README.md": "old\n", "man/git-stack.1": "page of old\n"})
-    repo.write("README.md", "unstaged\n")
-    repo.write("a", "staged\n")
-    repo.git("add", "a")
-    readmes = built_from(monkeypatch, dev_project, repo)
-
-    dev_project.pre_commit_man([])
-
-    assert readmes == []
