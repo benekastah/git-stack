@@ -8,10 +8,10 @@ description: Create and manage stacked pull requests with git-stack (`git stack`
 git-stack keeps stacked branches rebased on each other. It records, in the repo's git config, each
 branch's **parent** (`branch.<name>.stackParent`) and the exact parent commit it was built on, its
 **base** (`branch.<name>.stackBase`). A restack replays only the branch's own commits from that base
-onto the parent, which is why squash-merging the parent never causes conflicts.
+onto the parent. That keeps the parent's commits out of the replay after it is squash-merged.
 
-Words: **stack** (branches built on each other; it can fork), **root** (bottom, usually `main`, not
-managed), **tracked** (git-stack knows the branch), **group** (stacks that were one stack before their
+Words: **stack** (branches built on each other; it can fork), **root** (the branch a stack starts
+from, usually `main`), **tracked** (git-stack knows the branch), **group** (stacks that were one stack before their
 bottom branch merged). Most commands act on the *current stack*: every branch connected to the one you're
 on, including siblings.
 
@@ -47,6 +47,7 @@ git stack push --prs           # push both, open draft PRs, each into its parent
 | Task | Command |
 | --- | --- |
 | New branch on the current one | `git stack create <name>` (`--group <group>` starts it in a group) |
+| Combine several branch tips into one root | `git stack integrate <name> <source-a> <source-b>` |
 | Track existing branches | `git stack track <parent> <branch>...` (`--base <sha>` if the parent moved) |
 | Track open PRs, e.g. new clone | `git stack import` (`-n` previews) |
 | Move through the stack | `git stack next`, `git stack prev` |
@@ -59,7 +60,8 @@ git stack push --prs           # push both, open draft PRs, each into its parent
 
 Keeping a stack current (restack, sync, conflicts) is the `git-stack-sync` skill. Reshaping it is
 `git-stack-rearrange`. When something looks wrong, use `git-stack-troubleshoot`. Breaking a big change
-into a stack is `git-stack-split`.
+into a stack is `git-stack-split`. Building work above several unmerged inputs is
+`git-stack-integrate`.
 
 ## Reading state in scripts
 

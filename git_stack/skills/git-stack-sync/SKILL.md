@@ -18,11 +18,15 @@ worktree (untracked files are fine unless one is in the way of a commit being re
 | Put the stack on the latest `main` | `git stack sync --latest` (or `restack --latest`) |
 | Catch up locally only, no fetch-push | `git stack pull` (or `restack`) |
 | Untrack merged branches in every stack, restacking nothing | `git stack clean` |
-| Branch never pushed, or PRs to open | `git stack push --prs` (`sync` pushes only branches that already have an upstream, and never opens PRs) |
+| Branch never pushed, or PRs to open | `git stack push --prs` (`sync` pushes work branches that already have an upstream) |
 
 `sync` fetches, fast-forwards the root, untracks merged branches (moving their children onto the
-parent), restacks, pulls in commits others pushed, then pushes. It never force-pushes. A branch
-directly on the root only moves if it conflicts with the root's new commits, or with `--latest`.
+parent), restacks, pulls in commits others pushed, then pushes with leases. A branch directly on an
+ordinary root only moves if it conflicts with the root's new commits or with `--latest`.
+
+For stacks on an integration root, `sync` refreshes the integration and publishes it with the
+eligible work. Use `git-stack-integrate` to manage these inputs or resolve a merge stopped in the
+temporary integration worktree.
 
 Ask the user before `-d remote`, `-d both`, `--force`, `--allow-shared`, `--rewritten-upstream`,
 `--pull-tracked-upstream` and `--ignore-revert`: each overrides a protection.
