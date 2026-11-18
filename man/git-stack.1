@@ -294,9 +294,9 @@ Like git, every command accepts \f[CR]\-C <path>\f[R] before it to run
 as if started in \f[CR]<path>\f[R], e.g.
 \f[CR]git stack \-C \(ti/src/app info\f[R], and
 \f[CR]git \-C <path> stack ...\f[R] works too.
-.SS \f[CR]git stack create <name> [\-\-group <group>]\f[R]
-Create \f[CR]<name>\f[R] on top of the current branch, switch to it, and
-track it.
+.SS \f[CR]git stack create <name> [\-\-group <group>] [\-\-from <branch>]\f[R]
+Create \f[CR]<name>\f[R] on top of the current branch (or
+\f[CR]\-\-from <branch>\f[R]), switch to it, and track it.
 \f[CR]git stack branch\f[R] remains available as an alias.
 .PP
 \f[B]When would I use it?\f[R] Whenever you start a new branch for a
@@ -312,6 +312,7 @@ git stack create add\-api        \f[I]# stacked on main\f[R]
 git stack create use\-api        \f[I]# stacked on add\-api\f[R]
 git switch main
 git stack create search\-ui \-\-group search   \f[I]# a new stack, in group search\f[R]
+git stack create add\-api\-fix \-\-from add\-api \f[I]# on add\-api, wherever you are\f[R]
 .EE
 .IP \(bu 2
 Uncommitted changes come along to the new branch, as with
@@ -336,6 +337,10 @@ Whatever untracked branch is at the bottom of a stack (usually
 fast\-forward it to its upstream.
 If you branch off a branch that isn\(aqt tracked, that branch becomes
 the root.
+.IP \(bu 2
+\f[CR]\-\-from\f[R] takes a local branch, and works from any branch,
+since it\(aqs what the new branch is made from.
+It switches to the new branch, as without it.
 .IP \(bu 2
 \f[CR]\-\-group\f[R] puts the new branch\(aqs stack in
 \f[CR]<group>\f[R] (see Groups), as \f[CR]git stack group add\f[R]
@@ -764,6 +769,7 @@ they\(aqre merged.
 .EX
 git stack restack
 git stack restack \-\-onto main           \f[I]# move the current branch onto main, then restack\f[R]
+git stack restack pr2 \-\-onto main       \f[I]# move pr2 onto main, from wherever you are\f[R]
 git stack restack \-\-latest              \f[I]# also move the stack onto main\(aqs latest commit\f[R]
 .EE
 .IP \(bu 2
@@ -774,9 +780,11 @@ See How it works.
 A branch with merge commits must be restacked manually while preserving
 those merges; git\-stack refuses to replay it as a linear history.
 .IP \(bu 2
-\f[CR]\-\-onto\f[R] retargets only the current branch, onto another
-local branch.
-The branches stacked on it come along.
+\f[CR]\-\-onto\f[R] retargets one branch, onto another local branch: the
+one branch you name, or the current branch if you name none.
+It can\(aqt be combined with \f[CR]\-\-group\f[R] or several branches.
+The branches stacked on it come along, and you stay on the branch you
+were on.
 .IP \(bu 2
 \f[CR]\-l\f[R]/\f[CR]\-\-latest\f[R] moves the branches on the
 stack\(aqs root onto its latest commit even if they don\(aqt conflict

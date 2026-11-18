@@ -86,10 +86,11 @@ def stack(autospec_stack: Any) -> Any:
 @pytest.mark.parametrize(
     ("argv", "method", "args", "kwargs"),
     [
-        (["branch", "pr1"], "branch", ("pr1",), {"group": None}),
-        (["create", "pr1"], "branch", ("pr1",), {"group": None}),
-        (["create", "pr1", "--group", "feat"], "branch", ("pr1",), {"group": "feat"}),
-        (["branch", "pr1", "--group", "feat"], "branch", ("pr1",), {"group": "feat"}),
+        (["branch", "pr1"], "branch", ("pr1",), {"group": None, "from_branch": None}),
+        (["create", "pr1"], "branch", ("pr1",), {"group": None, "from_branch": None}),
+        (["create", "pr1", "--group", "feat"], "branch", ("pr1",), {"group": "feat", "from_branch": None}),
+        (["branch", "pr1", "--group", "feat"], "branch", ("pr1",), {"group": "feat", "from_branch": None}),
+        (["create", "pr2", "--from", "pr1"], "branch", ("pr2",), {"group": None, "from_branch": "pr1"}),
         (["track", "main"], "track", ("main", []), {"base": None}),
         (["track", "main", "pr1", "pr2", "--base", "abc123"], "track", ("main", ["pr1", "pr2"]), {"base": "abc123"}),
         (
@@ -150,6 +151,7 @@ def stack(autospec_stack: Any) -> Any:
         (["restack"], "restack", ([], []), {"onto": None, "latest": False}),
         (["restack", "-l"], "restack", ([], []), {"onto": None, "latest": True}),
         (["restack", "--allow-shared"], "restack", ([], []), {"onto": None, "latest": False}),
+        (["restack", "pr2", "--onto", "main"], "restack", (["pr2"], []), {"onto": "main", "latest": False}),
         (
             ["restack", "--onto", "main", "--latest"],
             "restack",

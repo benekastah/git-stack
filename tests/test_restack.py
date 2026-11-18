@@ -385,6 +385,33 @@ def test_restack_onto_suggests_tracking_untracked_branch(repo: Repo, client: Sta
         client.restack(onto="main")
 
 
+def test_restack_onto_moves_the_named_branch_without_switching_to_it(repo: Repo, client: StackClient) -> None:
+    repo.make_stack()
+    repo.git("switch", "--quiet", "main")
+
+    client.restack(["pr2"], onto="main")
+
+    repo.assert_stacked("pr2", "main", ["pr2 c1"])
+    repo.assert_stacked("pr3", "pr2", ["pr3 c1"])
+    assert repo.git("branch", "--show-current") == "main"
+
+
+def test_restack_onto_a_named_branch_suggests_tracking_it_if_untracked(repo: Repo, client: StackClient) -> None:
+    repo.git("switch", "--quiet", "-c", "loose")
+    repo.git("switch", "--quiet", "main")
+
+    with pytest.raises(StackError, match="loose isn't in a stack; use `git stack track` first"):
+        client.restack(["loose"], onto="main")
+
+
+@pytest.mark.parametrize(("branches", "groups"), [(["pr2", "pr3"], []), ([], ["feature"]), (["pr2"], ["feature"])])
+def test_restack_onto_moves_one_branch(repo: Repo, client: StackClient, branches: list[str], groups: list[str]) -> None:
+    repo.make_stack()
+
+    with pytest.raises(StackError, match="--onto moves one branch"):
+        client.restack(branches, groups, onto="main")
+
+
 def test_restack_refuses_outside_a_stack(repo: Repo, client: StackClient) -> None:
     repo.make_stack()
     repo.git("switch", "--quiet", "main")

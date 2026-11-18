@@ -180,9 +180,10 @@ Like git, every command accepts `-C <path>` before it to run as if started in
 `<path>`, e.g. `git stack -C ~/src/app info`, and `git -C <path> stack ...`
 works too.
 
-### `git stack create <name> [--group <group>]`
+### `git stack create <name> [--group <group>] [--from <branch>]`
 
-Create `<name>` on top of the current branch, switch to it, and track it.
+Create `<name>` on top of the current branch (or `--from <branch>`), switch to
+it, and track it.
 `git stack branch` remains available as an alias.
 
 **When would I use it?** Whenever you start a new branch for a pull request,
@@ -196,6 +197,7 @@ git stack create add-api        # stacked on main
 git stack create use-api        # stacked on add-api
 git switch main
 git stack create search-ui --group search   # a new stack, in group search
+git stack create add-api-fix --from add-api # on add-api, wherever you are
 ```
 
 - Uncommitted changes come along to the new branch, as with `git switch -c`.
@@ -210,6 +212,8 @@ git stack create search-ui --group search   # a new stack, in group search
 - Whatever untracked branch is at the bottom of a stack (usually `main`) is its
   root, and `sync` and `clean` fast-forward it to its upstream. If you branch
   off a branch that isn't tracked, that branch becomes the root.
+- `--from` takes a local branch, and works from any branch, since it's what
+  the new branch is made from. It switches to the new branch, as without it.
 - `--group` puts the new branch's stack in `<group>` (see [Groups](#groups)),
   as `git stack group add` would. If the stack is in another group already,
   it refuses without creating the branch.
@@ -545,6 +549,7 @@ to be up to date before they're merged.
 ```sh
 git stack restack
 git stack restack --onto main           # move the current branch onto main, then restack
+git stack restack pr2 --onto main       # move pr2 onto main, from wherever you are
 git stack restack --latest              # also move the stack onto main's latest commit
 ```
 
@@ -553,8 +558,10 @@ git stack restack --latest              # also move the stack onto main's latest
   [How it works](#how-it-works).
 - A branch with merge commits must be restacked manually while preserving
   those merges; git-stack refuses to replay it as a linear history.
-- `--onto` retargets only the current branch, onto another local branch. The
-  branches stacked on it come along.
+- `--onto` retargets one branch, onto another local branch: the one branch
+  you name, or the current branch if you name none. It can't be combined with
+  `--group` or several branches. The branches stacked on it come along, and you
+  stay on the branch you were on.
 - `-l`/`--latest` moves the branches on the stack's root onto its latest commit
   even if they don't conflict with it (and the rest of the stack with them).
 - Merged branches are skipped and their children restacked onto their parent;

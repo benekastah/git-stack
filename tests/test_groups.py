@@ -304,13 +304,6 @@ def test_unknown_argument_names_nothing(repo: Repo, client: StackClient) -> None
         client.restack(["nope-*"])
 
 
-def test_restack_onto_refuses_branch_arguments(repo: Repo, client: StackClient) -> None:
-    two_stacks(repo, client)
-
-    with pytest.raises(StackError, match="--onto moves the current branch"):
-        client.restack(["feat-a"], onto="main")
-
-
 def test_sync_from_main_syncs_the_stacks_named(repo: Repo, client: StackClient) -> None:
     make_siblings(repo, client)
     repo.git("switch", "--quiet", "main")
