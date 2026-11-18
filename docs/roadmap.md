@@ -27,3 +27,14 @@ Changing the choice once the other child is in the GitHub stack needs
 
 Groups aren't the way to say it: a group holds whole stacks, not paths
 within one, and groups are made automatically after merges.
+
+## Import only works on PRs
+
+I should be able to express how I'd like to import remote branches:
+
+```bash
+git stack import branch-a branch-b
+```
+
+This would create a stack branch-a -> branch-b. I'm not sure how best to import
+more complicated shapes; maybe some kind of basic syntax could work here.
