@@ -1382,6 +1382,13 @@ rewrites) then won't. On Windows, `GIT_STACK_GIT` has to name an `.exe`:
 git-stack refuses a batch file (`.bat` or `.cmd`), which would run in cmd.exe,
 where characters a branch name can have (`&`, `|`, `%`) mean something else.
 
+## Agent skills
+
+`skills/` has [Agent Skills](https://agentskills.io) for coding agents (Claude Code, Codex, ...) that
+use git-stack: `git-stack` teaches the model, the rules (use `git stack` rather than plain git on
+a tracked branch) and everyday commands. Point your agent at that directory, e.g. link it from
+`.claude/skills` or `.agents/skills`.
+
 ## Install
 
 Runs on Linux, macOS and Windows. Requires Python 3.15+ and git 2.38+. The

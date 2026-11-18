@@ -1934,5 +1934,16 @@ On Windows, \f[CR]GIT_STACK_GIT\f[R] has to name an \f[CR].exe\f[R]:
 git\-stack refuses a batch file (\f[CR].bat\f[R] or \f[CR].cmd\f[R]),
 which would run in cmd.exe, where characters a branch name can have
 (\f[CR]&\f[R], \f[CR]|\f[R], \f[CR]%\f[R]) mean something else.
+.SH AGENT SKILLS
+\f[CR]skills/\f[R] has \c
+.UR https://agentskills.io
+Agent Skills
+.UE \c
+\ for coding agents (Claude Code, Codex, ...)
+that use git\-stack: \f[CR]git\-stack\f[R] teaches the model, the rules
+(use \f[CR]git stack\f[R] rather than plain git on a tracked branch) and
+everyday commands.
+Point your agent at that directory, e.g.
+link it from \f[CR].claude/skills\f[R] or \f[CR].agents/skills\f[R].
 .SH LICENSE
 git\-stack is released under the MIT License; see \f[CR]LICENSE\f[R].
