@@ -26,7 +26,7 @@ def stack_commands(text: str) -> list[str]:
     lines = [m.group(1) for m in CODE_SPAN.finditer(text)]
     fenced = False
     for line in text.splitlines():
-        if line.startswith("```"):
+        if line.lstrip().startswith("```"):
             fenced = not fenced
         elif fenced:
             lines.append(line.strip())
@@ -79,3 +79,8 @@ def test_a_skill_doesnt_tell_an_agent_to_run_what_waits_for_a_person(path: pathl
 def test_stack_commands_reads_what_a_skill_writes() -> None:
     text = "Run `git stack sync [-l] <branch>` then:\n```sh\ngit stack push --prs  # go\nmake test && git stack info\n```\n"
     assert stack_commands(text) == ["sync x", "push --prs", "info"]
+
+
+def test_stack_commands_reads_a_fenced_block_indented_in_a_list_item() -> None:
+    text = "- step:\n  ```sh\n  git stack track x y --base z\n  ```\n"
+    assert stack_commands(text) == ["track x y --base z"]
