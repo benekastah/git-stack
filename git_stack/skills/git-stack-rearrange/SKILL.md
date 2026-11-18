@@ -6,8 +6,9 @@ description: Reshape stacked branches with git-stack - move a branch to another 
 # Rearranging a stack
 
 Read the `git-stack` skill first. Commit everything first: restacking needs a clean worktree.
-Every move below is `git stack restack --onto <parent>` on a branch (its children come along, and
-only its own commits are replayed) or `git stack track <parent> <branch>`, which only records a new parent and base.
+Every move below is `git stack restack <branch> --onto <parent>` (the branch's children come along,
+and only its own commits are replayed) or `git stack track <parent> <branch>`, which only records a
+new parent and base. Naming the branch means you needn't switch to it.
 After rearranging, run `git stack info --all --offline` to check the shape, then `git stack push`.
 
 ## Moves
@@ -15,24 +16,20 @@ After rearranging, run `git stack info --all --offline` to check the shape, then
 **Move a branch (and what's on it) onto another parent**, e.g. `b` onto `main`:
 
 ```sh
-git switch b
-git stack restack --onto main
+git stack restack b --onto main
 ```
 
 **Insert `a2` between `a` and `b`:**
 
 ```sh
-git switch a
-git stack create a2          # ...commit...
-git switch b
-git stack restack --onto a2
+git stack create a2 --from a   # switches to a2; ...commit...
+git stack restack b --onto a2
 ```
 
 **Remove `b` from between `a` and `c`**, dropping b's changes from `c`:
 
 ```sh
-git switch c
-git stack restack --onto a
+git stack restack c --onto a
 git stack untrack b          # then delete b yourself if the user wants it gone
 ```
 
@@ -48,12 +45,9 @@ git stack track a c          # c was on b; put it on a
 **Swap `a` and `b`** (`main` → `a` → `b` → `c` becomes `main` → `b` → `a` → `c`):
 
 ```sh
-git switch b
-git stack restack --onto main    # b, with c, onto main
-git switch a
-git stack restack --onto b       # a onto b
-git switch c
-git stack restack --onto a       # c back on top
+git stack restack b --onto main    # b, with c, onto main
+git stack restack a --onto b       # a onto b
+git stack restack c --onto a       # c back on top
 ```
 
 **Rename:** `git stack rename <new>`. Plain `git branch -m` leaves the branch's children pointing
@@ -65,12 +59,9 @@ at the old name.
 moving `big`, or `part2` silently loses its commit (it's then only in the reflog):
 
 ```sh
-git switch big
-git stack create part2           # same tip as big
+git stack create part2 --from big   # same tip as big; you're on part2
 git stack track big part2 --base HEAD~1
-git switch big
-git reset --keep HEAD~1          # big is now the first commit
-git switch part2
+git branch -f big HEAD~1         # big is now the first commit
 git stack restack
 ```
 
@@ -87,8 +78,11 @@ git commit -m "<message>"
 git stack restack                # the branches above follow
 ```
 
-This needs no editor. Reordering or dropping commits inside a branch has no git-stack command yet,
-and git's interactive rebase needs a person at an editor: ask the user.
+This needs no editor. Reordering, splitting or regrouping commits inside a branch has no git-stack
+command, and git's interactive rebase needs a person at an editor. If `git-recommit` is installed
+(`command -v git-recommit`), use it, and its skill if that's installed too: give it the range
+`$(git stack base)..HEAD`, then `git stack restack` so the branches above follow. If it isn't
+installed, ask the user.
 
 ## Groups
 

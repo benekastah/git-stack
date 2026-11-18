@@ -37,8 +37,7 @@ on, including siblings.
 ## Starting and managing a stack
 
 ```sh
-git switch main
-git stack create add-api       # PR 1, on main
+git stack create add-api --from main   # PR 1, on main
 # ...commit...
 git stack create use-api       # PR 2, on add-api
 # ...commit...

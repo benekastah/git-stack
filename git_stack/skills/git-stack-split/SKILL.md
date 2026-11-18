@@ -28,8 +28,7 @@ instructions).
 For a change that's already one branch `big`, carve it by files, one branch per step:
 
 ```sh
-git switch main
-git stack create step1-model
+git stack create step1-model --from main
 git checkout big -- lib/model.py   # this step's files
 git commit -m "..."
 git stack create step2-api         # stacked on step1-model
@@ -38,7 +37,9 @@ git commit -m "..."
 ```
 
 For a change that's several commits on `big`, split by commit instead: see `git-stack-rearrange`
-("Split a branch in two").
+("Split a branch in two"). If the change is a tangle of hunks rather than whole files or commits, and
+`git-recommit` is installed (`command -v git-recommit`), use it (and its skill, if installed) to
+rebuild the commits first, choosing changes a hunk or a line at a time.
 
 ## Check it
 

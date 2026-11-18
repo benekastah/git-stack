@@ -15,7 +15,7 @@ worktree (untracked files are fine unless one is in the way of a commit being re
 | You committed to a branch that has branches stacked on it | `git stack restack`, then `git stack push` |
 | A PR merged, `main` moved, or someone pushed to your branch | `git stack sync` |
 | Also delete merged local branches | `git stack sync -d local` |
-| Put the stack on the latest `main` even without a conflict | `git stack sync --latest` (or `restack --latest`) |
+| Put the stack on the latest `main` | `git stack sync --latest` (or `restack --latest`) |
 | Catch up locally only, no fetch-push | `git stack pull` (or `restack`) |
 | Untrack merged branches in every stack, restacking nothing | `git stack clean` |
 | Branch never pushed, or PRs to open | `git stack push --prs` (`sync` pushes only branches that already have an upstream, and never opens PRs) |
