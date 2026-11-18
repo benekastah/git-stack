@@ -36,7 +36,12 @@ def test_info_shows_both_bases_and_reports_when_their_dependents_need_replay(rep
 
     client.restack()
     assert repo.stack(*args).stdout == (
-        "main\n└── first\n    └── combined\n        └── child *\nrelease\n└── second\n    └── combined (see first)\n"
+        "main\n"
+        f"{'└── first':19} ─┐\n"
+        f"{'    └── combined':19} ←┤\n"
+        "        └── child *  │\n"
+        f"{'release':19}  │\n"
+        f"{'└── second':19} ─┘\n"
     )
     assert [item["status"] for item in listing()[-2:]] == ["up-to-date", "up-to-date"]
 

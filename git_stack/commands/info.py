@@ -181,9 +181,63 @@ def tree_children(branches: list[BranchInfo]) -> dict[str | GroupHeader, list[Br
             children.setdefault(header, []).append(branch)
         else:
             children.setdefault(branch.parent, []).append(branch)
-        for parent in branch.additional_parents:
-            children.setdefault(parent, []).append(branch)
     return children
+
+
+type TreeRow = tuple[str, BranchInfo | GroupHeader]
+
+
+def tree_rows(branches: list[BranchInfo], flip: bool) -> list[TreeRow]:
+    """Draw the primary-parent tree, with one row per branch."""
+    children = tree_children(branches)
+    rows: list[TreeRow] = []
+    for root in branches:
+        if root.parent is not None:
+            continue
+        drawn: list[TreeRow] = []
+        pending: list[tuple[str, BranchInfo | GroupHeader, str]] = [("", root, "")]
+        while pending:
+            tree, row, prefix = pending.pop()
+            drawn.append((tree, row))
+            key = row if isinstance(row, GroupHeader) else row.name
+            kids = children.get(key, ())
+            for index in reversed(range(len(kids))):
+                last = index == len(kids) - 1
+                elbow = ("┌── " if flip else "└── ") if last else "├── "
+                pending.append((prefix + elbow, kids[index], prefix + ("    " if last else "│   ")))
+        rows.extend(reversed(drawn) if flip else drawn)
+    return rows
+
+
+def base_brackets(rows: list[TreeRow]) -> dict[int, str]:
+    """Bracket each multi-base branch and its bases, with an arrow at the branch."""
+    positions = {row.name: i for i, (_, row) in enumerate(rows) if isinstance(row, BranchInfo)}
+    brackets: list[tuple[int, int, int, set[int]]] = []
+    for i, (_, row) in enumerate(rows):
+        if not isinstance(row, BranchInfo) or not row.additional_parents:
+            continue
+        bases = {positions[base] for base in (row.parent, *row.additional_parents) if base in positions}
+        if bases:
+            members = bases | {i}
+            brackets.append((min(members), max(members), i, members))
+
+    columns: list[int] = []
+    lines: dict[int, list[str]] = {}
+    for start, end, combined, members in sorted(brackets):
+        column = next((n for n, last in enumerate(columns) if last < start), len(columns))
+        if column == len(columns):
+            columns.append(end)
+        else:
+            columns[column] = end
+        for i in range(start, end + 1):
+            fields = lines.setdefault(i, [])
+            fields.extend(["   "] * (column + 1 - len(fields)))
+            if i in members:
+                end_piece = "┐" if i == start else "┘" if i == end else "┤"
+                fields[column] = (" ←" if i == combined else " ─") + end_piece
+            else:
+                fields[column] = "  │"
+    return {i: "".join(fields) for i, fields in lines.items()}
 
 
 def print_tree(
@@ -198,42 +252,22 @@ def print_tree(
     color = use_color(stack)
     paint = painter(color)
     flip = orientation(stack) is Orientation.ROOT_AT_BOTTOM
-    children = tree_children(branches)
-
-    # (the tree drawn before branch, branch), in the order they're printed.
-    rows: list[tuple[str, BranchInfo | GroupHeader, bool]] = []
-
-    def add(
-        branch: BranchInfo | GroupHeader, prefix: str, drawn: list[tuple[str, BranchInfo | GroupHeader, bool]]
-    ) -> None:
-        kids = children.get(branch if isinstance(branch, GroupHeader) else branch.name, [])
-        for i, kid in enumerate(kids):
-            last = i == len(kids) - 1
-            reference = isinstance(branch, BranchInfo) and isinstance(kid, BranchInfo) and kid.parent != branch.name
-            drawn.append((f"{prefix}{('┌── ' if flip else '└── ') if last else '├── '}", kid, reference))
-            if not reference:
-                add(kid, prefix + ("    " if last else "│   "), drawn)
-
-    for branch in branches:
-        if branch.parent is None:
-            drawn: list[tuple[str, BranchInfo | GroupHeader, bool]] = [("", branch, False)]
-            add(branch, "", drawn)
-            # Upside down, the tree reads the same, mirrored.
-            rows.extend(reversed(drawn) if flip else drawn)
-
-    # Pull request links go in a right-aligned column after the longest line.
-    def row_label(row: BranchInfo | GroupHeader, reference: bool, row_paint: Paint) -> str:
-        text = label(row, row_paint, color)
-        return f"{text} (see {row.parent})" if reference and isinstance(row, BranchInfo) else text
-
-    widths = [len(tree) + len(row_label(row, reference, painter(False))) for tree, row, reference in rows]
-    links = [link_of(row, new_links) for _, row, _ in rows]
-    link_width = max(len(link[0]) if link else 0 for link in links)
-    for (tree, row, reference), width, link in zip(rows, widths, links, strict=True):
-        line = paint(tree, TREE) + row_label(row, reference, paint)
+    rows = tree_rows(branches, flip)
+    brackets = base_brackets(rows)
+    plain = painter(False)
+    widths = [len(tree) + len(label(row, plain, color)) for tree, row in rows]
+    tree_width = max(widths, default=0)
+    bracket_width = max(map(len, brackets.values()), default=0)
+    links = [link_of(row, new_links) for _, row in rows]
+    link_width = max((len(link[0]) for link in links if link), default=0)
+    for i, ((tree, row), width, link) in enumerate(zip(rows, widths, links, strict=True)):
+        line = paint(tree, TREE) + label(row, paint, color)
+        if bracket := brackets.get(i):
+            line += " " * (tree_width - width) + paint(bracket, TREE)
+            width = tree_width + len(bracket)
         if link:
             text, link_color = link
-            line += " " * (max(widths) - width + 2) + paint(text.rjust(link_width), link_color)
+            line += " " * (tree_width + bracket_width - width + 2) + paint(text.rjust(link_width), link_color)
         print(line)
 
 

@@ -420,6 +420,8 @@ git stack info
 ```
 
 - `*` marks the current branch.
+- A bracket connects a branch with multiple bases to its base branches. The
+  `←` points to the dependent branch, which appears once under its first base.
 - To draw each stack upside down, with its root at the bottom (as
   `git log --graph` and other stacking tools do), run
   `git config --global stack.orientation root-at-bottom`. The default is

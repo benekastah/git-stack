@@ -606,6 +606,10 @@ git stack info
 .IP \(bu 2
 \f[CR]*\f[R] marks the current branch.
 .IP \(bu 2
+A bracket connects a branch with multiple bases to its base branches.
+The \f[CR]←\f[R] points to the dependent branch, which appears once
+under its first base.
+.IP \(bu 2
 To draw each stack upside down, with its root at the bottom (as
 \f[CR]git log \-\-graph\f[R] and other stacking tools do), run
 \f[CR]git config \-\-global stack.orientation root\-at\-bottom\f[R].

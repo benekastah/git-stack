@@ -980,8 +980,33 @@ def test_info_does_not_repeat_subtrees_for_secondary_dependencies(
     main(["info"], stack=stack)
 
     lines = capsys.readouterr().out.splitlines()
-    assert len(lines) == 41
-    assert sum("combined9" in line for line in lines) == 2
+    assert len(lines) == 31
+    assert sum("combined9" in line for line in lines) == 1
+
+
+@pytest.mark.parametrize("flipped", [False, True])
+def test_info_brackets_all_bases_and_shows_the_combined_branch_once(
+    stack: Any, capsys: pytest.CaptureFixture[str], flipped: bool
+) -> None:
+    stack.git.config_value.return_value = "root-at-bottom" if flipped else "root-at-top"
+    stack.info.return_value = [
+        BranchInfo("main", None, None, current=False),
+        BranchInfo("first", "main", BranchStatus.UP_TO_DATE, current=False, group="work"),
+        BranchInfo("normal", "first", BranchStatus.UP_TO_DATE, current=False),
+        BranchInfo("second", "main", BranchStatus.UP_TO_DATE, current=False, group="work"),
+        BranchInfo("third", "main", BranchStatus.UP_TO_DATE, current=False, group="work"),
+        BranchInfo("combined", "first", BranchStatus.UP_TO_DATE, current=True, additional_parents=("second", "third")),
+    ]
+
+    main(["info"], stack=stack)
+
+    lines = capsys.readouterr().out.splitlines()
+    assert sum("combined" in line for line in lines) == 1
+    assert next(line for line in lines if "first" in line).endswith("┘" if flipped else "┐")
+    assert next(line for line in lines if "second" in line).endswith("┤")
+    assert next(line for line in lines if "third" in line).endswith("┐" if flipped else "┘")
+    assert "←" in next(line for line in lines if "combined" in line)
+    assert "←" not in next(line for line in lines if "normal" in line)
 
 
 @pytest.mark.parametrize(
