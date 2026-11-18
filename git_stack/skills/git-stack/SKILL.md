@@ -17,8 +17,10 @@ on, including siblings.
 
 ## Rules
 
-1. **Look first.** Run `git stack info --all` before changing anything: it shows each stack, which
-   branches need a restack, and merged or reverted ones.
+1. **Look first.** Run `git stack info --all --offline` before changing anything: it shows each stack
+   and which branches need a restack. Without `--offline`, `info` also asks GitHub about each pull
+   request (about a second), for PR links and GitHub's view of what merged; add that only when you
+   need it.
 2. **Never use plain git on a tracked branch** for what a git-stack command does. It moves the branch
    without updating the recorded base, and the next restack then replays the wrong commits.
    - New branch: `git stack create <name>`, not `git switch -c`.
@@ -26,13 +28,11 @@ on, including siblings.
    - Push: `git stack push`, not `git push`. Update from remote: `git stack pull` or `git stack sync`,
      not `git pull`.
    - Rename: `git stack rename <new>`, not `git branch -m`. Stop tracking: `git stack untrack`.
-   - Committing, amending and `git rebase -i $(git stack base)` on a branch's own commits are fine;
-     restack afterwards so the branches above it follow.
+   - Committing and amending a branch's own commits are fine; restack afterwards so the branches
+     above it follow.
 3. **Commit before running.** `restack` and `sync` refuse a dirty worktree.
 4. **Don't pass `--allow-shared` or `--force` on your own.** A shared stack (someone else's commits)
    is protected on purpose. Ask the user first.
-5. **One worktree per stack** when several things are in flight; git-stack skips branches checked out
-   in other worktrees.
 
 ## Starting and managing a stack
 
@@ -73,4 +73,5 @@ git diff $(git stack parent)...        # what this branch's PR changes
 git log --oneline $(git stack base)..  # this branch's own commits
 ```
 
-Run `git stack --help` for every flag; the README has the details.
+Run `git stack -h` for the commands, and e.g. `git stack restack --help` for one command's flags. Don't
+run `--help` without a command: it opens a man page in a pager, which an agent can't use.

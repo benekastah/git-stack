@@ -69,6 +69,13 @@ def test_a_skill_names_itself_and_says_when_to_use_it(path: pathlib.Path) -> Non
     assert fields["description"].strip()
 
 
+@pytest.mark.parametrize("path", SKILL_FILES, ids=lambda p: f"{p.parent.name}/{p.name}")
+@pytest.mark.parametrize("hangs", ["rebase -i", "rebase --interactive", "git stack --help"])
+def test_a_skill_doesnt_tell_an_agent_to_run_what_waits_for_a_person(path: pathlib.Path, hangs: str) -> None:
+    """These open an editor or a pager, which an agent can't use. (`git stack <command> --help` is fine.)"""
+    assert hangs not in path.read_text(encoding="utf-8")
+
+
 def test_stack_commands_reads_what_a_skill_writes() -> None:
     text = "Run `git stack sync [-l] <branch>` then:\n```sh\ngit stack push --prs  # go\nmake test && git stack info\n```\n"
     assert stack_commands(text) == ["sync x", "push --prs", "info"]
