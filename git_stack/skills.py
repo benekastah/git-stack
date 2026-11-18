@@ -83,33 +83,33 @@ def make_link(link: pathlib.Path, target: pathlib.Path) -> None:
         _winapi.CreateJunction(str(target), str(link))  # pyright: ignore[reportUnknownMemberType]
 
 
-def plan_skill(agent: Agent, source: pathlib.Path, reinstall: bool) -> tuple[pathlib.Path, InstallAction | str]:
+def plan_skill(agent: Agent, source: pathlib.Path, replace: bool) -> tuple[pathlib.Path, InstallAction | str]:
     """Where the skill directory source goes in agent's skills directory, and what
     installing it does there, or why it can't: a link to another directory (that still
-    exists) is left alone unless reinstall, and a file or directory that isn't a link
+    exists) is left alone unless replace, and a file or directory that isn't a link
     never is."""
     link = agent.skills_dir() / source.name
     if is_link(link):
         if link.resolve() == source.resolve():
             return link, InstallAction.UNCHANGED
-        if reinstall or not link.exists():
+        if replace or not link.exists():
             return link, InstallAction.REPLACED
-        return link, f"{link} is a link to {link.resolve()}, not git-stack's; rerun with --reinstall to replace it"
+        return link, f"{link} is a link to {link.resolve()}, not git-stack's; rerun with --replace to replace it"
     if link.exists():
         return link, f"{link} exists and isn't a link; move it away to install git-stack's {source.name} skill"
     return link, InstallAction.LINKED
 
 
-def install(names: Sequence[str], reinstall: bool = False) -> list[Installed]:
+def install(names: Sequence[str], replace: bool = False) -> list[Installed]:
     """Link every packaged skill into the skills directory of each agent in
     names, or, if there are none, of each agent found in use. Changes nothing if
-    a link can't be made (see plan_skill); reinstall replaces links to other directories."""
+    a link can't be made (see plan_skill); replace takes over links to other directories."""
     agents = [a for a in AGENTS if a.name in names] or [a for a in AGENTS if any(p.exists() for p in a.marks())]
     if not agents:
         options = " or ".join(f"--{a.name}" for a in AGENTS)
         raise StackError(f"found no agent to install skills for; name one with {options}")
     sources = sorted(p for p in PACKAGED_SKILLS.iterdir() if p.is_dir())
-    plans = [(agent, source, *plan_skill(agent, source, reinstall)) for agent in agents for source in sources]
+    plans = [(agent, source, *plan_skill(agent, source, replace)) for agent in agents for source in sources]
     refusals = [what for *_, what in plans if isinstance(what, str)]
     if refusals:
         raise StackError("\n".join(refusals))

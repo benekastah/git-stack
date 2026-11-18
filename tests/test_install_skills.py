@@ -97,15 +97,15 @@ def test_it_leaves_a_link_to_somewhere_else_and_changes_nothing(
 
     assert main(["install-skills", "--claude"]) == 1
 
-    assert "--reinstall" in capsys.readouterr().err
+    assert "--replace" in capsys.readouterr().err
     assert link.resolve() == (tmp_path / "elsewhere").resolve()
     assert [p.name for p in link.parent.iterdir()] == ["git-stack-sync"]
 
 
-def test_reinstall_replaces_a_link_to_somewhere_else(home: pathlib.Path, tmp_path: pathlib.Path) -> None:
+def test_replace_replaces_a_link_to_somewhere_else(home: pathlib.Path, tmp_path: pathlib.Path) -> None:
     link = link_to_elsewhere(home, tmp_path)
 
-    assert main(["install-skills", "--claude", "--reinstall"]) == 0
+    assert main(["install-skills", "--claude", "--replace"]) == 0
 
     assert link.resolve() == (SKILLS / "git-stack").resolve()
 
@@ -124,7 +124,7 @@ def test_it_refuses_to_replace_a_directory_of_your_own(home: pathlib.Path, capsy
     mine.mkdir(parents=True)
     (mine / "SKILL.md").write_text("mine", encoding="utf-8")
 
-    assert main(["install-skills", "--claude", "--reinstall"]) == 1
+    assert main(["install-skills", "--claude", "--replace"]) == 1
 
     assert "git-stack" in capsys.readouterr().err
     assert (mine / "SKILL.md").read_text(encoding="utf-8") == "mine"

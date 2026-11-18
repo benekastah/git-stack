@@ -44,7 +44,7 @@ def install_skills() -> None:
     if run_code(tool("git-stack"), "install-skills") != 0:
         print(
             "warning: couldn't link the agent skills (see above); run `git stack install-skills`"
-            " once an agent is installed (add --reinstall to take over another clone's links)",
+            " once an agent is installed (add --replace to take over another clone's links)",
             file=sys.stderr,
         )
 

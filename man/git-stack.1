@@ -1324,7 +1324,7 @@ Works on the local \f[CR]\-\-from\f[R], without fetching, so run
 \f[CR]git stack sync\f[R] first if the revert only happened on the
 remote.
 Needs a clean worktree.
-.SS \f[CR]git stack install\-skills [\-\-claude] [\-\-codex] [\-\-reinstall] [\-\-json]\f[R]
+.SS \f[CR]git stack install\-skills [\-\-claude] [\-\-codex] [\-\-replace] [\-\-json]\f[R]
 Link git\-stack\(aqs \c
 .UR https://agentskills.io
 Agent Skills
@@ -1362,11 +1362,11 @@ On Windows, where making a symlink usually needs a privilege, it makes a
 directory junction instead.
 .IP \(bu 2
 It leaves a link that\(aqs already right, and a link to somewhere else
-(say, another clone\(aqs skills) unless you pass
-\f[CR]\-\-reinstall\f[R], which replaces it.
+(say, another clone\(aqs skills) unless you pass \f[CR]\-\-replace\f[R],
+which replaces it.
 A link whose target is gone is replaced either way.
 It refuses to replace a real file or directory, even with
-\f[CR]\-\-reinstall\f[R], so a skill of your own with the same name is
+\f[CR]\-\-replace\f[R], so a skill of your own with the same name is
 safe, and it changes nothing if it refuses any link.
 .SH SCRIPTING
 The commands below print one thing per line, for use in scripts,
