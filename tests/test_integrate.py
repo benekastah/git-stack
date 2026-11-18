@@ -63,6 +63,18 @@ def test_create_refresh_and_replace_ordered_sources(repo: Repo, git_calls: list[
     assert repo.git("status", "--porcelain") == ""
 
 
+def test_unchanged_integration_verifies_refs_without_reloading_snapshot(repo: Repo, git_calls: list[GitCall]) -> None:
+    integration(repo)
+    work(repo)
+    git_calls.clear()
+
+    result = repo.stack("restack")
+
+    assert sum(call[:1] == ["for-each-ref"] for call in git_calls) == 1
+    assert any(call[:2] == ["update-ref", "--stdin"] for call in git_calls)
+    assert "rebuilding integration" not in result.stdout
+
+
 @pytest.mark.parametrize("command", ["restack", "pull", "sync"])
 @pytest.mark.parametrize("checkout", ["combined", "work"])
 def test_refresh_from_root_or_work_branch(repo: Repo, command: str, checkout: str) -> None:
@@ -886,6 +898,7 @@ def test_push_refuses_to_replace_a_remote_integration_deleted_since_last_fetch(
 
     result = repo.stack("push", *args, expect_success=False)
 
+    assert "checking whether origin will accept the push" in result.stdout
     assert "push would fail" in result.stderr
     assert tip(repo, "work", remote=True) == before
     assert gh.calls("pr", "edit") == []
@@ -918,8 +931,13 @@ def test_push_refreshes_integration_and_publishes_work_with_its_base(
     repo.commit("c", "latest work\n", "advance work")
     git_calls.clear()
 
-    repo.stack("push")
+    result = repo.stack("push")
 
+    assert ("rebuilding integration combined" in result.stdout) is not restack_first
+    assert ("removing the temporary worktree for combined" in result.stdout) is not restack_first
+    assert "checking whether origin will accept the push" in result.stdout
+    if not restack_first:
+        assert result.stdout.index("rebuilding integration combined") < result.stdout.index("Merge made by")
     assert repo.git("show", "refs/heads/work:b", cwd=repo.origin) == "latest source"
     remote_base = tip(repo, "combined", remote=True)
     assert remote_base == tip(repo, "combined")

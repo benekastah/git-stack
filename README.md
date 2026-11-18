@@ -277,6 +277,8 @@ selected work on it. It publishes the integration and work in the same
 atomic push with leases. `sync` also publishes the integration atomically
 with eligible selected work. The first publication sets the integration's
 upstream.
+Git-stack reports when it starts rebuilding the integration, removes the
+temporary worktree, and checks the atomic push with the remote.
 If sync also deletes merged remote branches, those deletions wait for the
 same push. If the push fails, sync reports the remote branches it kept.
 Rerun sync with the same integration selected to retry those deletions

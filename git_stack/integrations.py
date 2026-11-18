@@ -137,6 +137,7 @@ class Integrations:
         # Git can remove a registered worktree even if its files are gone.
         registered = self.git.run("worktree", "list", "--porcelain", "-z").split("\0")
         if any(path == pathlib.Path(entry[9:]) for entry in registered if entry.startswith("worktree ")):
+            self.core.emit(events.RemovingIntegrationWorktree(name))
             self.git.run("worktree", "remove", "--force", str(path))
         self.git.config_unset(name, PENDING_KEY)
         self.progress_path(name).unlink(missing_ok=True)
@@ -385,6 +386,7 @@ class Integrations:
             return {**observed, name: expected}
         else:
             self.ensure_available_worktree(name)
+            self.core.emit(events.RebuildingIntegration(name))
             build = Build(integration=desired, expected=expected, observed=observed, step=0, head=root_tip, result=None)
             self.progress_path(name).unlink(missing_ok=True)
             self.journal(name, build)
@@ -486,7 +488,7 @@ class Integrations:
         """Verify inputs together, with the update in the same ref transaction."""
         # NUL-delimited fields let Git validate the names in the same
         # transaction. An empty old value for verify requires an absent ref.
-        commands = ["start"]
+        commands: list[str] = []
         for branch, tip in refs.items():
             if "\0" in branch or (tip and not is_object_id(tip)):
                 raise StackError(f"invalid integration input ref or tip for {branch}")
@@ -495,8 +497,7 @@ class Integrations:
                 commands.extend((f"update refs/heads/{branch}", update[1], tip or "0" * len(update[1])))
             else:
                 commands.extend((f"verify refs/heads/{branch}", tip or ""))
-        commands.extend(("prepare", "commit" if update else "abort", ""))
         try:
-            self.git.run("update-ref", "--stdin", "-z", input="\0".join(commands))
+            self.git.ref_transaction(commands, publish=update is not None)
         except StackError as e:
             raise StackError(f"integration refs changed or could not be locked; retry or abort the build:\n{e}") from e

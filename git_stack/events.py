@@ -67,6 +67,27 @@ class Restacking:
 
 
 @dataclass(frozen=True)
+class RebuildingIntegration:
+    event_type: ClassVar[str] = "rebuilding-integration"
+
+    branch: str
+
+
+@dataclass(frozen=True)
+class RemovingIntegrationWorktree:
+    event_type: ClassVar[str] = "removing-integration-worktree"
+
+    branch: str
+
+
+@dataclass(frozen=True)
+class CheckingPush:
+    event_type: ClassVar[str] = "checking-push"
+
+    remote: str
+
+
+@dataclass(frozen=True)
 class PullingUpstream:
     event_type: ClassVar[str] = "pulling-upstream"
 
@@ -406,6 +427,9 @@ type Event = (
     | LookingUpNamedPullRequests
     | Squashing
     | Restacking
+    | RebuildingIntegration
+    | RemovingIntegrationWorktree
+    | CheckingPush
     | PullingUpstream
     | TookUpstreamRebase
     | FastForwarded

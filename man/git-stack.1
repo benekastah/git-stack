@@ -422,6 +422,8 @@ leases.
 \f[CR]sync\f[R] also publishes the integration atomically with eligible
 selected work.
 The first publication sets the integration\(aqs upstream.
+Git\-stack reports when it starts rebuilding the integration, removes
+the temporary worktree, and checks the atomic push with the remote.
 If sync also deletes merged remote branches, those deletions wait for
 the same push.
 If the push fails, sync reports the remote branches it kept.

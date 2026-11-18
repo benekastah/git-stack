@@ -220,6 +220,17 @@ class GitClient:
         finally:
             self._ran(args)
 
+    def ref_transaction(self, commands: Sequence[str], *, publish: bool) -> None:
+        """Prepare the ref transaction to check its inputs, then publish or abort it."""
+        action = "commit" if publish else "abort"
+        input = "\0".join(("start", *commands, "prepare", action, ""))
+        if publish:
+            self.run("update-ref", "--stdin", "-z", input=input)
+        else:
+            # An aborted transaction leaves every ref and reflog unchanged.
+            with git_errors():
+                self._git.run("update-ref", "--stdin", "-z", input=input)
+
     def passthrough(self, *args: str) -> bool:
         """Run git with output going straight to the terminal (stdout to
         passthrough_stdout)."""

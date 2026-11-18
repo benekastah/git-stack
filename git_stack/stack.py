@@ -2201,6 +2201,8 @@ class StackClient(StackCore):
         # since it was fetched, leaves nothing changed. The remote can still
         # refuse the real push (e.g. a protected branch), which a dry run
         # doesn't ask it about.
+        if integration_pushes:
+            self.emit(events.CheckingPush(remote))
         if (why := git.push_would_fail("--atomic", *leases, remote, *refspecs)) is not None:
             raise StackError(
                 f"push would fail, so nothing was pushed or changed; if the remote has new commits, run "

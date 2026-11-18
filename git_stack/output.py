@@ -46,6 +46,12 @@ def message(event: events.Event) -> str:  # noqa: C901
             return f"squashing {event.count} commits on {event.branch}"
         case events.Restacking():
             return f"restacking {event.branch} onto {event.parent}"
+        case events.RebuildingIntegration():
+            return f"rebuilding integration {event.branch}"
+        case events.RemovingIntegrationWorktree():
+            return f"removing the temporary worktree for {event.branch}"
+        case events.CheckingPush():
+            return f"checking whether {event.remote} will accept the push"
         case events.PullingUpstream():
             return f"pulling {event.count} new commit(s) from {event.branch}'s upstream"
         case events.TookUpstreamRebase():
@@ -189,7 +195,7 @@ def print_event(event: events.Event) -> None:
     if isinstance(event, WARNINGS):
         print(f"warning: {message(event)}", file=sys.stderr)
     else:
-        print(message(event))
+        print(message(event), flush=True)
 
 
 class JsonStream:
