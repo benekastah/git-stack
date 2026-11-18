@@ -1353,8 +1353,11 @@ git stack install\-skills \-\-codex    \f[I]# for Codex, even if it isn\(aqt fou
 \f[CR]\(ti/.agents/skills\f[R].
 Without either, it installs for each agent it finds in use (a
 \f[CR]\(ti/.claude\f[R] or \f[CR]\(ti/.codex\f[R] directory, or
-\f[CR]$CLAUDE_CONFIG_DIR\f[R] or \f[CR]$CODEX_HOME\f[R] existing), and
-fails if it finds none.
+\f[CR]$CLAUDE_CONFIG_DIR\f[R] or \f[CR]$CODEX_HOME\f[R] existing).
+If it finds none it says so and changes nothing, which isn\(aqt a
+failure.
+If two agents\(aq skills directories are the same one (one is a link to
+the other), each skill is linked there once.
 .IP \(bu 2
 Each skill is a link to the one in the installed package, so a
 git\-stack upgrade updates the skills too.

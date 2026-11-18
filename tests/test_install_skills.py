@@ -51,11 +51,17 @@ def test_a_named_agent_is_installed_even_if_not_found(home: pathlib.Path) -> Non
     assert not (home / ".claude").exists()
 
 
-def test_it_stops_when_it_finds_no_agent(home: pathlib.Path, capsys: pytest.CaptureFixture[str]) -> None:
-    assert main(["install-skills"]) == 1
+def test_it_says_so_and_succeeds_when_it_finds_no_agent(home: pathlib.Path, capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["install-skills"]) == 0
 
-    assert "--claude" in capsys.readouterr().err
+    assert "--claude" in capsys.readouterr().out
     assert not any(home.iterdir())
+
+
+def test_json_lists_nothing_when_it_finds_no_agent(home: pathlib.Path, capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["install-skills", "--json"]) == 0
+
+    assert json.loads(capsys.readouterr().out)["installed"] == []
 
 
 def test_claude_config_dir_says_where_claude_keeps_its_skills(
@@ -108,6 +114,37 @@ def test_replace_replaces_a_link_to_somewhere_else(home: pathlib.Path, tmp_path:
     assert main(["install-skills", "--claude", "--replace"]) == 0
 
     assert link.resolve() == (SKILLS / "git-stack").resolve()
+
+
+def test_it_links_a_skill_once_where_two_agents_share_a_skills_directory(
+    home: pathlib.Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    shared = home / ".agents" / "skills"
+    shared.mkdir(parents=True)
+    (home / ".claude").mkdir()
+    (home / ".claude" / "skills").symlink_to(shared, target_is_directory=True)
+
+    assert main(["install-skills", "--claude", "--codex", "--json"]) == 0
+
+    installed = json.loads(capsys.readouterr().out)["installed"]
+    assert [(i["agent"], i["action"]) for i in installed if i["skill"] == "git-stack"] == [
+        ("claude", "linked"),
+        ("codex", "unchanged"),
+    ]
+    assert (shared / "git-stack").resolve() == (SKILLS / "git-stack").resolve()
+
+
+def test_a_refusal_in_the_second_agents_directory_links_nothing_for_the_first(
+    home: pathlib.Path, tmp_path: pathlib.Path
+) -> None:
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (home / ".agents" / "skills").mkdir(parents=True)
+    (home / ".agents" / "skills" / "git-stack-sync").symlink_to(elsewhere, target_is_directory=True)
+
+    assert main(["install-skills", "--claude", "--codex"]) == 1
+
+    assert not (home / ".claude").exists()
 
 
 def test_it_replaces_a_link_whose_target_is_gone(home: pathlib.Path, tmp_path: pathlib.Path) -> None:

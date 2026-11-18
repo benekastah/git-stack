@@ -50,6 +50,10 @@ def run(stack: StackClient, args: Args) -> Result:
 
 
 def show(stack: StackClient, args: Args, result: Result) -> None:
+    if not result.installed:
+        print(
+            f"found no coding agent to install skills for; name one with {' or '.join(f'--{a.name}' for a in AGENTS)}"
+        )
     for item in result.installed:
         verb = "already linked" if item.action is InstallAction.UNCHANGED else item.action.value
         print(f"{item.agent}: {verb} {item.path}")

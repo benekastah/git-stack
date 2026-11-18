@@ -102,14 +102,24 @@ def plan_skill(agent: Agent, source: pathlib.Path, replace: bool) -> tuple[pathl
 
 def install(names: Sequence[str], replace: bool = False) -> list[Installed]:
     """Link every packaged skill into the skills directory of each agent in
-    names, or, if there are none, of each agent found in use. Changes nothing if
+    names, or, if there are none, of each agent found in use (so none if it finds
+    no agent: not an error, since a machine can have none). Changes nothing if
     a link can't be made (see plan_skill); replace takes over links to other directories."""
     agents = [a for a in AGENTS if a.name in names] or [a for a in AGENTS if any(p.exists() for p in a.marks())]
-    if not agents:
-        options = " or ".join(f"--{a.name}" for a in AGENTS)
-        raise StackError(f"found no agent to install skills for; name one with {options}")
     sources = sorted(p for p in PACKAGED_SKILLS.iterdir() if p.is_dir())
-    plans = [(agent, source, *plan_skill(agent, source, replace)) for agent in agents for source in sources]
+    plans: list[tuple[Agent, pathlib.Path, pathlib.Path, InstallAction | str]] = []
+    # Where each link will be made, by its real location: two agents can share a
+    # skills directory (one's a link to the other's), and it's linked once.
+    planned: set[pathlib.Path] = set()
+    for agent in agents:
+        for source in sources:
+            link, what = plan_skill(agent, source, replace)
+            where = link.parent.resolve() / link.name
+            if where in planned and what is not InstallAction.UNCHANGED:
+                what = InstallAction.UNCHANGED
+            elif what is not InstallAction.UNCHANGED:
+                planned.add(where)
+            plans.append((agent, source, link, what))
     refusals = [what for *_, what in plans if isinstance(what, str)]
     if refusals:
         raise StackError("\n".join(refusals))

@@ -986,8 +986,10 @@ git stack install-skills --codex    # for Codex, even if it isn't found
 - `--claude` installs into `$CLAUDE_CONFIG_DIR/skills` (default
   `~/.claude/skills`), and `--codex` into `~/.agents/skills`. Without either, it
   installs for each agent it finds in use (a `~/.claude` or `~/.codex`
-  directory, or `$CLAUDE_CONFIG_DIR` or `$CODEX_HOME` existing), and fails if
-  it finds none.
+  directory, or `$CLAUDE_CONFIG_DIR` or `$CODEX_HOME` existing). If it finds
+  none it says so and changes nothing, which isn't a failure. If two agents'
+  skills directories are the same one (one is a link to the other), each skill
+  is linked there once.
 - Each skill is a link to the one in the installed package, so a git-stack
   upgrade updates the skills too. On Windows, where making a symlink usually
   needs a privilege, it makes a directory junction instead.
@@ -1491,8 +1493,9 @@ there and adds it to your `PATH`) and, except on Windows, the man page into
 the clone use the [git hooks](#git-hooks) in `git_hooks/`, makes
 `git blame` skip [reformatting commits](#skipping-reformatting-in-git-blame),
 and links the clone's [agent skills](#git-stack-install-skills---claude---codex---replace---json)
-into the coding agents it finds (`git stack install-skills`: it leaves a
-skill link to another clone, saying so, and only warns if it finds no agent).
+into the coding agents it finds (`git stack install-skills`, which stops the
+install if a skill is linked to another clone's or install's copy, unless you
+pass `--replace`; finding no agent isn't a failure).
 It's safe to rerun, e.g. when `pyproject.toml` changes, to pick up a new
 command-line entry point.
 

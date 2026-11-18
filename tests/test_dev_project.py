@@ -74,16 +74,29 @@ def test_install_links_the_agent_skills_to_this_clone(
     assert link.resolve() == (ROOT / "git_stack" / "skills" / "git-stack").resolve()
 
 
-def test_install_only_warns_when_the_skills_cant_be_installed(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], dev_project: ModuleType
-) -> None:
+def test_install_fails_when_the_skills_cant_be_linked(monkeypatch: pytest.MonkeyPatch, dev_project: ModuleType) -> None:
     monkeypatch.setattr(dev_project, "run", lambda *args: None)
     monkeypatch.setattr(dev_project, "_git_has_optional_paths", lambda: True)
     monkeypatch.setattr(dev_project, "run_code", lambda *args: 1)
 
-    dev_project.after_install()
+    with pytest.raises(SystemExit) as exited:
+        dev_project.after_install()
 
-    assert "git stack install-skills" in capsys.readouterr().err
+    assert "git stack install-skills --replace" in str(exited.value.code)
+
+
+@pytest.mark.parametrize(("replace", "flags"), [(False, ()), (True, ("--replace",))])
+def test_install_passes_replace_to_install_skills(
+    monkeypatch: pytest.MonkeyPatch, dev: ModuleType, dev_project: ModuleType, replace: bool, flags: tuple[str, ...]
+) -> None:
+    commands: list[tuple[str, ...]] = []
+    monkeypatch.setattr(dev_project, "run", lambda *args: None)
+    monkeypatch.setattr(dev_project, "_git_has_optional_paths", lambda: True)
+    monkeypatch.setattr(dev_project, "run_code", lambda *args: commands.append(args) or 0)
+
+    dev_project.after_install(replace=replace)
+
+    assert commands == [(dev.tool("git-stack"), "install-skills", *flags)]
 
 
 def git_version() -> tuple[int, int]:

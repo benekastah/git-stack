@@ -25,27 +25,27 @@ def types_other_platforms(_: list[str]) -> None:
         run(tool("basedpyright"), "--pythonplatform", platform)
 
 
-def after_install() -> None:
-    """Make `git blame` in this clone skip the commits in .git-blame-ignore-revs."""
+def after_install(replace: bool = False) -> None:
+    """Make `git blame` in this clone skip the commits in .git-blame-ignore-revs, and link the
+    agent skills (see `install_skills`). replace is dev.py install's --replace."""
     # `git blame` fails if the file is missing (e.g. with an older commit checked out), unless
     # this git supports marking the path :(optional).
     prefix = ":(optional)" if _git_has_optional_paths() else ""
     run("git", "config", "blame.ignoreRevsFile", f"{prefix}.git-blame-ignore-revs")
     print("made git blame skip the commits in .git-blame-ignore-revs")
-    install_skills()
+    install_skills(replace)
 
 
-def install_skills() -> None:
-    """Link this clone's agent skills into each coding agent's skills directory, as
-    `git stack install-skills` does for the agents it finds. That command makes the links (a
-    symlink, or a junction on Windows), so they aren't `install_links()`: they'd need a
-    symlink Windows usually can't make. It fails when it finds no agent, which isn't this
-    install's failure, so that only warns."""
-    if run_code(tool("git-stack"), "install-skills") != 0:
-        print(
-            "warning: couldn't link the agent skills (see above); run `git stack install-skills`"
-            " once an agent is installed (add --replace to take over another clone's links)",
-            file=sys.stderr,
+def install_skills(replace: bool) -> None:
+    """Link this clone's agent skills into the skills directory of each coding agent found, as
+    `git stack install-skills` does (with --replace if replace), failing the install if it
+    refuses a link, e.g. one to another clone's skills. That command makes the links (a
+    symlink, or a junction on Windows), so they aren't `install_links()`, which makes plain
+    symlinks Windows usually can't. It's no failure to find no agent."""
+    if run_code(tool("git-stack"), "install-skills", *(["--replace"] if replace else [])) != 0:
+        sys.exit(
+            "install: couldn't link the agent skills (see above); `git stack install-skills"
+            " --replace` takes over a link to another clone's"
         )
 
 
