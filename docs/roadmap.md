@@ -38,3 +38,27 @@ git stack import branch-a branch-b
 
 This would create a stack branch-a -> branch-b. I'm not sure how best to import
 more complicated shapes; maybe some kind of basic syntax could work here.
+
+## Shortcuts for what agents (and people) do with a branch's own commits
+
+Skills and the README give recipes built on `parent` and `base`:
+
+```sh
+git diff $(git stack parent)...         # what this branch's pull request changes
+git log --oneline $(git stack base)..   # this branch's own commits
+git rebase -i $(git stack base)         # reword or reorder them
+```
+
+Commands for these would be easier to find and to get right, and the last one
+can't be used by an agent at all, since it opens an editor. Which ones are worth
+having (`diff`, `log`, something to reword, squash or reorder a branch's own
+commits without an editor) is undecided.
+
+## A command that prints the documentation
+
+`git stack --help` opens a man page in a pager, and uv doesn't install it, so
+neither a person without `man` nor an agent can read the documentation from
+git-stack itself. The README is too long to hand over whole. A `git stack docs
+[<section>]` command that prints sections of a bundled copy would let the agent
+skills point at the right part of it. How the sections are named, and whether
+the man page and this command share one source, is undecided.
