@@ -55,7 +55,7 @@ man page is generated from it.
   which can move, could install code CI never ran. To take a new release,
   change the commit and the comment, and run `uv lock`.
 
-- `skills/<name>/SKILL.md` are agent skills for people's agents, kept short and pointing at
+- `git_stack/skills/<name>/SKILL.md` are agent skills for people's agents, kept short and pointing at
   `git stack --help` and the README for detail. `tests/test_skills.py` checks that every
   `git stack ...` command they show parses with `cli.build_parser()`, so a renamed command or
   flag fails there. Change a skill with the behavior it describes.

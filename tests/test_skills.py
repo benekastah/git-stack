@@ -9,7 +9,7 @@ import pytest
 from git_stack.cli import build_parser
 from tests.conftest import ROOT
 
-SKILLS = ROOT / "skills"
+SKILLS = ROOT / "git_stack" / "skills"
 SKILL_FILES = sorted(SKILLS.glob("*/*.md"))
 
 CODE_SPAN = re.compile(r"`([^`\n]+)`")

@@ -1384,7 +1384,7 @@ where characters a branch name can have (`&`, `|`, `%`) mean something else.
 
 ## Agent skills
 
-`skills/` has [Agent Skills](https://agentskills.io) for coding agents (Claude Code, Codex, ...) that
+`git_stack/skills/` has [Agent Skills](https://agentskills.io) for coding agents (Claude Code, Codex, ...) that
 use git-stack: `git-stack` teaches the model, the rules (use `git stack` rather than plain git on
 a tracked branch) and everyday commands. Point your agent at that directory, e.g. link it from
 `.claude/skills` or `.agents/skills`.
