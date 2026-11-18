@@ -1759,7 +1759,7 @@ class StackClient(StackCore):
                 continue
             configured = git.config_get(name, "remote")
             if configured is None or (configured == remote and git.remote_branch_name(name, remote) == target):
-                self.record_integration_push(integrations, name, remote, target, tip)
+                self.record_published_branch(integrations, name, remote, target, tip)
 
     def move_off_deleted_parents(
         self,
@@ -2006,10 +2006,11 @@ class StackClient(StackCore):
         then opens their pull requests as prs does; without the GitHub adapter,
         it pushes anyway, and the result's error says it opened none.
 
-        Unless force is set, a branch whose remote branch has its commits rebased
-        (see take_upstream_rebase) is moved there first, so there's nothing
-        to push for it. Refuses if a remote branch has commits the local one doesn't, unless
-        force is set. Either way, the push fails if a remote branch changed
+        If the selected work uses an integration, rebuild it and restack that
+        work before pushing both together. Unless force is set, a branch whose
+        remote branch has its commits rebased (see take_upstream_rebase) is moved
+        there first. Refuses if a remote branch has commits the local one doesn't,
+        unless force is set. Either way, the push fails if a remote branch changed
         since it was last fetched.
         """
         self.ensure_no_operation_in_progress()
@@ -2039,11 +2040,12 @@ class StackClient(StackCore):
             raise StackError("the selected upstreams changed while settling; retry the push")
         adapter = self.checked_adapter(push_remote)
         github = adapter if prs and isinstance(adapter, GitHubAdapter) else None
-        branches = self.skip_merged(stack, stacks, adapter)
-        self.ensure_published_pr_roots(branches, stacks, adapter, opening=prs)
-        if not force:
-            for b in branches:
-                self.take_upstream_rebase(b, stacks.parent(b), push_remote)
+        roots = {stacks.root(branch) for branch in stack}
+        integrations = Integrations(self)
+        selection = RefreshSelection(
+            stack, {root: config for root in sorted(roots) if (config := integrations.read(root)) is not None}
+        )
+        branches, integration_pushes = self.prepare_push(selection, stacks, adapter, push_remote, force)
         pushed = self.push_branches(
             branches,
             stacks,
@@ -2054,6 +2056,7 @@ class StackClient(StackCore):
             rebuild_stack=rebuild_stack,
             use_upstreams=True,
             no_verify=no_verify,
+            integration_pushes=integration_pushes,
         )
         steps = (
             self.open_pull_requests(pushed, stacks, github, push_remote, rebuild_stack=rebuild_stack)
@@ -2066,7 +2069,62 @@ class StackClient(StackCore):
         shown = (
             self.branch_infos(stacks.restricted(stack), adapter) if only_remote else self.stack_infos(stack, adapter)
         )
-        return PushResult(pushed, shown, steps, error)
+        return PushResult([*(push.name for push in integration_pushes), *pushed], shown, steps, error)
+
+    def prepare_push(
+        self, selection: RefreshSelection, stacks: Stacks, adapter: GitAdapter, remote: str, force: bool
+    ) -> tuple[list[str], list[IntegrationPush]]:
+        """Prepare selected work and any generated bases for a single push."""
+        if not selection.integrations:
+            return self.take_branches_for_push(selection.branches, stacks, adapter, remote, force), []
+        self.ensure_clean_worktree()
+        expected = self.preflight_integrations(selection, stacks)
+        self.preflight_integration_worktrees(selection, expected)
+        roots = {stacks.root(branch) for branch in selection.branches}
+        protected = roots | {config["root"] for config in selection.integrations.values()}
+        self.ensure_sync_destination(selection.branches, protected, remote, force, "push")
+        self.fetch_missing_integration_upstreams(selection.integrations, remote)
+        leases = self.integration_leases(selection, remote, force, protected)
+        sources, remaining = selection.ordered(stacks)
+        source_branches = self.take_branches_for_push(sources, stacks, adapter, remote, force)
+        verified = self.refresh_integrations(selection, remote, expected, fetch=False)
+        work_branches = self.take_branches_for_push(remaining, stacks, adapter, remote, force)
+        integrated_work = [b for b in work_branches if stacks.root(b) in selection.integrations]
+        self.restack_work_for_push(integrated_work, stacks)
+        return [*source_branches, *work_branches], [
+            IntegrationPush(name, target, tip, verified[name]) for name, (target, tip) in leases.items()
+        ]
+
+    def take_branches_for_push(
+        self, branches: list[str], stacks: Stacks, adapter: GitAdapter, remote: str, force: bool
+    ) -> list[str]:
+        remaining = self.skip_merged(branches, stacks, adapter)
+        if not force:
+            for branch in remaining:
+                self.take_upstream_rebase(branch, stacks.parent(branch), remote)
+        return remaining
+
+    def restack_work_for_push(self, branches: list[str], stacks: Stacks) -> None:
+        """Ensure every selected work branch includes its newly generated base."""
+        if blocked := self.restack_all(branches, stacks):
+            raise StackError(f"couldn't restack {', '.join(blocked)}; nothing was pushed")
+        git = self.git
+        for branch in branches:
+            root = stacks.root(branch)
+            if not git.is_ancestor(git.tip(root), git.tip(branch)):
+                raise StackError(f"{branch} isn't based on the latest {root}; restack its full stack before pushing")
+
+    def fetch_missing_integration_upstreams(self, names: Iterable[str], remote: str) -> None:
+        """Restore missing tracking refs for published integrations without fetching work branches."""
+        git = self.git
+        targets = [git.remote_branch_name(name, remote) for name in names if git.config_get(name, "remote") == remote]
+        missing = {f"refs/heads/{target}": f"refs/remotes/{remote}/{target}" for target in targets}
+        missing = {ref: tracking for ref, tracking in missing.items() if git.rev(tracking) is None}
+        if missing:
+            found = git.run("ls-remote", "--heads", "--", remote, *missing).splitlines()
+            refspecs = [f"{ref}:{missing[ref]}" for line in found if (ref := line.partition("\t")[2]) in missing]
+            if refspecs:
+                git.run("fetch", "--quiet", "--no-write-fetch-head", remote, *refspecs)
 
     def push_refspecs(
         self,
@@ -2124,6 +2182,8 @@ class StackClient(StackCore):
         git = self.git
         if not branches and not integration_pushes and not deletions:
             return []
+        if integration_pushes:
+            self.recover_first_pushes(branches, remote)
         self.ensure_remote_branches_ours(branches, remote)
 
         # Force-pushing is only safe if we've seen everything on the remote branch.
@@ -2158,7 +2218,7 @@ class StackClient(StackCore):
         verify_options = ["--no-verify"] if no_verify else []
         for integration in integration_pushes:
             integrations.verify(integration.refs)
-        self.remember_integration_pushes(integrations, integration_pushes, remote)
+        self.remember_atomic_push(integrations, integration_pushes, remote, work_tips)
         if not git.passthrough("push", "--atomic", *verify_options, *leases, "--set-upstream", remote, *refspecs):
             raise StackError(
                 "push failed, so nothing was pushed; if the remote has new commits, run `git stack sync` and try "
@@ -2211,8 +2271,12 @@ class StackClient(StackCore):
         leases.append(f"{lease}:{remote_tip or ''}")
         refspecs.append(f"{tip}:{target}")
 
-    def remember_integration_pushes(
-        self, integrations: Integrations, pushes: Sequence[IntegrationPush], remote: str
+    def remember_atomic_push(
+        self,
+        integrations: Integrations,
+        pushes: Sequence[IntegrationPush],
+        remote: str,
+        work_tips: dict[str, str] | None,
     ) -> None:
         for push in pushes:
             if self.git.config_get(push.name, "remote") is None:
@@ -2220,7 +2284,11 @@ class StackClient(StackCore):
                 assert tip is not None
                 integrations.remember_first_push(push.name, remote, push.target, tip)
 
-    def record_integration_push(
+        for branch, tip in (work_tips or {}).items():
+            if self.git.config_get(branch, "remote") is None:
+                integrations.remember_first_push(branch, remote, branch, tip)
+
+    def record_published_branch(
         self, integrations: Integrations, name: str, remote: str, target: str, tip: str
     ) -> None:
         if self.git.config_get(name, "remote") is None:
@@ -2248,9 +2316,14 @@ class StackClient(StackCore):
         for push in pushes:
             tip = push.refs[push.name]
             assert tip is not None
-            self.record_integration_push(integrations, push.name, remote, push.target, tip)
-        for name, tip in (work_tips if work_tips is not None else {b: self.git.tip(b) for b in branches}).items():
-            self.record_pulled_tip(name, tip)
+            self.record_published_branch(integrations, push.name, remote, push.target, tip)
+        for name in branches:
+            if work_tips is None:
+                self.record_pulled_tip(name, self.git.tip(name))
+            else:
+                self.record_published_branch(
+                    integrations, name, remote, self.git.remote_branch_name(name, remote), work_tips[name]
+                )
 
     def changes_left(self, adapter: GitAdapter) -> str:
         """What adapter changed before a push failed, for its error, or ""."""
@@ -2329,7 +2402,7 @@ class StackClient(StackCore):
         adapter = ensure_github(make_adapter(self, remote, fetch=True), remote)
         adapter.ensure_available()
         branches = self.skip_merged(stack, stacks, adapter)
-        self.ensure_published_pr_roots(branches, stacks, adapter, opening=True)
+        self.ensure_published_pr_roots({stacks.root(b) for b in branches}, remote)
         steps = self.open_pull_requests(branches, stacks, adapter, remote, dry_run, rebuild_stack)
         return PrsResult(steps, self.stack_infos(stack, adapter))
 
@@ -2399,18 +2472,9 @@ class StackClient(StackCore):
         except StackError as e:
             raise StackError(f"updating the stack in pull request descriptions failed: {e}") from e
 
-    def ensure_published_pr_roots(
-        self, branches: list[str], stacks: Stacks, adapter: GitAdapter, *, opening: bool
-    ) -> None:
-        """Check integration bases on the server before opening or retargeting PRs."""
-        if not isinstance(adapter, GitHubAdapter):
-            return
-        if opening:
-            roots = {stacks.root(branch) for branch in branches}
-        else:
-            prs = adapter.pull_requests()
-            roots = {stacks.parent(b) for b in branches if b in prs and prs[b].state is GitHubState.OPEN}
-        git, remote = self.git, adapter.remote
+    def ensure_published_pr_roots(self, roots: set[str], remote: str) -> None:
+        """Check integration bases on the server before opening PRs."""
+        git = self.git
         refs = {
             root: f"refs/heads/{git.remote_branch_name(root, remote)}"
             for root in sorted(roots)
@@ -2418,8 +2482,7 @@ class StackClient(StackCore):
         }
         if not refs:
             return
-        # A cached remote-tracking ref can be stale or missing. The integration
-        # is outside the work push, so none of its refspecs will create this base.
+        # A cached remote-tracking ref can be stale or missing.
         found = {
             line.partition("\t")[2]
             for line in git.run("ls-remote", "--heads", "--", remote, *refs.values()).splitlines()
@@ -2434,7 +2497,7 @@ class StackClient(StackCore):
                     else ""
                 )
                 raise StackError(
-                    f"integration base {upstream} is missing; publish it with `git stack sync {root}`.{hint}"
+                    f"integration base {upstream} is missing; publish it with `git stack push --prs` from a work branch.{hint}"
                 )
 
     def ensure_on_remote(self, branches: list[str], roots: list[str], remote: str) -> None:
@@ -2454,7 +2517,8 @@ class StackClient(StackCore):
                 f"{', '.join(unpushed)}; run `git stack push` first"
             )
         for root in roots:
-            # GitHub PR commands verify integration bases on the server before this point.
+            # Push publishes integration bases itself. Standalone prs checks
+            # those bases on the server before it gets here.
             if git.config_get(root, INTEGRATION_KEY):
                 continue
             if git.rev(f"refs/remotes/{remote}/{git.remote_branch_name(root, remote)}") is None:

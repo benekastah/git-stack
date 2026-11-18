@@ -272,15 +272,19 @@ selector to include its other stacks. A selected source stack updates
 before the integration is rebuilt. An excluded source contributes its local
 tip. `restack` uses local refs. `pull` and `sync` fetch and fast-forward the
 configured root when possible before rebuilding.
-`sync` publishes the integration and eligible selected work in the same
-atomic push with leases. The first sync sets the integration's upstream.
+`push` refreshes the integration from local source tips and restacks the
+selected work on it. It publishes the integration and work in the same
+atomic push with leases. `sync` also publishes the integration atomically
+with eligible selected work. The first publication sets the integration's
+upstream.
 If sync also deletes merged remote branches, those deletions wait for the
 same push. If the push fails, sync reports the remote branches it kept.
 Rerun sync with the same integration selected to retry those deletions
 with the original leases.
-Publish the integration with `git stack sync <name>` before opening or
-retargeting PRs onto it. `push --prs` checks that the base exists on the
-remote before pushing the work branches.
+Use `git stack push --prs` to publish both the integration and the work,
+then open or retarget the work PRs. To review the rebase before publishing,
+run `git stack restack <name>` first. Standalone `git stack prs` requires
+the integration to be on the remote already.
 
 A source drops out of the generated history when its tip is already on the
 configured root or when a merged GitHub PR proves that exact tip landed
@@ -785,6 +789,10 @@ git stack push --no-verify      # skip the local pre-push hook
 git stack push --prs            # then open pull requests, as `git stack prs` does
 ```
 
+- For selected work on an integration, `push` needs a clean worktree. It
+  rebuilds the integration from local tips, restacks the selected work, and
+  publishes both together. Source branches are pushed when they belong to
+  the selected stacks. `--prs` opens pull requests for the work branches.
 - Each branch is pushed to its configured upstream, or to a new branch of the
   same name if it has no upstream. Pushing to the remote's default branch (as
   the remote reports it), or to a stack root's remote branch, requires `--force`.

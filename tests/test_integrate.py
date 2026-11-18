@@ -197,7 +197,7 @@ def test_missing_source_needs_exact_landing_evidence(repo: Repo) -> None:
 def test_sync_pushes_integration_and_work_atomically(repo: Repo, git_calls: list[GitCall]) -> None:
     integration(repo)
     work(repo)
-    repo.stack("push")
+    repo.git("push", "--set-upstream", "origin", "refs/heads/work")
     repo.git("switch", "--quiet", "one")
     repo.commit("a", "updated\n", "update")
     repo.git("switch", "--quiet", "work")
@@ -854,18 +854,26 @@ def test_recovered_parent_is_refreshed_before_work_is_rebased(repo: Repo, gh: Fa
     assert repo.git("log", "--format=%s", "refs/heads/combined..refs/heads/work") == "work"
 
 
-@pytest.mark.parametrize("stale_tracking_ref", [False, True])
-@pytest.mark.parametrize("command", [("push", "--prs"), ("push",), ("prs",)])
-def test_pr_update_refuses_unpublished_integration_before_pushing(
-    repo: Repo, gh: FakeGitHub, stale_tracking_ref: bool, command: tuple[str, ...]
+def test_prs_requires_integration_to_be_published_first(repo: Repo, gh: FakeGitHub) -> None:
+    integration(repo)
+    work(repo)
+    repo.git("push", "--set-upstream", "origin", "refs/heads/work")
+
+    result = repo.stack("prs", expect_success=False)
+
+    assert "publish it with `git stack push --prs`" in result.stderr
+    assert gh.load()["prs"] == []
+
+
+@pytest.mark.parametrize("args", [(), ("--prs",)])
+def test_push_refuses_to_replace_a_remote_integration_deleted_since_last_fetch(
+    repo: Repo, gh: FakeGitHub, args: tuple[str, ...]
 ) -> None:
     integration(repo)
     work(repo)
     repo.stack("push")
     before = tip(repo, "work", remote=True)
-    if stale_tracking_ref:
-        repo.stack("sync", "combined")
-        repo.git("update-ref", "-d", "refs/heads/combined", cwd=repo.origin)
+    repo.git("update-ref", "-d", "refs/heads/combined", cwd=repo.origin)
     gh.add_pr(
         number=1,
         state="OPEN",
@@ -876,9 +884,9 @@ def test_pr_update_refuses_unpublished_integration_before_pushing(
     )
     repo.commit("c", "next work commit\n", "advance work")
 
-    result = repo.stack(*command, expect_success=False)
+    result = repo.stack("push", *args, expect_success=False)
 
-    assert "publish it with `git stack sync combined`" in result.stderr
+    assert "push would fail" in result.stderr
     assert tip(repo, "work", remote=True) == before
     assert gh.calls("pr", "edit") == []
 
@@ -892,3 +900,96 @@ def test_push_prs_accepts_published_integration_without_cached_ref(repo: Repo, g
     repo.stack("push", "--prs")
 
     assert [(pr["headRefName"], pr["baseRefName"]) for pr in gh.load()["prs"]] == [("work", "combined")]
+
+
+@pytest.mark.parametrize("restack_first", [False, True])
+def test_push_refreshes_integration_and_publishes_work_with_its_base(
+    repo: Repo, git_calls: list[GitCall], restack_first: bool
+) -> None:
+    integration(repo)
+    work(repo)
+    repo.git("switch", "--quiet", "two")
+    repo.commit("b", "latest source\n", "advance source")
+    source_tip = tip(repo, "two")
+    if restack_first:
+        repo.stack("restack", "combined")
+        assert repo.git("branch", "--show-current") == "two"
+    repo.git("switch", "--quiet", "work")
+    repo.commit("c", "latest work\n", "advance work")
+    git_calls.clear()
+
+    repo.stack("push")
+
+    assert repo.git("show", "refs/heads/work:b", cwd=repo.origin) == "latest source"
+    remote_base = tip(repo, "combined", remote=True)
+    assert remote_base == tip(repo, "combined")
+    assert tip(repo, "work", remote=True) == tip(repo, "work")
+    assert repo.git("log", "--format=%s", f"{remote_base}..refs/heads/work", cwd=repo.origin).splitlines() == [
+        "advance work",
+        "work",
+    ]
+    assert repo.config("work", "remote") == repo.config("combined", "remote") == "origin"
+    assert tip(repo, "two") == source_tip
+    assert repo.git("ls-remote", "--heads", "origin", "two") == ""
+    assert len([c for c in git_calls if c[:2] == ["push", "--atomic"]]) == 1
+
+
+@pytest.mark.parametrize("existing_pr", [False, True])
+def test_first_push_prs_creates_or_retargets_only_the_work_pull_request(
+    repo: Repo, gh: FakeGitHub, existing_pr: bool
+) -> None:
+    integration(repo)
+    work(repo)
+    if existing_pr:
+        repo.git("push", "--set-upstream", "origin", "refs/heads/work")
+        gh.add_pr(
+            number=1,
+            state="OPEN",
+            headRefName="work",
+            headRefOid=tip(repo, "work"),
+            baseRefName="main",
+            mergeCommit=None,
+        )
+
+    repo.stack("push", "--prs")
+
+    assert [(pr["headRefName"], pr["baseRefName"]) for pr in gh.load()["prs"]] == [("work", "combined")]
+    assert tip(repo, "combined", remote=True) == tip(repo, "combined")
+
+
+def test_push_conflict_leaves_remote_integration_and_work_untouched(repo: Repo) -> None:
+    integration(repo)
+    work(repo)
+    repo.stack("push")
+    base = tip(repo, "combined", remote=True)
+    work_tip = tip(repo, "work", remote=True)
+    repo.git("switch", "--quiet", "two")
+    repo.commit("a", "conflict with one\n", "conflict")
+    repo.git("switch", "--quiet", "work")
+    repo.commit("c", "unpushed work\n", "advance work")
+
+    assert "merge --continue" in repo.stack("push", expect_success=False).stderr
+
+    assert tip(repo, "combined", remote=True) == base
+    assert tip(repo, "work", remote=True) == work_tip
+    repo.stack("integrate", "--abort", "combined")
+
+
+def test_push_recovers_new_work_upstream_after_publication(repo: Repo, monkeypatch: pytest.MonkeyPatch) -> None:
+    integration(repo)
+    work(repo)
+    run = GitClient.run
+
+    def fail_tracking(git: GitClient, *args: str, check: bool = True, input: str | None = None) -> str:
+        if args[:2] == ("branch", "--set-upstream-to=refs/remotes/origin/work"):
+            raise StackError("failed to set work's upstream")
+        return run(git, *args, check=check, input=input)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(GitClient, "run", fail_tracking)
+        assert "failed to set work's upstream" in repo.stack("push", expect_success=False).stderr
+    assert tip(repo, "work", remote=True) == tip(repo, "work")
+
+    repo.stack("push")
+
+    assert repo.config("work", "remote") == "origin"

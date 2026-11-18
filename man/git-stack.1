@@ -415,18 +415,24 @@ An excluded source contributes its local tip.
 \f[CR]restack\f[R] uses local refs.
 \f[CR]pull\f[R] and \f[CR]sync\f[R] fetch and fast\-forward the
 configured root when possible before rebuilding.
-\f[CR]sync\f[R] publishes the integration and eligible selected work in
-the same atomic push with leases.
-The first sync sets the integration\(aqs upstream.
+\f[CR]push\f[R] refreshes the integration from local source tips and
+restacks the selected work on it.
+It publishes the integration and work in the same atomic push with
+leases.
+\f[CR]sync\f[R] also publishes the integration atomically with eligible
+selected work.
+The first publication sets the integration\(aqs upstream.
 If sync also deletes merged remote branches, those deletions wait for
 the same push.
 If the push fails, sync reports the remote branches it kept.
 Rerun sync with the same integration selected to retry those deletions
 with the original leases.
-Publish the integration with \f[CR]git stack sync <name>\f[R] before
-opening or retargeting PRs onto it.
-\f[CR]push \-\-prs\f[R] checks that the base exists on the remote before
-pushing the work branches.
+Use \f[CR]git stack push \-\-prs\f[R] to publish both the integration
+and the work, then open or retarget the work PRs.
+To review the rebase before publishing, run
+\f[CR]git stack restack <name>\f[R] first.
+Standalone \f[CR]git stack prs\f[R] requires the integration to be on
+the remote already.
 .PP
 A source drops out of the generated history when its tip is already on
 the configured root or when a merged GitHub PR proves that exact tip
@@ -1080,6 +1086,13 @@ git stack push \-\-force          \f[I]# drop commits on the remote you didn\(aq
 git stack push \-\-no\-verify      \f[I]# skip the local pre\-push hook\f[R]
 git stack push \-\-prs            \f[I]# then open pull requests, as \(gagit stack prs\(ga does\f[R]
 .EE
+.IP \(bu 2
+For selected work on an integration, \f[CR]push\f[R] needs a clean
+worktree.
+It rebuilds the integration from local tips, restacks the selected work,
+and publishes both together.
+Source branches are pushed when they belong to the selected stacks.
+\f[CR]\-\-prs\f[R] opens pull requests for the work branches.
 .IP \(bu 2
 Each branch is pushed to its configured upstream, or to a new branch of
 the same name if it has no upstream.

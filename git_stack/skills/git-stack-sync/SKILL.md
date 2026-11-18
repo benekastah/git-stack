@@ -25,7 +25,8 @@ parent), restacks, pulls in commits others pushed, then pushes with leases. A br
 ordinary root only moves if it conflicts with the root's new commits or with `--latest`.
 
 For stacks on an integration root, `sync` refreshes the integration and publishes it with the
-eligible work. Use `git-stack-integrate` to manage these inputs or resolve a merge stopped in the
+eligible work. `push` also refreshes the integration from local tips and publishes it with
+the restacked work. Use `git-stack-integrate` to manage these inputs or resolve a merge stopped in the
 temporary integration worktree.
 
 Ask the user before `-d remote`, `-d both`, `--force`, `--allow-shared`, `--rewritten-upstream`,

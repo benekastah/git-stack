@@ -27,10 +27,14 @@ single parent. Check the selected stacks and source branches first with
 
 - `git stack restack <name>` refreshes from local refs. `git stack pull <name>`
   fetches and refreshes locally. `git stack sync <name>` also publishes the
-  integration and eligible work in one atomic push with leases. The first
-  sync sets the integration's upstream. Use `git stack push --prs` from the
-  work branch to publish new work and open its draft PR after the integration
-  is on the remote.
+  integration and eligible work in one atomic push with leases.
+- From the work branch, `git stack push` rebuilds the integration from local
+  tips, restacks the selected work, and publishes both atomically. To review
+  that rebase before publishing, run `git stack restack <name>` first.
+  Use `git stack push --prs` to publish both and open draft PRs for the work.
+  Standalone `git stack prs` requires the integration to be on the remote.
+- A typical edit is to commit on a source, run `git stack restack <name>`,
+  switch to the work branch, commit the work, and run `git stack push`.
 - Naming the integration selects its dependent stacks. Use a group selector
   to include source stacks that also need restacking or syncing. Excluded
   sources contribute their local tips.
