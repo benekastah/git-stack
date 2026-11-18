@@ -50,11 +50,53 @@ def test_install_sets_up_git_blame(
     monkeypatch.setattr(dev, "venv", lambda: None)
     monkeypatch.setattr(dev, "run", lambda *args: commands.append(args))
     monkeypatch.setattr(dev_project, "run", lambda *args: commands.append(args))
+    monkeypatch.setattr(dev_project, "run_code", lambda *args: 0)
     monkeypatch.setattr(dev_project, "_git_has_optional_paths", lambda: optional_paths)
 
     dev.install([])
 
-    assert commands[-1] == ("git", "config", "blame.ignoreRevsFile", ignore_revs_file)
+    assert ("git", "config", "blame.ignoreRevsFile", ignore_revs_file) in commands
+
+
+def test_install_links_the_agent_skills_to_this_clone(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, dev_project: ModuleType
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    (tmp_path / ".claude").mkdir()
+    monkeypatch.setattr(dev_project, "run", lambda *args: None)
+    monkeypatch.setattr(dev_project, "_git_has_optional_paths", lambda: True)
+
+    dev_project.after_install()
+
+    link = tmp_path / ".claude" / "skills" / "git-stack"
+    assert link.resolve() == (ROOT / "git_stack" / "skills" / "git-stack").resolve()
+
+
+def test_install_fails_when_the_skills_cant_be_linked(monkeypatch: pytest.MonkeyPatch, dev_project: ModuleType) -> None:
+    monkeypatch.setattr(dev_project, "run", lambda *args: None)
+    monkeypatch.setattr(dev_project, "_git_has_optional_paths", lambda: True)
+    monkeypatch.setattr(dev_project, "run_code", lambda *args: 1)
+
+    with pytest.raises(SystemExit) as exited:
+        dev_project.after_install()
+
+    assert "git stack install-skills --replace" in str(exited.value.code)
+
+
+@pytest.mark.parametrize(("replace", "flags"), [(False, ()), (True, ("--replace",))])
+def test_install_passes_replace_to_install_skills(
+    monkeypatch: pytest.MonkeyPatch, dev: ModuleType, dev_project: ModuleType, replace: bool, flags: tuple[str, ...]
+) -> None:
+    commands: list[tuple[str, ...]] = []
+    monkeypatch.setattr(dev_project, "run", lambda *args: None)
+    monkeypatch.setattr(dev_project, "_git_has_optional_paths", lambda: True)
+    monkeypatch.setattr(dev_project, "run_code", lambda *args: commands.append(args) or 0)
+
+    dev_project.after_install(replace=replace)
+
+    assert commands == [(dev.tool("git-stack"), "install-skills", *flags)]
 
 
 def git_version() -> tuple[int, int]:

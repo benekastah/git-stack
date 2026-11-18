@@ -86,6 +86,20 @@ def test_restack_info_and_push(repo: Repo, client: StackClient) -> None:
 
 
 @pytest.mark.usefixtures("no_ambiguous_names")
+def test_create_from_and_restack_onto_a_named_branch(repo: Repo, client: StackClient) -> None:
+    repo.make_stack()
+    shadow(repo, "main", "pr1", "pr2", "pr3")
+    repo.git("switch", "--quiet", "main")
+
+    client.branch("pr1b", from_branch="pr1")
+    client.restack(["pr2"], onto="main")
+
+    assert stacked_on(repo, "pr1b", "pr1")
+    assert stacked_on(repo, "pr2", "main")
+    assert stacked_on(repo, "pr3", "pr2")
+
+
+@pytest.mark.usefixtures("no_ambiguous_names")
 def test_sync_untracks_and_deletes_a_merged_branch(repo: Repo, client: StackClient) -> None:
     repo.make_stack()
     client.push()

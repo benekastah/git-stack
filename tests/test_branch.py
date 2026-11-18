@@ -45,3 +45,22 @@ def test_branch_refuses_a_branch_without_commits(repo: Repo, client: StackClient
 
     assert repo.git("branch", "--show-current") == "empty"
     assert not [key for branch, key in client.git.branch_config() if branch == "feature"]
+
+
+def test_create_from_stacks_the_new_branch_on_the_named_one(repo: Repo, client: StackClient) -> None:
+    repo.make_stack()
+    repo.git("switch", "--quiet", "main")
+
+    assert client.branch("pr1b", from_branch="pr1") == "pr1"
+
+    assert repo.git("branch", "--show-current") == "pr1b"
+    assert repo.git("rev-parse", "pr1b") == repo.git("rev-parse", "pr1")
+    repo.assert_stacked("pr1b", "pr1", [])
+
+
+def test_create_from_refuses_a_branch_that_doesnt_exist(repo: Repo, client: StackClient) -> None:
+    with pytest.raises(StackError, match="nope isn't a local branch"):
+        client.branch("pr1", from_branch="nope")
+
+    assert repo.git("branch", "--show-current") == "main"
+    assert repo.git("branch", "--list", "pr1") == ""

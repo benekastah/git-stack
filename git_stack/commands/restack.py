@@ -30,7 +30,10 @@ def register(subparsers: Subparsers) -> None:
         "they conflict with it",
     )
     add_stack_arguments(p, "restack")
-    p.add_argument("--onto", help="first change the current branch's parent to ONTO")
+    p.add_argument(
+        "--onto",
+        help="first change the parent of the one branch named (default: the current branch) to ONTO",
+    )
     add_latest_argument(p)
     add_allow_shared_argument(p)
     add_json_argument(p)

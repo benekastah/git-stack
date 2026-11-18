@@ -134,6 +134,11 @@ T}@T{
 \f[CR]git stack unrevert <new branch> <revert> \-\-stack <branch>\f[R]
 T}
 T{
+teach my coding agents git\-stack
+T}@T{
+\f[CR]git stack install\-skills\f[R]
+T}
+T{
 read all of this in the terminal
 T}@T{
 \f[CR]git stack \-\-help\f[R]
@@ -289,9 +294,9 @@ Like git, every command accepts \f[CR]\-C <path>\f[R] before it to run
 as if started in \f[CR]<path>\f[R], e.g.
 \f[CR]git stack \-C \(ti/src/app info\f[R], and
 \f[CR]git \-C <path> stack ...\f[R] works too.
-.SS \f[CR]git stack create <name> [\-\-group <group>]\f[R]
-Create \f[CR]<name>\f[R] on top of the current branch, switch to it, and
-track it.
+.SS \f[CR]git stack create <name> [\-\-group <group>] [\-\-from <branch>]\f[R]
+Create \f[CR]<name>\f[R] on top of the current branch (or
+\f[CR]\-\-from <branch>\f[R]), switch to it, and track it.
 \f[CR]git stack branch\f[R] remains available as an alias.
 .PP
 \f[B]When would I use it?\f[R] Whenever you start a new branch for a
@@ -307,6 +312,7 @@ git stack create add\-api        \f[I]# stacked on main\f[R]
 git stack create use\-api        \f[I]# stacked on add\-api\f[R]
 git switch main
 git stack create search\-ui \-\-group search   \f[I]# a new stack, in group search\f[R]
+git stack create add\-api\-fix \-\-from add\-api \f[I]# on add\-api, wherever you are\f[R]
 .EE
 .IP \(bu 2
 Uncommitted changes come along to the new branch, as with
@@ -331,6 +337,10 @@ Whatever untracked branch is at the bottom of a stack (usually
 fast\-forward it to its upstream.
 If you branch off a branch that isn\(aqt tracked, that branch becomes
 the root.
+.IP \(bu 2
+\f[CR]\-\-from\f[R] takes a local branch, and works from any branch,
+since it\(aqs what the new branch is made from.
+It switches to the new branch, as without it.
 .IP \(bu 2
 \f[CR]\-\-group\f[R] puts the new branch\(aqs stack in
 \f[CR]<group>\f[R] (see Groups), as \f[CR]git stack group add\f[R]
@@ -759,6 +769,7 @@ they\(aqre merged.
 .EX
 git stack restack
 git stack restack \-\-onto main           \f[I]# move the current branch onto main, then restack\f[R]
+git stack restack pr2 \-\-onto main       \f[I]# move pr2 onto main, from wherever you are\f[R]
 git stack restack \-\-latest              \f[I]# also move the stack onto main\(aqs latest commit\f[R]
 .EE
 .IP \(bu 2
@@ -769,9 +780,11 @@ See How it works.
 A branch with merge commits must be restacked manually while preserving
 those merges; git\-stack refuses to replay it as a linear history.
 .IP \(bu 2
-\f[CR]\-\-onto\f[R] retargets only the current branch, onto another
-local branch.
-The branches stacked on it come along.
+\f[CR]\-\-onto\f[R] retargets one branch, onto another local branch: the
+one branch you name, or the current branch if you name none.
+It can\(aqt be combined with \f[CR]\-\-group\f[R] or several branches.
+The branches stacked on it come along, and you stay on the branch you
+were on.
 .IP \(bu 2
 \f[CR]\-l\f[R]/\f[CR]\-\-latest\f[R] moves the branches on the
 stack\(aqs root onto its latest commit even if they don\(aqt conflict
@@ -1311,6 +1324,53 @@ Works on the local \f[CR]\-\-from\f[R], without fetching, so run
 \f[CR]git stack sync\f[R] first if the revert only happened on the
 remote.
 Needs a clean worktree.
+.SS \f[CR]git stack install\-skills [\-\-claude] [\-\-codex] [\-\-replace] [\-\-json]\f[R]
+Link git\-stack\(aqs \c
+.UR https://agentskills.io
+Agent Skills
+.UE \c
+\ into the directories your coding agents read skills from, so they know
+how to use git\-stack (for example, to use \f[CR]git stack\f[R] rather
+than plain git on a tracked branch).
+There are five: \f[CR]git\-stack\f[R] (the model, the rules, everyday
+commands), and \f[CR]git\-stack\-sync\f[R],
+\f[CR]git\-stack\-rearrange\f[R], \f[CR]git\-stack\-troubleshoot\f[R]
+and \f[CR]git\-stack\-split\f[R].
+It works anywhere, not just in a repository.
+.PP
+\f[B]When would I use it?\f[R] Once after installing git\-stack, and
+again after moving or reinstalling it, which can leave the links
+dangling.
+(\f[CR]dev.py install\f[R] runs it for a clone.)
+.IP
+.EX
+git stack install\-skills            \f[I]# for each agent it finds\f[R]
+git stack install\-skills \-\-codex    \f[I]# for Codex, even if it isn\(aqt found\f[R]
+.EE
+.IP \(bu 2
+\f[CR]\-\-claude\f[R] installs into \f[CR]$CLAUDE_CONFIG_DIR/skills\f[R]
+(default \f[CR]\(ti/.claude/skills\f[R]), and \f[CR]\-\-codex\f[R] into
+\f[CR]\(ti/.agents/skills\f[R].
+Without either, it installs for each agent it finds in use (a
+\f[CR]\(ti/.claude\f[R] or \f[CR]\(ti/.codex\f[R] directory, or
+\f[CR]$CLAUDE_CONFIG_DIR\f[R] or \f[CR]$CODEX_HOME\f[R] existing).
+If it finds none it says so and changes nothing, which isn\(aqt a
+failure.
+If two agents\(aq skills directories are the same one (one is a link to
+the other), each skill is linked there once.
+.IP \(bu 2
+Each skill is a link to the one in the installed package, so a
+git\-stack upgrade updates the skills too.
+On Windows, where making a symlink usually needs a privilege, it makes a
+directory junction instead.
+.IP \(bu 2
+It leaves a link that\(aqs already right, and a link to somewhere else
+(say, another clone\(aqs skills) unless you pass \f[CR]\-\-replace\f[R],
+which replaces it.
+A link whose target is gone is replaced either way.
+It refuses to replace a real file or directory, even with
+\f[CR]\-\-replace\f[R], so a skill of your own with the same name is
+safe, and it changes nothing if it refuses any link.
 .SH SCRIPTING
 The commands below print one thing per line, for use in scripts,
 aliases, shell prompts and editors.
@@ -1555,6 +1615,13 @@ T{
 \f[CR]parent\f[R], \f[CR]base\f[R]
 T}@T{
 the \f[CR]parent\f[R] or \f[CR]base\f[R]
+T}
+T{
+\f[CR]install\-skills\f[R]
+T}@T{
+\f[CR]installed\f[R]: each skill\(aqs \f[CR]agent\f[R],
+\f[CR]skill\f[R], link \f[CR]path\f[R], and \f[CR]action\f[R]:
+\f[CR]linked\f[R], \f[CR]replaced\f[R] or \f[CR]unchanged\f[R]
 T}
 T{
 \f[CR]show\-stack\f[R]

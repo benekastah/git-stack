@@ -50,6 +50,7 @@ git stack sync                  # catch up: drop merged PRs, rebase what's left,
 | sync several stacks at once | `git stack group add <name> <branch-or-glob>...`, then `git stack sync -g <name>` |
 | clean up merged branches in every stack | `git stack clean` |
 | bring back a PR whose merge was reverted | `git stack unrevert <new branch> <revert> --stack <branch>` |
+| teach my coding agents git-stack | `git stack install-skills` |
 | read all of this in the terminal | `git stack --help` |
 
 ## Words used here
@@ -179,9 +180,10 @@ Like git, every command accepts `-C <path>` before it to run as if started in
 `<path>`, e.g. `git stack -C ~/src/app info`, and `git -C <path> stack ...`
 works too.
 
-### `git stack create <name> [--group <group>]`
+### `git stack create <name> [--group <group>] [--from <branch>]`
 
-Create `<name>` on top of the current branch, switch to it, and track it.
+Create `<name>` on top of the current branch (or `--from <branch>`), switch to
+it, and track it.
 `git stack branch` remains available as an alias.
 
 **When would I use it?** Whenever you start a new branch for a pull request,
@@ -195,6 +197,7 @@ git stack create add-api        # stacked on main
 git stack create use-api        # stacked on add-api
 git switch main
 git stack create search-ui --group search   # a new stack, in group search
+git stack create add-api-fix --from add-api # on add-api, wherever you are
 ```
 
 - Uncommitted changes come along to the new branch, as with `git switch -c`.
@@ -209,6 +212,8 @@ git stack create search-ui --group search   # a new stack, in group search
 - Whatever untracked branch is at the bottom of a stack (usually `main`) is its
   root, and `sync` and `clean` fast-forward it to its upstream. If you branch
   off a branch that isn't tracked, that branch becomes the root.
+- `--from` takes a local branch, and works from any branch, since it's what
+  the new branch is made from. It switches to the new branch, as without it.
 - `--group` puts the new branch's stack in `<group>` (see [Groups](#groups)),
   as `git stack group add` would. If the stack is in another group already,
   it refuses without creating the branch.
@@ -544,6 +549,7 @@ to be up to date before they're merged.
 ```sh
 git stack restack
 git stack restack --onto main           # move the current branch onto main, then restack
+git stack restack pr2 --onto main       # move pr2 onto main, from wherever you are
 git stack restack --latest              # also move the stack onto main's latest commit
 ```
 
@@ -552,8 +558,10 @@ git stack restack --latest              # also move the stack onto main's latest
   [How it works](#how-it-works).
 - A branch with merge commits must be restacked manually while preserving
   those merges; git-stack refuses to replay it as a linear history.
-- `--onto` retargets only the current branch, onto another local branch. The
-  branches stacked on it come along.
+- `--onto` retargets one branch, onto another local branch: the one branch
+  you name, or the current branch if you name none. It can't be combined with
+  `--group` or several branches. The branches stacked on it come along, and you
+  stay on the branch you were on.
 - `-l`/`--latest` moves the branches on the stack's root onto its latest commit
   even if they don't conflict with it (and the rest of the stack with them).
 - Merged branches are skipped and their children restacked onto their parent;
@@ -957,6 +965,40 @@ git stack unrevert add-api-unrevert 1a2b3c4d5e6f --stack use-api
 - Works on the local `--from`, without fetching, so run `git stack sync`
   first if the revert only happened on the remote. Needs a clean worktree.
 
+### `git stack install-skills [--claude] [--codex] [--replace] [--json]`
+
+Link git-stack's [Agent Skills](https://agentskills.io) into the directories
+your coding agents read skills from, so they know how to use git-stack (for
+example, to use `git stack` rather than plain git on a tracked branch). There
+are five: `git-stack` (the model, the rules, everyday commands), and
+`git-stack-sync`, `git-stack-rearrange`, `git-stack-troubleshoot` and
+`git-stack-split`. It works anywhere, not just in a repository.
+
+**When would I use it?** Once after installing git-stack, and again after
+moving or reinstalling it, which can leave the links dangling. (`dev.py
+install` runs it for a clone.)
+
+```sh
+git stack install-skills            # for each agent it finds
+git stack install-skills --codex    # for Codex, even if it isn't found
+```
+
+- `--claude` installs into `$CLAUDE_CONFIG_DIR/skills` (default
+  `~/.claude/skills`), and `--codex` into `~/.agents/skills`. Without either, it
+  installs for each agent it finds in use (a `~/.claude` or `~/.codex`
+  directory, or `$CLAUDE_CONFIG_DIR` or `$CODEX_HOME` existing). If it finds
+  none it says so and changes nothing, which isn't a failure. If two agents'
+  skills directories are the same one (one is a link to the other), each skill
+  is linked there once.
+- Each skill is a link to the one in the installed package, so a git-stack
+  upgrade updates the skills too. On Windows, where making a symlink usually
+  needs a privilege, it makes a directory junction instead.
+- It leaves a link that's already right, and a link to somewhere else (say,
+  another clone's skills) unless you pass `--replace`, which replaces it. A
+  link whose target is gone is replaced either way. It refuses to replace a
+  real file or directory, even with `--replace`, so a skill of your own with
+  the same name is safe, and it changes nothing if it refuses any link.
+
 ## Scripting
 
 The commands below print one thing per line, for use in scripts, aliases,
@@ -1076,6 +1118,7 @@ What each command's result has, besides `type` and `events`:
 | `prs` | `stacks`, and `steps`, one for each branch: the `branch`, its `parent`, and the `action`: `open`, `exists` (it already has a pull request) or `no-commits` (skipped, since it has no commits of its own). `title` is an opened pull request's title, and `number` and `url` an opened or existing one's (an existing one has no `url`, and a dry run opens none); each is `null` otherwise |
 | `unrevert` | the `branch` it created, the `parent` it created it on, the `reverts` it reverted, newest first, and the `children` it moved onto it |
 | `parent`, `base` | the `parent` or `base` |
+| `install-skills` | `installed`: each skill's `agent`, `skill`, link `path`, and `action`: `linked`, `replaced` or `unchanged` |
 | `show-stack` | `branches`, bottom first (`--quiet` can't be combined with `--json`) |
 
 `stacks` is the stacks the command covered, as `info --json` lists them.
@@ -1447,8 +1490,12 @@ when uv is installed, and venv and pip (25.1+) otherwise. It links the
 `git-stack` command into `~/.local/bin` (on Windows, writes a `git-stack.cmd`
 there and adds it to your `PATH`) and, except on Windows, the man page into
 `~/.local/share/man/man1` (an editable install doesn't install it). It makes
-the clone use the [git hooks](#git-hooks) in `git_hooks/`, and makes
-`git blame` skip [reformatting commits](#skipping-reformatting-in-git-blame).
+the clone use the [git hooks](#git-hooks) in `git_hooks/`, makes
+`git blame` skip [reformatting commits](#skipping-reformatting-in-git-blame),
+and links the clone's [agent skills](#git-stack-install-skills---claude---codex---replace---json)
+into the coding agents it finds (`git stack install-skills`, which stops the
+install if a skill is linked to another clone's or install's copy, unless you
+pass `--replace`; finding no agent isn't a failure).
 It's safe to rerun, e.g. when `pyproject.toml` changes, to pick up a new
 command-line entry point.
 

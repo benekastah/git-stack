@@ -335,16 +335,19 @@ class StackClient(StackCore):
                 )
 
     @exclusive
-    def branch(self, name: str, group: str | None = None) -> str:
-        """Create name on top of the current branch and track it, putting its
-        stack in group, if given. Returns the parent.
+    def branch(self, name: str, group: str | None = None, from_branch: str | None = None) -> str:
+        """Create name on top of from_branch (default: the current branch) and
+        track it, switching to it and putting its stack in group, if given.
+        Returns the parent.
 
         Refuses, creating nothing, if the stack is in another group already.
         """
         git = self.git
-        parent = git.current_branch()
+        parent = from_branch or git.current_branch()
         if parent is None:
             raise StackError("not on a branch")
+        if from_branch and not git.local_branch_exists(from_branch):
+            raise StackError(f"{from_branch} isn't a local branch")
         if not git.local_branch_exists(parent):
             # git would switch to name without creating it, leaving it
             # tracked on parent with nothing to stack on.
@@ -366,7 +369,7 @@ class StackClient(StackCore):
                     )
         # Without --no-track, branch.autoSetupMerge=inherit (or always) would give
         # name its parent's upstream, which sync and push take as its own.
-        git.run(*SWITCH, "--no-track", "--create", name)
+        git.run(*SWITCH, "--no-track", "--create", name, *([f"refs/heads/{from_branch}"] if from_branch else []))
         stacks.reparent(name, parent)
         if group is not None:
             stacks.set_group(bottom or name, group)
@@ -1107,20 +1110,27 @@ class StackClient(StackCore):
         needs_restack), in the current stack, or in the stacks of the branches
         that branches and groups name (see named).
 
-        onto first retargets the current branch, so it can't be combined with
-        branches or groups; latest
-        moves branches on a stack's root onto its tip even if they don't
-        conflict with it.
+        onto first retargets one branch: the one branches names, or the
+        current one if it names none. It can't be combined with groups or
+        more branches. latest moves branches on a stack's root onto its tip
+        even if they don't conflict with it.
         """
-        if onto and (branches or groups):
-            raise StackError("--onto moves the current branch, so it can't be combined with branches to restack")
+        if onto and (groups or len(branches) > 1):
+            raise StackError(
+                "--onto moves one branch: name just that branch (or none, for the current one), without --group"
+            )
         self.ensure_no_operation_in_progress()
         self.ensure_clean_worktree()
         self.settle_all()
         stacks = self.stacks()
         original = self.current_checkout()
         if onto:
-            branch = self.current_stacked_branch(stacks, "restack", hint="use `git stack track` first")
+            if branches:
+                branch = branches[0]
+                if branch not in stacks:
+                    raise StackError(f"{branch} isn't in a stack; use `git stack track` first")
+            else:
+                branch = self.current_stacked_branch(stacks, "restack", hint="use `git stack track` first")
             self.ensure_local_branch_parent(onto)
             stacks.ensure_no_cycle(branch, onto)
             self.ensure_owned(stacks.stack_of(branch), stacks, allow_shared, "restack")

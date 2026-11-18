@@ -10,6 +10,7 @@ from git_stack.commands import (
     group,
     import_stacks,
     info,
+    install_skills,
     next_branch,
     ownership,
     parent,
@@ -52,13 +53,12 @@ COMMANDS = (
     parent,
     base,
     show_stack,
+    install_skills,
 )
 
 
-def main(argv: list[str] | None = None, stack: StackClient | None = None) -> int:
-    """Run the `git stack` command in argv (default: sys.argv) with stack (default:
-    a StackClient working in the directory -C names, or the current one,
-    printing what it reports). Returns the exit status."""
+def build_parser() -> argparse.ArgumentParser:
+    """The `git stack` command line's parser, with every command registered."""
     parser = argparse.ArgumentParser(prog="git stack", description=(git_stack.__doc__ or "").partition("\n")[0])
     parser.add_argument(
         "-C",
@@ -72,8 +72,14 @@ def main(argv: list[str] | None = None, stack: StackClient | None = None) -> int
     subparsers = parser.add_subparsers(dest="command", required=True)
     for command in COMMANDS:
         command.register(subparsers)
+    return parser
 
-    args = parser.parse_args(argv)
+
+def main(argv: list[str] | None = None, stack: StackClient | None = None) -> int:
+    """Run the `git stack` command in argv (default: sys.argv) with stack (default:
+    a StackClient working in the directory -C names, or the current one,
+    printing what it reports). Returns the exit status."""
+    args = build_parser().parse_args(argv)
     # With --json, stdout is for the JSON, so git's output goes to stderr.
     stream = JsonStream() if args.json else None
     status: int | None = None
