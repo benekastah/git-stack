@@ -4,6 +4,49 @@ What's wrong with what's built: bugs, and gaps against the rules in `AGENTS.md` 
 `PROJECT_AGENTS.md`, most severe first. New work is in [roadmap.md](roadmap.md). When a change
 fixes one, remove it in the same change; when a change leaves something wrong, add it.
 
+## A second clone can't push a branch with a managed draft base
+
+Ownership of a managed draft base is recorded only in the local
+`stackDraftBase` setting. A clone without it (a second machine, or the setting
+lost) finds `refs/heads/git-stack/draft-base/<hash>` already on the remote and
+`DraftBase.plan` raises "already exists; refusing to adopt it", which fails the
+whole atomic push, unrelated branches included. It could adopt the ref when it
+matches the recorded boundary (or the PR's current base), and say so otherwise.
+
+## Managed draft bases can be left on the remote
+
+Only the path that drops to one dependency, or none, deletes the managed ref.
+Closing the draft's PR, deleting or untracking the combined branch, or `clean`
+leaves it behind, and nothing else reads `stackDraftBase` to find it.
+
+## `sync` changes a draft's bases without an event
+
+`reduce_draft_dependencies` reparents the branch and replaces its secondary
+bases without emitting an event, unlike `move_off_deleted_parents`
+(`MovedOffDeletedParent`). It also only runs for an open GitHub draft, so the
+same graph syncs differently depending on PR state, and with bases
+`(main, x)` where `x` already includes `main` it collapses to `x` though
+nothing merged (its docstring says "once one lands").
+
+## One ready-for-review PR blocks every push
+
+If a PR that targets a managed base is marked ready for review,
+`managed_draft_updates` and `retiring_draft_bases` raise "convert it to a draft
+before pushing", which stops the push of the whole stack, unrelated branches
+included. Neither error is tested. It could skip that branch and warn.
+
+## Smaller draft-base gaps
+
+- `managed_draft_updates` (used by `push`) doesn't check that the recorded
+  `stackReplayTips` still match the parents' tips, as `plan_draft_base` (used
+  by `prs`) does.
+- `sync_branch` assigns `parent` and overwrites it before use.
+- `DraftBase`'s guards (invalid record, a different upstream, the ref moved
+  outside git-stack, already exists, push failure) and these `StackClient`
+  paths are untested: the early returns in `reduce_draft_dependencies`, a PR no
+  longer a draft, retiring when the parent isn't pushed, and a failed delete of
+  the managed ref.
+
 ## `clean` then `restack` copies the trunk's history into a multi-base branch
 
 If a branch has bases `(first, second)` and `second` merges into `main`,
