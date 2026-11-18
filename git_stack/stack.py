@@ -1472,12 +1472,7 @@ class StackClient(StackCore):
             return SyncResult([], self.branch_infos(self.stacks(), GitAdapter(self)))
         initial_stacks = self.stacks()
         initial_stack, _ = self.sync_selection(branches, groups, initial_stacks, remote, only_remote, command)
-        if only_remote:
-            for branch in initial_stack:
-                if self.git.config_get(branch, "remote") == remote:
-                    self.settle(branch)
-        else:
-            self.settle_all()
+        self.settle_sync_selection(initial_stack, remote if only_remote else None)
         stacks = self.stacks()
         self.ensure_owned(
             self.selected_stacks(branches, groups, stacks, command.value), stacks, allow_shared, command.value
@@ -1500,9 +1495,7 @@ class StackClient(StackCore):
             self.fetch(name)
         if self.move_off_deleted_parents(stack, stacks, adapter, push_remote):
             plan = DependencyPlan.select(stacks, stack)
-            roots_to_update = {
-                r for r in plan.roots if not only_remote or self.git.config_get(r, "remote") == remote
-            }
+            roots_to_update = {r for r in plan.roots if not only_remote or self.git.config_get(r, "remote") == remote}
             for name in sorted(self.upstream_remotes(roots_to_update) - remotes):
                 self.fetch(name)
             if push and not force:
@@ -1555,6 +1548,15 @@ class StackClient(StackCore):
             self.branch_infos(stacks.restricted(stack), adapter) if only_remote else self.stack_infos(stack, adapter)
         )
         return SyncResult(state.unpushed, shown)
+
+    def settle_sync_selection(self, branches: Iterable[str], remote: str | None) -> None:
+        """Settle pending operations in the scope sync is allowed to change."""
+        if remote is None:
+            self.settle_all()
+            return
+        for branch in branches:
+            if self.git.config_get(branch, "remote") == remote:
+                self.settle(branch)
 
     def move_off_deleted_parents(
         self, branches: Sequence[str], stacks: Stacks, adapter: GitAdapter, remote: str
