@@ -21,14 +21,15 @@ git-stack = "git_stack.cli:main"
 template-dev = [
     "basedpyright>=1.40.2",
     "coverage>=7.17.3",
+    # pandoc, for dev.py man. Pinned: `man --check` compares its exact output with the pages.
+    # It has no wheel for Windows on ARM, so dev.py venv fails there.
+    "pypandoc_binary==1.17",
     "pytest>=9.2.0",
     "pytest-xdist>=3.8.0",
     "ruff>=0.17.5",
 ]
-# pypandoc_binary is pinned because man/build.py --check (and so the tests) compares
-# its pandoc's exact output with the committed man/git-stack.1. distlib makes the
-# tests' commands on Windows (tests/helpers.py's install_command).
-dev = [{ include-group = "template-dev" }, "distlib>=0.4.4", "pypandoc_binary==1.17"]
+# distlib makes the tests' commands on Windows (tests/helpers.py's install_command).
+dev = [{ include-group = "template-dev" }, "distlib>=0.4.4"]
 
 # setuptools rather than the template's hatchling, for data-files: a wheel installs the man page.
 [build-system]
@@ -84,7 +85,6 @@ include = [
     "tests",
     "dev.py",
     # The project's own below:
-    "man/build.py",
     "dev_project.py",
 ]
 typeCheckingMode = "strict"

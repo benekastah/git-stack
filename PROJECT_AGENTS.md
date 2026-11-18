@@ -101,9 +101,9 @@ Text meant for people (messages, `info`'s tree) can change.
   repository fails rather than reach the clone the tests were started in.
   Code that names `ROOT` (`dev.py`, `dev_project.py`) still runs there. `git_calls` lists the git processes
   git-stack starts; the tests' own (`Repo.git`) aren't in it.
-- The man page, `man/git-stack.1`, is generated from the README, and a test
-  fails if it's out of date: the pre-commit hook regenerates it (or run
-  `python3 dev.py man`).
+- The man page, `man/git-stack.1`, is generated from the README by
+  `dev.py man` (the template's), and `dev.py static` fails if it's out of
+  date: the pre-commit hook regenerates it (or run `python3 dev.py man`).
 
 ## Linux, macOS and Windows
 
@@ -129,18 +129,16 @@ On top of `AGENTS.md`'s rules:
 
 Keep these when resolving a `copier update`'s conflicts:
 
-- `dev_project.py` adds to `dev.py`: `man`, `pre-commit-man` (which
-  `git_hooks/pre-commit` runs after the template's step) and
-  `types-other-platforms`, and install's man page link and
-  `blame.ignoreRevsFile`.
+- `dev_project.py` adds to `dev.py`: `types-other-platforms`, the man page's
+  SYNOPSIS (`MAN_SYNOPSIS`), and install's `blame.ignoreRevsFile`.
 - `pyproject.toml`: every setting the template doesn't have, and every value
   that differs from it, e.g. setuptools and its `data-files` (the man page;
-  the package is at the root, not in `src/`), `pypandoc_binary` and `distlib`
-  in `dev`, Ruff's line length, extra rules, `force-exclude` and `dev.py`'s
-  exclusions, and basedpyright's `include` and relaxed rules.
-- CI: `.github/workflows/project.yml` runs the man page check (on docs-only
-  changes too) and the type checks as if on Windows and macOS. `ci.yml` has two
-  edits of git-stack's, each commented: the tests job sets up the Windows Dev
-  Drive (`.github/actions/fast-temp`), and the time limits. `tests/conftest.py`
+  the package is at the root, not in `src/`), `distlib` in `dev`, Ruff's
+  line length, extra rules, `force-exclude` and `dev.py`'s exclusions, and
+  basedpyright's `include` and relaxed rules.
+- CI: `.github/workflows/project.yml` runs the type checks as if on Windows
+  and macOS. `ci.yml` has two edits of git-stack's, each commented: the tests
+  job sets up the Windows Dev Drive (`.github/actions/fast-temp`), and the
+  time limits. `tests/conftest.py`
   gives CI 8 test workers. `.github/workflows/measure.yml` is git-stack's own.
 - The extra lines in `.gitattributes` and `.gitignore`.

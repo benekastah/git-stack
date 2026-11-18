@@ -105,6 +105,7 @@ dev = [
 template-dev = [
     { name = "basedpyright" },
     { name = "coverage" },
+    { name = "pypandoc-binary" },
     { name = "pytest" },
     { name = "pytest-xdist" },
     { name = "ruff" },
@@ -126,6 +127,7 @@ dev = [
 template-dev = [
     { name = "basedpyright", specifier = ">=1.40.2" },
     { name = "coverage", specifier = ">=7.17.3" },
+    { name = "pypandoc-binary", specifier = "==1.17" },
     { name = "pytest", specifier = ">=9.2.0" },
     { name = "pytest-xdist", specifier = ">=3.8.0" },
     { name = "ruff", specifier = ">=0.17.5" },
