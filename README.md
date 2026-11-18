@@ -847,14 +847,22 @@ git stack prs
   [stacked pull requests](https://docs.github.com/en/pull-requests/reference/stacked-pull-requests),
   and a stack's open pull requests are a chain, each on the one before, it
   first links them into a stack on GitHub, or adds the new ones to the top
-  of the one they're in. Once they're all in one, GitHub shows the stack on
-  each pull request, so they get no stack in their descriptions, and the
-  ones they had are removed. A stack that branches out, or a group's stacks,
-  can't be one stack on GitHub, so they keep theirs. Merged pull requests can't
+  of the one they're in. GitHub shows its stack on each pull request in it,
+  so those in a stack on GitHub that still fits get no stack in their
+  descriptions, and the ones they had are removed; the others (e.g. new ones
+  not added to it, as linking is off) get one showing the whole stack. A
+  stack that branches out, or a group's stacks,
+  can't be one stack on GitHub, so they aren't linked. But a stack on GitHub
+  is kept while its open pull requests are still a path through the local
+  stack, from its root, each on the one before (e.g. once a branch is
+  added beside one in it): new pull requests, each the only one on the one
+  before, join its top, and the others keep their descriptions, showing the
+  whole stack. Merged pull requests can't
   be taken out of a stack on GitHub, so if some are in one that doesn't match
   (e.g. in another order, or ending with a merged pull request that a new
-  one isn't based on), it warns and leaves them, using description sections
-  instead. GitHub doesn't change
+  one isn't based on), it leaves them, using description sections instead.
+  If the local stack is a chain, it also warns and suggests `--rebuild-stack`,
+  which can't relink a stack that branches out. GitHub doesn't change
   the base of a pull request in a stack either. When a stack is reshaped
   (e.g. a branch is put in its middle), `push`, `sync`, and `prs` refuse to
   unstack it to change those bases unless given `--rebuild-stack`. It refuses
@@ -862,6 +870,9 @@ git stack prs
   closed and merged PRs do not block rebuilding.
   Run `prs` to
   link them again, or use `push --prs --rebuild-stack` to do both together.
+  Only a stack that's a chain is linked again: one that branches out is left
+  unlinked, with description sections, since nothing says yet which path
+  through it to link.
   `sync` may already have changed local branches before it reaches this check.
   To stop it linking them, run
   `git config stack.githubStacks false`. git-stack links them through
@@ -870,13 +881,17 @@ git stack prs
   (`gh extension install github/gh-stack`).
 
   Use `git stack prs --rebuild-stack` to unstack the selected pull requests on
-  GitHub and create a new stack when the existing stack doesn't match. Merged
+  GitHub and create a new stack when the existing stack doesn't match (for a
+  stack that's a chain; one that branches out is only unstacked). Merged
   pull requests remain in the old stack. It refuses if unstacking would also
   remove an open pull request outside the selected stack; a closed one outside
   it is taken out of the stack with the rest, and isn't linked again unless
   it's reopened and a later `prs` links it with its stack. If creating the
   new stack fails, the pull requests remain unstacked; rerun `prs` to retry.
-  Add `--dry-run` to see the planned unstack and creation without changing them.
+  A stack that matches is never unstacked: new pull requests are added to its
+  top, as without `--rebuild-stack`, so it keeps its number.
+  Add `--dry-run` to see the planned unstack and creation, or additions,
+  without changing them.
 
   ```
   <!-- git-stack -->
@@ -1250,7 +1265,8 @@ With the GitHub adapter:
   is first pushed targets the default branch instead; the next `prs` or
   `push` retargets a pull request opened from it.) Where the repository has
   stacked pull requests, `prs` also links each stack that's a chain into a
-  stack on GitHub.
+  stack on GitHub, and keeps one that's still a path through a stack that
+  branches out.
 - A pull request that GitHub says was merged counts as merged once its merge
   commit is in the local parent branch (`sync` fetches it), even if the parent
   changed the merged lines since, or the merge changed them.

@@ -1167,16 +1167,26 @@ stacked pull requests
 , and a stack\(aqs open pull requests are a chain, each on the one
 before, it first links them into a stack on GitHub, or adds the new ones
 to the top of the one they\(aqre in.
-Once they\(aqre all in one, GitHub shows the stack on each pull request,
-so they get no stack in their descriptions, and the ones they had are
-removed.
+GitHub shows its stack on each pull request in it, so those in a stack
+on GitHub that still fits get no stack in their descriptions, and the
+ones they had are removed; the others (e.g.
+new ones not added to it, as linking is off) get one showing the whole
+stack.
 A stack that branches out, or a group\(aqs stacks, can\(aqt be one stack
-on GitHub, so they keep theirs.
+on GitHub, so they aren\(aqt linked.
+But a stack on GitHub is kept while its open pull requests are still a
+path through the local stack, from its root, each on the one before
+(e.g.
+once a branch is added beside one in it): new pull requests, each the
+only one on the one before, join its top, and the others keep their
+descriptions, showing the whole stack.
 Merged pull requests can\(aqt be taken out of a stack on GitHub, so if
 some are in one that doesn\(aqt match (e.g.
 in another order, or ending with a merged pull request that a new one
-isn\(aqt based on), it warns and leaves them, using description sections
-instead.
+isn\(aqt based on), it leaves them, using description sections instead.
+If the local stack is a chain, it also warns and suggests
+\f[CR]\-\-rebuild\-stack\f[R], which can\(aqt relink a stack that
+branches out.
 GitHub doesn\(aqt change the base of a pull request in a stack either.
 When a stack is reshaped (e.g.
 a branch is put in its middle), \f[CR]push\f[R], \f[CR]sync\f[R], and
@@ -1186,6 +1196,9 @@ It refuses if the GitHub stack includes open PRs outside the selected
 local stacks; closed and merged PRs do not block rebuilding.
 Run \f[CR]prs\f[R] to link them again, or use
 \f[CR]push \-\-prs \-\-rebuild\-stack\f[R] to do both together.
+Only a stack that\(aqs a chain is linked again: one that branches out is
+left unlinked, with description sections, since nothing says yet which
+path through it to link.
 \f[CR]sync\f[R] may already have changed local branches before it
 reaches this check.
 To stop it linking them, run
@@ -1200,7 +1213,8 @@ gh\-stack
 .PP
 Use \f[CR]git stack prs \-\-rebuild\-stack\f[R] to unstack the selected
 pull requests on GitHub and create a new stack when the existing stack
-doesn\(aqt match.
+doesn\(aqt match (for a stack that\(aqs a chain; one that branches out
+is only unstacked).
 Merged pull requests remain in the old stack.
 It refuses if unstacking would also remove an open pull request outside
 the selected stack; a closed one outside it is taken out of the stack
@@ -1208,8 +1222,11 @@ with the rest, and isn\(aqt linked again unless it\(aqs reopened and a
 later \f[CR]prs\f[R] links it with its stack.
 If creating the new stack fails, the pull requests remain unstacked;
 rerun \f[CR]prs\f[R] to retry.
-Add \f[CR]\-\-dry\-run\f[R] to see the planned unstack and creation
-without changing them.
+A stack that matches is never unstacked: new pull requests are added to
+its top, as without \f[CR]\-\-rebuild\-stack\f[R], so it keeps its
+number.
+Add \f[CR]\-\-dry\-run\f[R] to see the planned unstack and creation, or
+additions, without changing them.
 .IP
 .EX
 <!\-\- git\-stack \-\->
@@ -1782,7 +1799,8 @@ parents too, and keeps the stack in each open one\(aqs description.
 default branch instead; the next \f[CR]prs\f[R] or \f[CR]push\f[R]
 retargets a pull request opened from it.)
 Where the repository has stacked pull requests, \f[CR]prs\f[R] also
-links each stack that\(aqs a chain into a stack on GitHub.
+links each stack that\(aqs a chain into a stack on GitHub, and keeps one
+that\(aqs still a path through a stack that branches out.
 .IP \(bu 2
 A pull request that GitHub says was merged counts as merged once its
 merge commit is in the local parent branch (\f[CR]sync\f[R] fetches it),

@@ -412,7 +412,10 @@ def test_push_reports_github_stacks_it_left_unstacked_when_the_push_fails(repo: 
     result = repo.stack("push", "--rebuild-stack", expect_success=False)
 
     assert gh.stacks() == []
-    assert "GitHub stack 1000 was unstacked (`git stack prs` links its pull requests" in result.stderr
+    assert (
+        "GitHub stack 1000 was unstacked (once they're pushed, `git stack prs` links a linear stack's pull "
+        "requests into one again; one that branches out is left unlinked, with description sections)"
+    ) in " ".join(result.stderr.split())
 
 
 def test_push_runs_the_pre_push_hook_once(repo: Repo, gh: FakeGitHub) -> None:

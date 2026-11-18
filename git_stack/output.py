@@ -149,6 +149,8 @@ def message(event: events.Event) -> str:  # noqa: C901
                 f"would unstack GitHub {'stacks' if len(event.github_stacks) > 1 else 'stack'} {stacks} "
                 f"(merged pull requests remain), then create a new stack with {pull_requests(event.numbers)}"
             )
+        case events.GitHubStackAddPlanned():
+            return f"would add {pull_requests(event.numbers)} to the top of GitHub stack {event.stack}"
         case events.GitHubStackUnstackPlanned():
             stacks = ", ".join(map(str, event.github_stacks))
             return (

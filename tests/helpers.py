@@ -359,6 +359,7 @@ class FakeGitHub:
         its pull requests' numbers, bottom first."""
         state = self.load()
         state["stacks"] = [{"number": 1000 + i, "prs": list(prs)} for i, prs in enumerate(stacks)]
+        state["next_stack"] = 1000 + len(stacks)
         self.save(state)
 
     def stacks(self) -> list[list[int]]:

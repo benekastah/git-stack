@@ -33,6 +33,10 @@ def test_unstack_preview_reports_stack_and_pull_requests() -> None:
     )
 
 
+def test_add_preview_reports_stack_and_pull_requests() -> None:
+    assert message(events.GitHubStackAddPlanned(42, (12, 13))) == "would add #12, #13 to the top of GitHub stack 42"
+
+
 @pytest.mark.parametrize(
     ("event", "expected"),
     [
