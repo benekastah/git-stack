@@ -975,7 +975,8 @@ are five: `git-stack` (the model, the rules, everyday commands), and
 `git-stack-split`. It works anywhere, not just in a repository.
 
 **When would I use it?** Once after installing git-stack, and again after
-moving or reinstalling it, which can leave the links dangling.
+moving or reinstalling it, which can leave the links dangling. (`dev.py
+install` runs it for a clone.)
 
 ```sh
 git stack install-skills            # for each agent it finds
@@ -1485,8 +1486,11 @@ when uv is installed, and venv and pip (25.1+) otherwise. It links the
 `git-stack` command into `~/.local/bin` (on Windows, writes a `git-stack.cmd`
 there and adds it to your `PATH`) and, except on Windows, the man page into
 `~/.local/share/man/man1` (an editable install doesn't install it). It makes
-the clone use the [git hooks](#git-hooks) in `git_hooks/`, and makes
-`git blame` skip [reformatting commits](#skipping-reformatting-in-git-blame).
+the clone use the [git hooks](#git-hooks) in `git_hooks/`, makes
+`git blame` skip [reformatting commits](#skipping-reformatting-in-git-blame),
+and links the clone's [agent skills](#git-stack-install-skills---claude---codex---json)
+into the coding agents it finds (`git stack install-skills`: it replaces a
+skill link to another clone, and only warns if it finds no agent).
 It's safe to rerun, e.g. when `pyproject.toml` changes, to pick up a new
 command-line entry point.
 

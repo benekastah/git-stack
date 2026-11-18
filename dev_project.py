@@ -3,13 +3,15 @@ blame.
 
     python dev.py types-other-platforms  # basedpyright as if on Windows and macOS too
 
-`install` also makes `git blame` skip the commits in .git-blame-ignore-revs.
+`install` also makes `git blame` skip the commits in .git-blame-ignore-revs, and links the agent
+skills into the directories of the coding agents it finds (`git stack install-skills`).
 """
 
 import subprocess
+import sys
 from collections.abc import Callable
 
-from dev import ROOT, run, tool, venv
+from dev import ROOT, run, run_code, tool, venv
 
 MAN_SYNOPSIS = {"git-stack": "**git stack** [**-C** *path*] *command* [*args*]"}
 """man/git-stack.1's SYNOPSIS (dev.py man makes the page from README.md)."""
@@ -30,6 +32,21 @@ def after_install() -> None:
     prefix = ":(optional)" if _git_has_optional_paths() else ""
     run("git", "config", "blame.ignoreRevsFile", f"{prefix}.git-blame-ignore-revs")
     print("made git blame skip the commits in .git-blame-ignore-revs")
+    install_skills()
+
+
+def install_skills() -> None:
+    """Link this clone's agent skills into each coding agent's skills directory, as
+    `git stack install-skills` does for the agents it finds. That command makes the links (a
+    symlink, or a junction on Windows), so they aren't `install_links()`: they'd need a
+    symlink Windows usually can't make. It fails when it finds no agent, which isn't this
+    install's failure, so that only warns."""
+    if run_code(tool("git-stack"), "install-skills") != 0:
+        print(
+            "warning: couldn't link the agent skills (see above); run `git stack install-skills`"
+            " once an agent is installed",
+            file=sys.stderr,
+        )
 
 
 def _git_has_optional_paths() -> bool:

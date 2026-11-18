@@ -138,7 +138,9 @@ On top of `AGENTS.md`'s rules:
 Keep these when resolving a `copier update`'s conflicts:
 
 - `dev_project.py` adds to `dev.py`: `types-other-platforms`, the man page's
-  SYNOPSIS (`MAN_SYNOPSIS`), and install's `blame.ignoreRevsFile`.
+  SYNOPSIS (`MAN_SYNOPSIS`), and install's `blame.ignoreRevsFile` and its running
+  `git stack install-skills` (not an `install_links()` entry, since the links are
+  directory links Windows needs a junction for, which that command makes).
 - `pyproject.toml`: every setting the template doesn't have, and every value
   that differs from it, e.g. setuptools and its `data-files` (the man page;
   the package is at the root, not in `src/`), `distlib` in `dev`, Ruff's
