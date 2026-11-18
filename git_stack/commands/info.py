@@ -19,6 +19,7 @@ NOTES: dict[BranchStatus, str | None] = {
     BranchStatus.MERGED_WITH_NEW_COMMITS: "(merged, with new commits)",
     BranchStatus.REVERTED: "(merged, then reverted)",
     BranchStatus.UNKNOWN: "(status unavailable)",
+    BranchStatus.STALE_BASE: "(stale recorded base)",
 }
 ORIENTATION_SETTING = "stack.orientation"
 
@@ -50,6 +51,7 @@ STATUS_COLORS = {
     BranchStatus.MERGED_WITH_NEW_COMMITS: "33",
     BranchStatus.REVERTED: "33",
     BranchStatus.UNKNOWN: "33",
+    BranchStatus.STALE_BASE: "33",
     BranchStatus.PARENT_MISSING: "31",  # red
 }
 

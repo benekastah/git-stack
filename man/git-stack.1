@@ -631,6 +631,12 @@ Run \f[CR]git stack sync\f[R] or \f[CR]git stack restack\f[R].
 With color on, the branch is yellow and marked \f[CR]!\f[R] instead; the
 marker makes its status visible without relying on color.
 .IP \(bu 2
+\f[CR](stale recorded base)\f[R]: the recorded base includes trunk merge
+commits in the branch\(aqs replay range.
+\f[CR]sync\f[R] and \f[CR]restack\f[R] stop and suggest a newer fork.
+Confirm the fork before repairing tracking with
+\f[CR]git stack track <parent> <branch> \-\-base <sha>\f[R].
+.IP \(bu 2
 \f[CR](merged)\f[R]: it was merged into its parent (see When does
 \f[CR]sync\f[R] consider a branch merged?); \f[CR]sync\f[R] or
 \f[CR]clean\f[R] will stop tracking it.
@@ -695,8 +701,9 @@ child.
 \f[CR]parent\f[R] and \f[CR]status\f[R] are \f[CR]null\f[R] for a root,
 and \f[CR]status\f[R] is one of \f[CR]up\-to\-date\f[R],
 \f[CR]needs\-restack\f[R], \f[CR]merged\f[R],
-\f[CR]merged\-with\-new\-commits\f[R], \f[CR]reverted\f[R] or
-\f[CR]parent\-missing\f[R] or \f[CR]unknown\f[R].
+\f[CR]merged\-with\-new\-commits\f[R], \f[CR]reverted\f[R],
+\f[CR]parent\-missing\f[R], \f[CR]stale\-base\f[R] or
+\f[CR]unknown\f[R].
 \f[CR]additional_parents\f[R] lists any parents after \f[CR]parent\f[R],
 in replay order; it is empty for a single\-base branch or root.
 \f[CR]group\f[R] is the group of a branch on a stack\(aqs root, when

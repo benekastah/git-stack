@@ -458,6 +458,50 @@ class StackCore:
             )
         return base
 
+    def stale_trunk_base(self, branch: str) -> tuple[str, str] | None:
+        """Suggest a repair when the recorded range counts trunk merges as branch work."""
+        git = self.git
+        recorded = git.config_get(branch, PARENT_KEY)
+        base = git.config_get(branch, BASE_KEY)
+        if not recorded or not base or git.config_get(branch, replay.TIPS):
+            return None
+        parents = read_parents(branch, recorded)
+        parent = parents[0]
+        if len(parents) != 1 or git.config_get(parent, PARENT_KEY):
+            return None
+        trunk = git.rev(f"refs/heads/{parent}")
+        if trunk is None:
+            return None
+        upstream = git.rev(f"{parent}@{{upstream}}")
+        if upstream and git.is_ancestor(trunk, upstream):
+            trunk = upstream
+        tip = git.tip(branch)
+        fork = self.newer_trunk_fork(base, tip, trunk)
+        return (parent, fork) if fork else None
+
+    def newer_trunk_fork(self, base: str, tip: str, trunk: str) -> str | None:
+        if base == trunk:
+            return None
+        git = self.git
+        fork = git.run("merge-base", trunk, tip, check=False)
+        if not fork or fork in (base, tip) or not git.is_ancestor(base, fork):
+            return None
+        if git.run("rev-list", "--max-count=1", "--merges", f"{base}..{fork}") and not git.run(
+            "rev-list", "--max-count=1", "--merges", f"{fork}..{tip}"
+        ):
+            return fork
+        return None
+
+    def ensure_fresh_trunk_bases(self, branches: Iterable[str]) -> None:
+        for branch in branches:
+            if stale := self.stale_trunk_base(branch):
+                parent, fork = stale
+                repair = f"git stack track {shlex.quote(parent)} {shlex.quote(branch)} --base {fork[:12]}"
+                raise BrokenStackError(
+                    f"{branch} has a stale recorded base that includes trunk merge commits. "
+                    f"If {fork[:12]} is the intended fork, repair it with `{repair}`"
+                )
+
     def needs_restack(self, branch: str, parent: str, base: str | None, parent_tip: str, latest: bool) -> bool:
         """Whether branch, last rebased onto base, has to be rebased onto
         parent_tip, its parent's tip.

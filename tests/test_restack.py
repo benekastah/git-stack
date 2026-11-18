@@ -116,6 +116,21 @@ def test_restack_keeps_refs_unchanged_on_base_conflict(repo: Repo, client: Stack
     assert {b: repo.git("rev-parse", b) for b in before} == before
 
 
+def test_restack_from_untracked_branch_reports_it_before_settling_other_stacks(repo: Repo, client: StackClient) -> None:
+    client.branch("tracked")
+    repo.commit("a", "tracked\n", "tracked")
+    tip = repo.git("rev-parse", "tracked")
+    base = repo.git("rev-parse", "main")
+    pending = f"{tip} {base} main"
+    repo.git("config", "branch.tracked.stackPendingRestack", pending)
+    repo.git("switch", "-qc", "untracked", "main")
+
+    with pytest.raises(StackError, match="untracked isn't in a stack"):
+        client.restack()
+
+    assert repo.config("tracked", "stackPendingRestack") == pending
+
+
 def test_restack_refuses_to_drop_local_merge_changes(repo: Repo, client: StackClient) -> None:
     client.branch("pr1")
     repo.commit("a", "pr1\n", "pr1")

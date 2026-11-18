@@ -70,6 +70,7 @@ class BranchStatus(enum.Enum):
     MERGED_WITH_NEW_COMMITS = "merged-with-new-commits"
     REVERTED = "reverted"
     UNKNOWN = "unknown"
+    STALE_BASE = "stale-base"
 
 
 @dataclass(frozen=True)
@@ -1138,6 +1139,8 @@ class StackClient(StackCore):
             parent_tip = git.rev(f"refs/heads/{parent}")
             if parent_tip is None:
                 return BranchStatus.PARENT_MISSING
+            if self.stale_trunk_base(branch) is not None:
+                return BranchStatus.STALE_BASE
             # Worked out before merge_state, which may wait for the adapter's
             # lookup, so the two overlap. It's wasted on merged branches.
             needs_restack = self.needs_restack(
@@ -1193,7 +1196,7 @@ class StackClient(StackCore):
     def propagate_graph_status(
         self, ordered: list[str], graph: set[str], stacks: Stacks, statuses: dict[str, BranchStatus]
     ) -> None:
-        stale = {BranchStatus.NEEDS_RESTACK, BranchStatus.PARENT_MISSING, BranchStatus.UNKNOWN}
+        stale = {BranchStatus.NEEDS_RESTACK, BranchStatus.PARENT_MISSING, BranchStatus.UNKNOWN, BranchStatus.STALE_BASE}
         for branch in ordered:
             if (
                 branch in graph
@@ -1314,6 +1317,11 @@ class StackClient(StackCore):
                 remaining = self.skip_merged(queued, stacks, adapter)
                 self.restack_all(remaining, stacks, job.latest)
             return
+        initial = self.stacks()
+        if not branches and not groups:
+            self.current_stacked_branch(initial, "restack", hint="use `git stack track` first")
+        else:
+            self.named(branches, groups, initial)
         self.settle_all()
         stacks = self.stacks()
         original = self.current_checkout()
@@ -1329,6 +1337,7 @@ class StackClient(StackCore):
         else:
             selected = self.selected_stacks(branches, groups, stacks, "restack")
             self.ensure_owned(selected, stacks, allow_shared, "restack")
+        self.ensure_fresh_trunk_bases(selected)
         adapter = make_adapter(self, self.default_remote(selected, stacks), fetch=False)
         to_restack = self.skip_merged(selected, stacks, adapter, retargeted=retargeted)
         self.restack_all(to_restack, stacks, latest)
@@ -1479,6 +1488,7 @@ class StackClient(StackCore):
         )
         stack, upstream_remotes = self.sync_selection(branches, groups, stacks, remote, only_remote, command)
         self.ensure_ignorable_reverts(ignore_reverts, stack, "the stacks being synced")
+        self.ensure_fresh_trunk_bases(stack)
         plan = DependencyPlan.select(stacks, stack)
         roots_to_update = {
             root for root in plan.roots if not only_remote or self.git.config_get(root, "remote") == remote

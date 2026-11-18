@@ -437,6 +437,10 @@ git stack info
   branch on `main`, it conflicts with `main`). Run `git stack sync` or
   `git stack restack`. With color on, the branch is yellow and marked `!`
   instead; the marker makes its status visible without relying on color.
+- `(stale recorded base)`: the recorded base includes trunk merge commits
+  in the branch's replay range. `sync` and `restack` stop and suggest a newer
+  fork. Confirm the fork before repairing tracking with `git stack track
+  <parent> <branch> --base <sha>`.
 - `(merged)`: it was merged into its parent (see
   [When does `sync` consider a branch merged?](#when-does-sync-consider-a-branch-merged));
   `sync` or `clean` will stop tracking it.
@@ -477,8 +481,8 @@ git stack info
 - `--json` prints the same information for scripts: a list with an object for
   each branch, each stack's root first, parent before child. `parent` and
   `status` are `null` for a root, and `status` is one of `up-to-date`,
-  `needs-restack`, `merged`, `merged-with-new-commits`, `reverted` or
-  `parent-missing` or `unknown`. `additional_parents` lists any parents after
+  `needs-restack`, `merged`, `merged-with-new-commits`, `reverted`,
+  `parent-missing`, `stale-base` or `unknown`. `additional_parents` lists any parents after
   `parent`, in replay order; it is empty for a single-base branch or root.
   `group` is the group of a branch on a stack's root, when `info` shows it
   (once the group has two or more stacks), or `null`.

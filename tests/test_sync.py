@@ -974,6 +974,33 @@ def test_sync_pull_aborted_then_committed_over_in_same_second_by_same_author_is_
     assert repo.remote_subject("pr1") == "from my other machine"
 
 
+def test_stale_trunk_base_is_reported_before_sync_or_restack(repo: Repo, client: StackClient) -> None:
+    old_base = repo.git("rev-parse", "main")
+    repo.git("switch", "-qc", "trunk-side")
+    repo.commit("b", "trunk change\n", "trunk change")
+    repo.git("switch", "-q", "main")
+    repo.git("merge", "--no-ff", "--no-edit", "trunk-side")
+    fork = repo.git("rev-parse", "main")
+    repo.git("push", "-q", "origin", "main")
+    client.branch("feature")
+    repo.commit("a", "feature\n", "own change")
+    repo.git("config", "branch.feature.stackBase", old_base)
+    repo.commit_on_forge("main", "c", "new trunk change\n", "new trunk change")
+
+    assert "stale recorded base" in repo.stack("info", "--offline").stdout
+    for command in (client.sync, client.restack):
+        with pytest.raises(StackError, match=f"git stack track main feature --base {fork[:12]}"):
+            command(latest=True)
+        assert repo.git("rev-parse", "main") == fork
+        assert repo.git("rev-parse", "refs/remotes/origin/main") == fork
+        assert repo.git("branch", "--show-current") == "feature"
+
+    repo.stack("track", "main", "feature", "--base", fork[:12])
+    client.sync(latest=True)
+    assert repo.git("show", "HEAD:a") == "feature"
+    assert repo.git("show", "HEAD:c") == "new trunk change"
+
+
 def test_sync_skips_branches_above_a_missing_parent(
     repo: Repo, client: StackClient, emitted: list[events.Event]
 ) -> None:
