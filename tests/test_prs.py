@@ -732,10 +732,10 @@ def test_prs_keeps_the_github_stack_of_each_stack_in_a_group(repo: Repo, gh: Fak
     repo.commit("b", "y1\n", "y1 c1")
     client.branch("y2")
     repo.commit("b", "y2\n", "y2 c1")
-    client.push(prs=True)
+    client.push(groups=["g"], prs=True)
     gh.enable_stacks([1, 2], [3, 4])
 
-    client.prs()
+    client.prs(groups=["g"])
 
     assert gh.stacks() == [[1, 2], [3, 4]]
     assert [body(gh, n) for n in (1, 2, 3, 4)] == ["", "", "", ""]

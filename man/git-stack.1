@@ -167,9 +167,7 @@ with \f[CR]git stack create\f[R], or added it with
 replaying only the branch\(aqs own commits.
 .IP \(bu 2
 \f[B]the current stack\f[R]: the whole stack the branch you\(aqre on is
-part of, including branches beside yours, not just the ones above it,
-and the other stacks in its group for commands other than
-\f[CR]sync\f[R] and \f[CR]pull\f[R].
+part of, including branches beside yours, not just the ones above it.
 .IP \(bu 2
 \f[B]group\f[R]: stacks that were one stack until the branch at their
 bottom merged (see Groups).
@@ -231,10 +229,9 @@ So a clone whose remote has another name (e.g.
 .SS Groups
 When a branch on \f[CR]main\f[R] merges, the branches stacked on it each
 become the bottom of a stack of their own.
-So that commands still treat them as one, as before the merge,
 \f[CR]sync\f[R] and \f[CR]clean\f[R] put them in a group, named after
 the merged branch.
-Here, \f[CR]restack\f[R] from \f[CR]pr2b\f[R] still restacks
+Here, \f[CR]restack \-g\f[R] from \f[CR]pr2b\f[R] restacks
 \f[CR]pr2a\f[R], \f[CR]pr2b\f[R] and \f[CR]pr3\f[R] after \f[CR]pr1\f[R]
 merges:
 .IP
@@ -254,12 +251,11 @@ command stops; rename that group before continuing.
 .IP \(bu 2
 A group can span roots, e.g.
 if you \f[CR]restack \-\-onto release\f[R] one of its stacks.
-Commands on it then cover every root it\(aqs on: \f[CR]sync\f[R]
+Selecting that group covers every root it\(aqs on: \f[CR]sync\f[R]
 fast\-forwards each, and \f[CR]prs\f[R] gives each root\(aqs pull
 requests their own stack section.
 .IP \(bu 2
-\f[CR]sync\f[R] and \f[CR]pull\f[R] select only the current or named
-stacks.
+Commands select only the current or named stacks.
 Pass \f[CR]\-g\f[R] for the current stack\(aqs group, or
 \f[CR]\-g <name>\f[R] for a named group.
 .IP \(bu 2
@@ -654,8 +650,8 @@ tracked in a stack.
 group, and can be combined with other selectors.
 Put it after positional branches, since the following word is read as a
 group name.
-The read\-only \f[CR]ownership show\f[R] also accepts \f[CR]\-g\f[R]
-without a name; commands that change stacks require a group name.
+The read\-only \f[CR]ownership show\f[R] also also accepts
+\f[CR]\-g\f[R] without a name.
 .PP
 \f[B]When would I use it?\f[R] When you want to see your stacks and what
 needs doing: which branches depend on which, which need a restack, and
@@ -833,7 +829,7 @@ git stack prev                  \f[I]# to main\f[R]
 .IP \(bu 2
 From the bottom of a stack, it switches to the stack\(aqs root (e.g.
 \f[CR]main\f[R]).
-.SS \f[CR]git stack ownership [show|owned|shared] [<branch|glob>...] [\-g <group>]\f[R]
+.SS \f[CR]git stack ownership [show|owned|shared] [<branch|glob>...] [\-g [<group>]]\f[R]
 Show the ownership of the current stack, or mark it or the named stacks
 as owned or shared.
 With multiple stacks, \f[CR]show\f[R] reports shared if any is shared.
@@ -857,7 +853,7 @@ choice can change the default.
 Existing stacks default to owned.
 Ownership is local to this clone, not a permission or a substitute for
 coordinating with contributors.
-.SS \f[CR]git stack restack [<branch|glob>...] [\-g <group>] [\-\-onto <parent>] [\-l] [\-\-allow\-shared] [\-\-force]\f[R]
+.SS \f[CR]git stack restack [<branch|glob>...] [\-g [<group>]] [\-\-onto <parent>] [\-l] [\-\-allow\-shared] [\-\-force]\f[R]
 Rebase every branch in the current stack (or the ones named, see Groups)
 onto its parent, bottom\-up, except that a branch on the stack\(aqs root
 (e.g.
@@ -1098,7 +1094,7 @@ Runs from any branch, even one that isn\(aqt in a stack.
 Uncommitted changes are fine, unless you\(aqre on a stack\(aqs root,
 which \f[CR]clean\f[R] fast\-forwards, or, with \f[CR]\-d local\f[R] or
 \f[CR]\-d both\f[R], on a tracked branch, which it could delete.
-.SS \f[CR]git stack push [<branch|glob>...] [\-g <group>] [\-\-remote <name>] [\-\-force] [\-\-no\-verify] [\-\-prs] [\-\-allow\-shared] [\-\-rebuild\-stack]\f[R]
+.SS \f[CR]git stack push [<branch|glob>...] [\-g [<group>]] [\-\-remote <name>] [\-\-force] [\-\-no\-verify] [\-\-prs] [\-\-allow\-shared] [\-\-rebuild\-stack]\f[R]
 Force\-push (with lease) every branch in the current stack (or the ones
 named, see Groups), and set each one\(aqs upstream.
 .PP
@@ -1199,10 +1195,9 @@ how to undo it.
 \f[CR]git stack push\f[R] and \f[CR]git stack prs\f[R] in one.
 Without the GitHub adapter, it still pushes and shows the stacks, but
 then fails, saying it didn\(aqt open or update any pull requests.
-.SS \f[CR]git stack group add <name> [<branch|glob>...] [\-g <group>] [\-\-move]\f[R]
-Put stacks (default: the current one) in group \f[CR]<name>\f[R], so
-\f[CR]restack\f[R], \f[CR]push\f[R] and \f[CR]prs\f[R] on one of them
-cover them all, and so you can name them all at once (see Groups).
+.SS \f[CR]git stack group add <name> [<branch|glob>...] [\-g [<group>]] [\-\-move]\f[R]
+Put stacks (default: the current one) in group \f[CR]<name>\f[R], so you
+can select them all at once (see Groups).
 \f[CR]git stack group remove\f[R] takes stacks out of their groups
 (\f[CR]git stack ungroup\f[R] for short), and
 \f[CR]git stack group rename [<old>] <new>\f[R] renames a group
@@ -1240,7 +1235,7 @@ To merge them, run
 \f[CR]git stack group add \-\-move <name> \-g <other group>\f[R].
 .IP \(bu 2
 \f[CR]info\f[R] shows a group once it has two or more stacks.
-.SS \f[CR]git stack prs [<branch|glob>...] [\-g <group>] [\-\-remote <name>] [\-n] [\-\-rebuild\-stack]\f[R]
+.SS \f[CR]git stack prs [<branch|glob>...] [\-g [<group>]] [\-\-remote <name>] [\-n] [\-\-rebuild\-stack]\f[R]
 Open a draft pull request on GitHub for each branch in the current stack
 (or the ones named, see Groups) that has none, into its stack parent,
 bottom\-up.

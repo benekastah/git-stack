@@ -30,7 +30,7 @@ def register(subparsers: Subparsers) -> None:
         "except that branches on the stack's root only move if "
         "they conflict with it",
     )
-    add_stack_arguments(p, "restack")
+    add_stack_arguments(p, "restack", optional_group=True)
     p.add_argument(
         "--onto",
         help="first change the parent of the one branch named (default: the current branch) to ONTO",

@@ -34,7 +34,7 @@ def register(subparsers: Subparsers) -> None:
         help="force-push (with lease) every branch in the current stack (or the ones "
         "named), refusing if that would drop commits on the remote",
     )
-    add_stack_arguments(p, "push")
+    add_stack_arguments(p, "push", optional_group=True)
     p.add_argument("--remote", help="only push branches for this remote")
     p.add_argument("--no-verify", action="store_true", help="skip the pre-push hook")
     p.add_argument(

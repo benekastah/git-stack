@@ -619,6 +619,29 @@ def test_retry_with_only_retired_source_preserves_group_scope(repo: Repo) -> Non
     assert tip(repo, "work") != old_work
 
 
+def test_retry_keeps_unselected_group_peer_out_of_scope(repo: Repo) -> None:
+    integration(repo, tracked=True)
+    repo.stack("create", "child", "--from", "one")
+    repo.commit("c", "child work\n", "child")
+    source(repo, "peer", "c", tracked=True)
+    repo.stack("group", "add", "both", "one", "peer")
+    repo.git("switch", "main")
+    repo.git("merge", "--ff-only", "one")
+    repo.git("switch", "two")
+    repo.commit("a", "conflict\n", "conflict")
+    before = tip(repo, "peer")
+    command = ("sync", "combined", "one", "--delete", "local")
+    path = conflict_worktree(repo.stack(*command, expect_success=False).stderr)
+    (path / "a").write_text("resolved\n", encoding="utf-8")
+    repo.git("add", "a", cwd=path)
+    repo.git("-c", "core.editor=true", "merge", "--continue", cwd=path)
+
+    result = repo.stack(*command)
+
+    assert "peer" not in result.stdout
+    assert tip(repo, "peer") == before
+
+
 def test_retry_selects_recorded_integration_after_its_last_work_lands(
     repo: Repo, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -29,7 +29,7 @@ def register(subparsers: Subparsers) -> None:
         help="open a draft pull request on GitHub for each branch in the current "
         "stack (or the named ones) that has none, into its stack parent",
     )
-    add_stack_arguments(p, "open pull requests for")
+    add_stack_arguments(p, "open pull requests for", optional_group=True)
     p.add_argument("--remote")
     add_rebuild_stack_argument(p)
     p.add_argument(

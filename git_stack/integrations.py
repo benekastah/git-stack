@@ -37,6 +37,7 @@ class RetiredSource(TypedDict):
     source: Source
     group: str | None
     parent: str | None
+    members: NotRequired[list[str]]
 
 
 class Integration(TypedDict):
@@ -99,6 +100,8 @@ class Integrations:
         groups_outside = {stacks.group(bottom) for bottom in outside} - {None}
 
         def has_outside_work(entry: RetiredSource) -> bool:
+            if "members" in entry:
+                return any(member in stacks and member not in scope for member in entry["members"])
             group, parent = entry["group"], entry["parent"]
             if group is None and parent in stacks:
                 assert parent is not None
@@ -363,6 +366,8 @@ class Integrations:
                 current = self.retired_input(source, current, pending_sources.get(branch))
             if entry and live in (None, entry["source"]["tip"]):
                 still_retired[branch] = RetiredSource(source=current, group=entry["group"], parent=entry["parent"])
+                if "members" in entry:
+                    still_retired[branch]["members"] = entry["members"]
             if self.local_landing(current, root_tip):
                 pass
             elif live and same_root and self.same_evidence(source, current, fetch):

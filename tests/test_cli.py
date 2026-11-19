@@ -611,10 +611,8 @@ def test_info_all_rejects_other_selectors(stack: Any, capsys: pytest.CaptureFixt
 
 
 @pytest.mark.parametrize("command", [["push"], ["restack"], ["prs"], ["ungroup"], ["group", "remove"]])
-def test_writing_commands_require_a_group_name(stack: Any, command: list[str]) -> None:
-    with pytest.raises(SystemExit) as error:
-        main([*command, "-g"], stack=stack)
-    assert error.value.code == 2
+def test_stack_commands_accept_current_group(stack: Any, command: list[str]) -> None:
+    assert main([*command, "-g"], stack=stack) == 0
 
 
 @pytest.mark.parametrize("command", ["sync", "pull"])

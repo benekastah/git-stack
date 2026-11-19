@@ -286,7 +286,7 @@ class StackCore:
         stacks: Stacks,
         command: str,
         *,
-        include_groups: bool = True,
+        include_groups: bool = False,
     ) -> list[str]:
         """The branches in the stacks (see Stacks.stack_of) of the branches
         that branches and groups name (see named), or with neither, in the

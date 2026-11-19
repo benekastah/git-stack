@@ -23,13 +23,13 @@ def register(subparsers: Subparsers) -> None:
 
     add = actions.add_parser("add", help="put stacks in group NAME, so commands on one cover them all")
     add.add_argument("name", help="the group")
-    add_stack_arguments(add, "group")
+    add_stack_arguments(add, "group", optional_group=True)
     add.add_argument("--move", action="store_true", help="move stacks that are in another group out of it")
     add_json_argument(add)
     add.set_defaults(run=run_add, show=show_add)
 
     remove = actions.add_parser("remove", help="take stacks out of their groups (also `git stack ungroup`)")
-    add_stack_arguments(remove, "ungroup")
+    add_stack_arguments(remove, "ungroup", optional_group=True)
     add_json_argument(remove)
     remove.set_defaults(run=run_remove, show=show_remove)
 
@@ -40,7 +40,7 @@ def register(subparsers: Subparsers) -> None:
     rename.set_defaults(run=run_rename, show=show_rename)
 
     ungroup = subparsers.add_parser("ungroup", help="take stacks out of their groups (`git stack group remove`)")
-    add_stack_arguments(ungroup, "ungroup")
+    add_stack_arguments(ungroup, "ungroup", optional_group=True)
     add_json_argument(ungroup)
     ungroup.set_defaults(run=run_remove, show=show_remove)
 

@@ -1176,12 +1176,11 @@ class StackClient(StackCore):
         )
 
     def stack_infos(self, branches: Iterable[str], adapter: GitAdapter) -> list[BranchInfo]:
-        """The stacks of those of branches that are still tracked, and of the
-        other stacks in their groups, as info() lists them (see branch_infos),
+        """The stacks of those of branches that are still tracked, as info() lists them (see branch_infos),
         for a command to show what it left them as."""
         stacks = self.stacks()
         return self.branch_infos(
-            stacks.restricted(s for b in branches if b in stacks for s in stacks.stack_of(b)), adapter
+            stacks.restricted(s for b in branches if b in stacks for s in stacks.stack_of(b, groups=False)), adapter
         )
 
     def checked_adapter(self, remote: str) -> GitAdapter:
@@ -1286,7 +1285,7 @@ class StackClient(StackCore):
         retired_groups = {entry["group"] for owners in retired.values() for _, entry in owners}
         groups = [group for group in groups if group not in retired_groups or stacks.bottoms_in(group)]
         selected = (
-            self.selected_stacks(ordinary, groups, stacks, command, include_groups=command not in ("sync", "pull"))
+            self.selected_stacks(ordinary, groups, stacks, command)
             if ordinary or groups or not (explicit or replaced)
             else []
         )
@@ -1349,14 +1348,18 @@ class StackClient(StackCore):
         for selector, owners in retired.items():
             matched = False
             for name, entry in owners:
-                branches = stacks.continuation_bottoms(entry["parent"], entry["group"])
+                branches = (
+                    [member for member in entry["members"] if member in stacks]
+                    if "members" in entry
+                    else stacks.continuation_bottoms(entry["parent"], entry["group"])
+                )
                 if roots and name not in roots and all(stacks.root(branch) != name for branch in branches):
                     continue
                 matched = True
                 owners_selected[name] = None
                 for branch in branches:
                     if branch not in recovered:
-                        recovered.update(dict.fromkeys(stacks.stack_of(branch)))
+                        recovered.update(dict.fromkeys(stacks.stack_of(branch, groups=False)))
             if not matched and selector in replaced:
                 raise StackError(f"{selector} is no longer tracked. Name the work stack to resume its integration.")
         expanded.update(recovered)
@@ -1965,6 +1968,9 @@ class StackClient(StackCore):
                     source=integrations.source(branch, tip, source),
                     parent=bottom if parent in stacks else None,
                     group=group,
+                    members=[
+                        member for member in stacks.stack_of(branch, groups=False) if member in selection.branches
+                    ],
                 )
                 integrations.save(name, config)
 

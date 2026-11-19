@@ -104,8 +104,25 @@ def test_push_from_one_stack_in_a_group_pushes_them_all(repo: Repo, client: Stac
 
     client.push()
 
-    assert repo.remote_subject("b") == "b c2"
+    assert repo.remote_subject("b") != "b c2"
     assert repo.remote_subject("c") == "c c2"
+    client.push(groups=["a"])
+    assert repo.remote_subject("b") == "b c2"
+
+
+def test_info_and_restack_only_select_current_stack_without_group(repo: Repo, client: StackClient) -> None:
+    make_siblings(repo, client)
+    client.sync()
+    repo.git("switch", "b")
+    assert {branch.name for branch in client.info(current=True)} == {"main", "b"}
+    repo.commit_on_forge("main", "d", "root update\n", "root update")
+    repo.git("fetch", "origin")
+    repo.git("branch", "-f", "main", "origin/main")
+    before = repo.git("rev-parse", "c")
+    client.restack(latest=True)
+    assert repo.git("rev-parse", "c") == before
+    client.restack(groups=["a"], latest=True)
+    assert repo.git("rev-parse", "c") != before
 
 
 def test_children_of_a_merged_branch_in_a_group_stay_in_it(repo: Repo, client: StackClient) -> None:

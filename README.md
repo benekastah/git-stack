@@ -66,8 +66,7 @@ git stack sync                  # catch up: drop merged PRs, rebase what's left,
 - **restack**: rebase a branch onto its parent's latest commit, replaying only
   the branch's own commits.
 - **the current stack**: the whole stack the branch you're on is part of,
-  including branches beside yours, not just the ones above it, and the other
-  stacks in its group for commands other than `sync` and `pull`.
+  including branches beside yours, not just the ones above it.
 - **group**: stacks that were one stack until the branch at their bottom
   merged (see [Groups](#groups)).
 
@@ -129,10 +128,9 @@ has another name (e.g. `upstream`) needs no `--remote`.
 ### Groups
 
 When a branch on `main` merges, the branches stacked on it each become the
-bottom of a stack of their own. So that commands still treat them as one, as
-before the merge, `sync` and `clean` put them in a group, named after the
-merged branch. Here, `restack` from `pr2b` still restacks `pr2a`, `pr2b` and
-`pr3` after `pr1` merges:
+bottom of a stack of their own. `sync` and `clean` put them in a group, named
+after the merged branch. Here, `restack -g` from `pr2b` restacks `pr2a`,
+`pr2b` and `pr3` after `pr1` merges:
 
 ```
 main
@@ -147,10 +145,10 @@ main
 - If the automatic group name is already in use by an unrelated group, the
   command stops; rename that group before continuing.
 - A group can span roots, e.g. if you `restack --onto release` one of its
-  stacks. Commands on it then cover every root it's on: `sync` fast-forwards
+  stacks. Selecting that group covers every root it's on: `sync` fast-forwards
   each, and `prs` gives each root's pull requests their own stack section.
-- `sync` and `pull` select only the current or named stacks. Pass `-g` for
-  the current stack's group, or `-g <name>` for a named group.
+- Commands select only the current or named stacks. Pass `-g` for the
+  current stack's group, or `-g <name>` for a named group.
 - `info` only shows a group once it has two or more stacks, with
   `group <name>` above its stacks on each root they're on. A group of one is
   just a stack.
@@ -452,7 +450,7 @@ It cannot be combined with branch or group selectors. Without selectors,
 `-g` without a name also selects the current stack and its group, and can be
 combined with other selectors. Put it after positional branches, since the
 following word is read as a group name. The read-only `ownership show` also
-accepts `-g` without a name; commands that change stacks require a group name.
+also accepts `-g` without a name.
 
 **When would I use it?** When you want to see your stacks and what needs doing:
 which branches depend on which, which need a restack, and which were merged.
@@ -593,7 +591,7 @@ git stack prev                  # to main
 
 - From the bottom of a stack, it switches to the stack's root (e.g. `main`).
 
-### `git stack ownership [show|owned|shared] [<branch|glob>...] [-g <group>]`
+### `git stack ownership [show|owned|shared] [<branch|glob>...] [-g [<group>]]`
 
 Show the ownership of the current stack, or mark it or the named stacks as
 owned or shared. With multiple stacks, `show` reports shared if any is shared.
@@ -613,7 +611,7 @@ explicit `ownership owned` or `ownership shared` choice can change the default.
 Existing stacks default to owned. Ownership is local to this clone, not a
 permission or a substitute for coordinating with contributors.
 
-### `git stack restack [<branch|glob>...] [-g <group>] [--onto <parent>] [-l] [--allow-shared] [--force]`
+### `git stack restack [<branch|glob>...] [-g [<group>]] [--onto <parent>] [-l] [--allow-shared] [--force]`
 
 Rebase every branch in the current stack (or the ones named, see
 [Groups](#groups)) onto its parent, bottom-up, except
@@ -791,7 +789,7 @@ git stack clean -d local
   are fine, unless you're on a stack's root, which `clean` fast-forwards, or,
   with `-d local` or `-d both`, on a tracked branch, which it could delete.
 
-### `git stack push [<branch|glob>...] [-g <group>] [--remote <name>] [--force] [--no-verify] [--prs] [--allow-shared] [--rebuild-stack]`
+### `git stack push [<branch|glob>...] [-g [<group>]] [--remote <name>] [--force] [--no-verify] [--prs] [--allow-shared] [--rebuild-stack]`
 
 Force-push (with lease) every branch in the current stack (or the ones named,
 see [Groups](#groups)), and set each one's upstream.
@@ -864,11 +862,10 @@ git stack push --prs            # then open pull requests, as `git stack prs` do
   one. Without the GitHub adapter, it still pushes and shows the stacks, but
   then fails, saying it didn't open or update any pull requests.
 
-### `git stack group add <name> [<branch|glob>...] [-g <group>] [--move]`
+### `git stack group add <name> [<branch|glob>...] [-g [<group>]] [--move]`
 
-Put stacks (default: the current one) in group `<name>`, so `restack`,
-`push` and `prs` on one of them cover them all, and so you can name them all
-at once (see [Groups](#groups)). `git stack group remove` takes stacks out of
+Put stacks (default: the current one) in group `<name>`, so you can select
+them all at once (see [Groups](#groups)). `git stack group remove` takes stacks out of
 their groups (`git stack ungroup` for short), and
 `git stack group rename [<old>] <new>` renames a group (default: the current
 stack's).
@@ -895,7 +892,7 @@ git stack ungroup search-ui             # take search-ui's stack back out
   mistake. To merge them, run `git stack group add --move <name> -g <other group>`.
 - `info` shows a group once it has two or more stacks.
 
-### `git stack prs [<branch|glob>...] [-g <group>] [--remote <name>] [-n] [--rebuild-stack]`
+### `git stack prs [<branch|glob>...] [-g [<group>]] [--remote <name>] [-n] [--rebuild-stack]`
 
 Open a draft pull request on GitHub for each branch in the current stack (or
 the ones named, see [Groups](#groups)) that has none, into its stack parent,
