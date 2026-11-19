@@ -3,6 +3,7 @@
 import os
 import pathlib
 import shlex
+import stat
 import subprocess
 from collections.abc import Callable, Generator, Iterable, Mapping
 from contextlib import AbstractContextManager, contextmanager, nullcontext
@@ -10,7 +11,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from threading import Lock
 from time import monotonic
-from typing import IO, TYPE_CHECKING, Literal, override
+from typing import IO, TYPE_CHECKING, BinaryIO, Literal, override
 
 from git_client import CLIENT_TIMEOUT, Arg, CatFile, EnvValue, Git, Timeout
 
@@ -24,6 +25,8 @@ Tool = Literal["git", "gh"]
 MAX_PERFORMANCE_LOG_BYTES = 1_000_000
 LOG_PATH_SETTING = "stack.perfLog"
 LOG_LIMIT_SETTING = "stack.perfLogMaxBytes"
+REPORT_HEADING = "Performance timeline"
+TRUNCATION_NOTICE = b"[performance report truncated]\n\n"
 
 
 @dataclass
@@ -67,6 +70,25 @@ def _configured_log_limit(git: GitClient) -> int:
     return limit if limit > 0 else MAX_PERFORMANCE_LOG_BYTES
 
 
+@contextmanager
+def _open_log(path: pathlib.Path) -> Generator[BinaryIO]:
+    flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
+    with os.fdopen(os.open(path, flags, 0o600), "r+b") as log:
+        entry = path.lstat()
+        if not stat.S_ISREG(entry.st_mode) or not os.path.samestat(entry, os.fstat(log.fileno())):
+            raise OSError(f"{path} must be a regular file, not a symlink")
+        yield log
+
+
+def _is_performance_log(log: BinaryIO) -> bool:
+    log.seek(0)
+    command = log.readline(MAX_PERFORMANCE_LOG_BYTES).rstrip(b"\r\n")
+    if command == TRUNCATION_NOTICE.rstrip():
+        return True
+    heading = log.readline(len(REPORT_HEADING) + 2).rstrip(b"\r\n")
+    return (command == b"git stack" or command.startswith(b"git stack ")) and heading == REPORT_HEADING.encode()
+
+
 def append_performance_log(
     path: pathlib.Path, argv: list[str], report: str, *, max_bytes: int = MAX_PERFORMANCE_LOG_BYTES
 ) -> None:
@@ -78,15 +100,23 @@ def append_performance_log(
     command = _command_line(("git", "stack", *argv))
     entry = f"{command}\n{report}\n\n".encode("utf-8", errors="backslashreplace")
     if len(entry) > max_bytes:
-        marker = b"\n[performance report truncated]\n\n"[:max_bytes]
-        limit = max_bytes - len(marker)
-        entry = entry[:limit].decode("utf-8", errors="ignore").encode("utf-8") + marker
+        if max_bytes < len(TRUNCATION_NOTICE):
+            raise OSError("performance log size limit is too small for a truncation notice")
+        header = f"{command}\n{REPORT_HEADING}\n".encode("utf-8", errors="backslashreplace")
+        limit = max_bytes - len(TRUNCATION_NOTICE) - 1
+        if limit < len(header):
+            entry = TRUNCATION_NOTICE
+        else:
+            prefix = entry[:limit].decode("utf-8", errors="ignore").encode("utf-8")
+            entry = prefix + b"\n" + TRUNCATION_NOTICE
     # Commands in different repositories can finish at the same time.
     with (
         file_lock(path.with_name(f"{path.name}.lock"), lambda: None),
-        os.fdopen(os.open(path, os.O_RDWR | os.O_CREAT, 0o600), "r+b") as log,
+        _open_log(path) as log,
     ):
         end = log.seek(0, os.SEEK_END)
+        if end and not _is_performance_log(log):
+            raise OSError(f"{path} already exists and is not a performance log")
         remaining = max_bytes - len(entry)
         if end > remaining:
             # Start just before the retention window to detect a report that
@@ -97,6 +127,8 @@ def append_performance_log(
             log.seek(0)
             log.write(recent)
             log.truncate()
+        else:
+            log.seek(0, os.SEEK_END)
         log.write(entry)
 
 
@@ -134,7 +166,7 @@ class Timeline:
     def render(self) -> str:
         """Format the timeline after the command and its workers have finished."""
         total = self._clock() - self._start
-        lines = ["Performance timeline"]
+        lines = [REPORT_HEADING]
         for call in self._calls:
             command = _command_line((call.tool, *call.args))
             lines.append(f"  +{call.start:.3f}s  {call.end - call.start:6.3f}s  {command}")

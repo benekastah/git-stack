@@ -3,6 +3,7 @@
 import json
 import pathlib
 import shlex
+import sys
 
 import pytest
 from git_client.testing import GitCall
@@ -33,8 +34,7 @@ def test_local_config_enables_reporting_and_controls_the_cap(repo: Repo, perform
     repo.make_stack()
     repo.git("config", "--local", "stack.perfLog", str(performance_log))
     repo.git("config", "--local", "stack.perfLogMaxBytes", "1k")
-    performance_log.parent.mkdir()
-    performance_log.write_text("old\n" * 400, encoding="utf-8")
+    performance.append_performance_log(performance_log, ["old"], "Performance timeline\n" + "old\n" * 400)
 
     assert repo.stack("parent").stdout == "pr2\n"
 
@@ -67,6 +67,15 @@ def test_cli_preserves_command_error_if_log_cannot_be_written(repo: Repo, perfor
     assert result.returncode == 1
     assert "Performance timeline" not in result.stderr
     assert "couldn't write the performance log" in result.stderr
+
+
+def test_quiet_show_stack_stays_silent_if_log_cannot_be_written(repo: Repo, performance_log: pathlib.Path) -> None:
+    performance_log.mkdir(parents=True)
+    repo.git("config", "--local", "stack.perfLog", str(performance_log))
+
+    result = repo.stack("show-stack", "--quiet", expect_success=False)
+
+    assert (result.returncode, result.stdout, result.stderr) == (1, "", "")
 
 
 def test_relative_log_path_is_relative_to_the_command_directory(repo: Repo) -> None:
@@ -107,10 +116,41 @@ def test_log_cap_retains_newest_whole_reports(performance_log: pathlib.Path) -> 
 
 
 def test_oversized_report_respects_cap(performance_log: pathlib.Path) -> None:
-    performance.append_performance_log(performance_log, ["info"], "é" * 100, max_bytes=100)
+    performance.append_performance_log(performance_log, ["info"], "Performance timeline\n" + "é" * 100, max_bytes=100)
 
     assert performance_log.stat().st_size <= 100
     assert "truncated" in performance_log.read_text(encoding="utf-8")
+
+
+def test_perf_log_does_not_change_an_existing_unrelated_file(repo: Repo, performance_log: pathlib.Path) -> None:
+    repo.make_stack()
+    repo.git("config", "--local", "stack.perfLog", str(performance_log))
+    repo.git("config", "--local", "stack.perfLogMaxBytes", "100")
+    performance_log.parent.mkdir()
+    contents = b"[unrelated config]\n" * 20
+    performance_log.write_bytes(contents)
+
+    result = repo.stack("parent")
+
+    assert result.stdout == "pr2\n"
+    assert "couldn't write the performance log" in result.stderr
+    assert performance_log.read_bytes() == contents
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="creating a file symlink requires privileges on Windows")
+def test_perf_log_does_not_follow_a_file_symlink(repo: Repo, performance_log: pathlib.Path) -> None:
+    repo.make_stack()
+    repo.git("config", "--local", "stack.perfLog", str(performance_log))
+    target = repo.tmp / "other.log"
+    contents = b"git stack info\nPerformance timeline\n\n"
+    target.write_bytes(contents)
+    performance_log.parent.mkdir()
+    performance_log.symlink_to(target)
+
+    result = repo.stack("parent")
+
+    assert "couldn't write the performance log" in result.stderr
+    assert target.read_bytes() == contents
 
 
 @pytest.mark.parametrize("flag", ["-p", "--perf", "--performance"])

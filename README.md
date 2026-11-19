@@ -139,7 +139,7 @@ repositories, add this to `~/.gitconfig`:
 
 The size setting is optional and defaults to 1,000,000 bytes. It accepts
 Git's integer suffixes, such as `1k`. Relative paths use the command directory
-selected by `-C`.
+selected by `-C`. Use a regular file dedicated to performance reports.
 
 The timeline lists calls in start order with their start offsets and elapsed
 times. Batch `git cat-file` requests and shutdown are timed separately,

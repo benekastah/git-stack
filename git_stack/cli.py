@@ -136,7 +136,8 @@ def _run(args: argparse.Namespace, stack: StackClient | None, argv: list[str]) -
             try:
                 append_performance_log(path, argv, timeline.render(), max_bytes=max_bytes)
             except (OSError, RuntimeError) as error:
-                print(f"git stack: couldn't write the performance log: {error}", file=sys.stderr)
+                if not getattr(args, "quiet", False):
+                    print(f"git stack: couldn't write the performance log: {error}", file=sys.stderr)
 
 
 def _run_command(args: argparse.Namespace, stack: StackClient, stream: JsonStream | None) -> int:
