@@ -13,6 +13,7 @@ from git_stack.adapters.github import GitHubAdapter, GitHubState, OpenPullReques
 from git_stack.adapters.merge_state import MergeState
 from git_stack.core import (
     BASE_KEY,
+    CURRENT_GROUP,
     INTEGRATION_KEY,
     PULLED_KEY,
     PULLED_UPSTREAM_KEY,
@@ -106,6 +107,8 @@ class RefreshSelection:
     integrations: dict[str, Integration]
     explicit: tuple[str, ...] = ()
     recovered_sources: frozenset[str] = frozenset()
+    selected_groups: frozenset[str] = frozenset()
+    recovery_remotes: dict[str, set[str]] = field(default_factory=dict)
 
     def ordered(self, stacks: Stacks) -> tuple[list[str], list[str]]:
         """Process selected source stacks before refreshing integration roots."""
@@ -821,6 +824,7 @@ class StackClient(StackCore):
         members = [b for b, g in groups.items() if g == old]
         if not members:
             raise StackError(f"there's no group {old}")
+        Integrations(self).rename_group(old, new)
         for branch in members:
             stacks.set_group(branch, new)
         self.save(stacks)
@@ -926,7 +930,12 @@ class StackClient(StackCore):
                 raise StackError(f"{branch} isn't in a stack")
         remote = remote or self.default_remote(stack, stacks)
         parent = from_branch or (stacks.root(stack[0]) if stack else self.default_branch(remote))
-        affected = (b for branch in (*stack, parent) if stack and branch in stacks for b in stacks.stack_of(branch))
+        affected = (
+            b
+            for branch in (*stack, parent)
+            if stack and branch in stacks
+            for b in stacks.stack_of(branch, groups=False)
+        )
         self.ensure_owned(affected, stacks, allow_shared, "unrevert")
         self.ensure_local_branch_parent(parent)
         planned = stacks.copy()
@@ -1281,29 +1290,50 @@ class StackClient(StackCore):
             explicit = [current]
         ordinary = [name for name in branches if name not in names]
         retired, replaced = self.retired_source_selectors(ordinary, stacks, integrations, names)
+        recovery_remotes: dict[str, set[str]] = {}
+        retired_groups = {
+            entry["group"]
+            for entries in retired.values()
+            for _, entry in entries
+            if "integration_groups" not in entry and entry["group"] is not None
+        }
+        selected_groups = set(groups)
+        if CURRENT_GROUP in selected_groups and current is not None and current in stacks:
+            selected_groups.add(stacks.group(stacks.bottom(current)) or "")
+        if groups:
+            for name in names:
+                config = integrations.read(name)
+                assert config is not None
+                for entry in config.get("retired_sources", {}).values():
+                    recovery_groups = entry.get("integration_groups", [])
+                    matching_groups = selected_groups.intersection(recovery_groups)
+                    if matching_groups:
+                        remotes = recovery_remotes.setdefault(name, set())
+                        if "refresh_remote" in entry:
+                            remotes.add(entry["refresh_remote"])
+                        retired_groups.update(matching_groups)
         ordinary = [name for name in ordinary if name not in replaced]
-        retired_groups = {entry["group"] for owners in retired.values() for _, entry in owners}
         groups = [group for group in groups if group not in retired_groups or stacks.bottoms_in(group)]
         selected = (
             self.selected_stacks(ordinary, groups, stacks, command)
-            if ordinary or groups or not (explicit or replaced)
+            if ordinary or groups or not (explicit or replaced or retired or recovery_remotes)
             else []
         )
         expanded = dict.fromkeys(selected)
         for root in dict.fromkeys(explicit):
             expanded.update(dict.fromkeys(stacks.descendants(root)))
         recovered = frozenset[str]()
-        recovered_roots: tuple[str, ...] = ()
         if retired:
-            roots = set(explicit) | {stacks.root(b) for b in expanded}
-            recovered, recovered_roots = self.resume_retired_stacks(retired, replaced, roots, expanded, stacks)
-        requested = (*explicit, *recovered_roots)
-        roots = dict.fromkeys([*requested, *(stacks.root(b) for b in expanded)])
+            roots = set(explicit) | recovery_remotes.keys() | {stacks.root(b) for b in expanded}
+            recovered = self.resume_retired_stacks(retired, replaced, roots, expanded, stacks, recovery_remotes)
+        roots = dict.fromkeys([*explicit, *sorted(recovery_remotes), *(stacks.root(b) for b in expanded)])
         return RefreshSelection(
             list(expanded),
             {root: integration for root in roots if (integration := integrations.read(root)) is not None},
-            requested,
+            tuple(explicit),
             recovered,
+            frozenset(selected_groups),
+            recovery_remotes,
         )
 
     def retired_source_selectors(
@@ -1341,10 +1371,10 @@ class StackClient(StackCore):
         roots: set[str],
         expanded: dict[str, None],
         stacks: Stacks,
-    ) -> tuple[frozenset[str], tuple[str, ...]]:
+        recovery_remotes: dict[str, set[str]],
+    ) -> frozenset[str]:
         """Keep surviving parts of a selected source stack in the retry's scope."""
         recovered: dict[str, None] = {}
-        owners_selected: dict[str, None] = {}
         for selector, owners in retired.items():
             matched = False
             for name, entry in owners:
@@ -1356,14 +1386,16 @@ class StackClient(StackCore):
                 if roots and name not in roots and all(stacks.root(branch) != name for branch in branches):
                     continue
                 matched = True
-                owners_selected[name] = None
+                remotes = recovery_remotes.setdefault(name, set())
+                if "refresh_remote" in entry:
+                    remotes.add(entry["refresh_remote"])
                 for branch in branches:
                     if branch not in recovered:
                         recovered.update(dict.fromkeys(stacks.stack_of(branch, groups=False)))
             if not matched and selector in replaced:
                 raise StackError(f"{selector} is no longer tracked. Name the work stack to resume its integration.")
         expanded.update(recovered)
-        return frozenset(recovered), tuple(owners_selected)
+        return frozenset(recovered)
 
     def validate_integrations(self, stacks: Stacks) -> None:
         """Reject stack changes that would make an integration depend on another."""
@@ -1498,9 +1530,9 @@ class StackClient(StackCore):
                 branch = self.current_stacked_branch(stacks, "restack", hint="use `git stack track` first")
             self.ensure_local_branch_parent(onto)
             stacks.ensure_no_cycle(branch, onto)
-            self.ensure_owned(stacks.stack_of(branch), stacks, allow_shared, "restack")
+            self.ensure_owned(stacks.stack_of(branch, groups=False), stacks, allow_shared, "restack")
             if onto in stacks:
-                self.ensure_owned(stacks.stack_of(onto), stacks, allow_shared, "restack")
+                self.ensure_owned(stacks.stack_of(onto, groups=False), stacks, allow_shared, "restack")
             selected = [branch, *stacks.descendants(branch)]
             # Only in stacks, which isn't saved: restack_branch records the
             # new parent once the rebase has finished.
@@ -1536,6 +1568,12 @@ class StackClient(StackCore):
         command: SyncCommand,
     ) -> tuple[RefreshSelection, set[str]]:
         """Filter a selection to one remote's stacks and their integration roots."""
+
+        def recovered_remotes(name: str) -> set[str]:
+            recorded = selection.recovery_remotes[name]
+            upstream = self.git.config_get(name, "remote")
+            return {upstream} if upstream else recorded
+
         if only_remote:
             selection.branches = [b for b in selection.branches if self.git.config_get(b, "remote") == remote]
             needed = {stacks.root(b) for b in selection.branches}
@@ -1544,10 +1582,17 @@ class StackClient(StackCore):
                 for name, config in selection.integrations.items()
                 if name in needed
                 or (name in selection.explicit and self.git.config_get(name, "remote") in (None, remote))
+                or (
+                    name in selection.recovery_remotes
+                    and (not (recorded := recovered_remotes(name)) or remote in recorded)
+                )
             }
             if not selection.branches and not selection.integrations:
                 raise StackError(f"none of the selected branches track {remote}")
         remotes = self.upstream_remotes([*selection.branches, *selection.integrations])
+        if not only_remote:
+            for name in selection.recovery_remotes.keys() & selection.integrations.keys():
+                remotes.update(recovered_remotes(name) - {"."})
         if len(remotes) > 1 or (only_remote and remotes - {remote}):
             raise StackError(f"can't {command.value} branches on multiple remotes atomically; select one with --remote")
         return selection, remotes
@@ -1925,7 +1970,7 @@ class StackClient(StackCore):
     ) -> dict[str, dict[str, str | None]]:
         """Sync selected sources first, then refresh roots before touching their work branches."""
         sources, remaining = selection.ordered(state.stacks)
-        preserve_source = self.source_retirement(selection, sources, state.stacks)
+        preserve_source = self.source_retirement(selection, sources, state.stacks, state.remote)
         for branch in sources:
             self.sync_branch(branch, adapter, state, preserve_source)
         if selection.integrations:
@@ -1939,18 +1984,28 @@ class StackClient(StackCore):
         return verified
 
     def source_retirement(
-        self, selection: RefreshSelection, branches: Sequence[str], stacks: Stacks
+        self, selection: RefreshSelection, branches: Sequence[str], stacks: Stacks, remote: str
     ) -> Callable[[str], None]:
         """Capture merged sources and the selectors for their surviving stacks."""
         integrations = Integrations(self)
         # A selected, merged source may be deleted while syncing. Preserve the
         # live input and its upstream identity so exact landing proof is still required.
         selected_sources = set(branches)
+        members_by_bottom: dict[str, list[str]] = {}
+        groups_by_root: dict[str, set[str]] = {}
+        for branch in selection.branches:
+            bottom = stacks.bottom(branch)
+            members_by_bottom.setdefault(bottom, []).append(branch)
+            group = stacks.group(bottom)
+            if group is not None and group in selection.selected_groups:
+                groups_by_root.setdefault(stacks.root(bottom), set()).add(group)
         inputs: dict[str, list[tuple[str, Integration, Source]]] = {}
         for name, config in selection.integrations.items():
             for source in config["sources"]:
                 if source["name"] in selected_sources:
                     inputs.setdefault(source["name"], []).append((name, config, source))
+
+        source_members = {branch: members_by_bottom[stacks.bottom(branch)] for branch in inputs}
 
         def preserve_source(branch: str) -> None:
             entries = inputs.get(branch)
@@ -1968,9 +2023,9 @@ class StackClient(StackCore):
                     source=integrations.source(branch, tip, source),
                     parent=bottom if parent in stacks else None,
                     group=group,
-                    members=[
-                        member for member in stacks.stack_of(branch, groups=False) if member in selection.branches
-                    ],
+                    members=source_members[branch],
+                    integration_groups=sorted(groups_by_root.get(name, ())),
+                    refresh_remote=remote,
                 )
                 integrations.save(name, config)
 

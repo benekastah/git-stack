@@ -50,6 +50,14 @@ Determine whether the pre-push PR step will change anything before contacting
 the remote for the dry run. Keep the PR validation that can block a push and
 run the dry run before any pre-push PR changes.
 
+## Group sync can lose its integration selector after the last work branch lands
+
+If a group sync removes the last selected work branch above an integration
+and the atomic push fails, the group can lose its connection to the
+integration when no source was retired. To retry, name the integration
+explicitly with `git stack sync <integration>` and include any surviving
+stacks that still need to sync.
+
 ## An older git-stack can't finish a restack this one stopped
 
 A restack that stops on a conflict is recorded in one setting,

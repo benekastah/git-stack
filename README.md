@@ -147,8 +147,9 @@ main
 - A group can span roots, e.g. if you `restack --onto release` one of its
   stacks. Selecting that group covers every root it's on: `sync` fast-forwards
   each, and `prs` gives each root's pull requests their own stack section.
-- Commands select only the current or named stacks. Pass `-g` for the
-  current stack's group, or `-g <name>` for a named group.
+- Commands with stack selectors use only the current or named stacks. Pass
+  `-g` for the current stack's group, or `-g <name>` for a named group.
+  `show-stack` includes the selected stack's group.
 - `info` only shows a group once it has two or more stacks, with
   `group <name>` above its stacks on each root they're on. A group of one is
   just a stack.
@@ -286,7 +287,9 @@ If sync also deletes merged remote branches, those deletions wait for the
 same push. If the push fails, sync reports the remote branches it kept.
 Rerun sync with the same integration and any surviving child stacks selected
 to retry those deletions with the original leases. Sync updates their work
-and PR bases before removing the old remote branches.
+and PR bases before removing the old remote branches. When retrying a group
+sync limited by `--remote`, use the same remote to resume its integration
+publication.
 Sync keeps the remote integration and its work at their existing tips
 if selected work cannot be restacked, for example if another worktree has
 it checked out.
@@ -449,8 +452,8 @@ It cannot be combined with branch or group selectors. Without selectors,
 `info` requires the current branch to be tracked in a stack.
 `-g` without a name also selects the current stack and its group, and can be
 combined with other selectors. Put it after positional branches, since the
-following word is read as a group name. The read-only `ownership show` also
-also accepts `-g` without a name.
+following word is read as a group name. `ownership` also accepts `-g` without
+a name.
 
 **When would I use it?** When you want to see your stacks and what needs doing:
 which branches depend on which, which need a restack, and which were merged.

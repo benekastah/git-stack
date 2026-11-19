@@ -119,7 +119,7 @@ def test_restack_onto_does_not_rewrite_destination(repo: Repo, client: StackClie
     assert repo.config("moving", "stackParent") == "target"
 
 
-def test_restack_onto_requires_override_for_shared_source_group(repo: Repo, client: StackClient) -> None:
+def test_restack_onto_ignores_shared_group_peer(repo: Repo, client: StackClient) -> None:
     repo.make_stack()
     client.set_ownership(Ownership.OWNED)
     repo.git("switch", "--quiet", "main")
@@ -129,11 +129,9 @@ def test_restack_onto_requires_override_for_shared_source_group(repo: Repo, clie
     repo.git("switch", "--quiet", "main")
     client.branch("target")
     repo.git("switch", "--quiet", "pr1")
-    before = repo.git("rev-parse", "pr1")
-    with pytest.raises(StackError, match="--allow-shared"):
-        client.restack(onto="target")
-    assert repo.git("rev-parse", "pr1") == before
-    assert repo.config("pr1", "stackParent") == "main"
+    client.restack(onto="target")
+    assert repo.config("pr1", "stackParent") == "target"
+    assert repo.config("shared", "stackParent") == "main"
 
 
 def test_restack_checks_ownership_before_skipping_merged_branches(repo: Repo, client: StackClient) -> None:

@@ -38,6 +38,8 @@ class RetiredSource(TypedDict):
     group: str | None
     parent: str | None
     members: NotRequired[list[str]]
+    integration_groups: NotRequired[list[str]]
+    refresh_remote: NotRequired[str]
 
 
 class Integration(TypedDict):
@@ -110,7 +112,13 @@ class Integrations:
 
         for name, config in configs.items():
             retired = config.get("retired_sources", {})
-            remaining = {branch: entry for branch, entry in retired.items() if has_outside_work(entry)}
+            # Publication completes group recovery even if a retired source still
+            # has children that require their own retry.
+            remaining: dict[str, RetiredSource] = {
+                branch: {**entry, "integration_groups": []} if "integration_groups" in entry else entry
+                for branch, entry in retired.items()
+                if has_outside_work(entry)
+            }
             if remaining != retired:
                 if remaining:
                     config["retired_sources"] = remaining
@@ -118,7 +126,30 @@ class Integrations:
                     del config["retired_sources"]
                 self.save(name, config)
 
-    def renamed_inputs(self, old: str, new: str) -> dict[str, Integration]:
+    def rename_group(self, old: str, new: str) -> None:
+        """Keep interrupted refresh selectors aligned with a renamed group."""
+
+        def update(config: Integration) -> bool:
+            changed = False
+            for entry in config.get("retired_sources", {}).values():
+                if entry["group"] == old:
+                    entry["group"] = new
+                    changed = True
+                groups = entry.get("integration_groups", [])
+                if old in groups:
+                    entry["integration_groups"] = [new if group == old else group for group in groups]
+                    changed = True
+            return changed
+
+        for name in self.names():
+            config = self.read(name)
+            if config and update(config):
+                self.save(name, config)
+            build = self.pending(name)
+            if build and update(build["integration"]):
+                self.journal(name, build)
+
+    def renamed_inputs(self, old: str, new: str) -> dict[str, Integration]:  # noqa: C901
         """Prepare integration metadata for a local source or root rename."""
         self.check_pending_rename(old, new)
         updated: dict[str, Integration] = {}
@@ -128,7 +159,8 @@ class Integrations:
             source_names = {source["name"] for source in config["sources"]}
             retired = config.get("retired_sources", {})
             continuations = [entry for entry in retired.values() if entry["parent"] == old]
-            if config["root"] != old and old not in source_names and not continuations:
+            members = [entry for entry in retired.values() if old in entry.get("members", [])]
+            if config["root"] != old and old not in source_names and not continuations and not members:
                 continue
             if old in source_names and new in source_names:
                 raise StackError(f"{new} is already a source for integration {name}")
@@ -146,6 +178,8 @@ class Integrations:
                 retired[new]["source"]["name"] = new
             for entry in continuations:
                 entry["parent"] = new
+            for entry in members:
+                entry["members"] = [new if member == old else member for member in entry.get("members", [])]
             updated[name] = config
         return updated
 
@@ -365,9 +399,7 @@ class Integrations:
             if entry:
                 current = self.retired_input(source, current, pending_sources.get(branch))
             if entry and live in (None, entry["source"]["tip"]):
-                still_retired[branch] = RetiredSource(source=current, group=entry["group"], parent=entry["parent"])
-                if "members" in entry:
-                    still_retired[branch]["members"] = entry["members"]
+                still_retired[branch] = {**entry, "source": current}
             if self.local_landing(current, root_tip):
                 pass
             elif live and same_root and self.same_evidence(source, current, fetch):

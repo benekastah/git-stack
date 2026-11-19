@@ -642,13 +642,12 @@ def test_restack_no_longer_accepts_squash(stack: Any) -> None:
     stack.restack.assert_not_called()
 
 
-def test_ownership_bare_group_only_works_when_reading(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
+def test_ownership_bare_group_selects_current_group(stack: Any) -> None:
     stack.get_ownership.return_value = (Ownership.OWNED, ["pr1"])
     assert main(["ownership", "-g"], stack=stack) == 0
     stack.get_ownership.assert_called_once_with([], [CURRENT_GROUP])
-    assert main(["ownership", "shared", "-g"], stack=stack) == 1
-    assert "--group requires a group name" in capsys.readouterr().err
-    stack.set_ownership.assert_not_called()
+    assert main(["ownership", "shared", "-g"], stack=stack) == 0
+    stack.set_ownership.assert_called_once_with(Ownership.SHARED, [], [CURRENT_GROUP])
 
 
 def test_sync_shows_the_stacks_then_lists_branches_left_to_push(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:

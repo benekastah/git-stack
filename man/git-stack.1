@@ -255,9 +255,10 @@ Selecting that group covers every root it\(aqs on: \f[CR]sync\f[R]
 fast\-forwards each, and \f[CR]prs\f[R] gives each root\(aqs pull
 requests their own stack section.
 .IP \(bu 2
-Commands select only the current or named stacks.
+Commands with stack selectors use only the current or named stacks.
 Pass \f[CR]\-g\f[R] for the current stack\(aqs group, or
 \f[CR]\-g <name>\f[R] for a named group.
+\f[CR]show\-stack\f[R] includes the selected stack\(aqs group.
 .IP \(bu 2
 \f[CR]info\f[R] only shows a group once it has two or more stacks, with
 \f[CR]group <name>\f[R] above its stacks on each root they\(aqre on.
@@ -437,6 +438,8 @@ Rerun sync with the same integration and any surviving child stacks
 selected to retry those deletions with the original leases.
 Sync updates their work and PR bases before removing the old remote
 branches.
+When retrying a group sync limited by \f[CR]\-\-remote\f[R], use the
+same remote to resume its integration publication.
 Sync keeps the remote integration and its work at their existing tips if
 selected work cannot be restacked, for example if another worktree has
 it checked out.
@@ -650,8 +653,7 @@ tracked in a stack.
 group, and can be combined with other selectors.
 Put it after positional branches, since the following word is read as a
 group name.
-The read\-only \f[CR]ownership show\f[R] also also accepts
-\f[CR]\-g\f[R] without a name.
+\f[CR]ownership\f[R] also accepts \f[CR]\-g\f[R] without a name.
 .PP
 \f[B]When would I use it?\f[R] When you want to see your stacks and what
 needs doing: which branches depend on which, which need a restack, and

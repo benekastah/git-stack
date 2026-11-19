@@ -55,6 +55,19 @@ def test_unrevert_requires_override_for_a_shared_stack(repo: Repo, client: Stack
     assert repo.git("rev-parse", "refs/heads/pr2") != before
 
 
+def test_unrevert_ignores_shared_group_peer(repo: Repo, client: StackClient) -> None:
+    revert = merge_and_revert_pr1(repo, client)
+    repo.git("switch", "main")
+    client.branch("shared")
+    client.set_ownership(Ownership.SHARED)
+    client.group_add("feature", ["pr2", "shared"])
+
+    client.unrevert("restore", [revert], stack=["pr2"])
+
+    assert repo.config("pr2", "stackParent") == "restore"
+    assert repo.config("shared", "stackParent") == "main"
+
+
 def test_unrevert_requires_override_when_destination_is_shared(repo: Repo, client: StackClient) -> None:
     repo.make_stack()
     client.set_ownership(Ownership.OWNED)

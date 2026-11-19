@@ -21,7 +21,7 @@ def register(subparsers: Subparsers) -> None:
     p = subparsers.add_parser("group", help="put stacks in a group, take them out, or rename a group")
     actions = p.add_subparsers(dest="action", required=True)
 
-    add = actions.add_parser("add", help="put stacks in group NAME, so commands on one cover them all")
+    add = actions.add_parser("add", help="put stacks in group NAME so they can be selected together")
     add.add_argument("name", help="the group")
     add_stack_arguments(add, "group", optional_group=True)
     add.add_argument("--move", action="store_true", help="move stacks that are in another group out of it")

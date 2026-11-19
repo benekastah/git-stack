@@ -291,8 +291,8 @@ class Stacks:
     def remove_merged(self, branch: str) -> list[str]:
         """Move the branches stacked on merged branch onto its parent (see
         reparent), and, if that's a stack's root, put them in branch's group,
-        or a group named after branch, so commands on one of them still cover
-        the others, as they did before it merged. Then stop tracking branch.
+        or a group named after branch, so they can be selected together.
+        Then stop tracking branch.
         Returns the moved branches.
 
         Refuses, changing nothing, as ensure_group_available_for_merge does.

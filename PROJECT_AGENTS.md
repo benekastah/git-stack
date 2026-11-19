@@ -31,7 +31,7 @@ man page is generated from it.
   records exact tips, merge evidence, build inputs and pending publication. The merge
   checkpoint stores only the step and HEAD so it can advance without rewriting those
   inputs. Sync records merged source tips and stack selectors before untracking
-  them so a retry can recover the inputs and scope. Queued remote deletions
+  them so a retry can recover the inputs, group scope and remote. Queued remote deletions
   retain their dependent branches and leases. The checkout recovery marker
   survives worktree cleanup.
   The refresh commands order selected source stacks before the integration builds, then
