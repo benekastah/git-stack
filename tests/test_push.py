@@ -197,6 +197,27 @@ def test_push_refuses_an_ambiguous_default_branch_probe(repo: Repo, client: Stac
     assert repo.git("rev-parse", "refs/heads/release", cwd=destination) == before
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Win32 disallows newlines in paths")
+@pytest.mark.parametrize("multiple", [False, True])
+def test_push_accepts_a_separate_unambiguous_destination(repo: Repo, client: StackClient, multiple: bool) -> None:
+    client.branch("feature")
+    repo.commit("a", "feature\n", "feature")
+    client.push()
+    fetch = repo.tmp / "fetch with a\nnewline.git"
+    repo.git("clone", "--bare", "--quiet", str(repo.origin), str(fetch))
+    repo.git("config", "remote.origin.url", str(fetch))
+    repo.git("config", "remote.origin.pushurl", str(repo.origin))
+    if multiple:
+        second = repo.tmp / "second.git"
+        repo.git("clone", "--bare", "--quiet", str(repo.origin), str(second))
+        repo.git("config", "--add", "remote.origin.pushurl", str(second))
+    repo.commit("a", "local advance\n", "advance")
+
+    client.push()
+
+    assert repo.remote_subject("feature") == "advance"
+
+
 @pytest.mark.parametrize(("advance", "git_budget"), [(True, 18), (False, 14)])
 def test_push_prs_keeps_subprocess_work_bounded(
     repo: Repo, gh: FakeGitHub, git_calls: list[GitCall], advance: bool, git_budget: int

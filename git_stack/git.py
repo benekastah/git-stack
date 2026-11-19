@@ -721,12 +721,13 @@ class GitClient:
     def _push_destination_defaults(self, remote: str, default: str) -> frozenset[str] | None:
         if self._shared_remote_url(remote) is not None:
             return frozenset({default})
-        urls = self._config.get(config_key(f"remote.{remote}.url"), [])
-        explicit = self._config.get(config_key(f"remote.{remote}.pushurl"), [])
-        if self._ambiguous_push_urls([url for url in (*urls, *explicit) if url]):
-            return None
         push_urls = self._resolved_push_urls(remote)
         if not push_urls:
+            return None
+        urls = self._configured_remote_urls(remote, "url")
+        explicit = self._configured_remote_urls(remote, "pushurl")
+        rules = ("insteadof",) if explicit else ("insteadof", "pushinsteadof")
+        if len(push_urls) > 1 and self._ambiguous_push_urls(explicit or urls, rules):
             return None
         defaults = {default}
         fetch_url = urls[0] if urls else None
@@ -740,12 +741,22 @@ class GitClient:
             defaults.add(branch)
         return frozenset(defaults)
 
-    def _ambiguous_push_urls(self, configured: list[str]) -> bool:
+    def _configured_remote_urls(self, remote: str, setting: str) -> list[str]:
+        """Configured URLs after the last empty value clears the list."""
+        urls: list[str] = []
+        for url in self._config.get(config_key(f"remote.{remote}.{setting}"), []):
+            if url:
+                urls.append(url)
+            else:
+                urls.clear()
+        return urls
+
+    def _ambiguous_push_urls(self, configured: list[str], rules: tuple[str, ...]) -> bool:
         """Git separates URLs with newlines and leaves newlines in URLs unescaped."""
         return any("\n" in url for url in configured) or any(
             key.startswith("url.")
             and "\n" in key
-            and key.rpartition(".")[2] in ("insteadof", "pushinsteadof")
+            and key.rpartition(".")[2] in rules
             and any(url.startswith(prefix or "") for prefix in prefixes for url in configured)
             for key, prefixes in self._config.items()
         )
