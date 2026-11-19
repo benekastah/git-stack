@@ -140,6 +140,9 @@ total counts concurrent calls to that tool once. Time when both tools were
 active appears as overlap. Stdout, including `--json`, and the exit status
 are the same with or without timing.
 
+While performance work is underway, timed invocations also append the command
+line and its stderr timeline to `~/.local/git-stack/perf.log`.
+
 ### Groups
 
 When a branch on `main` merges, the branches stacked on it each become the

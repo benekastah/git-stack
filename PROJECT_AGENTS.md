@@ -54,6 +54,8 @@ man page is generated from it.
   `Git.process` boundary, in the snapshot's `CatFile`, and at both `gh` launches.
   Branch-status workers inherit the same recorder. Keep subprocess input,
   output and environment out of the timeline.
+  During performance work, the CLI appends the same timeline and its command
+  line to `~/.local/git-stack/perf.log` after printing the report.
 - A value from a fixed set (an option's, a setting's, GitHub's) is an enum,
   converted where it's read (e.g. `Delete`, `Ownership`, `GitHubState`), so
   the code compares members rather than strings, and adding a value happens in

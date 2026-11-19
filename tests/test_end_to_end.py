@@ -3,6 +3,7 @@ the mocked CLI tests can't: the entry point, and printing what StackClient
 reports."""
 
 import json
+import pathlib
 import subprocess
 import sys
 
@@ -78,16 +79,24 @@ def test_failure_exits_nonzero_with_message(repo: Repo) -> None:
     assert result.stderr == "git stack: main isn't in a stack; switch to a stacked branch to restack its stack\n"
 
 
-def test_performance_timeline_follows_stdout_when_streams_are_combined(repo: Repo) -> None:
+def test_performance_timeline_follows_stdout_when_streams_are_combined(repo: Repo, tmp_path: pathlib.Path) -> None:
     repo.make_stack()
+    # Keep the subprocess's performance log in the test's own directory.
+    run_git_stack = (
+        "import pathlib, runpy, sys\n"
+        "home = pathlib.Path(sys.argv.pop(1))\n"
+        "pathlib.Path.home = lambda: home\n"
+        "runpy.run_module('git_stack', run_name='__main__')"
+    )
     result = subprocess.run(
-        [sys.executable, "-m", "git_stack", "-C", str(repo.path), "parent", "--performance"],
+        [sys.executable, "-c", run_git_stack, str(tmp_path), "-C", str(repo.path), "parent", "--performance"],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         encoding="utf-8",
         check=True,
     )
     assert result.stdout.startswith("pr2\nPerformance timeline\n")
+    assert (tmp_path / ".local" / "git-stack" / "perf.log").is_file()
 
 
 def test_push_says_to_open_pull_requests_with_prs(repo: Repo, gh: FakeGitHub) -> None:

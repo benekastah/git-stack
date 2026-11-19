@@ -1,6 +1,7 @@
 """The opt-in CLI timeline and the wall time it attributes to each tool."""
 
 import json
+import pathlib
 import shlex
 
 import pytest
@@ -11,6 +12,33 @@ from git_stack.git import GitClient
 from git_stack.performance import Timeline
 from tests.helpers import FakeGitHub, Repo
 from tests.test_integrate import source
+
+pytestmark = pytest.mark.usefixtures("performance_home")
+
+
+def test_cli_appends_the_command_and_stderr_report(repo: Repo, performance_home: pathlib.Path) -> None:
+    repo.make_stack()
+    path = performance_home / ".local" / "git-stack" / "perf.log"
+    commands = [("info", "--offline", "-p"), ("--perf", "-C", "missing", "restack")]
+    reports = [repo.stack(*commands[0]), repo.stack(*commands[1], expect_success=False)]
+    entries = []
+    for args, result in zip(commands, reports, strict=True):
+        command = shlex.join(("git", "stack", "-C", str(repo.path), *args))
+        timeline = result.stderr[result.stderr.index("Performance timeline\n") :]
+        entries.append(f"{command}\n{timeline}\n")
+
+    assert path.read_text(encoding="utf-8") == "".join(entries)
+    repo.stack("info", "--offline")
+    assert path.read_text(encoding="utf-8") == "".join(entries)
+
+
+def test_cli_keeps_the_timeline_when_the_log_cannot_be_written(repo: Repo, performance_home: pathlib.Path) -> None:
+    (performance_home / ".local").write_text("a file", encoding="utf-8")
+    result = repo.stack("restack", "-p", expect_success=False)
+
+    assert result.returncode == 1
+    assert "Performance timeline\n" in result.stderr
+    assert "couldn't write the performance log" in result.stderr
 
 
 @pytest.mark.parametrize("flag", ["-p", "--perf", "--performance"])

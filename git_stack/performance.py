@@ -1,9 +1,10 @@
 """The CLI's opt-in wall-clock timeline of Git and GitHub calls."""
 
 import os
+import pathlib
 import shlex
 import subprocess
-from collections.abc import Callable, Generator, Mapping
+from collections.abc import Callable, Generator, Iterable, Mapping
 from contextlib import AbstractContextManager, contextmanager, nullcontext
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -12,6 +13,8 @@ from time import monotonic
 from typing import IO, Literal, override
 
 from git_client import CLIENT_TIMEOUT, Arg, CatFile, EnvValue, Git, Timeout
+
+from git_stack.file_lock import file_lock
 
 Tool = Literal["git", "gh"]
 
@@ -31,6 +34,29 @@ def _occupied_time(calls: list[_Call]) -> float:
         elapsed += max(0.0, call.end - max(end, call.start))
         end = max(end, call.end)
     return elapsed
+
+
+def _command_line(args: Iterable[str]) -> str:
+    return shlex.join(args).replace("\r", r"\r").replace("\n", r"\n")
+
+
+def append_performance_log(argv: list[str], report: str) -> None:
+    """Keep a copy of the emitted timeline, with its command, for performance work."""
+    directory = pathlib.Path.home() / ".local" / "git-stack"
+    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    path = directory / "perf.log"
+    command = _command_line(("git", "stack", *argv))
+    # Commands in different repositories can finish at the same time.
+    with (
+        file_lock(path.with_suffix(".log.lock"), lambda: None),
+        os.fdopen(
+            os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600),
+            "a",
+            encoding="utf-8",
+            errors="backslashreplace",
+        ) as log,
+    ):
+        log.write(f"{command}\n{report}\n\n")
 
 
 class Timeline:
@@ -69,7 +95,7 @@ class Timeline:
         total = self._clock() - self._start
         lines = ["Performance timeline"]
         for call in self._calls:
-            command = shlex.join((call.tool, *call.args)).replace("\r", r"\r").replace("\n", r"\n")
+            command = _command_line((call.tool, *call.args))
             lines.append(f"  +{call.start:.3f}s  {call.end - call.start:6.3f}s  {command}")
 
         git = _occupied_time([call for call in self._calls if call.tool == "git"])

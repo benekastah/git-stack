@@ -51,6 +51,13 @@ def _outside_any_repository(outside_any_repository: pathlib.Path) -> None:  # py
     one the tests were started in (its config, say)."""
 
 
+@pytest.fixture
+def performance_home(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> pathlib.Path:
+    """Keep performance logs away from the user's home."""
+    monkeypatch.setattr(pathlib.Path, "home", lambda: tmp_path)
+    return tmp_path
+
+
 def make_repositories(directory: pathlib.Path) -> None:
     """origin.git, local and forge as the repo fixture starts with them."""
     repo = Repo(path=directory / "local", origin=directory / "origin.git", forge=directory / "forge", tmp=directory)

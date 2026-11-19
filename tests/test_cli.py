@@ -910,6 +910,7 @@ def test_json_prints_the_result_on_stdout(
     assert json.loads(capsys.readouterr().out) == {"type": "result", **result, "events": []}
 
 
+@pytest.mark.usefixtures("performance_home")
 def test_global_options_work_at_different_parser_levels(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
     stack.group_add.return_value = ["pr1"]
 

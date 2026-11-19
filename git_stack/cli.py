@@ -31,7 +31,7 @@ from git_stack.commands import (
 from git_stack.errors import StackError
 from git_stack.git import GitClient
 from git_stack.output import JsonStream, print_event
-from git_stack.performance import Timeline
+from git_stack.performance import Timeline, append_performance_log
 from git_stack.stack import StackClient
 
 # In the order `git stack -h` lists them.
@@ -124,7 +124,12 @@ def main(argv: list[str] | None = None, stack: StackClient | None = None) -> int
     finally:
         # Keep the result first when stdout and stderr go to the same file.
         sys.stdout.flush()
-        print(timeline.render(), file=sys.stderr)
+        report = timeline.render()
+        print(report, file=sys.stderr)
+        try:
+            append_performance_log(sys.argv[1:] if argv is None else argv, report)
+        except (OSError, RuntimeError) as error:
+            print(f"git stack: couldn't write the performance log: {error}", file=sys.stderr)
 
 
 def _run(args: argparse.Namespace, stack: StackClient | None) -> int:
