@@ -5,9 +5,10 @@ description: Build or adopt a git-stack integration root from several local bran
 
 # Integration branches
 
-Use `--performance` on every git-stack command. In your summary, report total wall time
-and the time spent in Git, `gh`, and other work. Include any overlap shown and flag
-the slowest call if it explains a delay.
+Use `--performance` on every git-stack command. In your summary, report total wall time,
+how many Git and `gh` calls ran, the time spent in each tool, and the time spent elsewhere.
+Count each `cat-file` batch request as a Git call. Include batch shutdown in Git time only.
+Report any overlap shown and flag the slowest call if it explains a delay.
 
 Use an integration root when one stack needs several unmerged branch tips.
 It combines the tips with native Git merges and serves as the work stack's

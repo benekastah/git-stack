@@ -5,9 +5,10 @@ description: Bring stacked branches up to date with git-stack - restack, sync, p
 
 # Keeping a stack current
 
-Use `--performance` on every git-stack command. In your summary, report total wall time
-and the time spent in Git, `gh`, and other work. Include any overlap shown and flag
-the slowest call if it explains a delay.
+Use `--performance` on every git-stack command. In your summary, report total wall time,
+how many Git and `gh` calls ran, the time spent in each tool, and the time spent elsewhere.
+Count each `cat-file` batch request as a Git call. Include batch shutdown in Git time only.
+Report any overlap shown and flag the slowest call if it explains a delay.
 
 Read the `git-stack` skill first. Commit your work first: `restack` and `sync` refuse a dirty
 worktree (untracked files are fine unless one is in the way of a commit being replayed).

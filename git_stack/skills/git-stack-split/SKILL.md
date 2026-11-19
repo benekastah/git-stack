@@ -5,9 +5,10 @@ description: Plan and build a large change as a stack of small pull requests wit
 
 # Splitting a change into a stack
 
-Use `--performance` on every git-stack command. In your summary, report total wall time
-and the time spent in Git, `gh`, and other work. Include any overlap shown and flag
-the slowest call if it explains a delay.
+Use `--performance` on every git-stack command. In your summary, report total wall time,
+how many Git and `gh` calls ran, the time spent in each tool, and the time spent elsewhere.
+Count each `cat-file` batch request as a Git call. Include batch shutdown in Git time only.
+Report any overlap shown and flag the slowest call if it explains a delay.
 
 Read the `git-stack` skill first. Reviewers read a small PR better than a big one. Aim for steps of a
 few hundred changed lines, within the project's own limits (see its contributing docs or agent

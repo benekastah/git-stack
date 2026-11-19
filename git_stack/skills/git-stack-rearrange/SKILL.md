@@ -5,9 +5,10 @@ description: Reshape stacked branches with git-stack - move a branch to another 
 
 # Rearranging a stack
 
-Use `--performance` on every git-stack command. In your summary, report total wall time
-and the time spent in Git, `gh`, and other work. Include any overlap shown and flag
-the slowest call if it explains a delay.
+Use `--performance` on every git-stack command. In your summary, report total wall time,
+how many Git and `gh` calls ran, the time spent in each tool, and the time spent elsewhere.
+Count each `cat-file` batch request as a Git call. Include batch shutdown in Git time only.
+Report any overlap shown and flag the slowest call if it explains a delay.
 
 Read the `git-stack` skill first. Commit everything first: restacking needs a clean worktree.
 Every move below is `git stack --performance restack <branch> --onto <parent>` (the branch's children come along,

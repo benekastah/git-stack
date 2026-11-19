@@ -5,9 +5,10 @@ description: Create and manage stacked pull requests with git-stack (`git stack`
 
 # git-stack
 
-Use `--performance` on every git-stack command. In your summary, report total wall time
-and the time spent in Git, `gh`, and other work. Include any overlap shown and flag
-the slowest call if it explains a delay.
+Use `--performance` on every git-stack command. In your summary, report total wall time,
+how many Git and `gh` calls ran, the time spent in each tool, and the time spent elsewhere.
+Count each `cat-file` batch request as a Git call. Include batch shutdown in Git time only.
+Report any overlap shown and flag the slowest call if it explains a delay.
 
 git-stack keeps stacked branches rebased on each other. It records, in the repo's git config, each
 branch's **parent** (`branch.<name>.stackParent`) and the exact parent commit it was built on, its
