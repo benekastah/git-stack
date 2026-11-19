@@ -2916,13 +2916,9 @@ class StackClient(StackCore):
         dry_run: bool = False,
     ) -> None:
         """Update the stack sections of branches' pull requests (see
-        GitHubAdapter.update_stack_sections), one for each root, since a
-        group's stacks can be on several."""
+        GitHubAdapter.update_stack_sections)."""
         try:
-            for root in sorted({stacks.root(b) for b in branches}):
-                adapter.update_stack_sections(
-                    [b for b in branches if stacks.root(b) == root], stacks, rebuild_stack, dry_run
-                )
+            adapter.update_stack_sections(branches, stacks, rebuild_stack, dry_run)
         except StackError as e:
             raise StackError(f"updating the stack in pull request descriptions failed: {e}") from e
 

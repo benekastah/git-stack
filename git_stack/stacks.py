@@ -280,11 +280,13 @@ class Stacks:
 
         For working out what's left once branch is treated as gone (e.g.
         merged) without changing anything: saving it would untrack branch.
+        Promoted children keep the dropped bottom's existing group.
         """
         new_parent = self._nodes[branch].parent
+        group = self._nodes[branch].group if new_parent not in self._nodes else None
         children = self.children(branch)
         for child in children:
-            self._set(replace(self._nodes[child], parent=new_parent))
+            self._set(replace(self._nodes[child], parent=new_parent, group=group))
         self._remove(branch)
         return children
 

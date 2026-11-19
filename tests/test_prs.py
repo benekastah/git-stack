@@ -254,9 +254,16 @@ def test_prs_adds_new_pull_requests_to_the_stack_of_existing_ones(
 
 
 def merge(
-    repo: Repo, gh: FakeGitHub, client: StackClient, branch: str, number: int, delete_branch: bool = True
+    repo: Repo,
+    gh: FakeGitHub,
+    client: StackClient,
+    branch: str,
+    number: int,
+    delete_branch: bool = True,
+    *,
+    sync: bool = True,
 ) -> None:
-    """Squash-merge branch, pull request number, on the forge, then sync.
+    """Squash-merge branch, pull request number, on the forge, and optionally sync.
     Deleting the branch, GitHub points the pull requests on it at main
     itself; otherwise sync's push does."""
     repo.squash_merge_on_forge(branch, delete_branch)
@@ -272,7 +279,8 @@ def merge(
             pr["baseRefName"] = "main"
             pr.setdefault("baseChanges", []).append({"oldBase": branch, "createdAt": ""})
     gh.save(state)
-    client.sync()
+    if sync:
+        client.sync()
 
 
 def test_prs_shows_the_stack_on_the_merged_pull_request_it_was_on(
@@ -777,6 +785,32 @@ def test_prs_shows_the_group_across_roots_in_the_selected_pr(repo: Repo, gh: Fak
 
     assert body(gh, 1) == stack("- `main`", "  - #1 👈", "- `release`", "  - #2")
     assert [call[2] for call in gh.calls("pr", "edit")] == ["1"]
+
+
+@pytest.mark.parametrize("sync", [False, True])
+def test_prs_keeps_group_and_merge_history_when_a_grouped_bottom_merges(
+    repo: Repo, gh: FakeGitHub, client: StackClient, sync: bool
+) -> None:
+    repo.git("branch", "release", "main")
+    repo.git("push", "--quiet", "--set-upstream", "origin", "release")
+    client.branch("a", group="g")
+    repo.commit("a", "a\n", "a")
+    client.branch("b")
+    repo.commit("b", "b\n", "b")
+    client.branch("other", group="g", from_branch="release")
+    repo.commit("c", "c\n", "c")
+    client.push(groups=["g"], prs=True)
+    repo.git("switch", "--quiet", "b")
+    merge(repo, gh, client, "a", 1, sync=sync)
+    if not sync:
+        repo.git("fetch", "--quiet", "origin", "main:main")
+
+    if sync:
+        client.prs(["other"])
+        assert body(gh, 3) == stack("- `main`", "  - #1 (merged)", "    - #2", "- `release`", "  - #3 👈")
+    else:
+        client.prs(["b"])
+        assert body(gh, 2) == stack("- `main`", "  - #1 (merged)", "    - #2 👈", "- `release`", "  - #3")
 
 
 def test_push_unstacks_a_github_stack_that_no_longer_fits_a_branching_stack(

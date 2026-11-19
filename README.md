@@ -169,8 +169,9 @@ main
 - A group can span roots, e.g. if you `restack --onto release` one of its
   stacks. Selecting that group covers every root it's on, and `sync`
   fast-forwards each. The description of each pull request that `prs`
-  updates shows the full group across its roots, even when GitHub shows a
-  linked stack.
+  updates shows the full group across its roots, including the merged
+  pull requests its stacks last branched from. This also applies when
+  GitHub shows a linked stack.
 - Commands with stack selectors use only the current or named stacks. Pass
   `-g` for the current stack's group, or `-g <name>` for a named group.
   `show-stack` includes the selected stack's group.

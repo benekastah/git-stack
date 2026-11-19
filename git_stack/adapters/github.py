@@ -1001,22 +1001,61 @@ class GitHubAdapter(GitAdapter):
         roots, including when GitHub shows a linked stack.
         """
         prs = self.pull_requests()
-        root = stacks.parent(branches[0])
+        to_update = {b: prs[b].number for b in branches if b in prs and prs[b].state is GitHubState.OPEN}
+        history_roots = self.stack_section_history_roots(branches, stacks, prs, to_update)
+        numbers = sorted(set(to_update.values()) | history_roots.keys())
+        try:
+            fields = self.pull_request_fields(numbers, f"body {BASE_CHANGES} {STACK_FIELDS}")
+        except StackError:
+            # E.g. GitHub Enterprise without stacked pull requests, which
+            # doesn't know the field.
+            fields = self.pull_request_fields(numbers, f"body {BASE_CHANGES}")
+        merged = self.merged_parents({n: fields[n] for n in history_roots}, history_roots)
+        for root in sorted({stacks.root(b) for b in branches}):
+            on_root = [b for b in branches if stacks.root(b) == root]
+            self.update_stack_sections_on_root(
+                on_root,
+                stacks,
+                prs,
+                fields,
+                {b: to_update[b] for b in on_root if b in to_update},
+                merged,
+                rebuild_stack,
+                dry_run,
+            )
+
+    @staticmethod
+    def stack_section_history_roots(
+        branches: list[str], stacks: Stacks, prs: dict[str, PullRequest], to_update: dict[str, int]
+    ) -> dict[int, str]:
+        """Roots of PRs whose previous bases can appear in a stack section."""
+        selected = set(branches)
+        bottoms = {b for b in to_update if stacks.parent(b) not in selected}
+        for bottom in {stacks.bottom(b) for b in to_update}:
+            bottoms.update(stacks.group_bottoms(bottom))
+        return {prs[b].number: stacks.root(b) for b in bottoms if b in prs and prs[b].state is GitHubState.OPEN}
+
+    def update_stack_sections_on_root(
+        self,
+        branches: list[str],
+        stacks: Stacks,
+        prs: dict[str, PullRequest],
+        fields: dict[int, object],
+        to_update: dict[str, int],
+        group_history: dict[int, int],
+        rebuild_stack: bool,
+        dry_run: bool,
+    ) -> None:
+        root = stacks.root(branches[0])
+        selected = set(branches)
 
         def node(branch: str) -> stack_section.Node:
             return prs[branch].number if branch in prs else branch
 
-        current = {node(b): node(stacks.parent(b)) if stacks.parent(b) in branches else root for b in branches}
-        to_update = {b: prs[b].number for b in branches if b in prs and prs[b].state is GitHubState.OPEN}
-        try:
-            fields = self.pull_request_fields(to_update.values(), f"body {BASE_CHANGES} {STACK_FIELDS}")
-        except StackError:
-            # E.g. GitHub Enterprise without stacked pull requests, which
-            # doesn't know the field.
-            fields = self.pull_request_fields(to_update.values(), f"body {BASE_CHANGES}")
-        bodies = {n: field(pr, "body", str) for n, pr in fields.items()}
-        on_root = [n for b, n in to_update.items() if stacks.parent(b) not in branches]
-        merged = self.merged_parents({n: fields[n] for n in on_root}, root)
+        current = {node(b): node(stacks.parent(b)) if stacks.parent(b) in selected else root for b in branches}
+        merged = {
+            n: group_history[n] for b, n in to_update.items() if n in group_history and stacks.parent(b) not in selected
+        }
         # Each pull request on root goes on the merged one it was on, on root.
         tree = dict(current)
         for number, parent in merged.items():
@@ -1024,8 +1063,8 @@ class GitHubAdapter(GitAdapter):
             tree[parent] = root
         shown = sum(isinstance(n, int) for n in tree) >= 2
         github_stacks = {
-            n: GitHubStack.from_json(stack) if (stack := optional_field(pr, "stack", dict)) is not None else None
-            for n, pr in fields.items()
+            n: GitHubStack.from_json(stack) if (stack := optional_field(fields[n], "stack", dict)) is not None else None
+            for n in to_update.values()
         }
         paths = github_stack_paths(branches, stacks, root, to_update, github_stacks)
         # Only a linear stack is linked again once a retarget unstacks it, as
@@ -1043,9 +1082,9 @@ class GitHubAdapter(GitAdapter):
         if dry_run:
             return
         for branch, number in to_update.items():
-            body = bodies[number]
+            body = field(fields[number], "body", str)
             if len(stacks.group_bottoms(stacks.bottom(branch))) > 1:
-                section = group_stack_section(branch, stacks, prs, merged)
+                section = group_stack_section(branch, stacks, prs, group_history)
                 new_body = stack_section.replace(body, section)
             elif number in linked or not shown:
                 new_body = stack_section.remove(body)
@@ -1099,9 +1138,9 @@ class GitHubAdapter(GitAdapter):
             self.core.emit(events.GitHubStackUnstackPlanned(tuple(sorted(found)), tuple(sorted(affected))))
         return True
 
-    def merged_parents(self, prs: dict[int, object], root: str) -> dict[int, int]:
-        """{number: the merged pull request it was last stacked on} for the
-        pull requests prs, {number: its fields, with BASE_CHANGES}, on root.
+    def merged_parents(self, prs: dict[int, object], roots: dict[int, str]) -> dict[int, int]:
+        """The merged pull request each is last stacked on, given its fields
+        with BASE_CHANGES and its current root.
 
         That's the head of the first of the bases each was changed from,
         newest first, to have a pull request merged before the change (the
@@ -1121,13 +1160,16 @@ class GitHubAdapter(GitAdapter):
             for n, pr in prs.items()
         }
         open_heads = {b for b, pr in self.pull_requests().items() if pr.state is GitHubState.OPEN}
-        heads = {head for c in changes.values() for head, _ in c} - {root} - open_heads
+        heads = {head for n, c in changes.items() for head, _ in c if head != roots[n]} - open_heads
         merges = self.merged_pull_requests(sorted(heads))
         found = {}
         for n, c in changes.items():
             # GitHub's timestamps are all UTC, in the same format, so they
             # compare as strings.
-            parent = next((m for head, at in c for merged_at, m in merges.get(head, []) if merged_at <= at), None)
+            parent = next(
+                (m for head, at in c if head != roots[n] for merged_at, m in merges.get(head, []) if merged_at <= at),
+                None,
+            )
             if parent is not None:
                 found[n] = parent
         return found
@@ -1254,7 +1296,7 @@ class GitHubAdapter(GitAdapter):
 
 
 def group_stack_section(branch: str, stacks: Stacks, prs: dict[str, PullRequest], merged: dict[int, int]) -> str:
-    """Describe all of branch's group, with known merged parents for this update."""
+    """Describe all of branch's group, including its last merged parents."""
     group = stacks.restricted(stacks.stack_of(branch))
 
     def node(name: str) -> stack_section.Node:
