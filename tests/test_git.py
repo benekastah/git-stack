@@ -292,6 +292,24 @@ def test_snapshot_reads_every_remote_branch_when_upstreams_are_too_many_to_name(
     assert listing[-2:] == ["refs/heads/", "refs/remotes/"]
 
 
+def test_snapshot_can_validate_a_branch_upstream(repo: Repo, git_calls: list[GitCall]) -> None:
+    git = GitClient(repo.path)
+    with git.snapshot():
+        assert git.has_branch_upstream("main", "origin")
+    assert [call[0] for call in git_calls] == ["config", "for-each-ref"]
+
+
+@pytest.mark.parametrize("symbolic", [False, True])
+def test_snapshot_rejects_missing_or_symbolic_upstream_refs(repo: Repo, symbolic: bool) -> None:
+    repo.git("config", "branch.main.merge", "refs/heads/other")
+    if symbolic:
+        repo.git("symbolic-ref", "refs/remotes/origin/other", "refs/remotes/origin/main")
+    git = GitClient(repo.path)
+
+    with git.snapshot():
+        assert not git.has_branch_upstream("main", "origin")
+
+
 def test_snapshot_reads_an_upstream_with_an_unusual_refspec(repo: Repo) -> None:
     """Its remote-tracking branch isn't where the snapshot looks, so it isn't
     taken as deleted."""
@@ -303,6 +321,7 @@ def test_snapshot_reads_an_upstream_with_an_unusual_refspec(repo: Repo) -> None:
     with git.snapshot():
         assert not git.upstream_gone("mirrored")
         assert git.rev("mirrored@{upstream}") == git.tip("main")
+        assert not git.has_branch_upstream("mirrored", "mirror")
 
 
 def test_snapshot_reads_worktrees_and_the_remotes_default_branch_once(repo: Repo, git_calls: list[GitCall]) -> None:

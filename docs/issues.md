@@ -39,17 +39,6 @@ branch can't leave its settings behind, but every other read still trusts it.
 Comparing the file's contents (or a hash of them) instead of its metadata
 would rule out the missed write at little cost, since the file is small.
 
-## Push makes an extra remote round trip even without PR changes
-
-`git stack push` runs `git push --dry-run` before the real push. This catches
-stale leases before git-stack retargets any open PRs, which could otherwise be
-left pointing at a new base if the push fails. When no PR will change before
-publication, the real atomic push can check the leases itself.
-
-Determine whether the pre-push PR step will change anything before contacting
-the remote for the dry run. Keep the PR validation that can block a push and
-run the dry run before any pre-push PR changes.
-
 ## Group sync can lose its integration selector after the last work branch lands
 
 If a group sync removes the last selected work branch above an integration

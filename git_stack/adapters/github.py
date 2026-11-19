@@ -5,7 +5,7 @@ import re
 import subprocess
 import threading
 import urllib.parse
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
 from typing import Self
 
@@ -719,16 +719,16 @@ class GitHubAdapter(GitAdapter):
             if (branch in prs and prs[branch].state is GitHubState.OPEN) or (opening and branch not in prs):
                 self.ensure_pr_parent_remote(branch, stacks.parent(branch))
 
-    def before_push(
+    def prepare_push_retargets(
         self,
         to_push: list[str],
         stacks: Stacks,
         rebuild_stack: bool = False,
         scope: list[str] | None = None,
         opening: bool = False,
-    ) -> None:
-        """Point the open pull requests of branches about to be pushed at their
-        stack parents, where the parent is already on the remote.
+    ) -> Callable[[], None] | None:
+        """Validate PR changes and return a callback to retarget open PRs
+        whose new bases are already on the remote.
 
         Pushing first would briefly compare a rebased branch with its old base
         (e.g. its parent's branch, after the parent was merged), so its pull
@@ -745,41 +745,49 @@ class GitHubAdapter(GitAdapter):
             for b in (scope if scope is not None else to_push)
             if b in prs and prs[b].state is GitHubState.OPEN
         }
-        pending = {
-            prs[b].number
-            for b in to_push
-            if b in prs
-            and prs[b].state is GitHubState.OPEN
-            and prs[b].base != self.git.remote_branch_name(stacks.parent(b), self.remote)
-            and self.git.rev(f"refs/remotes/{self.remote}/{self.git.remote_branch_name(stacks.parent(b), self.remote)}")
-            is None
-        }
+        ready: list[tuple[str, str]] = []
+        pending: set[int] = set()
+        for branch in to_push:
+            pr = prs.get(branch)
+            if pr is None or pr.state is not GitHubState.OPEN:
+                continue
+            parent = stacks.parent(branch)
+            base = self.git.remote_branch_name(parent, self.remote)
+            if pr.base == base:
+                continue
+            if self.git.rev(f"refs/remotes/{self.remote}/{base}") is None:
+                pending.add(pr.number)
+            else:
+                ready.append((branch, parent))
         if pending:
-            try:
-                fields = self.pull_request_fields(pending, STACK_FIELDS)
-            except StackError as e:
-                if "Field 'stack' doesn't exist on type 'PullRequest'" not in str(e):
-                    raise StackError(
-                        "couldn't check whether pull requests need unstacking before pushing; nothing was pushed"
-                    ) from e
-                fields = {}
-            stacked = sorted(n for n, pr in fields.items() if optional_field(pr, "stack", dict) is not None)
-            if stacked and not rebuild_stack:
+            self.validate_deferred_retargets(pending, rebuild_stack, allowed)
+
+        def retarget() -> None:
+            for branch, parent in ready:
+                self.retarget(branch, parent, rebuild_stack, allowed)
+
+        return retarget if ready else None
+
+    def validate_deferred_retargets(self, pending: set[int], rebuild_stack: bool, allowed: set[int]) -> None:
+        """Check whether retargeting to parents published by this push is allowed."""
+        try:
+            fields = self.pull_request_fields(pending, STACK_FIELDS)
+        except StackError as e:
+            if "Field 'stack' doesn't exist on type 'PullRequest'" not in str(e):
                 raise StackError(
-                    f"changing the base of {', '.join(f'#{n}' for n in stacked)} requires unstacking its "
-                    "GitHub stack; rerun with --rebuild-stack to allow it"
-                )
-            if rebuild_stack:
-                for n in stacked:
-                    stack = optional_field(fields[n], "stack", dict)
-                    if stack is not None:
-                        self.ensure_stack_scope(GitHubStack.from_json(stack), allowed)
-        for b in to_push:
-            if (
-                self.git.rev(f"refs/remotes/{self.remote}/{self.git.remote_branch_name(stacks.parent(b), self.remote)}")
-                is not None
-            ):
-                self.retarget(b, stacks.parent(b), rebuild_stack, allowed)
+                    "couldn't check whether pull requests need unstacking before pushing; nothing was pushed"
+                ) from e
+            return
+        stacks = {
+            number: stack for number, pr in fields.items() if (stack := optional_field(pr, "stack", dict)) is not None
+        }
+        if stacks and not rebuild_stack:
+            raise StackError(
+                f"changing the base of {', '.join(f'#{n}' for n in sorted(stacks))} requires unstacking its "
+                "GitHub stack; rerun with --rebuild-stack to allow it"
+            )
+        for number in sorted(stacks):
+            self.ensure_stack_scope(GitHubStack.from_json(stacks[number]), allowed)
 
     def after_push(
         self,
@@ -790,7 +798,7 @@ class GitHubAdapter(GitAdapter):
         scope: list[str] | None = None,
     ) -> None:
         """Point the open pull requests of pushed branches at their stack parents,
-        if before_push couldn't because the parent wasn't on the remote yet, and
+        if the parent wasn't on the remote before the push, and
         say which pushed branches have none, unless they're opened next."""
         prs = self.pull_requests()
         allowed = {
@@ -1275,17 +1283,17 @@ def github_repo(git: GitClient, remote: str) -> tuple[str, str, str] | None:
     SSH URL, host is the one ssh connects to, so a Host alias in ~/.ssh/config
     (e.g. github-work for github.com) is resolved.
     """
-    for url in (
-        git.config_value(f"remote.{remote}.url") or "",
-        git.run("remote", "get-url", remote, check=False),
-    ):
+    url = git.config_value(f"remote.{remote}.url") or ""
+    match = REMOTE_URL.match(url)
+    if match is None:
+        url = git.run("remote", "get-url", remote, check=False)
         match = REMOTE_URL.match(url)
-        if match:
-            host, owner, name = match.groups()
-            if "://" not in url or url.startswith(("ssh://", "git+ssh://", "ssh+git://")):
-                host = ssh_hostname(host)
-            return host, owner, name
-    return None
+    if match is None:
+        return None
+    host, owner, name = match.groups()
+    if "://" not in url or url.startswith(("ssh://", "git+ssh://", "ssh+git://")):
+        host = ssh_hostname(host)
+    return host, owner, name
 
 
 def ssh_hostname(host: str) -> str:

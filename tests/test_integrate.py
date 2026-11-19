@@ -1658,7 +1658,6 @@ def test_push_refreshes_integration_and_publishes_work_with_its_base(
 
     assert ("rebuilding integration combined" in result.stdout) is not restack_first
     assert ("removing the temporary worktree for combined" in result.stdout) is not restack_first
-    assert "checking whether origin will accept the push" in result.stdout
     if not restack_first:
         assert result.stdout.index("rebuilding integration combined") < result.stdout.index("Merge made by")
     assert repo.git("show", "refs/heads/work:b", cwd=repo.origin) == "latest source"
@@ -1672,7 +1671,9 @@ def test_push_refreshes_integration_and_publishes_work_with_its_base(
     assert repo.config("work", "remote") == repo.config("combined", "remote") == "origin"
     assert tip(repo, "two") == source_tip
     assert repo.git("ls-remote", "--heads", "origin", "two") == ""
-    assert len([c for c in git_calls if c[:2] == ["push", "--atomic"]]) == 1
+    pushes = [call for call in git_calls if call[0] == "push"]
+    assert len(pushes) == 1
+    assert "--atomic" in pushes[0] and "--dry-run" not in pushes[0]
 
 
 @pytest.mark.parametrize("existing_pr", [False, True])

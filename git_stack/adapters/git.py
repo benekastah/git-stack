@@ -1,4 +1,5 @@
 import enum
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from git_stack.adapters.merge_state import MergeState
@@ -113,6 +114,9 @@ class GitAdapter:
         """
         git = self.git
         base = git.config_get(branch, BASE_KEY)
+        # The parent has no commits outside the branch when its tip is the base.
+        if base == parent_tip:
+            return False
         if base is None or not git.is_ancestor(base, f"refs/heads/{branch}") or git.rev(parent_tip) is None:
             return False
         files = self.changed_files(base, f"refs/heads/{branch}")
@@ -242,15 +246,16 @@ class GitAdapter:
         """Fail now if whatever the adapter asks about merges can't answer,
         rather than falling back to the repository alone."""
 
-    def before_push(
+    def prepare_push_retargets(
         self,
         to_push: list[str],
         stacks: Stacks,
         rebuild_stack: bool = False,
         scope: list[str] | None = None,
         opening: bool = False,
-    ) -> None:
-        """Called before to_push, a stack's unmerged branches, are pushed."""
+    ) -> Callable[[], None] | None:
+        """Validate any PR changes and return the edits needed before the push."""
+        return None
 
     def after_push(
         self,

@@ -9,7 +9,7 @@ from contextlib import contextmanager
 from typing import TextIO
 
 import git_client
-from git_client import GitError, config_key, git_common_dir, git_paths
+from git_client import GitError, Ref, config_key, git_common_dir, git_paths
 
 from git_stack.errors import StackError
 from git_stack.performance import TimedCatFile, TimedGit
@@ -162,15 +162,14 @@ class GitClient:
         self._config_stat: tuple[int, int, int] | None = None
         self._branch_config: dict[tuple[str, str], str] = {}
         self._config: dict[str, list[str | None]] = {}
-        # See snapshot: how many snapshot blocks we're in; the refs, as
-        # {refname: (commit, the full refname of its upstream, or "")}, the
+        # See snapshot: how many snapshot blocks we're in; the refs by full name, the
         # upstreams' refnames they were listed for, and the branch HEAD is on,
         # if it's one of them; `git worktree list --porcelain`'s output,
         # {worktree: the branch a rebase in it is rebasing} and {branch: its
         # reflog's commits}, once read; and {remote: its default branch}. The
         # lock is for commands that read them in several threads.
         self._snapshot_depth = 0
-        self._refs: dict[str, tuple[str, str]] | None = None
+        self._refs: dict[str, Ref] | None = None
         self._listed_upstreams: frozenset[str] = frozenset()
         self._head: str | None = None
         self._worktrees: str | None = None
@@ -277,7 +276,7 @@ class GitClient:
                 self._remote_defaults = {}
                 self._cat_file.close()
 
-    def _snapshot_refs(self) -> dict[str, tuple[str, str]] | None:
+    def _snapshot_refs(self) -> dict[str, Ref] | None:
         """The refs (see snapshot), reading them if they haven't been, or None
         outside a snapshot block."""
         if not self._snapshot_depth:
@@ -296,7 +295,7 @@ class GitClient:
                 with git_errors():
                     listed = git_client.refs(self._git, "refs/heads/", *patterns)
                 head = next((ref.name.removeprefix("refs/heads/") for ref in listed.values() if ref.head), None)
-                self._refs = {ref.name: (ref.object, ref.upstream) for ref in listed.values()}
+                self._refs = listed
                 self._listed_upstreams, self._head = frozenset(upstreams), head
             return self._refs
 
@@ -416,20 +415,20 @@ class GitClient:
         cacheable = is_branch_name(branch) and (branch != ref or ref.startswith(("refs/heads/", "refs/remotes/")))
         refs = self._snapshot_refs() if cacheable else None
         if refs is not None and ref in refs:
-            return refs[ref][0]
+            return refs[ref].object
         if refs is not None and branch != ref and (local := refs.get(f"refs/heads/{branch}")):
-            upstream = local[1]
+            upstream = local.upstream
             if not upstream:
                 return None
             if upstream in refs:
-                return refs[upstream][0]
+                return refs[upstream].object
         return self._resolve(f"{ref}^{{commit}}")
 
     def tip(self, branch: str) -> str:
         """The commit local branch points at. Fails if branch doesn't exist.
         Within a snapshot that doesn't have it, asked of the snapshot's cat-file."""
         if (refs := self._snapshot_refs()) is not None and (entry := refs.get(f"refs/heads/{branch}")):
-            return entry[0]
+            return entry.object
         if self._snapshot_depth:
             with git_errors():
                 return self._cat_file.verify(f"refs/heads/{branch}")
@@ -581,7 +580,8 @@ class GitClient:
         """Whether branch has an upstream that no longer exists, e.g. after
         `git fetch --prune` saw it deleted."""
         if (refs := self._snapshot_refs()) is not None:
-            upstream = refs.get(f"refs/heads/{branch}", ("", ""))[1]
+            local = refs.get(f"refs/heads/{branch}")
+            upstream = local.upstream if local is not None else ""
             if not upstream or upstream in refs:
                 return False
             # Unless it wasn't listed, as with an unusual fetch refspec.
@@ -606,8 +606,15 @@ class GitClient:
         ref = self.config_get(branch, "merge")
         if self.config_get(branch, "remote") != remote or ref is None or not ref.startswith("refs/heads/"):
             return False
+        expected = f"refs/remotes/{remote}/{ref.removeprefix('refs/heads/')}"
+        if (refs := self._snapshot_refs()) is not None:
+            local = refs.get(f"refs/heads/{branch}")
+            upstream = refs.get(expected)
+            # rev-parse dereferences symbolic refs and fails if the upstream is missing.
+            if local is not None and local.upstream == expected and upstream is not None and not upstream.symref:
+                return True
         upstream = self.run("rev-parse", "--symbolic-full-name", f"{branch}@{{upstream}}", check=False)
-        return upstream == f"refs/remotes/{remote}/{ref.removeprefix('refs/heads/')}"
+        return upstream == expected
 
     def remote_branch_name(self, branch: str, remote: str) -> str:
         """The configured branch name on remote, or branch if it has no such upstream."""

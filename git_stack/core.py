@@ -550,6 +550,8 @@ class StackCore:
         """
         git = self.git
         tip = git.tip(branch)
+        if tip == upstream_tip:
+            return []
         known = [tip, *git.reflog_tips(branch)]
         for ref in (f"refs/heads/{parent}", self.pulled_tip(branch)):
             commit = git.rev(ref) if ref else None

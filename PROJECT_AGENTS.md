@@ -10,7 +10,9 @@ man page is generated from it.
 - `git_stack/stack.py` (`StackClient`) and `git_stack/core.py` (`StackCore`) do
   the work. `git_stack/git.py` (`GitClient`) runs git; the adapters in
   `git_stack/adapters/` say which branches were merged, locally or by asking
-  GitHub.
+  GitHub. The GitHub adapter validates PR changes before an atomic push and
+  plans any retargets that must run before publication. Run the dry push
+  before applying those edits so stale leases leave the PR bases alone.
 - `GitClient` runs git through [py-git-client](https://github.com/benekastah/py-git-client)
   (`git_client`), which git-stack shares with git-recommit and move-forward:
   its `Git` starts each process, the quickest way each system allows (and

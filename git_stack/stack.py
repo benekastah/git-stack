@@ -2570,25 +2570,9 @@ class StackClient(StackCore):
         integrations = Integrations(self)
         for integration in integration_pushes:
             integrations.verify(integration.refs)
-        # Before the adapter changes anything (e.g. retargets pull requests),
-        # so a push that's bound to fail, e.g. because a remote branch moved
-        # since it was fetched, leaves nothing changed. The remote can still
-        # refuse the real push (e.g. a protected branch), which a dry run
-        # doesn't ask it about.
-        if integration_pushes:
-            self.emit(events.CheckingPush(remote))
-        if (why := git.push_would_fail("--atomic", *leases, remote, *refspecs)) is not None:
-            raise StackError(
-                f"push would fail, so nothing was pushed or changed; if the remote has new commits, run "
-                f"`git stack sync` and try again:\n{why}"
-            )
-        try:
-            adapter.before_push(branches, stacks, rebuild_stack, scope, opening)
-        except StackError as e:
-            raise StackError(
-                f"updating pull requests failed, so nothing was pushed (set {ADAPTER_SETTING} "
-                f"to git to stop using GitHub): {e}{self.changes_left(adapter)}"
-            ) from e
+        self.retarget_before_push(
+            branches, stacks, adapter, remote, leases, refspecs, rebuild_stack, scope, opening, bool(integration_pushes)
+        )
         # Atomic, so a branch that can't be pushed doesn't leave the rest of the
         # stack pushed without it, and its pull requests not retargeted.
         verify_options = ["--no-verify"] if no_verify else []
@@ -2608,6 +2592,47 @@ class StackClient(StackCore):
                 f"pushed, but updating pull requests failed (set {ADAPTER_SETTING} to git to stop using GitHub): {e}"
             ) from e
         return branches
+
+    def retarget_before_push(
+        self,
+        branches: list[str],
+        stacks: Stacks,
+        adapter: GitAdapter,
+        remote: str,
+        leases: list[str],
+        refspecs: list[str],
+        rebuild_stack: bool,
+        scope: list[str] | None,
+        opening: bool,
+        integration: bool,
+    ) -> None:
+        """Validate PRs and check leases before making any pre-push edits."""
+
+        def update_error(error: StackError) -> StackError:
+            return StackError(
+                f"updating pull requests failed, so nothing was pushed (set {ADAPTER_SETTING} "
+                f"to git to stop using GitHub): {error}{self.changes_left(adapter)}"
+            )
+
+        try:
+            retarget = adapter.prepare_push_retargets(branches, stacks, rebuild_stack, scope, opening)
+        except StackError as e:
+            raise update_error(e) from e
+        if retarget is None:
+            return
+        if integration:
+            self.emit(events.CheckingPush(remote))
+        # If a lease is stale, leave the PR bases as they are. The atomic
+        # push still checks the leases and may be refused by the server.
+        if (why := self.git.push_would_fail("--atomic", *leases, remote, *refspecs)) is not None:
+            raise StackError(
+                f"push would fail, so nothing was pushed or changed; if the remote has new commits, run "
+                f"`git stack sync` and try again:\n{why}"
+            )
+        try:
+            retarget()
+        except StackError as e:
+            raise update_error(e) from e
 
     def add_integration_refspecs(
         self,
@@ -2669,13 +2694,21 @@ class StackClient(StackCore):
     ) -> None:
         if self.git.config_get(name, "remote") is None:
             self.git.run("branch", f"--set-upstream-to=refs/remotes/{remote}/{target}", "--", name)
-        self.record_pulled_tip(name, tip)
+        self.record_pulled_tips([(name, tip)])
         integrations.forget_first_push(name)
 
-    def record_pulled_tip(self, branch: str, tip: str) -> None:
-        self.git.config_set(branch, PULLED_KEY, tip)
-        if (identity := self.upstream_identity(branch)) is not None:
-            self.git.config_set(branch, PULLED_UPSTREAM_KEY, identity)
+    def record_pulled_tips(self, tips: Iterable[tuple[str, str]]) -> None:
+        """Plan metadata writes before making any, so they share one config read."""
+        git = self.git
+        updates: list[tuple[str, str, str]] = []
+        for branch, tip in tips:
+            if git.config_get(branch, PULLED_KEY) != tip:
+                updates.append((branch, PULLED_KEY, tip))
+            identity = self.upstream_identity(branch)
+            if identity is not None and git.config_get(branch, PULLED_UPSTREAM_KEY) != identity:
+                updates.append((branch, PULLED_UPSTREAM_KEY, identity))
+        for branch, key, value in updates:
+            git.config_set(branch, key, value)
 
     def record_pushed(
         self,
@@ -2693,13 +2726,13 @@ class StackClient(StackCore):
             tip = push.refs[push.name]
             assert tip is not None
             self.record_published_branch(integrations, push.name, remote, push.target, tip)
+        if work_tips is None:
+            self.record_pulled_tips((name, self.git.tip(name)) for name in branches)
+            return
         for name in branches:
-            if work_tips is None:
-                self.record_pulled_tip(name, self.git.tip(name))
-            else:
-                self.record_published_branch(
-                    integrations, name, remote, self.git.remote_branch_name(name, remote), work_tips[name]
-                )
+            self.record_published_branch(
+                integrations, name, remote, self.git.remote_branch_name(name, remote), work_tips[name]
+            )
 
     def changes_left(self, adapter: GitAdapter) -> str:
         """What adapter changed before a push failed, for its error, or ""."""

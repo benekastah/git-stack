@@ -40,17 +40,20 @@ def test_sync_refuses_unseen_upstream_merge_commits(repo: Repo, client: StackCli
     assert repo.git("show", "pr1:a", cwd=repo.origin) == "merge resolution"
 
 
+@pytest.mark.parametrize(("local_change", "expected_checks"), [(False, 0), (True, 1)])
 def test_sync_reads_each_branchs_unpulled_commits_once(
-    repo: Repo, client: StackClient, git_calls: list[GitCall]
+    repo: Repo, client: StackClient, git_calls: list[GitCall], local_change: bool, expected_checks: int
 ) -> None:
-    """Before pulling, and again before pushing, with nothing changed between."""
+    """One history check before pulling and pushing when the tips differ."""
     repo.make_stack()
     client.push()
+    if local_change:
+        repo.commit("c", "local change\n", "advance pr3")
     git_calls.clear()
 
     client.sync()
 
-    assert [call[:2] for call in git_calls].count(["rev-list", "--parents"]) == 3
+    assert [call[:2] for call in git_calls].count(["rev-list", "--parents"]) == expected_checks
 
 
 def test_pull_updates_local_branch_without_pushing(repo: Repo, client: StackClient) -> None:
