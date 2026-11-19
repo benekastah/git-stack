@@ -126,6 +126,8 @@ def label(branch: BranchInfo | GroupHeader, paint: Paint, color: bool, sources_b
     if branch.parent is None:
         root_color = ("1;33" if branch.current else "33") if color and branch.integration_needs_restack else ROOT
         parts = [paint(branch.name, root_color)]
+        if color and branch.integration_needs_restack:
+            parts.append(paint("!", STATUS_COLORS[BranchStatus.NEEDS_RESTACK]))
         if branch.integration_sources is not None:
             sources = ", ".join(
                 paint(name, STATUS_COLORS[BranchStatus.MERGED]) if landed else name
@@ -134,8 +136,8 @@ def label(branch: BranchInfo | GroupHeader, paint: Paint, color: bool, sources_b
             parts.append(f"(of {sources})" + (" *" if branch.current else ""))
         elif (sources := sources_by_root.get(branch.name)) is not None:
             parts.append(f"(of {sources})" + (" *" if branch.current else ""))
-        if branch.integration_needs_restack:
-            parts.append(paint("!" if color else "(needs restack)", STATUS_COLORS[BranchStatus.NEEDS_RESTACK]))
+        if branch.integration_needs_restack and not color:
+            parts.append("(needs restack)")
     elif branch.status is BranchStatus.NEEDS_RESTACK and color:
         parts = [paint(branch.name + (" *" if branch.current else ""), "1;33" if branch.current else "33"), "!"]
     elif branch.current:
