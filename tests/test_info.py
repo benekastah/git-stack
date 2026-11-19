@@ -1,14 +1,17 @@
 """git stack info."""
 
 import json
+import re
+from threading import Event
 
 import pytest
 from git_client.testing import GitCall
 
+from git_stack.adapters.github import GitHubAdapter
 from git_stack.core import CURRENT_GROUP
 from git_stack.errors import StackError
 from git_stack.stack import BranchInfo, BranchStatus, StackClient
-from tests.helpers import Repo
+from tests.helpers import FakeGitHub, Repo
 
 
 def test_info_skips_patch_comparison_when_branch_already_contains_parent(
@@ -70,6 +73,51 @@ def test_info_defaults_to_current_and_all_shows_other_stacks(repo: Repo, client:
     all_stacks = json.loads(repo.stack("info", "--all", "--offline", "--json").stdout)
     assert {b["name"] for b in current} == {"main", "pr1", "pr2", "pr3"}
     assert {b["name"] for b in all_stacks} == {"main", "pr1", "pr2", "pr3", "other"}
+
+
+def test_info_only_queries_prs_for_the_selected_stack(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+    repo.make_stack()
+    client.push(prs=True)
+    client.branch("unrelated", from_branch="main")
+    repo.commit("c", "unrelated\n", "unrelated")
+    client.push(prs=True)
+    gh.clear_calls()
+
+    shown = client.info(["pr2"])
+
+    assert [b.name for b in shown] == ["main", "pr1", "pr2", "pr3"]
+    (call,) = gh.calls("api", "graphql")
+    assert {arg.split("=", 1)[1] for arg in call if re.fullmatch(r"b\d+=.*", arg)} == {"pr1", "pr2", "pr3"}
+
+
+def test_info_overlaps_pr_and_integration_source_queries(
+    repo: Repo, gh: FakeGitHub, client: StackClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    for branch, path in (("one", "a"), ("two", "b")):
+        client.branch(branch, from_branch="main")
+        repo.commit(path, f"{branch}\n", branch)
+        client.push()
+    client.integrate("combined", ["one", "two"])
+    client.branch("work", from_branch="combined")
+    repo.commit("c", "work\n", "work")
+    client.push(prs=True)
+    gh.clear_calls()
+    pulls, sources = Event(), Event()
+    gh_call = GitHubAdapter.gh
+
+    def observe(adapter: GitHubAdapter, *args: str, input: str | None = None) -> str:
+        if args[:2] == ("api", "graphql"):
+            if any(arg.startswith("b0=") for arg in args):
+                pulls.set()
+                assert sources.wait(5), "integration query did not overlap the PR lookup"
+            if any(arg.startswith("h0=") for arg in args):
+                sources.set()
+                assert pulls.wait(5), "PR lookup did not overlap the integration query"
+        return gh_call(adapter, *args, input=input)
+
+    monkeypatch.setattr(GitHubAdapter, "gh", observe)
+    assert [branch.name for branch in client.info(["work"])] == ["combined", "work"]
+    assert pulls.is_set() and sources.is_set()
 
 
 def test_info_current_requires_a_tracked_branch(repo: Repo, client: StackClient) -> None:

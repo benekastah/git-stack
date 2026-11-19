@@ -1101,8 +1101,12 @@ class StackClient(StackCore):
             selected = self.refresh_selection(branches, groups, stacks, "show")
             stacks = stacks.restricted(selected.branches)
             integration_roots &= selected.integrations.keys()
-        adapter = GitAdapter(self) if offline else make_adapter(self, self.default_remote(stacks, stacks), fetch=False)
-        return self.branch_infos(stacks, adapter, integration_roots, show_single_groups=True)
+        adapter = (
+            GitAdapter(self)
+            if offline
+            else make_adapter(self, self.default_remote(stacks, stacks), fetch=False, lookup_branches=stacks)
+        )
+        return self.branch_infos(stacks, adapter, integration_roots, show_single_groups=True, overlap_root_info=True)
 
     def branch_infos(
         self,
@@ -1111,6 +1115,7 @@ class StackClient(StackCore):
         extra_roots: Iterable[str] = (),
         *,
         show_single_groups: bool = False,
+        overlap_root_info: bool = False,
     ) -> list[BranchInfo]:
         """The branches in stacks, as info() lists them, checked with adapter,
         so a command that already has one (and its pull requests) can show
@@ -1138,12 +1143,19 @@ class StackClient(StackCore):
                 return BranchStatus.REVERTED
             return BranchStatus.NEEDS_RESTACK if needs_restack else BranchStatus.UP_TO_DATE
 
+        roots = sorted(set(stacks.roots()) | set(extra_roots))
+
+        def root_infos() -> list[BranchInfo]:
+            integrations = Integrations(self)
+            return [self.integration_root_info(root, current, integrations, adapter) for root in roots]
+
         # Each status can take a few git calls, and checking whether a branch on
         # main conflicts with it can take a second or more in a big repository
         # if the branch is far behind, so they're worked out in parallel, while
         # the adapter looks up pull requests (about a second on GitHub).
         with ThreadPoolExecutor(initializer=active_timeline.set, initargs=(active_timeline.get(),)) as pool:
             prefetched = pool.submit(adapter.prefetch)
+            root_results = pool.submit(root_infos) if overlap_root_info else None
             branches = list(stacks)
             statuses = dict(zip(branches, pool.map(status, branches), strict=True))
             prefetched.result()
@@ -1153,9 +1165,8 @@ class StackClient(StackCore):
             if stacks.is_bottom(b) and (show_single_groups or len(stacks.group_bottoms(b)) > 1)
         }
         result: list[BranchInfo] = []
-        integrations = Integrations(self)
-        for root in sorted(set(stacks.roots()) | set(extra_roots)):
-            result.append(self.integration_root_info(root, current, integrations, adapter))
+        for root, root_info in zip(roots, root_results.result() if root_results else root_infos(), strict=True):
+            result.append(root_info)
             result.extend(
                 BranchInfo(
                     b,

@@ -6,6 +6,7 @@ github also asks GitHub about each branch's pull request.
 
 import enum
 import shutil
+from collections.abc import Iterable
 
 from git_stack.adapters.git import GitAdapter
 from git_stack.adapters.github import GitHubAdapter, github_repo
@@ -22,7 +23,9 @@ class Adapter(enum.Enum):
     GITHUB = "github"
 
 
-def make_adapter(core: StackCore, remote: str, fetch: bool) -> GitAdapter:
+def make_adapter(
+    core: StackCore, remote: str, fetch: bool, *, lookup_branches: Iterable[str] | None = None
+) -> GitAdapter:
     """The adapter stack.adapter asks for. If unset, GitHub's when remote is on
     github.com and gh is installed, and git's otherwise.
 
@@ -43,7 +46,7 @@ def make_adapter(core: StackCore, remote: str, fetch: bool) -> GitAdapter:
             raise StackError(f"{ADAPTER_SETTING} is github, but {remote}'s URL isn't a GitHub repository")
         if not shutil.which("gh"):
             raise StackError(f"{ADAPTER_SETTING} is github, which needs the gh CLI on your PATH")
-        return GitHubAdapter(core, remote, *repo, fetch=fetch)
+        return GitHubAdapter(core, remote, *repo, fetch=fetch, lookup_branches=lookup_branches)
     if repo and repo[0] == "github.com" and shutil.which("gh"):
-        return GitHubAdapter(core, remote, *repo, fetch=fetch)
+        return GitHubAdapter(core, remote, *repo, fetch=fetch, lookup_branches=lookup_branches)
     return GitAdapter(core)
