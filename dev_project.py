@@ -13,7 +13,7 @@ from collections.abc import Callable
 
 from dev import ROOT, run, run_code, tool, venv
 
-MAN_SYNOPSIS = {"git-stack": "**git stack** [**-C** *path*] *command* [*args*]"}
+MAN_SYNOPSIS = {"git-stack": "**git stack** [**-C** *path*] [`--performance`] *command* [*args*]"}
 """man/git-stack.1's SYNOPSIS (dev.py man makes the page from README.md)."""
 
 

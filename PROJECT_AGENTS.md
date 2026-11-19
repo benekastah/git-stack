@@ -50,6 +50,10 @@ man page is generated from it.
 - Progress and warnings are events (`git_stack/events.py`), passed to the
   client's `on_event`. `git_stack/output.py` turns them into text, or into JSON
   lines.
+- `git_stack/performance.py` records one opt-in CLI timeline at py-git-client's
+  `Git.process` boundary, in the snapshot's `CatFile`, and at both `gh` launches.
+  Branch-status workers inherit the same recorder. Keep subprocess input,
+  output and environment out of the timeline.
 - A value from a fixed set (an option's, a setting's, GitHub's) is an enum,
   converted where it's read (e.g. `Delete`, `Ownership`, `GitHubState`), so
   the code compares members rather than strings, and adding a value happens in

@@ -125,6 +125,21 @@ their stacks' roots (e.g. `main`) track, if there's one, or else `origin`, or
 the repository's only remote if it has no `origin`. So a clone whose remote
 has another name (e.g. `upstream`) needs no `--remote`.
 
+### Performance timeline
+
+Pass `--performance` (also `--perf` or `-p`) before or after any command,
+including nested commands such as `git stack group add my-group -p`. After
+the command's result or error, stderr shows each Git and `gh` call in start
+order, with its start offset and elapsed time in seconds. Batch `git cat-file`
+requests and shutdown are measured separately, excluding idle time between
+requests. Inline GraphQL query bodies are abbreviated.
+
+The summary shows total wall time and the time and percentage spent in Git,
+in `gh`, and in other work such as Python or SSH host lookup. Each tool's
+total counts concurrent calls to that tool once. Time when both tools were
+active appears as overlap. Stdout, including `--json`, and the exit status
+are the same with or without timing.
+
 ### Groups
 
 When a branch on `main` merges, the branches stacked on it each become the

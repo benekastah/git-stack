@@ -1,6 +1,7 @@
 import argparse
 import pathlib
 import sys
+from typing import Any
 
 import git_stack
 from git_stack.commands import (
@@ -30,6 +31,7 @@ from git_stack.commands import (
 from git_stack.errors import StackError
 from git_stack.git import GitClient
 from git_stack.output import JsonStream, print_event
+from git_stack.performance import Timeline
 from git_stack.stack import StackClient
 
 # In the order `git stack -h` lists them.
@@ -59,9 +61,25 @@ COMMANDS = (
 )
 
 
+class _ArgumentParser(argparse.ArgumentParser):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        # Subparsers use this class too. An absent flag must preserve the value
+        # set by any ancestor parser.
+        self.add_argument(
+            "-p",
+            "--perf",
+            "--performance",
+            dest="performance",
+            action="store_true",
+            default=argparse.SUPPRESS,
+            help="print a Git and GitHub CLI timing timeline to stderr",
+        )
+
+
 def build_parser() -> argparse.ArgumentParser:
     """The `git stack` command line's parser, with every command registered."""
-    parser = argparse.ArgumentParser(prog="git stack", description=(git_stack.__doc__ or "").partition("\n")[0])
+    parser = _ArgumentParser(prog="git stack", description=(git_stack.__doc__ or "").partition("\n")[0])
     parser.add_argument(
         "-C",
         dest="directories",
@@ -82,6 +100,19 @@ def main(argv: list[str] | None = None, stack: StackClient | None = None) -> int
     a StackClient working in the directory -C names, or the current one,
     printing what it reports). Returns the exit status."""
     args = build_parser().parse_args(argv)
+    if not getattr(args, "performance", False):
+        return _run(args, stack)
+    timeline = Timeline()
+    try:
+        with timeline.activate():
+            return _run(args, stack)
+    finally:
+        # Keep the result first when stdout and stderr go to the same file.
+        sys.stdout.flush()
+        print(timeline.render(), file=sys.stderr)
+
+
+def _run(args: argparse.Namespace, stack: StackClient | None) -> int:
     # With --json, stdout is for the JSON, so git's output goes to stderr.
     stream = JsonStream() if args.json else None
     status: int | None = None

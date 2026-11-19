@@ -15,6 +15,7 @@ from git_stack.adapters.merge_state import MergeState
 from git_stack.core import BASE_KEY, StackCore
 from git_stack.errors import StackError
 from git_stack.git import GitClient
+from git_stack.performance import measure_gh
 from git_stack.stacks import Stacks
 
 # Matches https://host/owner/repo, ssh://user@host:port/owner/repo and
@@ -192,9 +193,10 @@ class GitHubAdapter(GitAdapter):
     def gh(self, *args: str, input: str | None = None) -> str:
         # As bytes, so Windows doesn't turn the \n in input (e.g. a pull
         # request's description) into \r\n.
-        result = subprocess.run(
-            ["gh", *args], capture_output=True, input=None if input is None else input.encode("utf-8"), check=False
-        )
+        with measure_gh(args):
+            result = subprocess.run(
+                ["gh", *args], capture_output=True, input=None if input is None else input.encode("utf-8"), check=False
+            )
         if result.returncode != 0:
             raise StackError(f"gh {' '.join(args)} failed:\n{result.stderr.decode('utf-8', 'replace').strip()}")
         return result.stdout.decode("utf-8").strip()
@@ -1207,23 +1209,15 @@ class GitHubAdapter(GitAdapter):
     def stacks_api(self, path: str, numbers: list[int]) -> bool:
         """POST numbers to path in the repository's stacks API. Returns
         False if the repository doesn't have stacked pull requests."""
-        result = subprocess.run(
-            [
-                "gh",
-                "api",
-                "--hostname",
-                self.host,
-                "-X",
-                "POST",
-                f"{self.stacks_path()}{path}",
-                "--input",
-                "-",
-            ],
-            capture_output=True,
-            encoding="utf-8",
-            input=json.dumps({"pull_requests": numbers}),
-            check=False,
-        )
+        args = ("api", "--hostname", self.host, "-X", "POST", f"{self.stacks_path()}{path}", "--input", "-")
+        with measure_gh(args):
+            result = subprocess.run(
+                ["gh", *args],
+                capture_output=True,
+                encoding="utf-8",
+                input=json.dumps({"pull_requests": numbers}),
+                check=False,
+            )
         if result.returncode == 0:
             self.core.emit(events.GitHubStackLinked(tuple(numbers)))
             return True

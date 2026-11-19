@@ -29,6 +29,7 @@ from git_stack.errors import BrokenStackError, StackError
 from git_stack.git import DEFAULT_REMOTE, SWITCH
 from git_stack.integrations import Integration, Integrations, RetiredSource, Source
 from git_stack.json_fields import json_name
+from git_stack.performance import active_timeline
 from git_stack.stacks import Ownership, Stacks
 
 
@@ -1133,7 +1134,7 @@ class StackClient(StackCore):
         # main conflicts with it can take a second or more in a big repository
         # if the branch is far behind, so they're worked out in parallel, while
         # the adapter looks up pull requests (about a second on GitHub).
-        with ThreadPoolExecutor() as pool:
+        with ThreadPoolExecutor(initializer=active_timeline.set, initargs=(active_timeline.get(),)) as pool:
             prefetched = pool.submit(adapter.prefetch)
             branches = list(stacks)
             statuses = dict(zip(branches, pool.map(status, branches), strict=True))

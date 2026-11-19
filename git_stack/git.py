@@ -9,9 +9,10 @@ from contextlib import contextmanager
 from typing import TextIO
 
 import git_client
-from git_client import CatFile, Git, GitError, config_key, git_common_dir, git_paths
+from git_client import GitError, config_key, git_common_dir, git_paths
 
 from git_stack.errors import StackError
+from git_stack.performance import TimedCatFile, TimedGit
 
 DEFAULT_REMOTE = "origin"
 # How long to keep retrying a git config write that finds the config file locked
@@ -142,7 +143,7 @@ class GitClient:
     def __init__(self, directory: str | os.PathLike[str] = ".") -> None:
         self.directory = pathlib.Path(directory)
         try:
-            self._git = Git(self.directory, env_var=GIT_VARIABLE)
+            self._git = TimedGit(self.directory, env_var=GIT_VARIABLE)
         except (FileNotFoundError, ValueError) as e:
             # find_git's: no git on PATH, or on Windows, a batch file.
             raise StackError(str(e)) from e
@@ -154,7 +155,7 @@ class GitClient:
         self._objects: dict[tuple[str, str], str] = {}
         self._ancestry: dict[tuple[str, str], bool] = {}
         self._merged_trees: dict[tuple[str, str], str | None] = {}
-        self._cat_file = CatFile(self._git)
+        self._cat_file = TimedCatFile(self._git)
         # See branch_config: whether it has read the config file, and the
         # file's stat when it did (None if there was no file).
         self._config_read = False

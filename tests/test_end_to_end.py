@@ -78,6 +78,18 @@ def test_failure_exits_nonzero_with_message(repo: Repo) -> None:
     assert result.stderr == "git stack: main isn't in a stack; switch to a stacked branch to restack its stack\n"
 
 
+def test_performance_timeline_follows_stdout_when_streams_are_combined(repo: Repo) -> None:
+    repo.make_stack()
+    result = subprocess.run(
+        [sys.executable, "-m", "git_stack", "-C", str(repo.path), "parent", "--performance"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        encoding="utf-8",
+        check=True,
+    )
+    assert result.stdout.startswith("pr2\nPerformance timeline\n")
+
+
 def test_push_says_to_open_pull_requests_with_prs(repo: Repo, gh: FakeGitHub) -> None:
     repo.stack_process("branch", "pr1")
     repo.commit("a", "pr1\n", "pr1 c1")
