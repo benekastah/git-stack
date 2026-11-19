@@ -86,6 +86,8 @@ class BranchInfo:
     current: bool
     pull_request: PullRequestLink | None = field(default=None, metadata=json_name("pr"))
     group: str | None = None
+    integration_sources: tuple[tuple[str, bool], ...] | None = None
+    integration_needs_restack: bool = False
 
 
 @dataclass(frozen=True)
@@ -1120,8 +1122,9 @@ class StackClient(StackCore):
             b: g for b, g in stacks.groups().items() if stacks.is_bottom(b) and len(stacks.group_bottoms(b)) > 1
         }
         result: list[BranchInfo] = []
+        integrations = Integrations(self)
         for root in sorted(set(stacks.roots()) | set(extra_roots)):
-            result.append(BranchInfo(root, None, None, root == current))
+            result.append(self.integration_root_info(root, current, integrations, adapter))
             result.extend(
                 BranchInfo(
                     b,
@@ -1134,6 +1137,43 @@ class StackClient(StackCore):
                 for b in stacks.descendants(root)
             )
         return result
+
+    def integration_root_info(
+        self, root: str, current: str | None, integrations: Integrations, adapter: GitAdapter
+    ) -> BranchInfo:
+        git = self.git
+        config = integrations.read(root)
+        integration_sources = None
+        root_status = None
+        if config is not None:
+            root_tip = git.rev(f"refs/heads/{config['root']}")
+            sources: list[Source] = [source.copy() for source in config["sources"]]
+            if root_tip:
+                unresolved = [source for source in sources if not integrations.local_landing(source, root_tip)]
+                if isinstance(adapter, GitHubAdapter) and unresolved:
+                    try:
+                        landed, _ = adapter.source_landings({(s["head"], s["tip"]) for s in unresolved}, root_tip)
+                    except StackError as error:
+                        self.emit(events.PullRequestLookupFailed(str(error)))
+                    else:
+                        for source in unresolved:
+                            source["landing"] = landed.get((source["head"], source["tip"]))
+            integration_sources = tuple((source["name"], bool(source["landing"])) for source in sources)
+            changed = root_tip != config["root_tip"] or any(
+                git.rev(f"refs/heads/{source['name']}") not in (None, source["tip"])
+                or bool(source["landing"]) != bool(original["landing"])
+                for source, original in zip(sources, config["sources"], strict=True)
+            )
+            if changed:
+                root_status = BranchStatus.NEEDS_RESTACK
+        return BranchInfo(
+            root,
+            None,
+            None,
+            root == current,
+            integration_sources=integration_sources,
+            integration_needs_restack=root_status is BranchStatus.NEEDS_RESTACK,
+        )
 
     def stack_infos(self, branches: Iterable[str], adapter: GitAdapter) -> list[BranchInfo]:
         """The stacks of those of branches that are still tracked, and of the

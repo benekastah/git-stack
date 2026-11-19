@@ -973,6 +973,8 @@ def test_info_json_lists_every_branch(stack: Any, capsys: pytest.CaptureFixture[
             "current": False,
             "group": None,
             "pr": None,
+            "integration_sources": None,
+            "integration_needs_restack": False,
         },
         {
             "name": "pr1",
@@ -980,6 +982,8 @@ def test_info_json_lists_every_branch(stack: Any, capsys: pytest.CaptureFixture[
             "status": "needs-restack",
             "current": True,
             "group": "pr0",
+            "integration_sources": None,
+            "integration_needs_restack": False,
             "pr": {"number": 12, "url": "https://github.com/acme/widgets/pull/12", "state": "open"},
         },
     ]

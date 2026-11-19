@@ -404,6 +404,10 @@ Switch to the integration branch and use
 merge order, for example \f[CR](of branch\-a, branch\-b)\f[R].
 Integration branches and work stacked above them cannot supply inputs to
 an integration.
+In color, sources proven to have landed on the configured root are cyan.
+An integration whose inputs or root have changed is marked as needing a
+restack.
+\f[CR]info \-\-offline\f[R] uses locally available landing evidence.
 .PP
 \f[CR]restack\f[R], \f[CR]pull\f[R], and \f[CR]sync\f[R] refresh the
 integration roots needed by the selected stacks.
@@ -748,6 +752,11 @@ and \f[CR]status\f[R] is one of \f[CR]up\-to\-date\f[R],
 \f[CR]group\f[R] is the group of a branch on a stack\(aqs root, when
 \f[CR]info\f[R] shows it (once the group has two or more stacks), or
 \f[CR]null\f[R].
+\f[CR]integration_sources\f[R] lists each configured source name and
+whether its included tip landed on the root, or is \f[CR]null\f[R] for
+other branches.
+\f[CR]integration_needs_restack\f[R] says whether the integration needs
+refreshing.
 \f[CR]pr\f[R] is the branch\(aqs pull request\(aqs \f[CR]number\f[R],
 \f[CR]url\f[R] and \f[CR]state\f[R] (\f[CR]open\f[R], \f[CR]draft\f[R]
 or \f[CR]merged\f[R]), or \f[CR]null\f[R] if it has none (or for a root,

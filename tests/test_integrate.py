@@ -37,6 +37,37 @@ def integration(repo: Repo, *, tracked: bool = False) -> None:
     repo.stack("integrate", "combined", "one", "two")
 
 
+def test_info_marks_landed_integration_input_and_refresh(repo: Repo, gh: FakeGitHub) -> None:
+    integration(repo)
+    work(repo)
+    repo.git("push", "--set-upstream", "origin", "one")
+    included = tip(repo, "one")
+    repo.squash_merge_on_forge("one", delete_branch=False)
+    gh.add_pr(
+        number=1,
+        state="MERGED",
+        headRefName="one",
+        headRefOid=included,
+        baseRefName="main",
+        mergeCommit={"oid": tip(repo, "main", remote=True)},
+    )
+    repo.git("fetch", "origin")
+    repo.git("branch", "-f", "main", "origin/main")
+    repo.git("config", "color.stack", "always")
+
+    result = repo.stack("info")
+
+    assert "\033[36mone\033[m" in result.stdout
+    assert "combined" in result.stdout and "!" in result.stdout
+    repo.git("config", "color.stack", "never")
+    assert "combined (of one, two) (needs restack)" in repo.stack("info", "--offline").stdout
+    repo.git("config", "color.stack", "always")
+    repo.stack("restack")
+    refreshed = repo.stack("info")
+    assert "\033[36mone\033[m" in refreshed.stdout
+    assert "!" not in refreshed.stdout
+
+
 def work(repo: Repo) -> None:
     repo.git("switch", "--quiet", "combined")
     repo.stack("create", "work")

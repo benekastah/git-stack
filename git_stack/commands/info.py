@@ -120,13 +120,21 @@ class GroupHeader:
     root: str
 
 
-def label(branch: BranchInfo | GroupHeader, paint: Paint, color: bool, sources_by_root: Mapping[str, str]) -> str:
+def label(branch: BranchInfo | GroupHeader, paint: Paint, color: bool, sources_by_root: Mapping[str, str]) -> str:  # noqa: C901
     if isinstance(branch, GroupHeader):
         return paint(f"group {branch.group}", ROOT)
     if branch.parent is None:
         parts = [paint(branch.name, ROOT)]
-        if (sources := sources_by_root.get(branch.name)) is not None:
+        if branch.integration_sources is not None:
+            sources = ", ".join(
+                paint(name, STATUS_COLORS[BranchStatus.MERGED]) if landed else name
+                for name, landed in branch.integration_sources
+            )
             parts.append(f"(of {sources})" + (" *" if branch.current else ""))
+        elif (sources := sources_by_root.get(branch.name)) is not None:
+            parts.append(f"(of {sources})" + (" *" if branch.current else ""))
+        if branch.integration_needs_restack:
+            parts.append(paint("!" if color else "(needs restack)", STATUS_COLORS[BranchStatus.NEEDS_RESTACK]))
     elif branch.status is BranchStatus.NEEDS_RESTACK and color:
         parts = [paint(branch.name + (" *" if branch.current else ""), "1;33" if branch.current else "33"), "!"]
     elif branch.current:

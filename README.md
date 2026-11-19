@@ -264,6 +264,9 @@ Switch to the integration branch and use `git stack create <work>` to start
 a stack on it. `git stack info` lists the root's configured sources in merge
 order, for example `(of branch-a, branch-b)`. Integration branches and work
 stacked above them cannot supply inputs to an integration.
+In color, sources proven to have landed on the configured root are cyan.
+An integration whose inputs or root have changed is marked as needing a
+restack. `info --offline` uses locally available landing evidence.
 
 `restack`, `pull`, and `sync` refresh the integration roots needed by the
 selected stacks. From an integration branch, they select its dependent
@@ -518,6 +521,9 @@ git stack info
   `parent-missing`.
   `group` is the group of a branch on a stack's root, when `info` shows it
   (once the group has two or more stacks), or `null`.
+  `integration_sources` lists each configured source name and whether its
+  included tip landed on the root, or is `null` for other branches.
+  `integration_needs_restack` says whether the integration needs refreshing.
   `pr` is the branch's pull request's `number`, `url` and `state` (`open`,
   `draft` or `merged`), or `null` if it has none (or for a root, or without
   the GitHub adapter).

@@ -42,6 +42,8 @@ single parent. Check the selected stacks and source branches first with
 - A source drops out when its exact included tip is proven to have landed on
   the configured root. If a source is missing and there is no proof, inspect
   it and confirm the replacement inputs before changing the source list.
+  `git stack info` marks landed sources in cyan and marks an integration that
+  needs refreshing as needing a restack.
 
 ## Recover or promote
 
