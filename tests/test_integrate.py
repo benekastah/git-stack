@@ -716,6 +716,54 @@ def test_group_retry_does_not_publish_integration_on_another_remote(
     assert tip(repo, "combined", remote=True) == tip(repo, "combined")
 
 
+@pytest.mark.parametrize("method", ["add", "rename", "create", "merge", "pull"])
+def test_reused_group_name_does_not_inherit_integration_retry(
+    repo: Repo, monkeypatch: pytest.MonkeyPatch, method: str
+) -> None:
+    integration(repo, tracked=True)
+    work(repo)
+    landed = tip(repo, "work")
+    repo.stack("group", "add", "both", "one", "work")
+    repo.git("switch", "main")
+    repo.git("merge", "--ff-only", "one")
+    repo.git("switch", "two")
+    repo.git("cherry-pick", landed)
+    command = ("sync", "-g", "both", "--delete", "local")
+    passthrough = GitClient.passthrough
+
+    def reject_push(git: GitClient, *args: str) -> bool:
+        return False if args[:2] == ("push", "--atomic") else passthrough(git, *args)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(GitClient, "passthrough", reject_push)
+        assert "push failed" in repo.stack(*command, expect_success=False).stderr
+    if method == "create":
+        repo.stack("create", "peer", "--from", "main", "--group", "both")
+        repo.commit("c", "new peer\n", "new peer")
+    elif method in ("merge", "pull"):
+        source(repo, "both", "a", tracked=True)
+        repo.stack("create", "peer")
+        repo.commit("b", "new peer\n", "new peer")
+        repo.git("switch", "main")
+        repo.git("merge", "--ff-only", "both")
+        if method == "pull":
+            base = repo.git("merge-base", "both", "two")
+            repo.stack("track", "both", "two", "--base", base)
+            repo.stack("pull", "combined", "both")
+        else:
+            repo.stack("clean")
+    else:
+        source(repo, "peer", "c", tracked=True)
+    if method == "rename":
+        repo.stack("group", "add", "new", "peer")
+        repo.stack("group", "rename", "new", "both")
+    elif method == "add":
+        repo.stack("group", "add", "both", "peer")
+
+    repo.stack(*command)
+    assert repo.git("ls-remote", "origin", "refs/heads/combined") == ""
+
+
 def test_successful_group_retry_consumes_integration_selection(repo: Repo, monkeypatch: pytest.MonkeyPatch) -> None:
     integration(repo, tracked=True)
     work(repo)
@@ -770,10 +818,73 @@ def test_retry_accepts_legacy_retired_group_metadata(repo: Repo, monkeypatch: py
     assert config is not None
     for entry in config.get("retired_sources", {}).values():
         entry.pop("integration_groups", None)
+        entry.pop("refresh_remote", None)
+        entry.pop("members", None)
     integrations.save("combined", config)
 
     repo.stack(*command)
     assert tip(repo, "combined", remote=True) == tip(repo, "combined")
+
+
+def test_retry_does_not_follow_retired_source_child_into_an_unselected_stack(
+    repo: Repo, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    integration(repo, tracked=True)
+    repo.stack("create", "child", "--from", "one")
+    repo.commit("c", "child work\n", "child")
+    source(repo, "unrelated", "b", tracked=True)
+    repo.git("push", "--set-upstream", "origin", "unrelated")
+    published = tip(repo, "unrelated", remote=True)
+    repo.commit("b", "unpublished work\n", "advance unrelated")
+    repo.git("switch", "main")
+    repo.git("merge", "--ff-only", "one")
+    command = ("sync", "one", "combined", "--delete", "local")
+
+    def interrupt(*args: object, **kwargs: object) -> None:
+        raise StackError("interrupted before build")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Integrations, "build", interrupt)
+        assert "interrupted before build" in repo.stack(*command, expect_success=False).stderr
+    repo.stack("restack", "child", "--onto", "unrelated")
+    repo.stack(*command)
+
+    assert tip(repo, "unrelated", remote=True) == published
+    assert tip(repo, "combined", remote=True) == tip(repo, "combined")
+
+
+def test_retry_keeps_child_when_its_stack_bottom_tracks_another_remote(
+    repo: Repo, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source(repo, "parent", "a", tracked=True)
+    other = repo.tmp / "other.git"
+    repo.git("clone", "--bare", str(repo.origin), str(other))
+    repo.git("remote", "add", "other", str(other))
+    repo.git("push", "--set-upstream", "other", "parent")
+    repo.stack("create", "one")
+    repo.commit("b", "source work\n", "source work")
+    repo.stack("create", "child")
+    repo.commit("c", "child work\n", "child work")
+    repo.git("push", "--set-upstream", "origin", "one", "child")
+    repo.commit("c", "unpublished child work\n", "advance child")
+    repo.git("switch", "-c", "two", "main")
+    repo.git("commit", "--allow-empty", "-m", "two")
+    repo.git("branch", "release", "one")
+    repo.stack("integrate", "combined", "one", "two", "--root", "release")
+    repo.git("branch", "-f", "parent", "one")
+    command = ("sync", "combined", "one", "--remote", "origin", "--delete", "local")
+
+    def interrupt(*args: object, **kwargs: object) -> None:
+        raise StackError("interrupted before build")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Integrations, "build", interrupt)
+        assert "interrupted before build" in repo.stack(*command, expect_success=False).stderr
+    assert "one" not in repo.client.stacks()
+
+    repo.stack(*command)
+
+    assert tip(repo, "child", remote=True) == tip(repo, "child")
 
 
 def test_retry_keeps_selected_sibling_after_source_stack_splits(repo: Repo, monkeypatch: pytest.MonkeyPatch) -> None:

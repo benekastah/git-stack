@@ -444,6 +444,8 @@ class StackClient(StackCore):
         git.run(*SWITCH, "--no-track", "--create", name, *([f"refs/heads/{from_branch}"] if from_branch else []))
         stacks.reparent(name, parent)
         if group is not None:
+            if not stacks.bottoms_in(group):
+                Integrations(self).replace_group(group)
             stacks.set_group(bottom or name, group)
         self.save(stacks)
         git.config_set(name, BASE_KEY, git.tip(name))
@@ -751,6 +753,13 @@ class StackClient(StackCore):
                 f"branches (e.g. branch, not origin/branch)"
             )
 
+    def remove_merged(self, branch: str, stacks: Stacks, delete: bool) -> None:
+        """Clear stale recovery selectors when a merge creates a new group."""
+        creates_group = stacks.is_bottom(branch) and stacks.group(branch) is None and bool(stacks.children(branch))
+        super().remove_merged(branch, stacks, delete)
+        if creates_group:
+            Integrations(self).replace_group(branch)
+
     @exclusive
     def group_add(
         self, name: str, branches: Sequence[str] = (), groups: Sequence[str] = (), move: bool = False
@@ -779,6 +788,8 @@ class StackClient(StackCore):
                     "some of those stacks are in another group already; pass --move to move them into "
                     f"{name}:\n" + "\n".join(f"  {m}" for m in moves)
                 )
+        if not stacks.bottoms_in(name):
+            Integrations(self).replace_group(name)
         for bottom in bottoms:
             stacks.set_group(bottom, name)
         self.save(stacks)
@@ -824,7 +835,7 @@ class StackClient(StackCore):
         members = [b for b, g in groups.items() if g == old]
         if not members:
             raise StackError(f"there's no group {old}")
-        Integrations(self).rename_group(old, new)
+        Integrations(self).replace_group(new, old)
         for branch in members:
             stacks.set_group(branch, new)
         self.save(stacks)
@@ -1374,14 +1385,18 @@ class StackClient(StackCore):
         recovery_remotes: dict[str, set[str]],
     ) -> frozenset[str]:
         """Keep surviving parts of a selected source stack in the retry's scope."""
-        recovered: dict[str, None] = {}
+        recovered: set[str] = set()
         for selector, owners in retired.items():
             matched = False
             for name, entry in owners:
                 branches = (
-                    [member for member in entry["members"] if member in stacks]
+                    self.surviving_source_members(entry["members"], entry["parent"], stacks)
                     if "members" in entry
-                    else stacks.continuation_bottoms(entry["parent"], entry["group"])
+                    else [
+                        branch
+                        for bottom in stacks.continuation_bottoms(entry["parent"], entry["group"])
+                        for branch in stacks.stack_of(bottom, groups=False)
+                    ]
                 )
                 if roots and name not in roots and all(stacks.root(branch) != name for branch in branches):
                     continue
@@ -1389,13 +1404,17 @@ class StackClient(StackCore):
                 remotes = recovery_remotes.setdefault(name, set())
                 if "refresh_remote" in entry:
                     remotes.add(entry["refresh_remote"])
-                for branch in branches:
-                    if branch not in recovered:
-                        recovered.update(dict.fromkeys(stacks.stack_of(branch, groups=False)))
+                recovered.update(branches)
             if not matched and selector in replaced:
                 raise StackError(f"{selector} is no longer tracked. Name the work stack to resume its integration.")
-        expanded.update(recovered)
+        if recovered:
+            expanded.update(dict.fromkeys(branch for branch in stacks.in_order() if branch in recovered))
         return frozenset(recovered)
+
+    def surviving_source_members(self, recorded: Sequence[str], bottom: str | None, stacks: Stacks) -> list[str]:
+        """Recover only recorded branches still in a stack from the original scope."""
+        bottoms = {*recorded, bottom}
+        return [branch for branch in recorded if branch in stacks and stacks.bottom(branch) in bottoms]
 
     def validate_integrations(self, stacks: Stacks) -> None:
         """Reject stack changes that would make an integration depend on another."""
@@ -1476,7 +1495,11 @@ class StackClient(StackCore):
     ) -> dict[str, dict[str, str | None]]:
         integrations = Integrations(self)
         verified: dict[str, dict[str, str | None]] = {}
-        for name, config in selection.integrations.items():
+        for name in selection.integrations:
+            # Source processing may have updated the stored retry selectors.
+            config = integrations.read(name)
+            assert config is not None
+            selection.integrations[name] = config
             root = config["root"]
             root_remote = self.git.config_get(root, "remote")
             evidence_remote = root_remote if root_remote and root_remote != "." else remote
@@ -1999,11 +2022,11 @@ class StackClient(StackCore):
             group = stacks.group(bottom)
             if group is not None and group in selection.selected_groups:
                 groups_by_root.setdefault(stacks.root(bottom), set()).add(group)
-        inputs: dict[str, list[tuple[str, Integration, Source]]] = {}
+        inputs: dict[str, list[tuple[str, Source]]] = {}
         for name, config in selection.integrations.items():
             for source in config["sources"]:
                 if source["name"] in selected_sources:
-                    inputs.setdefault(source["name"], []).append((name, config, source))
+                    inputs.setdefault(source["name"], []).append((name, source))
 
         source_members = {branch: members_by_bottom[stacks.bottom(branch)] for branch in inputs}
 
@@ -2018,7 +2041,9 @@ class StackClient(StackCore):
             if parent not in stacks and not group and stacks.children(branch):
                 # remove_merged gives the children a group named after their old parent.
                 group = branch
-            for name, config, source in entries:
+            for name, source in entries:
+                config = integrations.read(name)
+                assert config is not None
                 config.setdefault("retired_sources", {})[branch] = RetiredSource(
                     source=integrations.source(branch, tip, source),
                     parent=bottom if parent in stacks else None,

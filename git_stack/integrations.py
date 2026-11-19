@@ -126,18 +126,19 @@ class Integrations:
                     del config["retired_sources"]
                 self.save(name, config)
 
-    def rename_group(self, old: str, new: str) -> None:
-        """Keep interrupted refresh selectors aligned with a renamed group."""
+    def replace_group(self, new: str, old: str | None = None) -> None:
+        """A new group can reuse a name from a retired group. Only a rename
+        carries over the old group's pending integration selectors."""
 
         def update(config: Integration) -> bool:
             changed = False
             for entry in config.get("retired_sources", {}).values():
-                if entry["group"] == old:
+                if old is not None and entry["group"] == old:
                     entry["group"] = new
                     changed = True
                 groups = entry.get("integration_groups", [])
-                if old in groups:
-                    entry["integration_groups"] = [new if group == old else group for group in groups]
+                if new in groups or old in groups:
+                    entry["integration_groups"] = [new if group == old else group for group in groups if group != new]
                     changed = True
             return changed
 
