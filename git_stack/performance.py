@@ -72,21 +72,60 @@ def _configured_log_limit(git: GitClient) -> int:
 
 @contextmanager
 def _open_log(path: pathlib.Path) -> Generator[BinaryIO]:
-    flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
-    with os.fdopen(os.open(path, flags, 0o600), "r+b") as log:
+    flags = os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(path, flags)
+    except FileNotFoundError:
+        # Exclusive creation also rejects dangling symlinks on platforms
+        # without O_NOFOLLOW, where O_CREAT alone would create their target.
+        fd = os.open(path, flags | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "r+b") as log:
         entry = path.lstat()
         if not stat.S_ISREG(entry.st_mode) or not os.path.samestat(entry, os.fstat(log.fileno())):
             raise OSError(f"{path} must be a regular file, not a symlink")
         yield log
 
 
-def _is_performance_log(log: BinaryIO) -> bool:
-    log.seek(0)
+def _starts_with_report(log: BinaryIO) -> bool:
     command = log.readline(MAX_PERFORMANCE_LOG_BYTES).rstrip(b"\r\n")
-    if command == TRUNCATION_NOTICE.rstrip():
-        return True
     heading = log.readline(len(REPORT_HEADING) + 2).rstrip(b"\r\n")
     return (command == b"git stack" or command.startswith(b"git stack ")) and heading == REPORT_HEADING.encode()
+
+
+def _retained_report_start(log: BinaryIO, end: int, remaining: int) -> int | None:
+    """Validate the file and find the oldest complete report that will fit."""
+    log.seek(0)
+    if not _starts_with_report(log):
+        # Older builds could truncate the command itself. Accept just one
+        # truncated entry with its exact terminator and no trailing data.
+        log.seek(0)
+        data = log.read(MAX_PERFORMANCE_LOG_BYTES)
+        prefix, marker, after = data.rpartition(b"\n" + TRUNCATION_NOTICE)
+        legacy = (
+            marker
+            and not after
+            and b"\n" not in prefix
+            and (b"git stack".startswith(prefix) or prefix.startswith(b"git stack "))
+        )
+        return end if len(data) == end and (data == TRUNCATION_NOTICE or legacy) else None
+    if end <= remaining:
+        log.seek(max(0, end - 4))
+        return 0 if log.read().endswith((b"\n\n", b"\r\n\r\n")) else None
+
+    start, retain = 0, end
+    while True:
+        for line in iter(log.readline, b""):
+            if line in (b"\n", b"\r\n"):
+                break
+        else:
+            return None
+        if start >= end - remaining and retain == end:
+            retain = start
+        start = log.tell()
+        if start == end:
+            return retain
+        if not _starts_with_report(log):
+            return None
 
 
 def append_performance_log(
@@ -98,6 +137,7 @@ def append_performance_log(
         raise IsADirectoryError(path)
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     command = _command_line(("git", "stack", *argv))
+    report = report.rstrip("\n")
     entry = f"{command}\n{report}\n\n".encode("utf-8", errors="backslashreplace")
     if len(entry) > max_bytes:
         if max_bytes < len(TRUNCATION_NOTICE):
@@ -108,22 +148,20 @@ def append_performance_log(
             entry = TRUNCATION_NOTICE
         else:
             prefix = entry[:limit].decode("utf-8", errors="ignore").encode("utf-8")
-            entry = prefix + b"\n" + TRUNCATION_NOTICE
+            entry = prefix.rstrip(b"\n") + b"\n" + TRUNCATION_NOTICE
     # Commands in different repositories can finish at the same time.
     with (
-        file_lock(path.with_name(f"{path.name}.lock"), lambda: None),
+        file_lock(path.with_name(f".{path.name}.git-stack-perf-lock"), lambda: None),
         _open_log(path) as log,
     ):
         end = log.seek(0, os.SEEK_END)
-        if end and not _is_performance_log(log):
+        remaining = 0 if entry == TRUNCATION_NOTICE else max_bytes - len(entry)
+        start = _retained_report_start(log, end, remaining) if end else 0
+        if start is None:
             raise OSError(f"{path} already exists and is not a performance log")
-        remaining = max_bytes - len(entry)
-        if end > remaining:
-            # Start just before the retention window to detect a report that
-            # begins exactly at its boundary.
-            start = end - remaining
-            log.seek(max(0, start - 2))
-            _, _, recent = log.read().partition(b"\n\n")
+        if start:
+            log.seek(start)
+            recent = log.read()
             log.seek(0)
             log.write(recent)
             log.truncate()

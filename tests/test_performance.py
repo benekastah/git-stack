@@ -1,6 +1,7 @@
 """The CLI performance log and the wall time it attributes to each tool."""
 
 import json
+import os
 import pathlib
 import shlex
 import sys
@@ -122,12 +123,31 @@ def test_oversized_report_respects_cap(performance_log: pathlib.Path) -> None:
     assert "truncated" in performance_log.read_text(encoding="utf-8")
 
 
-def test_perf_log_does_not_change_an_existing_unrelated_file(repo: Repo, performance_log: pathlib.Path) -> None:
+def test_truncated_report_has_one_record_boundary(performance_log: pathlib.Path) -> None:
+    header = b"git stack info\nPerformance timeline\n"
+    limit = len(header) + len(b"[performance report truncated]\n\n") + 1
+    performance.append_performance_log(performance_log, ["info"], "Performance timeline\n" + "é" * 100, max_bytes=limit)
+    assert performance_log.read_bytes() == header + b"[performance report truncated]\n\n"
+
+
+def test_log_can_replace_a_legacy_truncated_command(performance_log: pathlib.Path) -> None:
+    performance_log.parent.mkdir()
+    performance_log.write_bytes(b"git sta\n[performance report truncated]\n\n")
+
+    performance.append_performance_log(performance_log, ["info"], "Performance timeline\n  Total  0.000s")
+
+    assert performance_log.read_bytes().startswith(b"git stack info\nPerformance timeline\n")
+
+
+@pytest.mark.parametrize("first_line", [b"[unrelated config]\n", b"[performance report truncated]\n\n"])
+def test_perf_log_does_not_change_an_existing_unrelated_file(
+    repo: Repo, performance_log: pathlib.Path, first_line: bytes
+) -> None:
     repo.make_stack()
     repo.git("config", "--local", "stack.perfLog", str(performance_log))
     repo.git("config", "--local", "stack.perfLogMaxBytes", "100")
     performance_log.parent.mkdir()
-    contents = b"[unrelated config]\n" * 20
+    contents = first_line + b"unrelated content\n" * 20
     performance_log.write_bytes(contents)
 
     result = repo.stack("parent")
@@ -135,6 +155,14 @@ def test_perf_log_does_not_change_an_existing_unrelated_file(repo: Repo, perform
     assert result.stdout == "pr2\n"
     assert "couldn't write the performance log" in result.stderr
     assert performance_log.read_bytes() == contents
+
+
+def test_log_path_cannot_leave_git_config_locked(repo: Repo) -> None:
+    repo.make_stack()
+    repo.git("config", "--local", "stack.perfLog", ".git/config")
+
+    assert "couldn't write the performance log" in repo.stack("parent").stderr
+    repo.git("config", "--local", "--unset", "stack.perfLog")
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="creating a file symlink requires privileges on Windows")
@@ -151,6 +179,24 @@ def test_perf_log_does_not_follow_a_file_symlink(repo: Repo, performance_log: pa
 
     assert "couldn't write the performance log" in result.stderr
     assert target.read_bytes() == contents
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="creating a file symlink requires privileges on Windows")
+def test_perf_log_does_not_create_a_dangling_symlink_target(
+    repo: Repo, performance_log: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo.make_stack()
+    # Exercise the fallback used where Git Stack cannot ask the OS for O_NOFOLLOW.
+    monkeypatch.delattr(os, "O_NOFOLLOW", raising=False)
+    repo.git("config", "--local", "stack.perfLog", str(performance_log))
+    target = repo.tmp / "missing.log"
+    performance_log.parent.mkdir()
+    performance_log.symlink_to(target)
+
+    result = repo.stack("info", "--offline")
+
+    assert "couldn't write the performance log" in result.stderr
+    assert not target.exists()
 
 
 @pytest.mark.parametrize("flag", ["-p", "--perf", "--performance"])
