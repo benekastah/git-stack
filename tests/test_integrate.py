@@ -58,7 +58,7 @@ def test_info_marks_landed_integration_input_and_refresh(repo: Repo, gh: FakeGit
     result = repo.stack("info")
 
     assert "\033[36mone\033[m" in result.stdout
-    assert "combined" in result.stdout and "!" in result.stdout
+    assert "\033[33mcombined\033[m" in result.stdout and "!" in result.stdout
     repo.git("config", "color.stack", "never")
     assert "combined (of one, two) (needs restack)" in repo.stack("info", "--offline").stdout
     repo.git("config", "color.stack", "always")
