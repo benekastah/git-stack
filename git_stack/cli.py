@@ -61,25 +61,36 @@ COMMANDS = (
 )
 
 
+def register_global_flags(parser: argparse.ArgumentParser) -> None:
+    """Add the flags shared by the main parser and every subparser."""
+    # An absent flag must preserve the value set by an ancestor parser.
+    parser.add_argument(
+        "-p",
+        "--perf",
+        "--performance",
+        dest="performance",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="print a Git and GitHub CLI timing timeline to stderr",
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="print JSON for scripts: a list for info, otherwise one object per line",
+    )
+
+
 class _ArgumentParser(argparse.ArgumentParser):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
-        # Subparsers use this class too. An absent flag must preserve the value
-        # set by any ancestor parser.
-        self.add_argument(
-            "-p",
-            "--perf",
-            "--performance",
-            dest="performance",
-            action="store_true",
-            default=argparse.SUPPRESS,
-            help="print a Git and GitHub CLI timing timeline to stderr",
-        )
+        register_global_flags(self)
 
 
 def build_parser() -> argparse.ArgumentParser:
     """The `git stack` command line's parser, with every command registered."""
     parser = _ArgumentParser(prog="git stack", description=(git_stack.__doc__ or "").partition("\n")[0])
+    parser.set_defaults(json=False)
     parser.add_argument(
         "-C",
         dest="directories",
@@ -99,7 +110,11 @@ def main(argv: list[str] | None = None, stack: StackClient | None = None) -> int
     """Run the `git stack` command in argv (default: sys.argv) with stack (default:
     a StackClient working in the directory -C names, or the current one,
     printing what it reports). Returns the exit status."""
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    # A global flag and a command's flag may have been read by different parsers.
+    if args.json and args.command == "show-stack" and args.quiet:
+        parser.error("argument -q/--quiet: not allowed with argument --json")
     if not getattr(args, "performance", False):
         return _run(args, stack)
     timeline = Timeline()
@@ -114,7 +129,7 @@ def main(argv: list[str] | None = None, stack: StackClient | None = None) -> int
 
 def _run(args: argparse.Namespace, stack: StackClient | None) -> int:
     # With --json, stdout is for the JSON, so git's output goes to stderr.
-    stream = JsonStream() if args.json else None
+    stream = JsonStream() if args.json and not getattr(args, "json_list", False) else None
     status: int | None = None
     try:
         if stack is None:

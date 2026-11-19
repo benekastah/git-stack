@@ -6,7 +6,8 @@
 git\-stack \- stacked branches that survive squash merges
 .SH SYNOPSIS
 \f[B]git stack\f[R] [\f[B]\-C\f[R] \f[I]path\f[R]]
-[\f[CR]\-\-performance\f[R]] \f[I]command\f[R] [\f[I]args\f[R]]
+[\f[CR]\-\-performance\f[R]] [\f[CR]\-\-json\f[R]] \f[I]command\f[R]
+[\f[I]args\f[R]]
 .SH DESCRIPTION
 Stacked pull requests on GitHub (or any git host) without the conflicts
 that squash merges cause.
@@ -1570,8 +1571,8 @@ isn\(aqt.
 As with the other commands, the stack includes branches beside the
 current one, not just those above and below it.
 .SS JSON output
-Every command takes \f[CR]\-\-json\f[R], for scripts and tools that run
-them.
+Pass \f[CR]\-\-json\f[R] before or after any command, including nested
+commands such as \f[CR]git stack group \-\-json add my\-group\f[R].
 In place of its usual output, it prints a JSON object per line (\c
 .UR https://jsonlines.org
 JSON Lines

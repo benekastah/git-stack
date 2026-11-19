@@ -1,7 +1,7 @@
 import argparse
 from dataclasses import dataclass
 
-from git_stack.commands import Subparsers, add_json_argument
+from git_stack.commands import Subparsers
 from git_stack.stack import StackClient, Tracked
 
 
@@ -11,7 +11,6 @@ class Args(argparse.Namespace):
     parent: str
     branches: list[str]
     base: str | None
-    json: bool
 
 
 def register(subparsers: Subparsers) -> None:
@@ -29,7 +28,6 @@ def register(subparsers: Subparsers) -> None:
         "from PARENT, found from PARENT's reflog like `git rebase` does). "
         "Needed when PARENT has already been squash-merged",
     )
-    add_json_argument(p)
     p.set_defaults(run=run, show=show)
 
 

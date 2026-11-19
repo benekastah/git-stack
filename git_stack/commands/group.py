@@ -1,7 +1,7 @@
 import argparse
 from dataclasses import dataclass
 
-from git_stack.commands import Subparsers, add_json_argument, add_stack_arguments
+from git_stack.commands import Subparsers, add_stack_arguments
 from git_stack.stack import StackClient
 
 
@@ -14,7 +14,6 @@ class Args(argparse.Namespace):
     move: bool
     old: str | None
     new: str
-    json: bool
 
 
 def register(subparsers: Subparsers) -> None:
@@ -25,23 +24,19 @@ def register(subparsers: Subparsers) -> None:
     add.add_argument("name", help="the group")
     add_stack_arguments(add, "group", optional_group=True)
     add.add_argument("--move", action="store_true", help="move stacks that are in another group out of it")
-    add_json_argument(add)
     add.set_defaults(run=run_add, show=show_add)
 
     remove = actions.add_parser("remove", help="take stacks out of their groups (also `git stack ungroup`)")
     add_stack_arguments(remove, "ungroup", optional_group=True)
-    add_json_argument(remove)
     remove.set_defaults(run=run_remove, show=show_remove)
 
     rename = actions.add_parser("rename", help="rename a group (default: the current stack's)")
     rename.add_argument("old", nargs="?", help="group to rename (default: the current stack's)")
     rename.add_argument("new", help="new name")
-    add_json_argument(rename)
     rename.set_defaults(run=run_rename, show=show_rename)
 
     ungroup = subparsers.add_parser("ungroup", help="take stacks out of their groups (`git stack group remove`)")
     add_stack_arguments(ungroup, "ungroup", optional_group=True)
-    add_json_argument(ungroup)
     ungroup.set_defaults(run=run_remove, show=show_remove)
 
 

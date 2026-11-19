@@ -1,7 +1,7 @@
 import argparse
 from dataclasses import dataclass
 
-from git_stack.commands import Subparsers, add_json_argument
+from git_stack.commands import Subparsers
 from git_stack.stack import StackClient, Untracked
 
 
@@ -9,7 +9,6 @@ class Args(argparse.Namespace):
     """The arguments register's parser produces."""
 
     branches: list[str]
-    json: bool
 
 
 def register(subparsers: Subparsers) -> None:
@@ -23,7 +22,6 @@ def register(subparsers: Subparsers) -> None:
         help="branches to untrack, or globs of them (quote them, so the shell doesn't expand them); "
         "default: the current branch",
     )
-    add_json_argument(p)
     p.set_defaults(run=run, show=show)
 
 

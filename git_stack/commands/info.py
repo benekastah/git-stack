@@ -60,7 +60,7 @@ class Args(argparse.Namespace):
 
     branches: list[str]
     groups: list[str]
-    list_json: bool
+    json: bool
     offline: bool
     all: bool
 
@@ -69,20 +69,13 @@ def register(subparsers: Subparsers) -> None:
     p = subparsers.add_parser("info", help="show the current stack (or the named ones)")
     add_stack_arguments(p, "show", optional_group=True)
     p.add_argument("-a", "--all", action="store_true", help="show every tracked stack")
-    # Older than every other command's --json (see git_stack.commands), so it
-    # keeps printing a single list.
-    p.add_argument(
-        "--json",
-        dest="list_json",
-        action="store_true",
-        help="print a JSON list of selected branches, each stack's root first, parent before child",
-    )
     p.add_argument(
         "--offline",
         action="store_true",
         help="don't ask GitHub about pull requests: check for merges locally, and show no links",
     )
-    p.set_defaults(run=run, show=show, json=False)
+    # For compatibility, info prints a JSON list through its show function.
+    p.set_defaults(run=run, show=show, json_list=True)
 
 
 def use_color(stack: StackClient) -> bool:
@@ -169,7 +162,7 @@ def run(stack: StackClient, args: Args) -> Info:
 
 
 def show(stack: StackClient, args: Args, result: Info) -> None:
-    if args.list_json:
+    if args.json:
         print(json.dumps(to_json(result.stacks), indent=2))
     elif not result.stacks:
         print("no tracked branches")

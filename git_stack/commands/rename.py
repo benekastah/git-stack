@@ -1,6 +1,6 @@
 import argparse
 
-from git_stack.commands import Subparsers, add_json_argument
+from git_stack.commands import Subparsers
 from git_stack.stack import Renamed, StackClient
 
 
@@ -9,7 +9,6 @@ class Args(argparse.Namespace):
 
     old: str | None
     name: str
-    json: bool
 
 
 def register(subparsers: Subparsers) -> None:
@@ -18,7 +17,6 @@ def register(subparsers: Subparsers) -> None:
     )
     p.add_argument("old", nargs="?", help="branch to rename (default: the current branch)")
     p.add_argument("name", metavar="new", help="new name")
-    add_json_argument(p)
     p.set_defaults(run=run, show=show)
 
 

@@ -2,7 +2,6 @@ import argparse
 
 from git_stack.commands import (
     Subparsers,
-    add_json_argument,
     add_rebuild_stack_argument,
     add_stack_arguments,
     named_stacks,
@@ -19,7 +18,6 @@ class Args(argparse.Namespace):
     remote: str | None
     dry_run: bool
     rebuild_stack: bool
-    json: bool
 
 
 def register(subparsers: Subparsers) -> None:
@@ -35,7 +33,6 @@ def register(subparsers: Subparsers) -> None:
     p.add_argument(
         "-n", "--dry-run", action="store_true", help="print the pull requests it would open, without opening them"
     )
-    add_json_argument(p)
     p.set_defaults(run=run, show=show)
 
 

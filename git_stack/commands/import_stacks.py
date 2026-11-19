@@ -1,6 +1,6 @@
 import argparse
 
-from git_stack.commands import Subparsers, add_json_argument
+from git_stack.commands import Subparsers
 from git_stack.commands.info import print_tree
 from git_stack.stack import ImportAction, ImportResult, ImportStep, ImportStepWithoutPr, StackClient
 
@@ -14,7 +14,6 @@ class Args(argparse.Namespace):
     remote: str | None
     dry_run: bool
     force: bool
-    json: bool
 
 
 def register(subparsers: Subparsers) -> None:
@@ -53,7 +52,6 @@ def register(subparsers: Subparsers) -> None:
         action="store_true",
         help="also import branches of someone else's pull requests, or with their commits",
     )
-    add_json_argument(p)
     p.set_defaults(run=run, show=show)
 
 

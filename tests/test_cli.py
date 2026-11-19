@@ -893,14 +893,31 @@ def test_clean_json_ends_with_the_error_when_it_fails(stack: Any, capsys: pytest
         ),
     ],
 )
+@pytest.mark.parametrize("global_json", [False, True])
 def test_json_prints_the_result_on_stdout(
-    stack: Any, capsys: pytest.CaptureFixture[str], argv: list[str], method: str, returned: Any, result: Any
+    stack: Any,
+    capsys: pytest.CaptureFixture[str],
+    argv: list[str],
+    method: str,
+    returned: Any,
+    result: Any,
+    global_json: bool,
 ) -> None:
     getattr(stack, method).return_value = returned
 
-    assert main([*argv, "--json"], stack=stack) == 0
+    assert main(["--json", *argv] if global_json else [*argv, "--json"], stack=stack) == 0
 
     assert json.loads(capsys.readouterr().out) == {"type": "result", **result, "events": []}
+
+
+def test_global_options_work_at_different_parser_levels(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
+    stack.group_add.return_value = ["pr1"]
+
+    assert main(["--performance", "group", "--json", "add", "g", "pr1"], stack=stack) == 0
+
+    output = capsys.readouterr()
+    assert json.loads(output.out) == {"type": "result", "group": "g", "bottoms": ["pr1"], "events": []}
+    assert output.err.startswith("Performance timeline\n")
 
 
 def test_push_says_when_everything_looks_merged(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
@@ -953,7 +970,8 @@ def test_info_draws_a_group_header_on_each_root_it_has_stacks_on(
     assert capsys.readouterr().out == ("main\n└── group a\n    └── b\nrelease\n└── group a\n    └── c\n")
 
 
-def test_info_json_lists_every_branch(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
+@pytest.mark.parametrize("argv", [["--json", "info"], ["info", "--json"]])
+def test_info_json_lists_every_branch(stack: Any, capsys: pytest.CaptureFixture[str], argv: list[str]) -> None:
     stack.info.return_value = [
         BranchInfo("main", None, None, current=False),
         BranchInfo(
@@ -966,7 +984,7 @@ def test_info_json_lists_every_branch(stack: Any, capsys: pytest.CaptureFixture[
         ),
     ]
 
-    main(["info", "--json"], stack=stack)
+    main(argv, stack=stack)
 
     assert json.loads(capsys.readouterr().out) == [
         {
@@ -1030,9 +1048,14 @@ def test_show_stack_outside_a_stack_says_so(stack: Any, capsys: pytest.CaptureFi
     assert capsys.readouterr() == ("", "git stack: main isn't in a stack\n")
 
 
-def test_show_stack_takes_quiet_or_json_but_not_both(stack: Any) -> None:
-    with pytest.raises(SystemExit):
-        main(["show-stack", "--quiet", "--json"], stack=stack)
+@pytest.mark.parametrize("argv", [["show-stack", "--quiet", "--json"], ["--json", "show-stack", "--quiet"]])
+def test_show_stack_takes_quiet_or_json_but_not_both(
+    stack: Any, capsys: pytest.CaptureFixture[str], argv: list[str]
+) -> None:
+    with pytest.raises(SystemExit) as error:
+        main(argv, stack=stack)
+    assert error.value.code == 2
+    assert "argument -q/--quiet: not allowed with argument --json" in capsys.readouterr().err
 
 
 @pytest.mark.usefixtures("fresh_find_git")

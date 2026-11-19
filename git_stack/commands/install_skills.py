@@ -2,7 +2,7 @@ import argparse
 from dataclasses import dataclass
 
 from git_stack import skills
-from git_stack.commands import Subparsers, add_json_argument
+from git_stack.commands import Subparsers
 from git_stack.skills import AGENTS, InstallAction, Installed
 from git_stack.stack import StackClient
 
@@ -12,7 +12,6 @@ class Args(argparse.Namespace):
 
     agents: list[str]
     replace: bool
-    json: bool
 
 
 def register(subparsers: Subparsers) -> None:
@@ -36,7 +35,6 @@ def register(subparsers: Subparsers) -> None:
         help="replace a skill's link to somewhere else (e.g. another clone's); a link that's already right is "
         "left alone, and a file or directory that isn't a link never replaced",
     )
-    add_json_argument(p)
     p.set_defaults(run=run, show=show)
 
 

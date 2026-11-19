@@ -82,14 +82,3 @@ def add_ignore_revert_argument(parser: argparse.ArgumentParser) -> None:
 
 def add_delete_argument(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("-d", "--delete", choices=[d.value for d in Delete], help=DELETE_HELP)
-
-
-# parser can be a mutually exclusive group, whose type argparse doesn't export either.
-def add_json_argument(
-    parser: argparse.ArgumentParser | argparse._MutuallyExclusiveGroup,  # pyright: ignore[reportPrivateUsage]
-) -> None:
-    parser.add_argument(
-        "--json",
-        action="store_true",
-        help="print what happens, then the result, for scripts: a JSON object per line",
-    )

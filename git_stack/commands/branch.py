@@ -1,7 +1,7 @@
 import argparse
 from dataclasses import dataclass
 
-from git_stack.commands import Subparsers, add_json_argument
+from git_stack.commands import Subparsers
 from git_stack.stack import StackClient
 
 
@@ -11,7 +11,6 @@ class Args(argparse.Namespace):
     name: str
     group: str | None
     from_branch: str | None
-    json: bool
 
 
 def register(subparsers: Subparsers) -> None:
@@ -30,7 +29,6 @@ def register(subparsers: Subparsers) -> None:
         help="also put its stack in group GROUP (see `git stack group`), failing without "
         "creating it if the stack is in another group already",
     )
-    add_json_argument(p)
     p.set_defaults(run=run, show=show)
 
 

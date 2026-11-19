@@ -1,7 +1,7 @@
 import argparse
 from dataclasses import dataclass
 
-from git_stack.commands import Subparsers, add_json_argument, add_stack_arguments
+from git_stack.commands import Subparsers, add_stack_arguments
 from git_stack.stack import StackClient
 from git_stack.stacks import Ownership
 
@@ -10,14 +10,12 @@ class Args(argparse.Namespace):
     ownership: str
     branches: list[str]
     groups: list[str]
-    json: bool
 
 
 def register(subparsers: Subparsers) -> None:
     p = subparsers.add_parser("ownership", help="mark stacks as owned or shared")
     p.add_argument("ownership", nargs="?", default="show", choices=("show", *(o.value for o in Ownership)))
     add_stack_arguments(p, "mark", optional_group=True)
-    add_json_argument(p)
     p.set_defaults(run=run, show=show)
 
 

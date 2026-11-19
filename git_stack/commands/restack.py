@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from git_stack.commands import (
     Subparsers,
     add_allow_shared_argument,
-    add_json_argument,
     add_latest_argument,
     add_stack_arguments,
 )
@@ -19,7 +18,6 @@ class Args(argparse.Namespace):
     onto: str | None
     latest: bool
     force: bool
-    json: bool
     allow_shared: bool
 
 
@@ -38,7 +36,6 @@ def register(subparsers: Subparsers) -> None:
     p.add_argument("--force", action="store_true", help="replace the tip of an explicitly named integration root")
     add_latest_argument(p)
     add_allow_shared_argument(p)
-    add_json_argument(p)
     p.set_defaults(run=run, show=show)
 
 

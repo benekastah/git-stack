@@ -5,7 +5,6 @@ from git_stack.commands import (
     add_allow_shared_argument,
     add_delete_argument,
     add_ignore_revert_argument,
-    add_json_argument,
     add_latest_argument,
     add_rebuild_stack_argument,
     add_stack_arguments,
@@ -25,7 +24,6 @@ class Args(argparse.Namespace):
     delete: str | None
     latest: bool
     ignore_reverts: list[str]
-    json: bool
     allow_shared: bool
     pull_tracked_upstream: bool
     rewritten_upstream: bool
@@ -57,7 +55,6 @@ def register(subparsers: Subparsers) -> None:
     p.add_argument(
         "--rewritten-upstream", action="store_true", help="pull unseen commits from rewritten upstream history"
     )
-    add_json_argument(p)
     p.set_defaults(run=run, show=show)
 
 

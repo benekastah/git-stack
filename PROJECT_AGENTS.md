@@ -80,8 +80,9 @@ man page is generated from it.
 Scripts, editors and other tools (e.g. move-forward) parse git-stack's output,
 so these are interfaces:
 
-- **`--json`**, which every command takes: a JSON object per line, one per
-  event, then a `result` or `error` line. An event's JSON `type` is its class's
+- **`--json`**, which every command takes before or after its name: a JSON
+  object per event, one per line, then a `result` or `error` line. An event's
+  JSON `type` is its class's
   `event_type`, and its fields are its dataclass fields. A result's fields are
   its dataclass fields, under the names `git_stack/json_fields.py` gives them
   (e.g. `json_name("stacks")`). So renaming or removing a field of an event or

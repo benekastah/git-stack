@@ -3,7 +3,6 @@ import argparse
 from git_stack.commands import (
     Subparsers,
     add_allow_shared_argument,
-    add_json_argument,
     add_rebuild_stack_argument,
     add_stack_arguments,
     named_stacks,
@@ -22,7 +21,6 @@ class Args(argparse.Namespace):
     remote: str | None
     force: bool
     prs: bool
-    json: bool
     allow_shared: bool
     rebuild_stack: bool
     no_verify: bool
@@ -49,7 +47,6 @@ def register(subparsers: Subparsers) -> None:
         action="store_true",
         help="then open pull requests for them, as `git stack prs` does",
     )
-    add_json_argument(p)
     add_allow_shared_argument(p)
     add_rebuild_stack_argument(p)
     p.set_defaults(run=run, show=show, error=lambda result: result.error)

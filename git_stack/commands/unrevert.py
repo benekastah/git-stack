@@ -1,6 +1,6 @@
 import argparse
 
-from git_stack.commands import Subparsers, add_allow_shared_argument, add_json_argument
+from git_stack.commands import Subparsers, add_allow_shared_argument
 from git_stack.stack import StackClient, Unreverted
 
 
@@ -12,7 +12,6 @@ class Args(argparse.Namespace):
     from_branch: str | None
     stack: list[str]
     remote: str | None
-    json: bool
     allow_shared: bool
 
 
@@ -39,7 +38,6 @@ def register(subparsers: Subparsers) -> None:
         help="move BRANCH, and the branches stacked on it, onto the new branch (can be given more than once)",
     )
     p.add_argument("--remote")
-    add_json_argument(p)
     add_allow_shared_argument(p)
     p.set_defaults(run=run, show=show)
 

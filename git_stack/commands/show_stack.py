@@ -1,7 +1,7 @@
 import argparse
 from dataclasses import dataclass
 
-from git_stack.commands import Subparsers, add_json_argument
+from git_stack.commands import Subparsers
 from git_stack.errors import StackError
 from git_stack.stack import StackClient
 
@@ -11,7 +11,6 @@ class Args(argparse.Namespace):
 
     branch: str | None
     quiet: bool
-    json: bool
 
 
 def register(subparsers: Subparsers) -> None:
@@ -19,14 +18,13 @@ def register(subparsers: Subparsers) -> None:
         "show-stack", help="print the branches in a branch's (default: the current one's) stack, bottom first"
     )
     p.add_argument("branch", nargs="?", help="branch whose stack to print (default: the current branch)")
-    output = p.add_mutually_exclusive_group()
-    output.add_argument(
+    p.add_argument(
         "-q",
         "--quiet",
         action="store_true",
-        help="print nothing; exit with status 0 if the branch is in a stack, and 1 if it isn't",
+        help="print nothing; exit with status 0 if the branch is in a stack, and 1 if it isn't "
+        "(incompatible with --json)",
     )
-    add_json_argument(output)
     p.set_defaults(run=run, show=show)
 
 

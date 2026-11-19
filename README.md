@@ -1166,7 +1166,8 @@ fi
 
 ### JSON output
 
-Every command takes `--json`, for scripts and tools that run them. In place of
+Pass `--json` before or after any command, including nested commands such as
+`git stack group --json add my-group`. In place of
 its usual output, it prints a JSON object per line
 ([JSON Lines](https://jsonlines.org)) as it goes: one for each thing that
 happens, then one with the result. git's own output, e.g. from fetching or
