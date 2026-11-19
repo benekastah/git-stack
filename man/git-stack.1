@@ -227,22 +227,21 @@ the repository\(aqs only remote if it has no \f[CR]origin\f[R].
 So a clone whose remote has another name (e.g.
 \f[CR]upstream\f[R]) needs no \f[CR]\-\-remote\f[R].
 .SS Performance log
-Enable \f[CR]stack.performance\f[R] to record each command line and its
-Git and \f[CR]gh\f[R] timeline in
-\f[CR]\(ti/.local/git\-stack/perf.log\f[R].
-Performance reporting is off by default.
+Set \f[CR]stack.perfLog\f[R] to record each command line and its Git and
+\f[CR]gh\f[R] timeline in that file.
+An unset or empty path disables reporting.
 To enable it across repositories, add this to
 \f[CR]\(ti/.gitconfig\f[R]:
 .IP
 .EX
 [stack]
-    performance = true
-    performanceLogMaxBytes = 1000000
+    perfLog = \(ti/.local/git\-stack/perf.log
+    perfLogMaxBytes = 1000000
 .EE
 .PP
 The size setting is optional and defaults to 1,000,000 bytes.
 It accepts Git\(aqs integer suffixes, such as \f[CR]1k\f[R].
-Set \f[CR]GIT_STACK_PERF_LOG\f[R] to use a separate file.
+Relative paths use the command directory selected by \f[CR]\-C\f[R].
 .PP
 The timeline lists calls in start order with their start offsets and
 elapsed times.

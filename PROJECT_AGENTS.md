@@ -50,13 +50,12 @@ man page is generated from it.
 - Progress and warnings are events (`git_stack/events.py`), passed to the
   client's `on_event`. `git_stack/output.py` turns them into text, or into JSON
   lines.
-- With `stack.performance` enabled, `git_stack/performance.py` records one timeline at py-git-client's
+- When `stack.perfLog` is set, `git_stack/performance.py` records one timeline at py-git-client's
   `Git.process` boundary, in the snapshot's `CatFile`, and at both `gh` launches.
   Branch-status workers inherit the same recorder. Keep subprocess input,
   output and environment out of the timeline.
-  The CLI logs the command line and timeline in `~/.local/git-stack/perf.log`,
-  capped by `stack.performanceLogMaxBytes`. Tests set
-  `GIT_STACK_PERF_LOG` to keep their logs in their own directories.
+  The CLI writes the command line and timeline to `stack.perfLog`, capped
+  by `stack.perfLogMaxBytes`. Tests configure their own log paths.
 - A value from a fixed set (an option's, a setting's, GitHub's) is an enum,
   converted where it's read (e.g. `Delete`, `Ownership`, `GitHubState`), so
   the code compares members rather than strings, and adding a value happens in

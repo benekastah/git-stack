@@ -24,15 +24,15 @@ def test_performance_is_off_by_default(repo: Repo, performance_log: pathlib.Path
 @pytest.mark.usefixtures("performance_enabled")
 def test_local_config_can_disable_global_performance_logging(repo: Repo, performance_log: pathlib.Path) -> None:
     repo.make_stack()
-    repo.git("config", "--local", "stack.performance", "false")
+    repo.git("config", "--local", "stack.perfLog", "")
     assert repo.stack("parent").stdout == "pr2\n"
     assert not performance_log.exists()
 
 
 def test_local_config_enables_reporting_and_controls_the_cap(repo: Repo, performance_log: pathlib.Path) -> None:
     repo.make_stack()
-    repo.git("config", "--local", "stack.performance", "yes")
-    repo.git("config", "--local", "stack.performanceLogMaxBytes", "1k")
+    repo.git("config", "--local", "stack.perfLog", str(performance_log))
+    repo.git("config", "--local", "stack.perfLogMaxBytes", "1k")
     performance_log.parent.mkdir()
     performance_log.write_text("old\n" * 400, encoding="utf-8")
 
@@ -69,19 +69,29 @@ def test_cli_preserves_command_error_if_log_cannot_be_written(repo: Repo, perfor
     assert "couldn't write the performance log" in result.stderr
 
 
-def test_log_defaults_to_the_local_state_directory(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("GIT_STACK_PERF_LOG")
-    monkeypatch.setattr(pathlib.Path, "home", lambda: tmp_path)
+def test_relative_log_path_is_relative_to_the_command_directory(repo: Repo) -> None:
+    repo.make_stack()
+    repo.git("config", "--local", "stack.perfLog", "state/log.txt")
+    repo.stack("parent")
 
-    performance.append_performance_log(["info"], "Performance timeline")
+    path = repo.path / "state" / "log.txt"
+    assert "Performance timeline\n" in path.read_text(encoding="utf-8")
 
-    assert (tmp_path / ".local" / "git-stack" / "perf.log").read_text(encoding="utf-8").startswith("git stack info\n")
+
+def test_filesystem_root_is_rejected_as_a_log_path(repo: Repo) -> None:
+    repo.make_stack()
+    repo.git("config", "--local", "stack.perfLog", repo.path.anchor)
+
+    result = repo.stack("parent")
+
+    assert result.stdout == "pr2\n"
+    assert "couldn't write the performance log" in result.stderr
 
 
 def test_log_cap_retains_newest_whole_reports(performance_log: pathlib.Path) -> None:
     report = "Performance timeline\n" + "é" * 6
     for command in ("old", "middle", "recent"):
-        performance.append_performance_log([command], report, max_bytes=110)
+        performance.append_performance_log(performance_log, [command], report, max_bytes=110)
 
     assert performance_log.stat().st_size <= 110
     assert performance_log.read_text(encoding="utf-8").splitlines() == [
@@ -97,7 +107,7 @@ def test_log_cap_retains_newest_whole_reports(performance_log: pathlib.Path) -> 
 
 
 def test_oversized_report_respects_cap(performance_log: pathlib.Path) -> None:
-    performance.append_performance_log(["info"], "é" * 100, max_bytes=100)
+    performance.append_performance_log(performance_log, ["info"], "é" * 100, max_bytes=100)
 
     assert performance_log.stat().st_size <= 100
     assert "truncated" in performance_log.read_text(encoding="utf-8")

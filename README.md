@@ -127,19 +127,19 @@ has another name (e.g. `upstream`) needs no `--remote`.
 
 ### Performance log
 
-Enable `stack.performance` to record each command line and its Git and `gh`
-timeline in `~/.local/git-stack/perf.log`. Performance reporting is off by
-default. To enable it across repositories, add this to `~/.gitconfig`:
+Set `stack.perfLog` to record each command line and its Git and `gh` timeline
+in that file. An unset or empty path disables reporting. To enable it across
+repositories, add this to `~/.gitconfig`:
 
 ```gitconfig
 [stack]
-    performance = true
-    performanceLogMaxBytes = 1000000
+    perfLog = ~/.local/git-stack/perf.log
+    perfLogMaxBytes = 1000000
 ```
 
 The size setting is optional and defaults to 1,000,000 bytes. It accepts
-Git's integer suffixes, such as `1k`. Set `GIT_STACK_PERF_LOG` to use a
-separate file.
+Git's integer suffixes, such as `1k`. Relative paths use the command directory
+selected by `-C`.
 
 The timeline lists calls in start order with their start offsets and elapsed
 times. Batch `git cat-file` requests and shutdown are timed separately,

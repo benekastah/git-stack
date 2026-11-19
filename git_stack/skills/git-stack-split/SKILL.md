@@ -5,7 +5,7 @@ description: Plan and build a large change as a stack of small pull requests wit
 
 # Splitting a change into a stack
 
-When `stack.performance` is enabled, use `~/.local/git-stack/perf.log` to report total wall time,
+When `stack.perfLog` is set, use that log to report total wall time,
 how many Git and `gh` calls ran, the time spent in each tool, and the time spent elsewhere.
 Count each `cat-file` batch request as a Git call. Include batch shutdown in Git time only.
 Report any overlap shown and flag the slowest call if it explains a delay.

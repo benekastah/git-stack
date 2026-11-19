@@ -22,8 +22,8 @@ if TYPE_CHECKING:
 
 Tool = Literal["git", "gh"]
 MAX_PERFORMANCE_LOG_BYTES = 1_000_000
-PERFORMANCE_SETTING = "stack.performance"
-LOG_LIMIT_SETTING = "stack.performanceLogMaxBytes"
+LOG_PATH_SETTING = "stack.perfLog"
+LOG_LIMIT_SETTING = "stack.perfLogMaxBytes"
 
 
 @dataclass
@@ -47,24 +47,19 @@ def _command_line(args: Iterable[str]) -> str:
     return shlex.join(args).replace("\r", r"\r").replace("\n", r"\n")
 
 
-def performance_log_limit(git: GitClient) -> int | None:
+def performance_log_settings(git: GitClient) -> tuple[pathlib.Path, int] | None:
     """Read the effective Git settings. None means reporting is disabled."""
     try:
-        enabled = git.config_value(PERFORMANCE_SETTING)
+        location = git.config_value(LOG_PATH_SETTING)
+        has_limit = bool(location) and git.config_value(LOG_LIMIT_SETTING) is not None
     except StackError:
         # Commands such as install-skills can run outside a repository.
-        if git.run("config", "--type=bool", "--get", PERFORMANCE_SETTING, check=False) != "true":
-            return None
-        return _configured_log_limit(git)
-    if enabled is None or enabled.lower() in {"false", "no", "off", "0"}:
+        location = git.run("config", "--get", LOG_PATH_SETTING, check=False)
+        has_limit = True
+    if not location:
         return None
-    # Ask Git about values such as an implicit true key or an integer.
-    if (
-        enabled.lower() not in {"true", "yes", "on", "1"}
-        and git.run("config", "--type=bool", "--get", PERFORMANCE_SETTING, check=False) != "true"
-    ):
-        return None
-    return MAX_PERFORMANCE_LOG_BYTES if git.config_value(LOG_LIMIT_SETTING) is None else _configured_log_limit(git)
+    path = pathlib.Path(location) if location.startswith("~") else git.directory.absolute() / location
+    return path, _configured_log_limit(git) if has_limit else MAX_PERFORMANCE_LOG_BYTES
 
 
 def _configured_log_limit(git: GitClient) -> int:
@@ -72,10 +67,13 @@ def _configured_log_limit(git: GitClient) -> int:
     return limit if limit > 0 else MAX_PERFORMANCE_LOG_BYTES
 
 
-def append_performance_log(argv: list[str], report: str, *, max_bytes: int = MAX_PERFORMANCE_LOG_BYTES) -> None:
+def append_performance_log(
+    path: pathlib.Path, argv: list[str], report: str, *, max_bytes: int = MAX_PERFORMANCE_LOG_BYTES
+) -> None:
     """Keep the newest timelines with their commands, within the byte limit."""
-    override = os.environ.get("GIT_STACK_PERF_LOG")
-    path = pathlib.Path(override) if override else pathlib.Path.home() / ".local" / "git-stack" / "perf.log"
+    path = path.expanduser()
+    if not path.name:
+        raise IsADirectoryError(path)
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     command = _command_line(("git", "stack", *argv))
     entry = f"{command}\n{report}\n\n".encode("utf-8", errors="backslashreplace")
@@ -85,7 +83,7 @@ def append_performance_log(argv: list[str], report: str, *, max_bytes: int = MAX
         entry = entry[:limit].decode("utf-8", errors="ignore").encode("utf-8") + marker
     # Commands in different repositories can finish at the same time.
     with (
-        file_lock(path.with_suffix(".log.lock"), lambda: None),
+        file_lock(path.with_name(f"{path.name}.lock"), lambda: None),
         os.fdopen(os.open(path, os.O_RDWR | os.O_CREAT, 0o600), "r+b") as log,
     ):
         end = log.seek(0, os.SEEK_END)

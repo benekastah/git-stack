@@ -32,7 +32,7 @@ from git_stack.commands import (
 from git_stack.errors import StackError
 from git_stack.git import GitClient
 from git_stack.output import JsonStream, print_event
-from git_stack.performance import Timeline, append_performance_log, performance_log_limit
+from git_stack.performance import Timeline, append_performance_log, performance_log_settings
 from git_stack.stack import StackClient
 
 # In the order `git stack -h` lists them.
@@ -115,14 +115,14 @@ def _run(args: argparse.Namespace, stack: StackClient | None, argv: list[str]) -
     # With --json, stdout is for the JSON, so git's output goes to stderr.
     stream = JsonStream() if args.json and not getattr(args, "json_list", False) else None
     timeline: Timeline | None = None
-    max_bytes: int | None = None
+    log_settings: tuple[pathlib.Path, int] | None = None
     try:
         if stack is None:
             # Joining starts over at an absolute path, as git's -C does. It
             # fails if there's no git to run.
             stack = StackClient(GitClient(pathlib.Path(".", *args.directories)))
-        max_bytes = performance_log_limit(stack.git)
-        timeline = Timeline() if max_bytes is not None else None
+        log_settings = performance_log_settings(stack.git)
+        timeline = Timeline() if log_settings is not None else None
         with timeline.activate() if timeline is not None else nullcontext():
             return _run_command(args, stack, stream)
     except StackError as e:
@@ -131,9 +131,10 @@ def _run(args: argparse.Namespace, stack: StackClient | None, argv: list[str]) -
         print(f"git stack: {e}", file=sys.stderr)
         return 1
     finally:
-        if timeline is not None and max_bytes is not None:
+        if timeline is not None and log_settings is not None:
+            path, max_bytes = log_settings
             try:
-                append_performance_log(argv, timeline.render(), max_bytes=max_bytes)
+                append_performance_log(path, argv, timeline.render(), max_bytes=max_bytes)
             except (OSError, RuntimeError) as error:
                 print(f"git stack: couldn't write the performance log: {error}", file=sys.stderr)
 

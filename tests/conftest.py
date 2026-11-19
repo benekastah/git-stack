@@ -51,18 +51,16 @@ def _outside_any_repository(outside_any_repository: pathlib.Path) -> None:  # py
     one the tests were started in (its config, say)."""
 
 
-@pytest.fixture(autouse=True)
-def performance_log(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> pathlib.Path:
-    """Keep in-process and subprocess performance logs under the test's directory."""
-    path = tmp_path / "perf-log" / "perf.log"
-    monkeypatch.setenv("GIT_STACK_PERF_LOG", str(path))
-    return path
+@pytest.fixture
+def performance_log(tmp_path: pathlib.Path) -> pathlib.Path:
+    """A log path for tests that enable performance reporting."""
+    return tmp_path / "perf log" / "perf.log"
 
 
 @pytest.fixture
-def performance_enabled(git_config: pathlib.Path) -> None:
+def performance_enabled(git_config: pathlib.Path, performance_log: pathlib.Path) -> None:
     with git_config.open("a", encoding="utf-8") as config:
-        config.write("\n[stack]\n\tperformance = true\n")
+        config.write(f'\n[stack]\n\tperfLog = "{performance_log.as_posix()}"\n')
 
 
 def make_repositories(directory: pathlib.Path) -> None:
