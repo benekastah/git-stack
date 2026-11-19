@@ -5,9 +5,8 @@
 .SH NAME
 git\-stack \- stacked branches that survive squash merges
 .SH SYNOPSIS
-\f[B]git stack\f[R] [\f[B]\-C\f[R] \f[I]path\f[R]]
-[\f[CR]\-\-performance\f[R]] [\f[CR]\-\-json\f[R]] \f[I]command\f[R]
-[\f[I]args\f[R]]
+\f[B]git stack\f[R] [\f[B]\-C\f[R] \f[I]path\f[R]] [\f[CR]\-\-json\f[R]]
+\f[I]command\f[R] [\f[I]args\f[R]]
 .SH DESCRIPTION
 Stacked pull requests on GitHub (or any git host) without the conflicts
 that squash merges cause.
@@ -227,28 +226,20 @@ there\(aqs one, or else the one their stacks\(aq roots (e.g.
 the repository\(aqs only remote if it has no \f[CR]origin\f[R].
 So a clone whose remote has another name (e.g.
 \f[CR]upstream\f[R]) needs no \f[CR]\-\-remote\f[R].
-.SS Performance timeline
-Pass \f[CR]\-\-performance\f[R] (also \f[CR]\-\-perf\f[R] or
-\f[CR]\-p\f[R]) before or after any command, including nested commands
-such as \f[CR]git stack group add my\-group \-p\f[R].
-After the command\(aqs result or error, stderr shows each Git and
-\f[CR]gh\f[R] call in start order, with its start offset and elapsed
-time in seconds.
-Batch \f[CR]git cat\-file\f[R] requests and shutdown are measured
+.SS Performance log
+During performance work, every invocation records its command line and
+Git and \f[CR]gh\f[R] timeline in
+\f[CR]\(ti/.local/git\-stack/perf.log\f[R].
+The log keeps up to 1 MB of recent reports.
+Set \f[CR]GIT_STACK_PERF_LOG\f[R] to use a separate file.
+.PP
+The timeline lists calls in start order with their start offsets and
+elapsed times.
+Batch \f[CR]git cat\-file\f[R] requests and shutdown are timed
 separately, excluding idle time between requests.
 Inline GraphQL query bodies are abbreviated.
-.PP
-The summary shows total wall time and the time and percentage spent in
-Git, in \f[CR]gh\f[R], and in other work such as Python or SSH host
-lookup.
-Each tool\(aqs total counts concurrent calls to that tool once.
-Time when both tools were active appears as overlap.
-Stdout, including \f[CR]\-\-json\f[R], and the exit status are the same
-with or without timing.
-.PP
-While performance work is underway, timed invocations also append the
-command line and its stderr timeline to
-\f[CR]\(ti/.local/git\-stack/perf.log\f[R].
+Reports show total wall time, time in Git and \f[CR]gh\f[R], time spent
+elsewhere, and any overlap between the two tools.
 .SS Groups
 When a branch on \f[CR]main\f[R] merges, the branches stacked on it each
 become the bottom of a stack of their own.

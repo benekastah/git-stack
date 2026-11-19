@@ -5,7 +5,7 @@ description: Plan and build a large change as a stack of small pull requests wit
 
 # Splitting a change into a stack
 
-Use `--performance` on every git-stack command. In your summary, report total wall time,
+Use `~/.local/git-stack/perf.log` to report total wall time,
 how many Git and `gh` calls ran, the time spent in each tool, and the time spent elsewhere.
 Count each `cat-file` batch request as a Git call. Include batch shutdown in Git time only.
 Report any overlap shown and flag the slowest call if it explains a delay.
@@ -24,7 +24,7 @@ instructions).
    - old and new code can run together (the steps may deploy in any order, or at different times).
 3. **Parallel or stacked:** pieces that don't depend on each other are separate stacks from `main`,
    so they can be reviewed and merged in any order; pieces that depend on one another are a stack.
-   Group related stacks so one command covers them: `git stack --performance group add <name> <branch>...`.
+   Group related stacks so one command covers them: `git stack group add <name> <branch>...`.
 4. **Show the user the plan** (branches, order, what goes in each, rough size) and get agreement
    before building it.
 
@@ -33,10 +33,10 @@ instructions).
 For a change that's already one branch `big`, carve it by files, one branch per step:
 
 ```sh
-git stack --performance create step1-model --from main
+git stack create step1-model --from main
 git checkout big -- lib/model.py   # this step's files
 git commit -m "..."
-git stack --performance create step2-api         # stacked on step1-model
+git stack create step2-api         # stacked on step1-model
 git checkout big -- lib/api.py
 git commit -m "..."
 ```
@@ -51,12 +51,12 @@ rebuild the commits first, choosing changes a hunk or a line at a time.
 - Nothing was lost: `git diff big <top branch>` is empty, once every step is in.
 - Each step passes the project's checks:
   ```sh
-  for branch in $(git stack --performance show-stack); do
+  for branch in $(git stack show-stack); do
       git switch --quiet "$branch" && <the project's checks> || break
   done
   ```
-- The shape is what you planned: `git stack --performance info --all --offline`.
+- The shape is what you planned: `git stack info --all --offline`.
 
-Then `git stack --performance push --prs` opens a draft PR per branch, each into its parent's branch, with a stack
+Then `git stack push --prs` opens a draft PR per branch, each into its parent's branch, with a stack
 section listing the others. Write each PR's description to say where it sits in the stack and what
 the next step adds.

@@ -1,4 +1,4 @@
-"""The opt-in CLI timeline and the wall time it attributes to each tool."""
+"""The CLI performance log and the wall time it attributes to each tool."""
 
 import json
 import pathlib
@@ -7,48 +7,79 @@ import shlex
 import pytest
 from git_client.testing import GitCall
 
+from git_stack import performance
 from git_stack.cli import build_parser
 from git_stack.git import GitClient
 from git_stack.performance import Timeline
 from tests.helpers import FakeGitHub, Repo
 from tests.test_integrate import source
 
-pytestmark = pytest.mark.usefixtures("performance_home")
 
-
-def test_cli_appends_the_command_and_stderr_report(repo: Repo, performance_home: pathlib.Path) -> None:
+def test_cli_appends_a_command_and_report_for_success_and_failure(repo: Repo, performance_log: pathlib.Path) -> None:
     repo.make_stack()
-    path = performance_home / ".local" / "git-stack" / "perf.log"
-    commands = [("info", "--offline", "-p"), ("--perf", "-C", "missing", "restack")]
-    reports = [repo.stack(*commands[0]), repo.stack(*commands[1], expect_success=False)]
-    entries = []
-    for args, result in zip(commands, reports, strict=True):
-        command = shlex.join(("git", "stack", "-C", str(repo.path), *args))
-        timeline = result.stderr[result.stderr.index("Performance timeline\n") :]
-        entries.append(f"{command}\n{timeline}\n")
+    successful = repo.stack("info", "--offline")
+    failed = repo.stack("-C", "missing", "restack", expect_success=False)
 
-    assert path.read_text(encoding="utf-8") == "".join(entries)
-    repo.stack("info", "--offline")
-    assert path.read_text(encoding="utf-8") == "".join(entries)
+    assert successful.stderr == ""
+    assert "Performance timeline" not in failed.stderr
+    first, second = performance_log.read_text(encoding="utf-8").strip().split("\n\n")
+    for entry, args in ((first, ("info", "--offline")), (second, ("-C", "missing", "restack"))):
+        command, _, report = entry.partition("\n")
+        assert shlex.split(command) == ["git", "stack", "-C", str(repo.path), *args]
+        assert report.startswith("Performance timeline\n")
+        assert "Total" in report
 
 
-def test_cli_keeps_the_timeline_when_the_log_cannot_be_written(repo: Repo, performance_home: pathlib.Path) -> None:
-    (performance_home / ".local").write_text("a file", encoding="utf-8")
-    result = repo.stack("restack", "-p", expect_success=False)
+def test_cli_preserves_command_error_if_log_cannot_be_written(repo: Repo, performance_log: pathlib.Path) -> None:
+    performance_log.parent.write_text("a file", encoding="utf-8")
+    result = repo.stack("restack", expect_success=False)
 
     assert result.returncode == 1
-    assert "Performance timeline\n" in result.stderr
+    assert "Performance timeline" not in result.stderr
     assert "couldn't write the performance log" in result.stderr
 
 
+def test_log_defaults_to_the_local_state_directory(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("GIT_STACK_PERF_LOG")
+    monkeypatch.setattr(pathlib.Path, "home", lambda: tmp_path)
+
+    performance.append_performance_log(["info"], "Performance timeline")
+
+    assert (tmp_path / ".local" / "git-stack" / "perf.log").read_text(encoding="utf-8").startswith("git stack info\n")
+
+
+def test_log_cap_retains_newest_whole_reports(performance_log: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(performance, "MAX_PERFORMANCE_LOG_BYTES", 110)
+    report = "Performance timeline\n" + "é" * 6
+    for command in ("old", "middle", "recent"):
+        performance.append_performance_log([command], report)
+
+    assert performance_log.stat().st_size <= 110
+    assert performance_log.read_text(encoding="utf-8").splitlines() == [
+        "git stack middle",
+        "Performance timeline",
+        "é" * 6,
+        "",
+        "git stack recent",
+        "Performance timeline",
+        "é" * 6,
+        "",
+    ]
+
+
+def test_oversized_report_respects_cap(performance_log: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(performance, "MAX_PERFORMANCE_LOG_BYTES", 100)
+    performance.append_performance_log(["info"], "é" * 100)
+
+    assert performance_log.stat().st_size <= 100
+    assert "truncated" in performance_log.read_text(encoding="utf-8")
+
+
 @pytest.mark.parametrize("flag", ["-p", "--perf", "--performance"])
-@pytest.mark.parametrize(
-    "command",
-    ["{flag} info", "info {flag}", "{flag} group add team", "group {flag} add team", "group add team {flag}"],
-)
-def test_performance_aliases_at_each_parser_level(flag: str, command: str) -> None:
-    args = build_parser().parse_args(command.format(flag=flag).split())
-    assert args.performance is True
+def test_old_performance_flags_are_rejected(flag: str) -> None:
+    with pytest.raises(SystemExit) as error:
+        build_parser().parse_args([flag, "info"])
+    assert error.value.code == 2
 
 
 def test_timeline_uses_start_order_and_unions_concurrent_intervals() -> None:
@@ -96,16 +127,18 @@ def test_timeline_without_subprocesses() -> None:
     ]
 
 
-def timed_commands(stderr: str) -> list[list[str]]:
-    return [shlex.split(line.strip())[2:] for line in stderr.splitlines() if line.startswith("  +")]
+def timed_commands(report: str) -> list[list[str]]:
+    return [shlex.split(line.strip())[2:] for line in report.splitlines() if line.startswith("  +")]
 
 
-def assert_git_processes_recorded(stderr: str, git_calls: list[GitCall]) -> None:
-    calls = [call[1:] for call in timed_commands(stderr) if call[0] == "git" and call[1] != "cat-file"]
+def assert_git_processes_recorded(report: str, git_calls: list[GitCall]) -> None:
+    calls = [call[1:] for call in timed_commands(report) if call[0] == "git" and call[1] != "cat-file"]
     assert sorted(calls) == sorted(call for call in git_calls if call[0] != "cat-file")
 
 
-def test_info_records_workers_and_keeps_json_parseable(repo: Repo, gh: FakeGitHub, git_calls: list[GitCall]) -> None:
+def test_info_records_workers_and_keeps_json_parseable(
+    repo: Repo, gh: FakeGitHub, git_calls: list[GitCall], performance_log: pathlib.Path
+) -> None:
     repo.make_stack()
     repo.client.push()
     # Moving the root forces a branch-status worker to check ancestry and conflicts.
@@ -113,62 +146,69 @@ def test_info_records_workers_and_keeps_json_parseable(repo: Repo, gh: FakeGitHu
     repo.commit("c", "main moved\n", "advance main")
     repo.git("switch", "--quiet", "pr3")
     git_calls.clear()
-    result = repo.stack("info", "--json", "--performance")
+    result = repo.stack("info", "--json")
+    report = performance_log.read_text(encoding="utf-8")
 
     assert isinstance(json.loads(result.stdout), list)
-    assert result.stderr.count("Performance timeline") == 1
-    assert_git_processes_recorded(result.stderr, git_calls)
-    calls = timed_commands(result.stderr)
+    assert report.count("Performance timeline") == 1
+    assert_git_processes_recorded(report, git_calls)
+    calls = timed_commands(report)
     assert ["git", "cat-file", "--batch-command", "request"] in calls
     assert ["git", "cat-file", "--batch-command", "shutdown"] in calls
     assert any(call[:3] == ["gh", "api", "graphql"] for call in calls)
     assert any(call[:2] == ["git", "merge-tree"] for call in calls)
-    assert "query=<omitted>" in result.stderr
+    assert "query=<omitted>" in report
     assert "Performance timeline" not in repo.stack("info", "--offline").stderr
 
 
-def test_prs_records_github_stack_post(repo: Repo, gh: FakeGitHub) -> None:
+def test_prs_records_github_stack_post(repo: Repo, gh: FakeGitHub, performance_log: pathlib.Path) -> None:
     gh.enable_stacks()
     repo.make_stack()
     repo.client.push()
-    result = repo.stack("prs", "--perf", "--json")
+    result = repo.stack("prs", "--json")
+    report = performance_log.read_text(encoding="utf-8")
 
     assert json.loads(result.stdout.splitlines()[-1])["type"] == "result"
-    posts = [call for call in timed_commands(result.stderr) if call[:2] == ["gh", "api"] and "POST" in call]
+    posts = [call for call in timed_commands(report) if call[:2] == ["gh", "api"] and "POST" in call]
     assert any(call[-2:] == ["--input", "-"] for call in posts)
-    assert "pull_requests" not in result.stderr
+    assert "pull_requests" not in report
     assert gh.stacks() == [[1, 2, 3]]
 
 
-def test_integrate_records_linked_worktree_calls(repo: Repo, git_calls: list[GitCall]) -> None:
+def test_integrate_records_linked_worktree_calls(
+    repo: Repo, git_calls: list[GitCall], performance_log: pathlib.Path
+) -> None:
     source(repo, "one", "a")
     source(repo, "two", "b")
     git_calls.clear()
-    result = repo.stack("integrate", "-p", "combined", "one", "two")
+    repo.stack("integrate", "combined", "one", "two")
+    report = performance_log.read_text(encoding="utf-8")
 
-    assert_git_processes_recorded(result.stderr, git_calls)
-    assert any(call[:3] == ["git", "merge", "--no-ff"] for call in timed_commands(result.stderr))
+    assert_git_processes_recorded(report, git_calls)
+    assert any(call[:3] == ["git", "merge", "--no-ff"] for call in timed_commands(report))
 
 
-def test_timeline_follows_command_errors_and_includes_failed_calls(repo: Repo, gh: FakeGitHub) -> None:
+def test_timeline_records_failed_gh_calls(repo: Repo, gh: FakeGitHub, performance_log: pathlib.Path) -> None:
     repo.make_stack()
     repo.client.push()
     gh.fail_opening("pr1")
-    result = repo.stack("prs", "-p", "--json", expect_success=False)
+    result = repo.stack("prs", "--json", expect_success=False)
+    report = performance_log.read_text(encoding="utf-8")
 
     assert result.returncode == 1
     assert json.loads(result.stdout.splitlines()[-1])["type"] == "error"
-    assert result.stderr.index("git stack:") < result.stderr.index("Performance timeline")
-    assert any(call[:3] == ["gh", "pr", "create"] for call in timed_commands(result.stderr))
+    assert "git stack:" in result.stderr and "Performance timeline" not in result.stderr
+    assert any(call[:3] == ["gh", "pr", "create"] for call in timed_commands(report))
 
 
-def test_failed_git_call_keeps_the_command_error(repo: Repo) -> None:
-    result = repo.stack("-C", "missing", "restack", "-p", "--json", expect_success=False)
+def test_failed_git_call_keeps_the_command_error(repo: Repo, performance_log: pathlib.Path) -> None:
+    result = repo.stack("-C", "missing", "restack", "--json", expect_success=False)
+    report = performance_log.read_text(encoding="utf-8")
 
     assert result.returncode == 1
     assert json.loads(result.stdout)["type"] == "error"
-    assert result.stderr.index("git stack:") < result.stderr.index("Performance timeline")
-    assert any(call[:2] == ["git", "rev-parse"] for call in timed_commands(result.stderr))
+    assert "git stack:" in result.stderr and "Performance timeline" not in result.stderr
+    assert any(call[:2] == ["git", "rev-parse"] for call in timed_commands(report))
 
 
 def test_batch_clock_excludes_idle_time(repo: Repo) -> None:

@@ -65,15 +65,6 @@ def register_global_flags(parser: argparse.ArgumentParser) -> None:
     """Add the flags shared by the main parser and every subparser."""
     # An absent flag must preserve the value set by an ancestor parser.
     parser.add_argument(
-        "-p",
-        "--perf",
-        "--performance",
-        dest="performance",
-        action="store_true",
-        default=argparse.SUPPRESS,
-        help="print a Git and GitHub CLI timing timeline to stderr",
-    )
-    parser.add_argument(
         "--json",
         action="store_true",
         default=argparse.SUPPRESS,
@@ -110,24 +101,19 @@ def main(argv: list[str] | None = None, stack: StackClient | None = None) -> int
     """Run the `git stack` command in argv (default: sys.argv) with stack (default:
     a StackClient working in the directory -C names, or the current one,
     printing what it reports). Returns the exit status."""
-    parser = build_parser()
-    args = parser.parse_args(argv)
-    # A global flag and a command's flag may have been read by different parsers.
-    if args.json and args.command == "show-stack" and args.quiet:
-        parser.error("argument -q/--quiet: not allowed with argument --json")
-    if not getattr(args, "performance", False):
-        return _run(args, stack)
+    argv = sys.argv[1:] if argv is None else argv
     timeline = Timeline()
     try:
         with timeline.activate():
+            parser = build_parser()
+            args = parser.parse_args(argv)
+            # A global flag and a command's flag may have been read by different parsers.
+            if args.json and args.command == "show-stack" and args.quiet:
+                parser.error("argument -q/--quiet: not allowed with argument --json")
             return _run(args, stack)
     finally:
-        # Keep the result first when stdout and stderr go to the same file.
-        sys.stdout.flush()
-        report = timeline.render()
-        print(report, file=sys.stderr)
         try:
-            append_performance_log(sys.argv[1:] if argv is None else argv, report)
+            append_performance_log(argv, timeline.render())
         except (OSError, RuntimeError) as error:
             print(f"git stack: couldn't write the performance log: {error}", file=sys.stderr)
 

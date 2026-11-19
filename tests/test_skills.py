@@ -54,12 +54,11 @@ def test_every_git_stack_command_in_a_skill_parses(path: pathlib.Path) -> None:
     assert commands or path.name != "SKILL.md"
     for command in commands:
         try:
-            args = parser.parse_args(shlex.split(command))
+            parser.parse_args(shlex.split(command))
         except SystemExit as e:
             if e.code == 0:  # --help
                 continue
             pytest.fail(f"`git stack {command}` in {path.name} isn't a git-stack command line")
-        assert args.performance and "--performance" in shlex.split(command)
 
 
 @pytest.mark.parametrize("path", sorted(SKILLS.glob("*/SKILL.md")), ids=lambda p: p.parent.name)

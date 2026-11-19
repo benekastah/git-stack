@@ -125,23 +125,17 @@ their stacks' roots (e.g. `main`) track, if there's one, or else `origin`, or
 the repository's only remote if it has no `origin`. So a clone whose remote
 has another name (e.g. `upstream`) needs no `--remote`.
 
-### Performance timeline
+### Performance log
 
-Pass `--performance` (also `--perf` or `-p`) before or after any command,
-including nested commands such as `git stack group add my-group -p`. After
-the command's result or error, stderr shows each Git and `gh` call in start
-order, with its start offset and elapsed time in seconds. Batch `git cat-file`
-requests and shutdown are measured separately, excluding idle time between
-requests. Inline GraphQL query bodies are abbreviated.
+During performance work, every invocation records its command line and Git
+and `gh` timeline in `~/.local/git-stack/perf.log`. The log keeps up to 1 MB
+of recent reports. Set `GIT_STACK_PERF_LOG` to use a separate file.
 
-The summary shows total wall time and the time and percentage spent in Git,
-in `gh`, and in other work such as Python or SSH host lookup. Each tool's
-total counts concurrent calls to that tool once. Time when both tools were
-active appears as overlap. Stdout, including `--json`, and the exit status
-are the same with or without timing.
-
-While performance work is underway, timed invocations also append the command
-line and its stderr timeline to `~/.local/git-stack/perf.log`.
+The timeline lists calls in start order with their start offsets and elapsed
+times. Batch `git cat-file` requests and shutdown are timed separately,
+excluding idle time between requests. Inline GraphQL query bodies are
+abbreviated. Reports show total wall time, time in Git and `gh`, time spent
+elsewhere, and any overlap between the two tools.
 
 ### Groups
 

@@ -51,11 +51,12 @@ def _outside_any_repository(outside_any_repository: pathlib.Path) -> None:  # py
     one the tests were started in (its config, say)."""
 
 
-@pytest.fixture
-def performance_home(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> pathlib.Path:
-    """Keep performance logs away from the user's home."""
-    monkeypatch.setattr(pathlib.Path, "home", lambda: tmp_path)
-    return tmp_path
+@pytest.fixture(autouse=True)
+def performance_log(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> pathlib.Path:
+    """Keep in-process and subprocess performance logs under the test's directory."""
+    path = tmp_path / "perf-log" / "perf.log"
+    monkeypatch.setenv("GIT_STACK_PERF_LOG", str(path))
+    return path
 
 
 def make_repositories(directory: pathlib.Path) -> None:

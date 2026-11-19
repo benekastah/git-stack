@@ -1,4 +1,4 @@
-"""The CLI's opt-in wall-clock timeline of Git and GitHub calls."""
+"""The CLI's wall-clock timeline of Git and GitHub calls."""
 
 import os
 import pathlib
@@ -17,6 +17,7 @@ from git_client import CLIENT_TIMEOUT, Arg, CatFile, EnvValue, Git, Timeout
 from git_stack.file_lock import file_lock
 
 Tool = Literal["git", "gh"]
+MAX_PERFORMANCE_LOG_BYTES = 1_000_000
 
 
 @dataclass
@@ -41,22 +42,33 @@ def _command_line(args: Iterable[str]) -> str:
 
 
 def append_performance_log(argv: list[str], report: str) -> None:
-    """Keep a copy of the emitted timeline, with its command, for performance work."""
-    directory = pathlib.Path.home() / ".local" / "git-stack"
-    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
-    path = directory / "perf.log"
+    """Keep the newest timelines with their commands, within the byte limit."""
+    override = os.environ.get("GIT_STACK_PERF_LOG")
+    path = pathlib.Path(override) if override else pathlib.Path.home() / ".local" / "git-stack" / "perf.log"
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     command = _command_line(("git", "stack", *argv))
+    entry = f"{command}\n{report}\n\n".encode("utf-8", errors="backslashreplace")
+    if len(entry) > MAX_PERFORMANCE_LOG_BYTES:
+        marker = b"\n[performance report truncated]\n\n"
+        limit = MAX_PERFORMANCE_LOG_BYTES - len(marker)
+        entry = entry[:limit].decode("utf-8", errors="ignore").encode("utf-8") + marker
     # Commands in different repositories can finish at the same time.
     with (
         file_lock(path.with_suffix(".log.lock"), lambda: None),
-        os.fdopen(
-            os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600),
-            "a",
-            encoding="utf-8",
-            errors="backslashreplace",
-        ) as log,
+        os.fdopen(os.open(path, os.O_RDWR | os.O_CREAT, 0o600), "r+b") as log,
     ):
-        log.write(f"{command}\n{report}\n\n")
+        end = log.seek(0, os.SEEK_END)
+        remaining = MAX_PERFORMANCE_LOG_BYTES - len(entry)
+        if end > remaining:
+            # Start just before the retention window to detect a report that
+            # begins exactly at its boundary.
+            start = end - remaining
+            log.seek(max(0, start - 2))
+            _, _, recent = log.read().partition(b"\n\n")
+            log.seek(0)
+            log.write(recent)
+            log.truncate()
+        log.write(entry)
 
 
 class Timeline:

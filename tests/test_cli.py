@@ -910,15 +910,14 @@ def test_json_prints_the_result_on_stdout(
     assert json.loads(capsys.readouterr().out) == {"type": "result", **result, "events": []}
 
 
-@pytest.mark.usefixtures("performance_home")
-def test_global_options_work_at_different_parser_levels(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
+def test_json_works_before_a_nested_command(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
     stack.group_add.return_value = ["pr1"]
 
-    assert main(["--performance", "group", "--json", "add", "g", "pr1"], stack=stack) == 0
+    assert main(["group", "--json", "add", "g", "pr1"], stack=stack) == 0
 
     output = capsys.readouterr()
     assert json.loads(output.out) == {"type": "result", "group": "g", "bottoms": ["pr1"], "events": []}
-    assert output.err.startswith("Performance timeline\n")
+    assert output.err == ""
 
 
 def test_push_says_when_everything_looks_merged(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
