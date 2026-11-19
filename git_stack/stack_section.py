@@ -7,7 +7,7 @@ the root). Merged pull requests are marked.
 """
 
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping
 
 type Node = int | str
 type Tree = dict[Node, Node]  # {node: its parent}
@@ -20,24 +20,24 @@ ACTIVE = " 👈"
 MERGED = " (merged)"
 
 
-def render(roots: Sequence[str], tree: Tree, merged: set[int], active: Node) -> str:
+def render(trees: Mapping[str, Tree], merged: set[int], active: Node) -> str:
     """The stack section for active's pull request."""
-    children: dict[Node, list[Node]] = {}
-    # Pull requests in the order they were opened, then branches without one.
-    for node in sorted(tree, key=lambda n: (0, n, "") if isinstance(n, int) else (1, 0, n)):
-        children.setdefault(tree[node], []).append(node)
     lines = [START, NOTE, "---", "**Stack**"]
 
-    def add(parent: Node, depth: int) -> None:
+    def add(children: dict[Node, list[Node]], parent: Node, depth: int) -> None:
         for node in children.get(parent, []):
             label = f"#{node}" if isinstance(node, int) else f"`{node}`"
             notes = (MERGED if node in merged else "") + (ACTIVE if node == active else "")
             lines.append(f"{'  ' * depth}- {label}{notes}")
-            add(node, depth + 1)
+            add(children, node, depth + 1)
 
-    for root in roots:
+    for root, tree in trees.items():
+        children: dict[Node, list[Node]] = {}
+        # Pull requests in the order they were opened, then branches without one.
+        for node in sorted(tree, key=lambda n: (0, n, "") if isinstance(n, int) else (1, 0, n)):
+            children.setdefault(tree[node], []).append(node)
         lines.append(f"- `{root}`")
-        add(root, 1)
+        add(children, root, 1)
     lines.append(END)
     return "\n".join(lines)
 

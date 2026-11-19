@@ -1089,7 +1089,7 @@ class GitHubAdapter(GitAdapter):
             elif number in linked or not shown:
                 new_body = stack_section.remove(body)
             else:
-                section = stack_section.render([root], tree, set(merged.values()), number)
+                section = stack_section.render({root: tree}, set(merged.values()), number)
                 new_body = stack_section.replace(body, section)
             if new_body != body:
                 self.gh("pr", "edit", str(number), "--repo", self.repo, "--body-file", "-", input=new_body)
@@ -1302,14 +1302,18 @@ def group_stack_section(branch: str, stacks: Stacks, prs: dict[str, PullRequest]
     def node(name: str) -> stack_section.Node:
         return prs[name].number if name in prs else name
 
-    tree = {node(b): node(group.parent(b)) if group.parent(b) in group else group.parent(b) for b in group}
+    trees: dict[str, stack_section.Tree] = {root: {} for root in group.roots()}
+    for member in group:
+        parent = group.parent(member)
+        trees[group.root(member)][node(member)] = node(parent) if parent in group else parent
     group_merged = {prs[b].number for b in group if b in prs and prs[b].state is GitHubState.MERGED}
-    for child, parent in merged.items():
-        if child in tree:
-            tree.setdefault(parent, tree[child])
-            tree[child] = parent
-            group_merged.add(parent)
-    return stack_section.render(sorted(group.roots()), tree, group_merged, node(branch))
+    for tree in trees.values():
+        for child, parent in merged.items():
+            if child in tree:
+                tree.setdefault(parent, tree[child])
+                tree[child] = parent
+                group_merged.add(parent)
+    return stack_section.render(trees, group_merged, node(branch))
 
 
 def github_stack_paths(

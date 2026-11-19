@@ -813,6 +813,29 @@ def test_prs_keeps_group_and_merge_history_when_a_grouped_bottom_merges(
         assert body(gh, 2) == stack("- `main`", "  - #1 (merged)", "    - #2 👈", "- `release`", "  - #3")
 
 
+def test_prs_shows_a_merged_parent_on_each_root_where_it_had_children(
+    repo: Repo, gh: FakeGitHub, client: StackClient
+) -> None:
+    repo.git("branch", "release", "main")
+    repo.git("push", "--quiet", "--set-upstream", "origin", "release")
+    client.branch("a", group="g")
+    repo.commit("a", "a\n", "a")
+    client.branch("b")
+    repo.commit("b", "b\n", "b")
+    client.branch("c", from_branch="a")
+    repo.commit("c", "c\n", "c")
+    client.push(prs=True)
+    merge(repo, gh, client, "a", 1)
+    client.restack(onto="release")
+    client.push()
+
+    client.prs(["b"])
+
+    assert body(gh, 2) == stack(
+        "- `main`", "  - #1 (merged)", "    - #2 👈", "- `release`", "  - #1 (merged)", "    - #3"
+    )
+
+
 def test_push_unstacks_a_github_stack_that_no_longer_fits_a_branching_stack(
     repo: Repo, gh: FakeGitHub, client: StackClient
 ) -> None:
