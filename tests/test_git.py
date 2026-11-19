@@ -299,6 +299,15 @@ def test_snapshot_can_validate_a_branch_upstream(repo: Repo, git_calls: list[Git
     assert [call[0] for call in git_calls] == ["config", "for-each-ref"]
 
 
+def test_snapshot_does_not_validate_an_upstream_after_the_fetch_refspec_changes(repo: Repo) -> None:
+    git = GitClient(repo.path)
+    repo.git("update-ref", "refs/remotes/mirror/main", "refs/heads/main")
+    with git.snapshot():
+        assert git.has_branch_upstream("main", "origin")
+        repo.git("config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/mirror/*")
+        assert not git.has_branch_upstream("main", "origin")
+
+
 @pytest.mark.parametrize("symbolic", [False, True])
 def test_snapshot_rejects_missing_or_symbolic_upstream_refs(repo: Repo, symbolic: bool) -> None:
     repo.git("config", "branch.main.merge", "refs/heads/other")

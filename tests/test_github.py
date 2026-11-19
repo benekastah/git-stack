@@ -50,6 +50,7 @@ def test_push_reuses_github_default_only_for_a_direct_remote(
         pytest.fail(f"default branch should have blocked git {' '.join(args)}")
 
     monkeypatch.setattr(GitClient, "_ask_remote_default_branch", transport_default)
+    monkeypatch.setattr(GitClient, "_default_at_resolved_url", lambda git, url: "main")
     monkeypatch.setattr(GitClient, "passthrough", unexpected_push)
     before = repo.remote_subject("main")
 

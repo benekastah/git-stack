@@ -909,10 +909,10 @@ class StackCore:
             self.remove_merged(branch, stacks, delete_local)
             return True
         if delete is not None and delete.deletes_remote:
-            default = git.remote_default_branch(remote_name)
-            if default is None:
+            defaults = git.push_default_branches(remote_name)
+            if defaults is None:
                 raise StackError(f"can't determine {remote_name}'s default branch; refusing to delete {upstream}")
-            if ref == f"refs/heads/{default}":
+            if ref.removeprefix("refs/heads/") in defaults:
                 self.remove_merged(branch, stacks, delete_local)
                 return True
             children = tuple((child, git.remote_branch_name(child, remote_name)) for child in stacks.children(branch))

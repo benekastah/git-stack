@@ -1164,7 +1164,8 @@ instead of overwriting their work.
 .IP \(bu 2
 The default\-branch protection can reuse GitHub\(aqs response for a
 single direct HTTPS remote on github.com.
-Otherwise it asks Git for the server\(aqs current HEAD.
+Otherwise it asks Git for the current HEAD of the fetch remote and any
+separate push destinations.
 .IP \(bu 2
 A remote branch whose commits were rebased there, e.g.
 by GitHub\(aqs \(dqRebase stack\(dq button, isn\(aqt pushed over: the

@@ -3,6 +3,7 @@ import pathlib
 import subprocess
 import tempfile
 import threading
+import uuid
 from collections import Counter
 from collections.abc import Generator, Sequence
 from contextlib import contextmanager
@@ -169,12 +170,14 @@ class GitClient:
         # lock is for commands that read them in several threads.
         self._snapshot_depth = 0
         self._refs: dict[str, Ref] | None = None
+        self._refs_config: dict[str, list[str | None]] = {}
         self._listed_upstreams: frozenset[str] = frozenset()
         self._head: str | None = None
         self._worktrees: str | None = None
         self._rebasing: dict[pathlib.Path, str | None] = {}
         self._reflogs: dict[str, tuple[str, ...]] = {}
         self._remote_defaults: dict[str, str | None] = {}
+        self._push_defaults: dict[str, frozenset[str] | None] = {}
         self._refs_lock = threading.Lock()
         # Where passthrough sends git's stdout (default: ours), e.g. stderr when
         # our stdout is for --json output.
@@ -273,6 +276,8 @@ class GitClient:
             if not self._snapshot_depth:
                 self._forget_refs()
                 self._remote_defaults = {}
+                self._push_defaults = {}
+                self._refs_config = {}
                 self._cat_file.close()
 
     def _snapshot_refs(self) -> dict[str, Ref] | None:
@@ -283,6 +288,7 @@ class GitClient:
         with self._refs_lock:
             if self._refs is None:
                 upstreams = self._upstream_refs()
+                config = self._config
                 # Unless there are too many to name on a command line (Windows
                 # limits one to 32767 characters); then list every
                 # remote-tracking branch.
@@ -295,6 +301,7 @@ class GitClient:
                     listed = git_client.refs(self._git, "refs/heads/", *patterns)
                 head = next((ref.name.removeprefix("refs/heads/") for ref in listed.values() if ref.head), None)
                 self._refs = listed
+                self._refs_config = config
                 self._listed_upstreams, self._head = frozenset(upstreams), head
             return self._refs
 
@@ -373,14 +380,15 @@ class GitClient:
         if len(urls) != 1 or not urls[0] or config_key(f"remote.{remote}.pushurl") in self._config:
             return None
         url = urls[0]
-        for key, prefixes in self._config.items():
-            if (
-                key.startswith("url.")
-                and key.rpartition(".")[2] in {"insteadof", "pushinsteadof"}
-                and any(prefix is None or url.startswith(prefix) for prefix in prefixes)
-            ):
-                return None
-        return url
+        return None if self._url_is_rewritten(url, "insteadof", "pushinsteadof") else url
+
+    def _url_is_rewritten(self, url: str, *rules: str) -> bool:
+        return any(
+            prefix is None or url.startswith(prefix)
+            for key, prefixes in self._config.items()
+            if key.startswith("url.") and key.rpartition(".")[2] in rules
+            for prefix in prefixes
+        )
 
     def config_get(self, branch: str, key: str) -> str | None:
         return self.branch_config().get((branch, key.lower())) or None
@@ -626,7 +634,15 @@ class GitClient:
             local = refs.get(f"refs/heads/{branch}")
             upstream = refs.get(expected)
             # rev-parse dereferences symbolic refs and fails if the upstream is missing.
-            if local is not None and local.upstream == expected and upstream is not None and not upstream.symref:
+            # A fetch-refspec edit can change the mapping without moving any refs.
+            fetch_key = config_key(f"remote.{remote}.fetch")
+            if (
+                local is not None
+                and local.upstream == expected
+                and upstream is not None
+                and not upstream.symref
+                and self._refs_config.get(fetch_key) == self._config.get(fetch_key)
+            ):
                 return True
         upstream = self.run("rev-parse", "--symbolic-full-name", f"{branch}@{{upstream}}", check=False)
         return upstream == expected
@@ -659,12 +675,67 @@ class GitClient:
         return default
 
     def _ask_remote_default_branch(self, remote: str) -> str | None:
-        heads = self.run("ls-remote", "--symref", remote, "HEAD", check=False).splitlines()
-        for line in heads:
+        return self._default_from_heads(self.run("ls-remote", "--symref", remote, "HEAD", check=False))
+
+    @staticmethod
+    def _default_from_heads(heads: str) -> str | None:
+        for line in heads.splitlines():
             target, _, name = line.partition("\t")
             if name == "HEAD" and target.startswith("ref: refs/heads/"):
                 return target.removeprefix("ref: refs/heads/")
         return None
+
+    def push_default_branches(self, remote: str, *, known: str | None = None) -> frozenset[str] | None:
+        """Protect the fetch default and every distinct push destination's default."""
+        if self._snapshot_depth and remote in self._push_defaults:
+            return self._push_defaults[remote]
+        default = self.remote_default_branch(remote, known=known)
+        defaults = self._push_destination_defaults(remote, default) if default is not None else None
+        if self._snapshot_depth:
+            self._push_defaults[remote] = defaults
+        return defaults
+
+    def _push_destination_defaults(self, remote: str, default: str) -> frozenset[str] | None:
+        self.branch_config()
+        urls = self._config.get(config_key(f"remote.{remote}.url"), [])
+        separate = (
+            len(urls) > 1
+            or config_key(f"remote.{remote}.pushurl") in self._config
+            or any(self._url_is_rewritten(url or "", "pushinsteadof") for url in urls)
+        )
+        if not separate:
+            return frozenset({default})
+        push_urls = self.run("remote", "get-url", "--push", "--all", remote, check=False).splitlines()
+        if not push_urls:
+            return None
+        defaults = {default}
+        fetch_url = urls[0] if urls else None
+        if fetch_url is not None and self._url_is_rewritten(fetch_url, "insteadof"):
+            fetch_url = None
+        for url in dict.fromkeys(push_urls):
+            if url == fetch_url:
+                continue
+            if (branch := self._default_at_resolved_url(url)) is None:
+                return None
+            defaults.add(branch)
+        return frozenset(defaults)
+
+    def _default_at_resolved_url(self, url: str) -> str | None:
+        # Git has already applied the URL rewrite for the push. A single
+        # rewrite from a temporary name avoids applying a second rule, and
+        # keeps credentials in the URL out of the command line.
+        probe = f"git-stack-probe-{uuid.uuid4().hex}"
+        count = int(os.environ.get("GIT_CONFIG_COUNT") or "0")
+        env = {
+            "GIT_CONFIG_COUNT": str(count + 1),
+            f"GIT_CONFIG_KEY_{count}": f"url.{url}.insteadOf",
+            f"GIT_CONFIG_VALUE_{count}": probe,
+        }
+        try:
+            heads = self._git.run("ls-remote", "--symref", "--", probe, "HEAD", env=env)
+        except GitError:
+            return None
+        return self._default_from_heads(heads)
 
     def remote_branch(self, branch: str) -> tuple[str, str, str] | None:
         """Return (remote, ref, tip) for branch's upstream on a remote, or None."""

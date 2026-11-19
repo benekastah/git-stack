@@ -842,8 +842,8 @@ git stack push --prs            # then open pull requests, as `git stack prs` do
   remote-tracking ref that was checked, so if someone pushes after your last
   fetch, the push fails instead of overwriting their work.
 - The default-branch protection can reuse GitHub's response for a single
-  direct HTTPS remote on github.com. Otherwise it asks Git for the server's
-  current HEAD.
+  direct HTTPS remote on github.com. Otherwise it asks Git for the current
+  HEAD of the fetch remote and any separate push destinations.
 - A remote branch whose commits were rebased there, e.g. by GitHub's
   "Rebase stack" button, isn't pushed over: the local branch is moved to it
   instead, as `sync` does (see

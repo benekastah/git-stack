@@ -1658,13 +1658,13 @@ class StackClient(StackCore):
         git = self.git
         if not any(git.config_get(b, "remote") == remote for b in branches):
             return set()
-        default = git.remote_default_branch(remote, known=known_default)
-        if default is None:
+        defaults = git.push_default_branches(remote, known=known_default)
+        if defaults is None:
             raise StackError(
                 f"{remote}'s default branch isn't known (couldn't ask {remote}, or its HEAD isn't a branch); "
                 "use --force to allow the configured upstream"
             )
-        protected = {default} | {git.remote_branch_name(root, remote) for root in roots}
+        protected = defaults | {git.remote_branch_name(root, remote) for root in roots}
         return {
             b
             for b in branches
@@ -1907,13 +1907,13 @@ class StackClient(StackCore):
                 recorded.append((journal, deletion))
         if not recorded:
             return pending, known
-        default = self.git.remote_default_branch(state.remote)
-        if default is None:
+        defaults = self.git.push_default_branches(state.remote)
+        if defaults is None:
             raise StackError(f"can't determine {state.remote}'s default branch; refusing queued deletions")
         for journal, deletion in recorded:
             current = self.git.rev(f"refs/remotes/{deletion.upstream}")
             protected = (deletion.remote, deletion.ref) in state.protected_deletes
-            if current == deletion.tip and deletion.branch != default and not protected:
+            if current == deletion.tip and deletion.branch not in defaults and not protected:
                 entry = known[deletion.ref]
                 entry.add(journal, deletion)
                 pending[deletion.ref] = entry
@@ -2074,10 +2074,10 @@ class StackClient(StackCore):
         self.ensure_remote_branches_ours(list(selection.integrations), remote)
         protected = {git.remote_branch_name(root, remote) for root in roots - selection.integrations.keys()}
         if selection.integrations and not force:
-            default = git.remote_default_branch(remote)
-            if default is None:
+            defaults = git.push_default_branches(remote)
+            if defaults is None:
                 raise StackError(f"{remote}'s default branch isn't known; rerun `git stack sync --force`")
-            protected.add(default)
+            protected.update(defaults)
         leases: dict[str, tuple[str, str | None]] = {}
         for name, config in selection.integrations.items():
             target = git.remote_branch_name(name, remote)
@@ -2736,7 +2736,12 @@ class StackClient(StackCore):
             assert tip is not None
             self.record_published_branch(integrations, push.name, remote, push.target, tip)
         if work_tips is None:
-            self.record_pulled_tips((name, self.git.tip(name)) for name in branches)
+            # A hook can move a local branch while Git publishes the old tip.
+            self.record_pulled_tips(
+                (name, upstream[2])
+                for name in branches
+                if (upstream := self.git.remote_branch(name)) is not None and upstream[0] == remote
+            )
             return
         for name in branches:
             self.record_published_branch(
