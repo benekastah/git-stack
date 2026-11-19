@@ -45,7 +45,7 @@ branch that isn't tracked, e.g. after a plain `git branch -m` of the parent. Fix
 `git stack track <parent> <branch>`: the base is worked out again from the reflog or merge-base.
 
 **"needs restack" won't clear, or restack says it stopped on a conflict** `git status`: if
-a rebase is in progress, finish it (see `git-stack-sync`). After a `git rebase --abort`, a pending
+a rebase is in progress, finish it (see `git-stack-restack`). After a `git rebase --abort`, a pending
 record stays, and rerunning `git stack restack` starts the same conflict again.
 
 **"could not lock config file .git/config: File exists"** (after about 5 seconds) A git process died

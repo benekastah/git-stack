@@ -64,10 +64,13 @@ git stack push --prs           # push both, open draft PRs, each into its parent
 | Group stacks to act on them together | `git stack group add <name> <branch>...` |
 | Who owns a stack | `git stack ownership show` |
 
-Keeping a stack current (restack, sync, conflicts) is the `git-stack-sync` skill. Reshaping it is
-`git-stack-rearrange`. When something looks wrong, use `git-stack-troubleshoot`. Breaking a big change
-into a stack is `git-stack-split`. Building work above several unmerged inputs is
-`git-stack-integrate`.
+Use `git-stack-restack` to replay branches on local parents, `git-stack-pull` to
+fetch and update locally, `git-stack-push` to publish local work, and
+`git-stack-sync` to fetch, update and publish in one command.
+
+Use `git-stack-rearrange` to change a stack's shape, `git-stack-troubleshoot`
+to diagnose a broken stack, `git-stack-split` to break up a large change, and
+`git-stack-integrate` to build work above several unmerged inputs.
 
 ## Reading state in scripts
 

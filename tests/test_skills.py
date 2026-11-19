@@ -47,6 +47,13 @@ def test_the_core_skill_exists() -> None:
     assert (SKILLS / "git-stack" / "SKILL.md").is_file()
 
 
+@pytest.mark.parametrize("command", ["sync", "restack", "pull", "push"])
+def test_stack_update_command_has_its_own_skill(command: str) -> None:
+    skill = SKILLS / f"git-stack-{command}" / "SKILL.md"
+    assert skill.is_file(), f"missing {skill.parent.name}"
+    assert command in stack_commands(skill.read_text(encoding="utf-8"))
+
+
 @pytest.mark.parametrize("path", SKILL_FILES, ids=lambda p: f"{p.parent.name}/{p.name}")
 def test_every_git_stack_command_in_a_skill_parses(path: pathlib.Path) -> None:
     parser = build_parser()

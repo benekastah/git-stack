@@ -1,72 +1,37 @@
 ---
 name: git-stack-sync
-description: Bring stacked branches up to date with git-stack - restack, sync, pull, clean, push - and finish a restack or sync that stopped on a conflict or warned. Use after a PR in a stack merged, main changed, review feedback changed a lower branch, someone pushed to a branch, or a `git stack` command stopped.
+description: Fetch, update and publish stacked branches with git stack sync. Use after a pull request in the stack merges, its root moves, or someone pushes to a branch and the updated stack should be published.
 ---
 
-# Keeping a stack current
+# Sync a stack
 
-When `stack.perfLog` is set, use that log to report total wall time,
-how many Git and `gh` calls ran, the time spent in each tool, and the time spent elsewhere.
-Count each `cat-file` batch request as a Git call. Include batch shutdown in Git time only.
-Report any overlap shown and flag the slowest call if it explains a delay.
+Read `git-stack` first for selection, ownership and timing. Start with a clean
+worktree. Sync fetches, fast-forwards the root, untracks merged branches,
+restacks the survivors, incorporates upstream commits, and pushes changed
+branches that already track a remote.
 
-Read the `git-stack` skill first. Commit your work first: `restack` and `sync` refuse a dirty
-worktree (untracked files are fine unless one is in the way of a commit being replayed).
+- Use `git stack sync` for the current stack or `git stack sync <branch>` for a
+  named stack. Pass `-g` for its group or `-g <group>` for a named group. Use
+  `--remote <name>` if the selected branches track different remotes.
+- A branch directly on an ordinary root moves when it conflicts with the
+  updated root. Use `git stack sync --latest` to move it either way.
+- Use `git stack sync -d local` to delete merged local branches as they are
+  untracked. Ask before `-d remote` or `-d both`. For housekeeping across all
+  stacks without restacking, use `git stack clean`.
+- Sync refreshes selected integration roots and publishes them with eligible
+  work. See `git-stack-integrate` for integration merge conflicts.
 
-## Which command
+If sync stops on a rebase or cherry-pick conflict, no branches are pushed.
+Use the recovery steps in `git-stack-restack` or `git-stack-pull` for the
+operation shown by `git status`. Then rerun the original sync with the same
+selectors and options. Check the result with `git stack info --all --offline`.
 
-| Situation | Run |
-| --- | --- |
-| You committed to a branch that has branches stacked on it | `git stack restack`, then `git stack push` |
-| A PR merged, `main` moved, or someone pushed to your branch | `git stack sync` |
-| Also delete merged local branches | `git stack sync -d local` |
-| Put the stack on the latest `main` | `git stack sync --latest` (or `restack --latest`) |
-| Catch up locally only, no fetch-push | `git stack pull` (or `restack`) |
-| Untrack merged branches in every stack, restacking nothing | `git stack clean` |
-| Branch never pushed, or PRs to open | `git stack push --prs` (`sync` pushes work branches that already have an upstream) |
+Ask before overriding protections with `--force`, `--allow-shared`,
+`--rewritten-upstream`, `--pull-tracked-upstream` or `--ignore-revert`.
+See `git-stack-pull` for upstream history and revert warnings. A branch
+checked out elsewhere can be skipped while sync publishes other branches.
+Coordinate with whoever is using that worktree before retrying.
 
-`sync` fetches, fast-forwards the root, untracks merged branches (moving their children onto the
-parent), restacks, pulls in commits others pushed, then pushes with leases. A branch directly on an
-ordinary root only moves if it conflicts with the root's new commits or with `--latest`.
-Commands select the current or named stacks. Pass `-g` for the current group, or
-`-g <name>` for a named group.
-
-For stacks on an integration root, `sync` refreshes the integration and publishes it with the
-eligible work. `push` also refreshes the integration from local tips and publishes it with
-the restacked work. Use `git-stack-integrate` to manage these inputs or resolve a merge stopped in the
-temporary integration worktree.
-
-Ask the user before `-d remote`, `-d both`, `--force`, `--allow-shared`, `--rewritten-upstream`,
-`--pull-tracked-upstream` and `--ignore-revert`: each overrides a protection.
-
-## When it stops on a conflict
-
-Nothing is pushed while a restack or pull is stopped. Git-stack records the pending result and
-finishes it when you rerun it.
-
-1. `git status` shows the conflicted files. Resolve them, then `git add` each.
-2. Continue without an editor: `GIT_EDITOR=true git rebase --continue` (for a pull,
-   `git cherry-pick --continue`). Repeat while it stops again.
-3. Rerun the command you started (`git stack restack` or `git stack sync`) to finish the rest of the
-   stack and record the new bases.
-4. Check with `git stack info --all --offline`, then `git stack push` if you didn't `sync`.
-
-- Don't `git rebase --abort` unless the user asks: the pending record stays, and rerunning the
-  command restarts the same conflict.
-- If an untracked file stops a commit being replayed (git says which), move it away and run
-  `git rebase --continue`. For a pull, run `git cherry-pick --abort` instead (`--continue` would skip
-  the commit) and rerun `git stack sync`.
-- The same line conflicting on every commit of a branch is a limit of line-based merging. A syntax-aware merge driver
-  such as mergiraf avoids it; suggest it to the user, don't enable it yourself.
-
-## Warnings you may meet
-
-- **Checked out in another worktree**: the branch, and the ones on it, are skipped. Finish or
-  switch that worktree, then rerun.
-- **Merged, then reverted**: the branch and its children are left alone. `git stack unrevert <name> <revert>` brings
-  it back as a new branch; if it wasn't really a revert, `--ignore-revert <branch>`. Ask the user.
-- **Upstream has unseen commits and its history was rewritten**: don't guess. Inspect, then the user
-  picks `--rewritten-upstream` (replay them) or `git stack push --force` (replace the remote).
-- **Shared stack** (someone else's commits): needs `--allow-shared`. Ask first.
-- **Remote branch deleted without a merge**: the branch is kept with a warning. Nothing to do.
-- **Broken metadata** (parent deleted by hand): see `git-stack-troubleshoot`.
+Use `git-stack-pull` to fetch and update locally, `git-stack-restack` to use
+local refs, and `git-stack-push` to publish a branch for the first time or open
+its draft PR.
