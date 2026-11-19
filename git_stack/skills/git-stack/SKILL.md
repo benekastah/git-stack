@@ -14,6 +14,7 @@ Words: **stack** (branches built on each other; it can fork), **root** (the bran
 from, usually `main`), **tracked** (git-stack knows the branch), **group** (stacks that were one stack before their
 bottom branch merged). Most commands act on the *current stack*: every branch connected to the one you're
 on, including siblings.
+`sync` and `pull` select just that stack. Pass `-g` to include its group.
 
 ## Rules
 

@@ -23,6 +23,8 @@ worktree (untracked files are fine unless one is in the way of a commit being re
 `sync` fetches, fast-forwards the root, untracks merged branches (moving their children onto the
 parent), restacks, pulls in commits others pushed, then pushes with leases. A branch directly on an
 ordinary root only moves if it conflicts with the root's new commits or with `--latest`.
+`sync` and `pull` select the current or named stacks. Pass `-g` for the current group, or
+`-g <name>` for a named group.
 
 For stacks on an integration root, `sync` refreshes the integration and publishes it with the
 eligible work. `push` also refreshes the integration from local tips and publishes it with

@@ -607,7 +607,7 @@ def test_retry_with_only_retired_source_preserves_group_scope(repo: Repo) -> Non
     repo.git("merge", "--ff-only", "one")
     repo.git("switch", "two")
     repo.commit("a", "conflict\n", "conflict")
-    command = ("sync", "one", "--delete", "local")
+    command = ("sync", "one", "-g", "both", "--delete", "local")
     path = conflict_worktree(repo.stack(*command, expect_success=False).stderr)
     (path / "a").write_text("resolved\n", encoding="utf-8")
     repo.git("add", "a", cwd=path)
@@ -630,7 +630,7 @@ def test_retry_selects_recorded_integration_after_its_last_work_lands(
     repo.git("merge", "--ff-only", "one")
     repo.git("switch", "two")
     repo.git("cherry-pick", landed)
-    command = ("sync", "one", "--delete", "local")
+    command = ("sync", "one", "-g", "both", "--delete", "local")
     passthrough = GitClient.passthrough
 
     def reject_push(git: GitClient, *args: str) -> bool:

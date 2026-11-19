@@ -610,11 +610,17 @@ def test_info_all_rejects_other_selectors(stack: Any, capsys: pytest.CaptureFixt
     stack.info.assert_not_called()
 
 
-@pytest.mark.parametrize("command", [["sync"], ["push"], ["restack"], ["prs"], ["ungroup"], ["group", "remove"]])
+@pytest.mark.parametrize("command", [["push"], ["restack"], ["prs"], ["ungroup"], ["group", "remove"]])
 def test_writing_commands_require_a_group_name(stack: Any, command: list[str]) -> None:
     with pytest.raises(SystemExit) as error:
         main([*command, "-g"], stack=stack)
     assert error.value.code == 2
+
+
+@pytest.mark.parametrize("command", ["sync", "pull"])
+def test_sync_and_pull_accept_current_group(stack: Any, command: str) -> None:
+    main([command, "-g"], stack=stack)
+    assert stack.sync.call_args.args == ([], [CURRENT_GROUP])
 
 
 def test_pull_does_not_accept_remote_deletion(stack: Any) -> None:

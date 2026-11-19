@@ -65,10 +65,33 @@ def test_rerun_after_a_conflict_still_syncs_every_stack_in_the_group(repo: Repo,
     repo.git("add", "b")
     repo.git("rebase", "--continue")
 
-    client.sync()
+    client.sync(groups=["a"])
 
     repo.assert_stacked("b", "main", ["b c1"])
     repo.assert_stacked("c", "main", ["c c1"])
+
+
+@pytest.mark.parametrize("selector", [(), ("b",)])
+@pytest.mark.parametrize("push", [True, False])
+def test_sync_selects_one_grouped_stack_unless_group_requested(
+    repo: Repo, client: StackClient, selector: tuple[str, ...], push: bool
+) -> None:
+    make_siblings(repo, client)
+    client.sync()
+    repo.git("switch", "b")
+    repo.commit("b", "b local\n", "b local")
+    repo.git("switch", "c")
+    repo.commit("c", "c local\n", "c local")
+    repo.git("switch", "b")
+    before = repo.remote_subject("c")
+
+    result = client.sync(branches=selector, push=push)
+
+    assert {branch.name for branch in result.branches} == {"main", "b"}
+    assert repo.remote_subject("c") == before
+    client.sync(groups=["a"], push=push)
+    if push:
+        assert repo.remote_subject("c") == "c local"
 
 
 def test_push_from_one_stack_in_a_group_pushes_them_all(repo: Repo, client: StackClient) -> None:
@@ -149,7 +172,7 @@ def test_group_spans_stacks_on_different_roots(repo: Repo, client: StackClient) 
     repo.git("push", "--quiet", "origin", "release", cwd=repo.forge)
     repo.git("switch", "--quiet", "b")
 
-    client.sync()
+    client.sync(groups=["a"])
 
     assert client.show_stack("b") == ["b", "c"]
     assert repo.git("rev-parse", "release") == repo.git("rev-parse", "origin/release")

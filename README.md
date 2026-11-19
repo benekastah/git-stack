@@ -67,7 +67,7 @@ git stack sync                  # catch up: drop merged PRs, rebase what's left,
   the branch's own commits.
 - **the current stack**: the whole stack the branch you're on is part of,
   including branches beside yours, not just the ones above it, and the other
-  stacks in its group.
+  stacks in its group for commands other than `sync` and `pull`.
 - **group**: stacks that were one stack until the branch at their bottom
   merged (see [Groups](#groups)).
 
@@ -149,6 +149,8 @@ main
 - A group can span roots, e.g. if you `restack --onto release` one of its
   stacks. Commands on it then cover every root it's on: `sync` fast-forwards
   each, and `prs` gives each root's pull requests their own stack section.
+- `sync` and `pull` select only the current or named stacks. Pass `-g` for
+  the current stack's group, or `-g <name>` for a named group.
 - `info` only shows a group once it has two or more stacks, with
   `group <name>` above its stacks on each root they're on. A group of one is
   just a stack.
@@ -652,7 +654,7 @@ git stack restack --latest              # also move the stack onto main's latest
 - A branch checked out in another worktree is skipped, with a warning; see
   [Branches checked out in other worktrees](#branches-checked-out-in-other-worktrees).
 
-### `git stack sync [<branch|glob>...] [-g <group>] [--remote <name>] [-d local|remote|both] [-l] [--force] [--no-verify] [--ignore-revert <branch>] [--allow-shared] [--pull-tracked-upstream] [--rewritten-upstream] [--rebuild-stack]`
+### `git stack sync [<branch|glob>...] [-g [<group>]] [--remote <name>] [-d local|remote|both] [-l] [--force] [--no-verify] [--ignore-revert <branch>] [--allow-shared] [--pull-tracked-upstream] [--rewritten-upstream] [--rebuild-stack]`
 
 Bring the current stack (or the ones named, see [Groups](#groups)) up to date
 with the remote:
@@ -753,7 +755,7 @@ git stack sync -d both          # ...and their remote branches
   for that reason.
 - Needs a clean worktree, and refuses to run outside a stack.
 
-### `git stack pull [<branch|glob>...] [-g <group>] [--remote <name>] [-d local] [-l] [--ignore-revert <branch>] [--allow-shared] [--pull-tracked-upstream] [--rewritten-upstream]`
+### `git stack pull [<branch|glob>...] [-g [<group>]] [--remote <name>] [-d local] [-l] [--ignore-revert <branch>] [--allow-shared] [--pull-tracked-upstream] [--rewritten-upstream]`
 
 Fetch and update the selected stacks locally. It can
 fast-forward local roots, untrack merged branches, and restack or pull into
@@ -864,7 +866,7 @@ git stack push --prs            # then open pull requests, as `git stack prs` do
 
 ### `git stack group add <name> [<branch|glob>...] [-g <group>] [--move]`
 
-Put stacks (default: the current one) in group `<name>`, so `restack`, `sync`,
+Put stacks (default: the current one) in group `<name>`, so `restack`,
 `push` and `prs` on one of them cover them all, and so you can name them all
 at once (see [Groups](#groups)). `git stack group remove` takes stacks out of
 their groups (`git stack ungroup` for short), and

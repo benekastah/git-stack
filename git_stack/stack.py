@@ -1283,8 +1283,10 @@ class StackClient(StackCore):
         ordinary = [name for name in branches if name not in names]
         retired, replaced = self.retired_source_selectors(ordinary, stacks, integrations, names)
         ordinary = [name for name in ordinary if name not in replaced]
+        retired_groups = {entry["group"] for owners in retired.values() for _, entry in owners}
+        groups = [group for group in groups if group not in retired_groups or stacks.bottoms_in(group)]
         selected = (
-            self.selected_stacks(ordinary, groups, stacks, command)
+            self.selected_stacks(ordinary, groups, stacks, command, include_groups=command not in ("sync", "pull"))
             if ordinary or groups or not (explicit or replaced)
             else []
         )
@@ -1735,11 +1737,7 @@ class StackClient(StackCore):
         if selection.integrations:
             shown = self.branch_infos(stacks.restricted(stack), adapter, selection.integrations)
         else:
-            shown = (
-                self.branch_infos(stacks.restricted(stack), adapter)
-                if only_remote
-                else self.stack_infos(stack, adapter)
-            )
+            shown = self.branch_infos(stacks.restricted(stack), adapter)
         return SyncResult(state.unpushed, shown)
 
     def integration_deletion_refs(

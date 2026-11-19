@@ -280,18 +280,24 @@ class StackCore:
         return list(dict.fromkeys(named))
 
     def selected_stacks(
-        self, branches: Sequence[str], groups: Sequence[str], stacks: Stacks, command: str
+        self,
+        branches: Sequence[str],
+        groups: Sequence[str],
+        stacks: Stacks,
+        command: str,
+        *,
+        include_groups: bool = True,
     ) -> list[str]:
         """The branches in the stacks (see Stacks.stack_of) of the branches
         that branches and groups name (see named), or with neither, in the
         current stack. Each stack is parent-before-child."""
         if not branches and not groups:
-            return stacks.stack_of(self.current_stacked_branch(stacks, command))
+            return stacks.stack_of(self.current_stacked_branch(stacks, command), groups=include_groups)
         result: dict[str, None] = {}
         for branch in self.named(branches, groups, stacks):
             # Stacks never overlap, so one with branch in it is already all there.
             if branch not in result:
-                result.update(dict.fromkeys(stacks.stack_of(branch)))
+                result.update(dict.fromkeys(stacks.stack_of(branch, groups=include_groups)))
         return list(result)
 
     def selected_bottoms(

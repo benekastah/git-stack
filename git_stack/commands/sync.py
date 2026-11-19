@@ -40,7 +40,7 @@ def register(subparsers: Subparsers) -> None:
         help="fetch, untrack the current stack's (or the named ones') merged branches, restack "
         "it, pull in commits others pushed, and push the branches that already have a remote branch",
     )
-    add_stack_arguments(p, "sync")
+    add_stack_arguments(p, "sync", optional_group=True)
     p.add_argument("--remote", help="only sync branches tracking this remote")
     p.add_argument("--no-verify", action="store_true", help="skip the pre-push hook")
     p.add_argument("--force", action="store_true", help="allow syncing a branch to the remote default branch")

@@ -28,7 +28,7 @@ class Args(argparse.Namespace):
 
 def register(subparsers: Subparsers) -> None:
     p = subparsers.add_parser("pull", help="fetch and sync stacks locally without pushing")
-    add_stack_arguments(p, "pull")
+    add_stack_arguments(p, "pull", optional_group=True)
     p.add_argument("--remote", help="only pull branches tracking this remote")
     p.add_argument("-d", "--delete", choices=(Delete.LOCAL.value,), help="also delete merged local branches")
     add_latest_argument(p)
