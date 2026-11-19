@@ -77,6 +77,22 @@ def test_config_get_sees_changes_made_by_other_processes(repo: Repo) -> None:
     assert git.config_get("main", "stackParent") == "trunk"
 
 
+@pytest.mark.parametrize("explicit", [False, True])
+def test_push_destinations_see_changes_in_an_included_config(repo: Repo, explicit: bool) -> None:
+    included = repo.tmp / "remote-config"
+    included.write_text("", encoding="utf-8")
+    repo.git("config", "include.path", str(included))
+    if explicit:
+        repo.git("config", "--file", str(included), "remote.origin.pushurl", str(repo.origin))
+    git = GitClient(repo.path)
+    with git.snapshot():
+        assert not git.has_multiple_push_urls("origin")
+        if not explicit:
+            repo.git("config", "--file", str(included), "remote.origin.pushurl", str(repo.origin))
+        repo.git("config", "--file", str(included), "--add", "remote.origin.pushurl", "second-destination")
+        assert git.has_multiple_push_urls("origin")
+
+
 def test_config_get_handles_dots_in_branch_names_and_any_key_case(repo: Repo) -> None:
     repo.git("config", "branch.release.1.2.stackParent", "main")
 

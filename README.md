@@ -873,6 +873,8 @@ git stack push --prs            # then open pull requests, as `git stack prs` do
 - The branches are pushed atomically to each destination. If a remote has
   several push URLs, a dry run checks leases at all destinations first. A
   failure during the real push can still leave some destinations updated.
+- If Git’s list of push URLs is ambiguous, the default branch check refuses
+  the push.
 - Refuses to push a branch whose remote branch was deleted, since that's
   usually a merged pull request `sync` hasn't seen yet. If it wasn't, run
   `git branch --unset-upstream <branch>` to push it again.

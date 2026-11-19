@@ -1204,6 +1204,9 @@ destinations first.
 A failure during the real push can still leave some destinations
 updated.
 .IP \(bu 2
+If Git\(cqs list of push URLs is ambiguous, the default branch check
+refuses the push.
+.IP \(bu 2
 Refuses to push a branch whose remote branch was deleted, since
 that\(aqs usually a merged pull request \f[CR]sync\f[R] hasn\(aqt seen
 yet.

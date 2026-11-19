@@ -147,21 +147,6 @@ def test_push_reports_partial_success_when_a_second_attempt_fails(repo: Repo, cl
     assert repo.git("rev-parse", "refs/heads/feature", cwd=repo.origin) == tip
 
 
-def test_push_resolves_an_explicit_destination_once(repo: Repo, client: StackClient, git_calls: list[GitCall]) -> None:
-    client.branch("feature")
-    repo.commit("a", "feature\n", "feature")
-    client.push()
-    other = repo.tmp / "other-push.git"
-    repo.git("clone", "--bare", "--quiet", str(repo.origin), str(other))
-    repo.git("config", "remote.origin.pushurl", str(other))
-    repo.commit("a", "local advance\n", "advance")
-    git_calls.clear()
-
-    client.push()
-
-    assert sum(call[:5] == ["remote", "get-url", "--push", "--all", "origin"] for call in git_calls) == 1
-
-
 @pytest.mark.parametrize("push_config", ["pushurl", "pushInsteadOf", "multiple URLs", "second rewrite"])
 def test_push_protects_the_default_branch_at_the_actual_push_destination(
     repo: Repo, client: StackClient, push_config: str
@@ -188,6 +173,28 @@ def test_push_protects_the_default_branch_at_the_actual_push_destination(
 
     assert "rerun `git stack push --force`" in result.stderr
     assert repo.git("rev-parse", "refs/heads/release", cwd=other) == before
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Win32 disallows newlines in paths")
+def test_push_refuses_an_ambiguous_default_branch_probe(repo: Repo, client: StackClient) -> None:
+    repo.git("push", "--quiet", "origin", "main:release")
+    decoy = repo.tmp / "decoy.git"
+    repo.git("clone", "--bare", "--quiet", str(repo.origin), str(decoy))
+    destination = repo.origin.with_name(f"{repo.origin.name}\n") / decoy.relative_to(decoy.anchor)
+    destination.parent.mkdir(parents=True)
+    repo.git("clone", "--bare", "--quiet", str(repo.origin), str(destination))
+    repo.git("symbolic-ref", "HEAD", "refs/heads/release", cwd=destination)
+    repo.git("config", "remote.origin.pushurl", str(destination))
+    repo.git("fetch", "--quiet", "origin")
+    client.branch("feature")
+    repo.commit("a", "feature\n", "feature")
+    repo.git("branch", "--set-upstream-to=origin/release", "feature")
+    before = repo.git("rev-parse", "refs/heads/release", cwd=destination)
+
+    with pytest.raises(StackError, match="default branch isn't known"):
+        client.push()
+
+    assert repo.git("rev-parse", "refs/heads/release", cwd=destination) == before
 
 
 @pytest.mark.parametrize(("advance", "git_budget"), [(True, 18), (False, 14)])

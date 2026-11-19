@@ -179,7 +179,6 @@ class GitClient:
         self._reflogs: dict[str, tuple[str, ...]] = {}
         self._remote_defaults: dict[str, str | None] = {}
         self._push_defaults: dict[str, frozenset[str] | None] = {}
-        self._push_urls: dict[str, tuple[str, ...]] = {}
         self._refs_lock = threading.Lock()
         # Where passthrough sends git's stdout (default: ours), e.g. stderr when
         # our stdout is for --json output.
@@ -279,7 +278,6 @@ class GitClient:
                 self._forget_refs()
                 self._remote_defaults = {}
                 self._push_defaults = {}
-                self._push_urls = {}
                 self._refs_config = {}
                 self._cat_file.close()
 
@@ -365,7 +363,6 @@ class GitClient:
                     branches[branch, name] = values[-1] or ""
             self._config, self._branch_config = entries, branches
             self._config_stat, self._config_read = stat, True
-            self._push_urls = {}
         return self._branch_config
 
     def config_value(self, key: str) -> str | None:
@@ -706,31 +703,32 @@ class GitClient:
 
     def has_multiple_push_urls(self, remote: str) -> bool:
         """Whether Git can push this remote's refspecs to more than one URL."""
-        return self._shared_remote_url(remote) is None and len(self._resolved_push_urls(remote)) > 1
+        shared_url = self._shared_remote_url(remote)
+        # The main config file can stay unchanged when an include or worktree
+        # config changes, even during a restack hook. Ask Git in those cases.
+        separate_config = any(
+            key in ("include.path", "extensions.worktreeconfig") or key.startswith("includeif.") for key in self._config
+        )
+        return (shared_url is None or separate_config) and len(self._resolved_push_urls(remote)) > 1
 
     def _resolved_push_urls(self, remote: str) -> tuple[str, ...]:
-        # Both default-branch protection and preflight use the effective push
-        # configuration, including config resets and Git's legacy remotes.
-        self.branch_config()
-        if self._snapshot_depth and remote in self._push_urls:
-            return self._push_urls[remote]
         try:
             output = self._git.run("remote", "get-url", "--push", "--all", remote, strip=False)
         except GitError:
             return ()
-        urls = tuple(output.removesuffix("\n").split("\n")) if output else ()
-        if self._snapshot_depth:
-            self._push_urls[remote] = urls
-        return urls
+        return tuple(output.removesuffix("\n").split("\n")) if output else ()
 
     def _push_destination_defaults(self, remote: str, default: str) -> frozenset[str] | None:
         if self._shared_remote_url(remote) is not None:
             return frozenset({default})
+        urls = self._config.get(config_key(f"remote.{remote}.url"), [])
+        explicit = self._config.get(config_key(f"remote.{remote}.pushurl"), [])
+        if self._ambiguous_push_urls([url for url in (*urls, *explicit) if url]):
+            return None
         push_urls = self._resolved_push_urls(remote)
         if not push_urls:
             return None
         defaults = {default}
-        urls = self._config.get(config_key(f"remote.{remote}.url"), [])
         fetch_url = urls[0] if urls else None
         if fetch_url is not None and self._url_is_rewritten(fetch_url, "insteadof"):
             fetch_url = None
@@ -741,6 +739,16 @@ class GitClient:
                 return None
             defaults.add(branch)
         return frozenset(defaults)
+
+    def _ambiguous_push_urls(self, configured: list[str]) -> bool:
+        """Git separates URLs with newlines and leaves newlines in URLs unescaped."""
+        return any("\n" in url for url in configured) or any(
+            key.startswith("url.")
+            and "\n" in key
+            and key.rpartition(".")[2] in ("insteadof", "pushinsteadof")
+            and any(url.startswith(prefix or "") for prefix in prefixes for url in configured)
+            for key, prefixes in self._config.items()
+        )
 
     def _default_at_resolved_url(self, url: str) -> str | None:
         # Git has already applied the URL rewrite for the push. A single
