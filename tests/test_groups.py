@@ -148,7 +148,7 @@ def test_children_of_a_merged_branch_in_a_group_stay_in_it(repo: Repo, client: S
     assert client.show_stack("c") == ["c", "b2"]
 
 
-def test_branch_whose_merged_parent_had_only_it_on_it_shows_no_group(repo: Repo, client: StackClient) -> None:
+def test_branch_whose_merged_parent_had_only_it_on_it_shows_its_group(repo: Repo, client: StackClient) -> None:
     repo.make_stack()
     client.push()
     repo.squash_merge_on_forge("pr1")
@@ -157,7 +157,7 @@ def test_branch_whose_merged_parent_had_only_it_on_it_shows_no_group(repo: Repo,
     client.sync()
 
     assert repo.config("pr2", "stackGroup") == "pr1"
-    assert repo.branch_info("pr2").group is None
+    assert repo.branch_info("pr2").group == "pr1"
 
 
 def test_untracked_branch_leaves_its_group(repo: Repo, client: StackClient) -> None:
@@ -169,7 +169,7 @@ def test_untracked_branch_leaves_its_group(repo: Repo, client: StackClient) -> N
 
     assert not repo.config_exists("c", "stackGroup")
     assert client.show_stack("b") == ["b"]
-    assert repo.branch_info("b").group is None
+    assert repo.branch_info("b").group == "a"
 
 
 def test_group_spans_stacks_on_different_roots(repo: Repo, client: StackClient) -> None:
@@ -299,7 +299,7 @@ def test_group_remove_takes_stacks_out_of_their_group(repo: Repo, client: StackC
     assert client.group_remove(["feat-b", "other"]) == [("feat-b", "feat")]
 
     assert client.show_stack("feat-a") == ["feat-a"]
-    assert repo.branch_info("feat-a").group is None
+    assert repo.branch_info("feat-a").group == "feat"
 
 
 def test_group_rename_renames_the_current_stacks_group(repo: Repo, client: StackClient) -> None:

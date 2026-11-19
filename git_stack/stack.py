@@ -1102,12 +1102,20 @@ class StackClient(StackCore):
             stacks = stacks.restricted(selected.branches)
             integration_roots &= selected.integrations.keys()
         adapter = GitAdapter(self) if offline else make_adapter(self, self.default_remote(stacks, stacks), fetch=False)
-        return self.branch_infos(stacks, adapter, integration_roots)
+        return self.branch_infos(stacks, adapter, integration_roots, show_single_groups=True)
 
-    def branch_infos(self, stacks: Stacks, adapter: GitAdapter, extra_roots: Iterable[str] = ()) -> list[BranchInfo]:
+    def branch_infos(
+        self,
+        stacks: Stacks,
+        adapter: GitAdapter,
+        extra_roots: Iterable[str] = (),
+        *,
+        show_single_groups: bool = False,
+    ) -> list[BranchInfo]:
         """The branches in stacks, as info() lists them, checked with adapter,
         so a command that already has one (and its pull requests) can show
-        them without looking them up again."""
+        them without looking them up again. show_single_groups keeps names
+        visible even when the displayed selection has only one stack in a group."""
         git = self.git
         current = git.current_branch()
 
@@ -1140,7 +1148,9 @@ class StackClient(StackCore):
             statuses = dict(zip(branches, pool.map(status, branches), strict=True))
             prefetched.result()
         shown_groups = {
-            b: g for b, g in stacks.groups().items() if stacks.is_bottom(b) and len(stacks.group_bottoms(b)) > 1
+            b: g
+            for b, g in stacks.groups().items()
+            if stacks.is_bottom(b) and (show_single_groups or len(stacks.group_bottoms(b)) > 1)
         }
         result: list[BranchInfo] = []
         integrations = Integrations(self)

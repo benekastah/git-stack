@@ -753,7 +753,30 @@ def test_prs_keeps_the_github_stack_of_each_stack_in_a_group(repo: Repo, gh: Fak
     client.prs(groups=["g"])
 
     assert gh.stacks() == [[1, 2], [3, 4]]
-    assert [body(gh, n) for n in (1, 2, 3, 4)] == ["", "", "", ""]
+    group = ["  - #1", "    - #2", "  - #3", "    - #4"]
+    for number in (1, 2, 3, 4):
+        assert body(gh, number) == stack(
+            "- `main`", *(line + (" 👈" if line.endswith(f"#{number}") else "") for line in group)
+        )
+
+
+def test_prs_shows_the_group_across_roots_in_the_selected_pr(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+    repo.git("branch", "release", "main")
+    repo.git("push", "--quiet", "--set-upstream", "origin", "release")
+    client.branch("a", group="g")
+    repo.commit("a", "a\n", "a c1")
+    client.push(prs=True)
+    client.branch("b", group="g", from_branch="release")
+    repo.commit("b", "b\n", "b c1")
+    client.push(prs=True)
+    assert body(gh, 1) == ""
+    assert body(gh, 2) == stack("- `main`", "  - #1", "- `release`", "  - #2 👈")
+
+    gh.clear_calls()
+    client.prs(["a"])
+
+    assert body(gh, 1) == stack("- `main`", "  - #1 👈", "- `release`", "  - #2")
+    assert [call[2] for call in gh.calls("pr", "edit")] == ["1"]
 
 
 def test_push_unstacks_a_github_stack_that_no_longer_fits_a_branching_stack(
