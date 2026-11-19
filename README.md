@@ -740,9 +740,8 @@ git stack sync -d both          # ...and their remote branches
   for those. It never forces, so it fails if `push` would refuse. As with
   `push`, the branches are pushed in one atomic push. Pushing to the remote's
   default branch, or to a stack root's remote branch, requires `--force`. The
-  default branch is asked of the remote each time (not read from
-  `<remote>/HEAD`, which fetching doesn't update); if the remote can't say,
-  `sync` fails unless `--force` is given.
+  default branch is checked when sync has work to publish. If it cannot be
+  determined, sync refuses to publish unless `--force` is given.
 - Nothing is pushed if a restack or pull stops on a conflict; rerun `sync`
   once it's resolved.
 - A branch whose remote branch was deleted without being merged (e.g. a

@@ -157,6 +157,18 @@ def test_sync_pushes_to_a_differently_named_upstream(repo: Repo, client: StackCl
     assert repo.git("rev-parse", "--abbrev-ref", "local-feature@{upstream}") == "origin/remote-feature"
 
 
+def test_up_to_date_sync_does_not_probe_the_remote_default_branch(
+    repo: Repo, client: StackClient, git_calls: list[GitCall]
+) -> None:
+    repo.make_stack()
+    client.push()
+    git_calls.clear()
+
+    client.sync(latest=True)
+
+    assert not any(call[0] in ("ls-remote", "push") for call in git_calls)
+
+
 def test_sync_requires_force_to_push_to_default_branch(repo: Repo, client: StackClient) -> None:
     client.branch("feature")
     repo.commit("a", "feature\n", "feature")

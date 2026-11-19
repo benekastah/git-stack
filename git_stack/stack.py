@@ -1772,13 +1772,7 @@ class StackClient(StackCore):
         }
         root_remotes = self.upstream_remotes(roots_to_update)
         push_remote = remote if only_remote else self.stack_remote(upstream_remotes, root_remotes)
-        destinations = [*stack, *selection.integrations]
         protected_roots = roots | ordinary_roots
-        protected = (
-            self.protected_sync_destinations(destinations, protected_roots, push_remote)
-            if push and not force
-            else set[str]()
-        )
         original = self.current_checkout()
         adapter = self.checked_adapter(push_remote)
         remotes = {push_remote} | upstream_remotes | root_remotes
@@ -1788,7 +1782,6 @@ class StackClient(StackCore):
             roots = {stacks.root(b) for b in stack} | selection.integrations.keys()
             ordinary_roots = {config["root"] for config in selection.integrations.values()}
             protected_roots = roots | ordinary_roots
-            destinations = [*stack, *selection.integrations]
             roots_to_update = ordinary_roots | {
                 r
                 for r in roots - selection.integrations.keys()
@@ -1796,13 +1789,24 @@ class StackClient(StackCore):
             }
             for name in sorted(self.upstream_remotes(roots_to_update) - remotes):
                 self.fetch(name)
-            if push and not force:
-                protected = self.protected_sync_destinations(destinations, protected_roots, push_remote)
         integration_leases = self.integration_leases(selection, push_remote, force, protected_roots) if push else {}
         # A group's stacks can be on different roots.
         self.preflight_integration_worktrees(selection, expected, roots_to_update)
         self.fast_forward_trunks(sorted(roots_to_update))
 
+        # Root destinations can be checked locally. The remote's default
+        # branch only needs probing if there are branches to publish.
+        protected_names = {self.git.remote_branch_name(root, push_remote) for root in protected_roots}
+        protected = (
+            {
+                branch
+                for branch in stack
+                if self.git.config_get(branch, "remote") == push_remote
+                and self.git.remote_branch_name(branch, push_remote) in protected_names
+            }
+            if push and not force
+            else set[str]()
+        )
         state = SyncState(
             original,
             stacks,
@@ -1819,7 +1823,7 @@ class StackClient(StackCore):
             no_verify,
         )
         state.protected_deletes = self.integration_deletion_refs(delete, roots, push_remote)
-        self.refresh_and_push(selection, expected, adapter, state, integration_leases, rebuild_stack)
+        self.refresh_and_push(selection, expected, adapter, state, integration_leases, rebuild_stack, force)
         if push and state.blocked:
             raise StackError(
                 f"didn't push {', '.join(state.blocked)}: checked out in another worktree, or stacked on a branch "
@@ -1857,6 +1861,7 @@ class StackClient(StackCore):
         state: SyncState,
         leases: dict[str, tuple[str, str | None]],
         rebuild_stack: bool,
+        force: bool,
     ) -> None:
         integrations = Integrations(self)
         pending: dict[str, QueuedRemoteDeletion] = {}
@@ -1882,6 +1887,9 @@ class StackClient(StackCore):
                 for name, (target, remote_tip) in leases.items()
             ]
             deletions = self.ready_remote_deletions(pending, state, adapter)
+            if state.pushable and not force:
+                known_default = adapter.default_branch_for_push() if isinstance(adapter, GitHubAdapter) else None
+                self.ensure_sync_destination(state.pushable, set(), state.remote, False, known_default=known_default)
             self.push_branches(
                 state.pushable,
                 state.stacks,
