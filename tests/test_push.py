@@ -53,6 +53,49 @@ def test_push_records_changed_tips_together(repo: Repo, client: StackClient, git
         assert repo.config(branch, "stackPulledUpstream") == f"origin refs/heads/{branch}"
 
 
+def test_push_records_remote_tip_if_a_hook_moves_the_local_branch(repo: Repo, client: StackClient) -> None:
+    client.branch("feature")
+    repo.commit("a", "feature\n", "feature")
+    pushed = repo.git("rev-parse", "refs/heads/feature")
+    tree = repo.git("rev-parse", f"{pushed}^{{tree}}")
+    moved = repo.git("commit-tree", tree, "-p", pushed, "-m", "advanced by hook")
+    repo.add_hook(repo.path, "pre-push", f"#!/bin/sh\ngit update-ref refs/heads/feature {moved}\n")
+
+    client.push()
+
+    assert repo.git("rev-parse", "refs/heads/feature") == moved
+    assert repo.git("rev-parse", "refs/heads/feature", cwd=repo.origin) == pushed
+    assert repo.config("feature", "stackPulled") == pushed
+
+
+@pytest.mark.parametrize("push_config", ["pushurl", "pushInsteadOf", "multiple URLs", "second rewrite"])
+def test_push_protects_the_default_branch_at_the_actual_push_destination(
+    repo: Repo, client: StackClient, push_config: str
+) -> None:
+    repo.git("push", "--quiet", "origin", "main:release")
+    other = repo.tmp / "push.git"
+    repo.git("clone", "--quiet", "--bare", str(repo.origin), str(other))
+    repo.git("symbolic-ref", "HEAD", "refs/heads/release", cwd=other)
+    if push_config == "pushurl":
+        repo.git("config", "remote.origin.pushurl", str(other))
+    elif push_config in ("pushInsteadOf", "second rewrite"):
+        repo.git("config", f"url.{other}.pushInsteadOf", str(repo.origin))
+        if push_config == "second rewrite":
+            repo.git("config", f"url.{repo.origin}.insteadOf", str(other))
+    else:
+        repo.git("config", "--add", "remote.origin.url", str(other))
+    repo.git("fetch", "origin")
+    client.branch("feature")
+    repo.commit("a", "feature\n", "feature")
+    repo.git("branch", "--set-upstream-to=origin/release", "feature")
+    before = repo.git("rev-parse", "refs/heads/release", cwd=other)
+
+    result = repo.stack("push", expect_success=False)
+
+    assert "rerun `git stack push --force`" in result.stderr
+    assert repo.git("rev-parse", "refs/heads/release", cwd=other) == before
+
+
 @pytest.mark.parametrize(("advance", "git_budget"), [(True, 18), (False, 14)])
 def test_push_prs_keeps_subprocess_work_bounded(
     repo: Repo, gh: FakeGitHub, git_calls: list[GitCall], advance: bool, git_budget: int
@@ -66,6 +109,8 @@ def test_push_prs_keeps_subprocess_work_bounded(
         repo.git("switch", "--quiet", "lower")
         repo.commit("c", "lower advanced\n", "advance lower")
         repo.client.restack()
+    # Other repositories' push rewrites should not add a remote probe here.
+    repo.git("config", f"url.{repo.origin}.pushInsteadOf", "other-repositories:")
     gh.fail_opening("lower")
     gh.clear_calls()
     git_calls.clear()
