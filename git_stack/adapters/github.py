@@ -994,7 +994,9 @@ class GitHubAdapter(GitAdapter):
         link_github_stack). The pull requests in such a stack (all of a
         path's, or its bottom ones when linking is off), which GitHub shows
         on each pull request itself, get no section, and the ones they have
-        are removed. The other pull requests' sections show the whole stack.
+        are removed for ungrouped stacks. For groups with several stacks,
+        each updated pull request's section shows the full group across its
+        roots, including when GitHub shows a linked stack.
         """
         prs = self.pull_requests()
         root = stacks.parent(branches[0])
@@ -1038,12 +1040,16 @@ class GitHubAdapter(GitAdapter):
         )
         if dry_run:
             return
-        for number in to_update.values():
+        for branch, number in to_update.items():
             body = bodies[number]
-            if number in linked or not shown:
+            if len(stacks.group_bottoms(stacks.bottom(branch))) > 1:
+                section = group_stack_section(branch, stacks, prs, merged)
+                new_body = stack_section.replace(body, section)
+            elif number in linked or not shown:
                 new_body = stack_section.remove(body)
             else:
-                new_body = stack_section.replace(body, stack_section.render(root, tree, set(merged.values()), number))
+                section = stack_section.render([root], tree, set(merged.values()), number)
+                new_body = stack_section.replace(body, section)
             if new_body != body:
                 self.gh("pr", "edit", str(number), "--repo", self.repo, "--body-file", "-", input=new_body)
 
@@ -1251,6 +1257,23 @@ class GitHubAdapter(GitAdapter):
         raise StackError(
             f"linking {', '.join(f'#{n}' for n in numbers)} into a stack on GitHub failed:\n{result.stderr.strip()}"
         )
+
+
+def group_stack_section(branch: str, stacks: Stacks, prs: dict[str, PullRequest], merged: dict[int, int]) -> str:
+    """Describe all of branch's group, with known merged parents for this update."""
+    group = stacks.restricted(stacks.stack_of(branch))
+
+    def node(name: str) -> stack_section.Node:
+        return prs[name].number if name in prs else name
+
+    tree = {node(b): node(group.parent(b)) if group.parent(b) in group else group.parent(b) for b in group}
+    group_merged = {prs[b].number for b in group if b in prs and prs[b].state is GitHubState.MERGED}
+    for child, parent in merged.items():
+        if child in tree:
+            tree.setdefault(parent, tree[child])
+            tree[child] = parent
+            group_merged.add(parent)
+    return stack_section.render(sorted(group.roots()), tree, group_merged, node(branch))
 
 
 def github_stack_paths(

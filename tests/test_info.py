@@ -84,6 +84,13 @@ def test_bare_group_selects_all_current_group_stacks(repo: Repo, client: StackCl
     client.group_add("feature", ["pr1", "other"])
     repo.git("switch", "--quiet", "pr2")
 
+    current = repo.stack("info", "--offline").stdout
+    assert "group feature" in current
+    assert "other" not in current
+    assert "other" in repo.stack("info", "-g", "--offline").stdout
+    data = json.loads(repo.stack("info", "--offline", "--json").stdout)
+    assert {b["name"]: b["group"] for b in data} == {"main": None, "pr1": "feature", "pr2": None, "pr3": None}
+
     assert set(client.selected_bottoms([], [CURRENT_GROUP], client.stacks(), "show")) == {"pr1", "other"}
     assert {b.name for b in client.info(groups=[CURRENT_GROUP], offline=True)} == {"main", "pr1", "pr2", "pr3", "other"}
 

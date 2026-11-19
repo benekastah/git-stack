@@ -1,5 +1,5 @@
 """The stack section that `git stack prs` keeps at the end of each pull
-request's description: the stack as a tree from its root, with the pull
+request's description: the stacks as trees from their roots, with the pull
 request's own branch marked.
 
 A node is a pull request's number, or the name of a branch without one (or of
@@ -7,6 +7,7 @@ the root). Merged pull requests are marked.
 """
 
 import re
+from collections.abc import Sequence
 
 type Node = int | str
 type Tree = dict[Node, Node]  # {node: its parent}
@@ -19,13 +20,13 @@ ACTIVE = " 👈"
 MERGED = " (merged)"
 
 
-def render(root: str, tree: Tree, merged: set[int], active: Node) -> str:
+def render(roots: Sequence[str], tree: Tree, merged: set[int], active: Node) -> str:
     """The stack section for active's pull request."""
     children: dict[Node, list[Node]] = {}
     # Pull requests in the order they were opened, then branches without one.
     for node in sorted(tree, key=lambda n: (0, n, "") if isinstance(n, int) else (1, 0, n)):
         children.setdefault(tree[node], []).append(node)
-    lines = [START, NOTE, "---", "**Stack**", f"- `{root}`"]
+    lines = [START, NOTE, "---", "**Stack**"]
 
     def add(parent: Node, depth: int) -> None:
         for node in children.get(parent, []):
@@ -34,7 +35,9 @@ def render(root: str, tree: Tree, merged: set[int], active: Node) -> str:
             lines.append(f"{'  ' * depth}- {label}{notes}")
             add(node, depth + 1)
 
-    add(root, 1)
+    for root in roots:
+        lines.append(f"- `{root}`")
+        add(root, 1)
     lines.append(END)
     return "\n".join(lines)
 

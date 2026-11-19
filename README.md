@@ -145,14 +145,15 @@ main
 - If the automatic group name is already in use by an unrelated group, the
   command stops; rename that group before continuing.
 - A group can span roots, e.g. if you `restack --onto release` one of its
-  stacks. Selecting that group covers every root it's on: `sync` fast-forwards
-  each, and `prs` gives each root's pull requests their own stack section.
+  stacks. Selecting that group covers every root it's on, and `sync`
+  fast-forwards each. The description of each pull request that `prs`
+  updates shows the full group across its roots, even when GitHub shows a
+  linked stack.
 - Commands with stack selectors use only the current or named stacks. Pass
   `-g` for the current stack's group, or `-g <name>` for a named group.
   `show-stack` includes the selected stack's group.
-- `info` only shows a group once it has two or more stacks, with
-  `group <name>` above its stacks on each root they're on. A group of one is
-  just a stack.
+- `info` displays `group <name>` above any displayed stacks in that group.
+  Use `info -g` to see the current stack's entire group.
 - A branch leaves its group when it's untracked, so a group ends once its last
   branch is untracked. It also leaves when it's moved onto another tracked
   branch (e.g. with `restack --onto`), since it's then part of that branch's
@@ -522,8 +523,7 @@ git stack info
   `status` are `null` for a root, and `status` is one of `up-to-date`,
   `needs-restack`, `merged`, `merged-with-new-commits`, `reverted` or
   `parent-missing`.
-  `group` is the group of a branch on a stack's root, when `info` shows it
-  (once the group has two or more stacks), or `null`.
+  `group` is the group name on the bottom branch of each grouped stack, or `null`.
   `integration_sources` lists each configured source name and whether its
   included tip landed on the root, or is `null` for other branches.
   `integration_needs_restack` says whether the integration needs refreshing.
@@ -937,18 +937,18 @@ git stack prs
   from after it merged), marked as merged. That one's description still has
   the stack as it was when it merged, with the one it was stacked on, so the
   links lead back through the earlier pull requests. A stack with only one
-  pull request, counting that one, gets none, and one it had is removed. Text you add outside
-  the stack is kept, but edits to the stack itself are overwritten.
+  pull request, counting that one, gets none unless it belongs to a group
+  with other stacks. In that case, the section shows the full group. Text
+  you add outside the stack is kept, but edits to the stack itself are overwritten.
 - If the repository has GitHub's
   [stacked pull requests](https://docs.github.com/en/pull-requests/reference/stacked-pull-requests),
   and a stack's open pull requests are a chain, each on the one before, it
   first links them into a stack on GitHub, or adds the new ones to the top
   of the one they're in. GitHub shows its stack on each pull request in it,
-  so those in a stack on GitHub that still fits get no stack in their
-  descriptions, and the ones they had are removed; the others (e.g. new ones
-  not added to it, as linking is off) get one showing the whole stack. A
-  stack that branches out, or a group's stacks,
-  can't be one stack on GitHub, so they aren't linked. But a stack on GitHub
+  so those in a stack on GitHub that still fits only get a section in their
+  description if it shows their group. The others (e.g. new ones when linking
+  is off) get a section showing the whole stack. GitHub can link each of a
+  group's linear stacks separately. A stack on GitHub
   is kept while its open pull requests are still a path through the local
   stack, from its root, each on the one before (e.g. once a branch is
   added beside one in it): new pull requests, each the only one on the one

@@ -251,18 +251,19 @@ command stops; rename that group before continuing.
 .IP \(bu 2
 A group can span roots, e.g.
 if you \f[CR]restack \-\-onto release\f[R] one of its stacks.
-Selecting that group covers every root it\(aqs on: \f[CR]sync\f[R]
-fast\-forwards each, and \f[CR]prs\f[R] gives each root\(aqs pull
-requests their own stack section.
+Selecting that group covers every root it\(aqs on, and \f[CR]sync\f[R]
+fast\-forwards each.
+The description of each pull request that \f[CR]prs\f[R] updates shows
+the full group across its roots, even when GitHub shows a linked stack.
 .IP \(bu 2
 Commands with stack selectors use only the current or named stacks.
 Pass \f[CR]\-g\f[R] for the current stack\(aqs group, or
 \f[CR]\-g <name>\f[R] for a named group.
 \f[CR]show\-stack\f[R] includes the selected stack\(aqs group.
 .IP \(bu 2
-\f[CR]info\f[R] only shows a group once it has two or more stacks, with
-\f[CR]group <name>\f[R] above its stacks on each root they\(aqre on.
-A group of one is just a stack.
+\f[CR]info\f[R] displays \f[CR]group <name>\f[R] above any displayed
+stacks in that group.
+Use \f[CR]info \-g\f[R] to see the current stack\(aqs entire group.
 .IP \(bu 2
 A branch leaves its group when it\(aqs untracked, so a group ends once
 its last branch is untracked.
@@ -753,9 +754,8 @@ and \f[CR]status\f[R] is one of \f[CR]up\-to\-date\f[R],
 \f[CR]needs\-restack\f[R], \f[CR]merged\f[R],
 \f[CR]merged\-with\-new\-commits\f[R], \f[CR]reverted\f[R] or
 \f[CR]parent\-missing\f[R].
-\f[CR]group\f[R] is the group of a branch on a stack\(aqs root, when
-\f[CR]info\f[R] shows it (once the group has two or more stacks), or
-\f[CR]null\f[R].
+\f[CR]group\f[R] is the group name on the bottom branch of each grouped
+stack, or \f[CR]null\f[R].
 \f[CR]integration_sources\f[R] lists each configured source name and
 whether its included tip landed on the root, or is \f[CR]null\f[R] for
 other branches.
@@ -1287,8 +1287,9 @@ changed from after it merged), marked as merged.
 That one\(aqs description still has the stack as it was when it merged,
 with the one it was stacked on, so the links lead back through the
 earlier pull requests.
-A stack with only one pull request, counting that one, gets none, and
-one it had is removed.
+A stack with only one pull request, counting that one, gets none unless
+it belongs to a group with other stacks.
+In that case, the section shows the full group.
 Text you add outside the stack is kept, but edits to the stack itself
 are overwritten.
 .IP \(bu 2
@@ -1300,15 +1301,13 @@ stacked pull requests
 before, it first links them into a stack on GitHub, or adds the new ones
 to the top of the one they\(aqre in.
 GitHub shows its stack on each pull request in it, so those in a stack
-on GitHub that still fits get no stack in their descriptions, and the
-ones they had are removed; the others (e.g.
-new ones not added to it, as linking is off) get one showing the whole
-stack.
-A stack that branches out, or a group\(aqs stacks, can\(aqt be one stack
-on GitHub, so they aren\(aqt linked.
-But a stack on GitHub is kept while its open pull requests are still a
-path through the local stack, from its root, each on the one before
-(e.g.
+on GitHub that still fits only get a section in their description if it
+shows their group.
+The others (e.g.
+new ones when linking is off) get a section showing the whole stack.
+GitHub can link each of a group\(aqs linear stacks separately.
+A stack on GitHub is kept while its open pull requests are still a path
+through the local stack, from its root, each on the one before (e.g.
 once a branch is added beside one in it): new pull requests, each the
 only one on the one before, join its top, and the others keep their
 descriptions, showing the whole stack.
