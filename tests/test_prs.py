@@ -379,6 +379,36 @@ def test_prs_shows_a_merged_branch_it_skipped(repo: Repo, gh: FakeGitHub, client
     ]
 
 
+def test_prs_batches_changed_descriptions(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+    repo.make_stack()
+    client.push()
+
+    client.prs()
+
+    assert len(gh.calls("api", "graphql", "--hostname", "github.com", "--input", "-")) == 1
+    assert not gh.calls("pr", "edit")
+    assert body(gh, 2) == stack("- `main`", "  - #1", "    - #2 👈", "      - #3")
+
+
+def test_prs_reports_the_failed_description_from_a_partial_batch(
+    repo: Repo, gh: FakeGitHub, client: StackClient
+) -> None:
+    repo.make_stack()
+    client.push(prs=True)
+    state = gh.load()
+    for pr in state["prs"]:
+        pr["body"] = "new description"
+    state["fail_edits"] = [2]
+    gh.save(state)
+
+    with pytest.raises(StackError, match=r"couldn't update descriptions for #2"):
+        client.prs()
+
+    assert stack_section.START in body(gh, 1)
+    assert body(gh, 2) == "new description"
+    assert stack_section.START in body(gh, 3)
+
+
 def test_prs_moves_the_stack_to_the_end_keeping_the_rest(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
     repo.make_stack()
     client.push()

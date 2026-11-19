@@ -11,7 +11,8 @@ man page is generated from it.
   the work. `git_stack/git.py` (`GitClient`) runs git; the adapters in
   `git_stack/adapters/` say which branches were merged, locally or by asking
   GitHub. The GitHub adapter validates PR changes before an atomic push and
-  plans any retargets that must run before publication. Run the dry push
+  plans any retargets that must run before publication. PR body updates use
+  bounded GraphQL batches and send the body data on stdin. Run the dry push
   before applying those edits so stale leases leave the PR bases alone.
   Push can reuse the API's default branch when the remote has one direct
   HTTPS URL on github.com for both fetch and push. Otherwise check the live

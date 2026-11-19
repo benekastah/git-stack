@@ -142,6 +142,8 @@ def top_level(fields: str) -> list[str]:
 
 def field_of(pr: dict[str, Any], name: str, state: dict[str, Any]) -> object:
     """pr's field name, as GraphQL gives it."""
+    if name == "id":
+        return f"PR_{pr['number']}"
     if name == "stack":
         return stack_of(pr["number"], state)
     if name == "timelineItems":
@@ -267,6 +269,21 @@ def create_pull_request(args: list[str], prs: list[dict[str, Any]]) -> str:
     return f"https://github.com/acme/widgets/pull/{number}"
 
 
+def update_descriptions(request: dict[str, Any], state: dict[str, Any]) -> str:
+    data = {}
+    errors = []
+    for alias, value in request["variables"].items():
+        pr = next(p for p in state["prs"] if f"PR_{p['number']}" == value["pullRequestId"])
+        number = pr["number"]
+        if number in state.get("fail_edits", []):
+            errors.append({"path": [alias], "message": "fake gh: failing as asked"})
+            data[alias] = None
+        else:
+            pr["body"] = value["body"]
+            data[alias] = {"pullRequest": {"number": number}}
+    return json.dumps({"data": data, **({"errors": errors} if errors else {})})
+
+
 def edit_pull_request(args: list[str], state: dict[str, Any]) -> None:
     pr = next(p for p in state["prs"] if p["number"] == int(args[2]))
     if "--base" in args:
@@ -319,13 +336,19 @@ def run(args: list[str], stdin: Callable[[], bytes] = bytes) -> tuple[int, bytes
     out = None
     if not failing:
         try:
-            out = respond(args, state)
+            out = (
+                update_descriptions(json.loads(read_stdin()), state)
+                if args[:2] == ["api", "graphql"] and "--input" in args
+                else respond(args, state)
+            )
         except GhError as e:
             error = str(e)
     with open(path, "w") as f:
         json.dump(state, f)
     if error is not None:
         return 1, b"", error.encode("utf-8") + b"\n"
+    if "--input" in args and args[:2] == ["api", "graphql"] and out and "errors" in json.loads(out):
+        return 1, out.encode("utf-8") + b"\n", b"fake gh: failing as asked\n"
     # As UTF-8, as gh writes, whatever the locale's encoding.
     return 0, b"" if out is None else out.encode("utf-8") + b"\n", b""
 
