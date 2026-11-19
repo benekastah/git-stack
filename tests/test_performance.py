@@ -347,7 +347,7 @@ def test_integrate_records_linked_worktree_calls(
     report = performance_log.read_text(encoding="utf-8")
 
     assert_git_processes_recorded(report, git_calls)
-    assert any(call[:3] == ["git", "merge", "--no-ff"] for call in timed_commands(report))
+    assert any(call[:3] == ["git", "cherry-pick", "-x"] for call in timed_commands(report))
 
 
 @pytest.mark.usefixtures("performance_enabled")

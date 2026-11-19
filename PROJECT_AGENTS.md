@@ -35,7 +35,9 @@ man page is generated from it.
 - `git_stack/integrations.py` keeps integration roots out of `Stacks`. Its branch config
   records exact tips, merge evidence, build inputs and pending publication. The merge
   checkpoint stores only the step and HEAD so it can advance without rewriting those
-  inputs. Sync records merged source tips and stack selectors before untracking
+  inputs. A linear build pins its cherry-pick plan on disk. Fast-forward source
+  changes can extend a previous build, and successful builds cache their detached
+  worktrees. Conflicts discard the build so sources can be restacked. Sync records merged source tips and stack selectors before untracking
   them so a retry can recover the inputs, group scope and remote. Queued remote deletions
   retain their dependent branches and leases. The checkout recovery marker
   survives worktree cleanup.

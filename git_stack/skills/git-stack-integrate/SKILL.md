@@ -11,12 +11,12 @@ Count each `cat-file` batch request as a Git call. Include batch shutdown in Git
 Report any overlap shown and flag the slowest call if it explains a delay.
 
 Use an integration root when one stack needs several unmerged branch tips.
-It combines the tips with native Git merges and serves as the work stack's
-single parent. Check the selected stacks and source branches first with
+It combines the source commits with cherry-picks or native Git merges and
+serves as the work stack's single parent. Check the selected stacks and source branches first with
 `git stack info --all --offline`.
 
 - Create with `git stack integrate <name> <source-a> <source-b>`. Source
-  names are local branches in merge order. The build starts at `main` by
+  names are local branches in application order. The build starts at `main` by
   default. Use `git stack integrate <name> <source-a> <source-b> --root <root>`
   for a different ordinary untracked root.
 - Register an existing snapshot with
@@ -52,14 +52,15 @@ single parent. Check the selected stacks and source branches first with
 
 ## Recover or promote
 
-- If a merge conflicts, use the temporary worktree path reported by git-stack.
-  Resolve and stage the conflicts there, run
-  `git -C "<path>" -c core.editor=true merge --continue`, then rerun the
-  original command with the same selectors. The retry keeps surviving work
-  in the source stack selected even if sync removed the branch you named.
-  Keep that work selected when retrying a queued remote branch deletion.
-  To discard the build, use
-  `git stack integrate --abort <name>` from the regular worktree.
+- A merge or cherry-pick conflict automatically aborts the build and keeps
+  the previous integration tip. Keep independent branches parallel when they
+  merge cleanly. When two sources conflict, recommend stacking them, with the
+  prerequisite below the dependent work. Resolve the conflict during
+  `git stack restack <source> --onto <dependency>` on the tracked source. Use
+  the upper branch's tip for both inputs and rerun the original command with
+  its selectors. Follow `git-stack-rearrange` for changing the sources.
+- Use `git stack integrate --abort <name>` to discard a build interrupted for
+  another reason or release its cached worktree.
 - If the integration tip has direct commits, inspect the commits listed by
   git-stack. `git stack restack <name> --force` replaces that integration's
   tip and removes those commits from it. Get authorization for that rewrite.

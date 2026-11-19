@@ -890,6 +890,8 @@ class StackClient(StackCore):
         updated_inputs = integrations.renamed_inputs(old, new)
         self.ensure_name_free_on_remotes(new)
         upstream = git.run("rev-parse", "--abbrev-ref", f"{old}@{{upstream}}", check=False) or None
+        if integrations.read(old) is not None and (integrations.path(old) / ".git").is_file():
+            integrations.remove_worktree(old, force=False)
         git.run("branch", "--move", old, new)
         for name, config in updated_inputs.items():
             integrations.save(name, config)

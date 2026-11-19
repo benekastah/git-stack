@@ -15,11 +15,11 @@ class Args(argparse.Namespace):
 def register(subparsers: Subparsers) -> None:
     parser = subparsers.add_parser("integrate", help="build an integration root from local source branches")
     parser.add_argument("name", help="integration branch")
-    parser.add_argument("sources", nargs="*", metavar="source", help="local source branches, in merge order")
-    parser.add_argument("--root", help="start the merges here (default: main)")
+    parser.add_argument("sources", nargs="*", metavar="source", help="local source branches, in application order")
+    parser.add_argument("--root", help="start the build here (default: main)")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--adopt", action="store_true", help="register an existing snapshot and rebuild it on refresh")
-    mode.add_argument("--abort", action="store_true", help="discard a stalled build")
+    mode.add_argument("--abort", action="store_true", help="discard a stalled build or release its cached worktree")
     parser.set_defaults(run=run, show=show)
 
 

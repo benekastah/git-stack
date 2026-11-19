@@ -277,16 +277,17 @@ entry, it's their merge-base.
 
 ### `git stack integrate <name> <source> <source>... [--root <branch>] [--adopt]`
 
-Build a local integration branch by merging the source branches in the order
-given, starting from `main` or the ordinary untracked branch named by
-`--root`. Name at least two distinct local sources when creating an
+Build a local integration branch by cherry-picking source commits in the
+given order, starting from `main` or the ordinary untracked branch named by
+`--root`. If the source history includes merge commits, Git merges the
+sources to preserve changes made by those merges. Name at least two distinct local sources when creating an
 integration. To register an existing snapshot, use `--adopt`. Its tip stays
 where it is until the next refresh. To change the sources, run `integrate`
 again with the new list. An existing integration can have a single source.
 The new list takes effect when the build succeeds.
 
 Switch to the integration branch and use `git stack create <work>` to start
-a stack on it. `git stack info` lists the root's configured sources in merge
+a stack on it. `git stack info` lists the root's configured sources in application
 order, for example `(of branch-a, branch-b)`. Integration branches and work
 stacked above them cannot supply inputs to an integration.
 In color, sources proven to have landed on the configured root are cyan.
@@ -305,8 +306,11 @@ selected work on it. It publishes the integration and work in the same
 atomic push with leases. `sync` also publishes the integration atomically
 with eligible selected work. The first publication sets the integration's
 upstream.
-Git-stack reports when it starts rebuilding the integration, removes the
-temporary worktree, and checks the atomic push with the remote.
+When the root is unchanged and sources only add commits, the next build
+cherry-picks the new commits on top of the previous result. Rewritten
+inputs or a changed root require rebuilding. A successful build keeps a
+detached worktree under Git's directory for reuse. To release it, run
+`git stack integrate --abort <name>`.
 If sync also deletes merged remote branches, those deletions wait for the
 same push. If the push fails, sync reports the remote branches it kept.
 Rerun sync with the same integration and any surviving child stacks selected
@@ -342,12 +346,12 @@ commits. To discard those commits, run `git stack restack <name> --force`
 with the integration named explicitly. Move an integration out of any other
 worktree before refreshing it.
 
-If a merge conflicts, git-stack reports the temporary worktree. Resolve and
-stage the files there, then run `git merge --continue`. To undo the current
-merge, run `git merge --abort` there. Rerun the original git-stack command to
-resume the build. To discard the entire pending build, run `git stack integrate
---abort <name>` from your regular worktree. The prior integration tip stays
-in place until a build completes.
+If a merge or cherry-pick conflicts, git-stack aborts the build and keeps
+the previous integration tip. Restack the conflicting source onto the
+branch it depends on, resolve the conflict in that source, and rerun the
+original command. Use `git stack integrate --abort <name>` to discard a build
+interrupted for another reason. Release the cached worktree before deleting
+the integration branch.
 Sync records a selected source's tip and stack before removing the merged
 branch. Rerun the original command with the same selectors. Sync keeps the
 surviving work selected and can reuse recorded squash-merge proof without
