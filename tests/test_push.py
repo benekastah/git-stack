@@ -1,5 +1,7 @@
 """git stack push."""
 
+import sys
+
 import pytest
 from git_client.testing import GitCall
 
@@ -94,7 +96,16 @@ def test_push_does_not_record_a_tracking_ref_changed_after_publication(
         client.push()
 
 
-@pytest.mark.parametrize("push_config", ["pushurls", "cleared pushurl"])
+@pytest.mark.parametrize(
+    "push_config",
+    [
+        "pushurls",
+        "cleared pushurl",
+        pytest.param(
+            "trailing space", marks=pytest.mark.skipif(sys.platform == "win32", reason="Win32 trims the path")
+        ),
+    ],
+)
 def test_push_checks_leases_at_all_destinations_before_writing(
     repo: Repo, client: StackClient, push_config: str
 ) -> None:
@@ -102,10 +113,11 @@ def test_push_checks_leases_at_all_destinations_before_writing(
     repo.commit("a", "feature\n", "feature")
     old = repo.git("rev-parse", "feature")
     client.push()
-    other = repo.tmp / "other-push.git"
+    name = f"{repo.origin.name} " if push_config == "trailing space" else "other-push.git"
+    other = repo.origin.with_name(name)
     repo.git("clone", "--bare", "--quiet", str(repo.origin), str(other))
     repo.git("update-ref", "refs/heads/feature", repo.git("rev-parse", "main"), cwd=other)
-    if push_config == "pushurls":
+    if push_config != "cleared pushurl":
         repo.git("config", "--add", "remote.origin.pushurl", str(repo.origin))
         repo.git("config", "--add", "remote.origin.pushurl", str(other))
     else:
@@ -117,6 +129,37 @@ def test_push_checks_leases_at_all_destinations_before_writing(
         client.push()
 
     assert repo.git("rev-parse", "refs/heads/feature", cwd=repo.origin) == old
+
+
+def test_push_reports_partial_success_when_a_second_attempt_fails(repo: Repo, client: StackClient) -> None:
+    client.branch("feature")
+    repo.commit("a", "feature\n", "feature")
+    client.push()
+    repo.git("config", "--add", "remote.origin.pushurl", str(repo.origin))
+    repo.git("config", "--add", "remote.origin.pushurl", str(repo.origin))
+    repo.commit("a", "local advance\n", "advance")
+    tip = repo.git("rev-parse", "feature")
+    repo.add_hook(repo.path, "pre-push", "#!/bin/sh\n[ ! -e .git/push-once ] || exit 1\n: > .git/push-once\n")
+
+    with pytest.raises(StackError, match="some destinations may have been updated"):
+        client.push()
+
+    assert repo.git("rev-parse", "refs/heads/feature", cwd=repo.origin) == tip
+
+
+def test_push_resolves_an_explicit_destination_once(repo: Repo, client: StackClient, git_calls: list[GitCall]) -> None:
+    client.branch("feature")
+    repo.commit("a", "feature\n", "feature")
+    client.push()
+    other = repo.tmp / "other-push.git"
+    repo.git("clone", "--bare", "--quiet", str(repo.origin), str(other))
+    repo.git("config", "remote.origin.pushurl", str(other))
+    repo.commit("a", "local advance\n", "advance")
+    git_calls.clear()
+
+    client.push()
+
+    assert sum(call[:5] == ["remote", "get-url", "--push", "--all", "origin"] for call in git_calls) == 1
 
 
 @pytest.mark.parametrize("push_config", ["pushurl", "pushInsteadOf", "multiple URLs", "second rewrite"])

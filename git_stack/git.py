@@ -179,6 +179,7 @@ class GitClient:
         self._reflogs: dict[str, tuple[str, ...]] = {}
         self._remote_defaults: dict[str, str | None] = {}
         self._push_defaults: dict[str, frozenset[str] | None] = {}
+        self._push_urls: dict[str, tuple[str, ...]] = {}
         self._refs_lock = threading.Lock()
         # Where passthrough sends git's stdout (default: ours), e.g. stderr when
         # our stdout is for --json output.
@@ -278,6 +279,7 @@ class GitClient:
                 self._forget_refs()
                 self._remote_defaults = {}
                 self._push_defaults = {}
+                self._push_urls = {}
                 self._refs_config = {}
                 self._cat_file.close()
 
@@ -363,6 +365,7 @@ class GitClient:
                     branches[branch, name] = values[-1] or ""
             self._config, self._branch_config = entries, branches
             self._config_stat, self._config_read = stat, True
+            self._push_urls = {}
         return self._branch_config
 
     def config_value(self, key: str) -> str | None:
@@ -706,7 +709,19 @@ class GitClient:
         return self._shared_remote_url(remote) is None and len(self._resolved_push_urls(remote)) > 1
 
     def _resolved_push_urls(self, remote: str) -> tuple[str, ...]:
-        return tuple(dict.fromkeys(self.run("remote", "get-url", "--push", "--all", remote, check=False).splitlines()))
+        # Both default-branch protection and preflight use the effective push
+        # configuration, including config resets and Git's legacy remotes.
+        self.branch_config()
+        if self._snapshot_depth and remote in self._push_urls:
+            return self._push_urls[remote]
+        try:
+            output = self._git.run("remote", "get-url", "--push", "--all", remote, strip=False)
+        except GitError:
+            return ()
+        urls = tuple(output.removesuffix("\n").split("\n")) if output else ()
+        if self._snapshot_depth:
+            self._push_urls[remote] = urls
+        return urls
 
     def _push_destination_defaults(self, remote: str, default: str) -> frozenset[str] | None:
         if self._shared_remote_url(remote) is not None:
@@ -719,7 +734,7 @@ class GitClient:
         fetch_url = urls[0] if urls else None
         if fetch_url is not None and self._url_is_rewritten(fetch_url, "insteadof"):
             fetch_url = None
-        for url in push_urls:
+        for url in dict.fromkeys(push_urls):
             if url == fetch_url:
                 continue
             if (branch := self._default_at_resolved_url(url)) is None:
