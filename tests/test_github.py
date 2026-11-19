@@ -4,7 +4,7 @@ import pathlib
 import subprocess
 
 import pytest
-from git_client.testing import real_git
+from git_client.testing import GitCall, real_git
 
 from git_stack import events
 from git_stack.adapters.git import PullRequestLink, PullRequestState
@@ -13,6 +13,13 @@ from git_stack.errors import StackError
 from git_stack.git import GitClient
 from git_stack.stack import BranchStatus, StackClient
 from tests.helpers import FakeGitHub, Repo, install_command
+
+
+def test_github_repo_needs_no_git_process_for_a_configured_url(
+    repo: Repo, gh: FakeGitHub, git_calls: list[GitCall]
+) -> None:
+    assert github_repo(GitClient(repo.path), "origin") == ("github.com", "acme", "widgets")
+    assert [call[0] for call in git_calls] == ["config"]
 
 
 def merge_pr1_on_forge_with_a_tweak(repo: Repo, gh: FakeGitHub) -> None:

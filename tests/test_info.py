@@ -11,6 +11,16 @@ from git_stack.stack import BranchInfo, BranchStatus, StackClient
 from tests.helpers import Repo
 
 
+def test_info_skips_patch_comparison_when_branch_already_contains_parent(
+    repo: Repo, client: StackClient, git_calls: list[GitCall]
+) -> None:
+    repo.make_stack()
+    git_calls.clear()
+
+    assert [branch.status for branch in client.info(offline=True)] == [None, *([BranchStatus.UP_TO_DATE] * 3)]
+    assert not any(call[0] == "patch-id" for call in git_calls)
+
+
 def test_info_lists_every_stack_parent_before_child(repo: Repo, client: StackClient) -> None:
     client.branch("pr1")
     repo.commit("a", "pr1\n", "pr1 c1")

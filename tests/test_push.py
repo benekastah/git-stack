@@ -1,11 +1,55 @@
 """git stack push."""
 
 import pytest
+from git_client.testing import GitCall
 
 from git_stack import events
 from git_stack.errors import StackError
 from git_stack.stack import StackClient
-from tests.helpers import Repo
+from tests.helpers import FakeGitHub, Repo
+
+
+def test_push_checks_leases_once_when_no_pull_request_needs_retargeting(
+    repo: Repo, gh: FakeGitHub, git_calls: list[GitCall]
+) -> None:
+    repo.make_stack()
+    repo.stack("push", "--prs")
+
+    assert gh.calls("pr", "create")
+    pushes = [call for call in git_calls if call[0] == "push"]
+    assert len(pushes) == 1
+    assert "--dry-run" not in pushes[0]
+    assert "--atomic" in pushes[0] and any(arg.startswith("--force-with-lease=") for arg in pushes[0])
+
+
+@pytest.mark.parametrize("prefix", [("config", "branch."), ("log", "--walk-reflogs"), ("rev-list", "--parents")])
+def test_repush_skips_already_recorded_work(
+    repo: Repo, client: StackClient, git_calls: list[GitCall], prefix: tuple[str, str]
+) -> None:
+    repo.make_stack()
+    client.push()
+    git_calls.clear()
+
+    client.push()
+
+    assert not any(len(call) >= 2 and call[0] == prefix[0] and call[1].startswith(prefix[1]) for call in git_calls)
+
+
+def test_push_records_changed_tips_together(repo: Repo, client: StackClient, git_calls: list[GitCall]) -> None:
+    repo.make_stack()
+    client.push()
+    repo.git("switch", "--quiet", "pr1")
+    repo.commit("a", "pr1 advanced\n", "advance pr1")
+    client.restack()
+    git_calls.clear()
+
+    client.push()
+
+    publication = next(i for i, call in enumerate(git_calls) if call[0] == "push" and "--set-upstream" in call)
+    assert sum(call[:2] == ["config", "--list"] for call in git_calls[publication + 1 :]) == 2
+    for branch in ("pr1", "pr2", "pr3"):
+        assert repo.config(branch, "stackPulled") == repo.git("rev-parse", f"refs/heads/{branch}")
+        assert repo.config(branch, "stackPulledUpstream") == f"origin refs/heads/{branch}"
 
 
 @pytest.mark.parametrize("command", ["push", "sync"])
