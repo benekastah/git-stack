@@ -1198,9 +1198,11 @@ local branch is moved to it instead, as \f[CR]sync\f[R] does (see
 Rebased on the remote).
 \f[CR]\-\-force\f[R] pushes over it.
 .IP \(bu 2
-The branches are pushed in one atomic push: if any of them can\(aqt be
-pushed (e.g.
-because its remote branch changed since your last fetch), none are.
+The branches are pushed atomically to each destination.
+If a remote has several push URLs, a dry run checks leases at all
+destinations first.
+A failure during the real push can still leave some destinations
+updated.
 .IP \(bu 2
 Refuses to push a branch whose remote branch was deleted, since
 that\(aqs usually a merged pull request \f[CR]sync\f[R] hasn\(aqt seen

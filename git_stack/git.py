@@ -376,12 +376,17 @@ class GitClient:
 
     def direct_remote_url(self, remote: str) -> str | None:
         """The configured URL when fetch and push use it without a rewrite."""
+        url = self._shared_remote_url(remote)
+        return None if url is not None and self._url_is_rewritten(url, "insteadof") else url
+
+    def _shared_remote_url(self, remote: str) -> str | None:
+        """A single configured URL that both fetch and push resolve the same way."""
         self.branch_config()
         urls = self._config.get(config_key(f"remote.{remote}.url"), [])
         if len(urls) != 1 or not urls[0] or config_key(f"remote.{remote}.pushurl") in self._config:
             return None
         url = urls[0]
-        return None if self._url_is_rewritten(url, "insteadof", "pushinsteadof") else url
+        return None if self._url_is_rewritten(url, "pushinsteadof") else url
 
     def _url_is_rewritten(self, url: str, *rules: str) -> bool:
         return any(
@@ -696,24 +701,25 @@ class GitClient:
             self._push_defaults[remote] = defaults
         return defaults
 
+    def has_multiple_push_urls(self, remote: str) -> bool:
+        """Whether Git can push this remote's refspecs to more than one URL."""
+        return self._shared_remote_url(remote) is None and len(self._resolved_push_urls(remote)) > 1
+
+    def _resolved_push_urls(self, remote: str) -> tuple[str, ...]:
+        return tuple(dict.fromkeys(self.run("remote", "get-url", "--push", "--all", remote, check=False).splitlines()))
+
     def _push_destination_defaults(self, remote: str, default: str) -> frozenset[str] | None:
-        self.branch_config()
-        urls = self._config.get(config_key(f"remote.{remote}.url"), [])
-        separate = (
-            len(urls) > 1
-            or config_key(f"remote.{remote}.pushurl") in self._config
-            or any(self._url_is_rewritten(url or "", "pushinsteadof") for url in urls)
-        )
-        if not separate:
+        if self._shared_remote_url(remote) is not None:
             return frozenset({default})
-        push_urls = self.run("remote", "get-url", "--push", "--all", remote, check=False).splitlines()
+        push_urls = self._resolved_push_urls(remote)
         if not push_urls:
             return None
         defaults = {default}
+        urls = self._config.get(config_key(f"remote.{remote}.url"), [])
         fetch_url = urls[0] if urls else None
         if fetch_url is not None and self._url_is_rewritten(fetch_url, "insteadof"):
             fetch_url = None
-        for url in dict.fromkeys(push_urls):
+        for url in push_urls:
             if url == fetch_url:
                 continue
             if (branch := self._default_at_resolved_url(url)) is None:

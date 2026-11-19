@@ -2574,24 +2574,37 @@ class StackClient(StackCore):
         # Refuse if we know of commits we haven't pulled (unless told to drop
         # them), and pin each lease to the remote-tracking ref we checked, so a
         # push that raced with someone else's fails instead of overwriting it.
-        work_tips = {branch: git.tip(branch) for branch in branches} if integration_pushes else None
-        leases, refspecs = self.push_refspecs(branches, stacks, remote, force, use_upstreams, work_tips)
+        work_tips = {branch: git.tip(branch) for branch in branches}
+        pinned = work_tips if integration_pushes else None
+        leases, refspecs = self.push_refspecs(branches, stacks, remote, force, use_upstreams, pinned)
         self.add_integration_refspecs(integration_pushes, deletions or (), leases, refspecs, remote)
         integrations = Integrations(self)
         for integration in integration_pushes:
             integrations.verify(integration.refs)
+        multiple_destinations = git.has_multiple_push_urls(remote)
         self.retarget_before_push(
-            branches, stacks, adapter, remote, leases, refspecs, rebuild_stack, scope, opening, bool(integration_pushes)
+            branches,
+            stacks,
+            adapter,
+            remote,
+            leases,
+            refspecs,
+            rebuild_stack,
+            scope,
+            opening,
+            bool(integration_pushes),
+            multiple_destinations,
         )
         # Atomic, so a branch that can't be pushed doesn't leave the rest of the
         # stack pushed without it, and its pull requests not retargeted.
         verify_options = ["--no-verify"] if no_verify else []
         for integration in integration_pushes:
             integrations.verify(integration.refs)
-        self.remember_atomic_push(integrations, integration_pushes, remote, work_tips)
+        self.remember_atomic_push(integrations, integration_pushes, remote, pinned)
         if not git.passthrough("push", "--atomic", *verify_options, *leases, "--set-upstream", remote, *refspecs):
+            detail = "some destinations may have been updated" if multiple_destinations else "nothing was pushed"
             raise StackError(
-                "push failed, so nothing was pushed; if the remote has new commits, run `git stack sync` and try "
+                f"push failed, so {detail}; if the remote has new commits, run `git stack sync` and try "
                 f"again{self.changes_left(adapter)}"
             )
         self.record_pushed(branches, integration_pushes, deletions, remote, work_tips)
@@ -2615,8 +2628,9 @@ class StackClient(StackCore):
         scope: list[str] | None,
         opening: bool,
         integration: bool,
+        multiple_destinations: bool,
     ) -> None:
-        """Validate PRs and check leases before making any pre-push edits."""
+        """Check leases before editing PRs or pushing to several destinations."""
 
         def update_error(error: StackError) -> StackError:
             return StackError(
@@ -2628,19 +2642,20 @@ class StackClient(StackCore):
             retarget = adapter.prepare_push_retargets(branches, stacks, rebuild_stack, scope, opening)
         except StackError as e:
             raise update_error(e) from e
-        if retarget is None:
+        if retarget is None and not multiple_destinations:
             return
         if integration:
             self.emit(events.CheckingPush(remote))
-        # If a lease is stale, leave the PR bases as they are. The atomic
-        # push still checks the leases and may be refused by the server.
+        # Leave PR bases and remote refs unchanged on a stale lease. A real
+        # push is atomic at each destination, and can still be refused.
         if (why := self.git.push_would_fail("--atomic", *leases, remote, *refspecs)) is not None:
             raise StackError(
                 f"push would fail, so nothing was pushed or changed; if the remote has new commits, run "
                 f"`git stack sync` and try again:\n{why}"
             )
         try:
-            retarget()
+            if retarget is not None:
+                retarget()
         except StackError as e:
             raise update_error(e) from e
 
@@ -2726,7 +2741,7 @@ class StackClient(StackCore):
         pushes: Sequence[IntegrationPush],
         deletions: list[RemoteDeletion] | None,
         remote: str,
-        work_tips: dict[str, str] | None,
+        work_tips: dict[str, str],
     ) -> None:
         """Remember exactly the pushed tips and configure a newly published integration's upstream."""
         for deletion in deletions or ():
@@ -2736,12 +2751,15 @@ class StackClient(StackCore):
             tip = push.refs[push.name]
             assert tip is not None
             self.record_published_branch(integrations, push.name, remote, push.target, tip)
-        if work_tips is None:
-            # A hook can move a local branch while Git publishes the old tip.
+        if not pushes:
+            # Hooks can move local refs while publishing, and a concurrent
+            # fetch can replace the tracking ref. Only record matching tips.
             self.record_pulled_tips(
-                (name, upstream[2])
+                (name, work_tips[name])
                 for name in branches
-                if (upstream := self.git.remote_branch(name)) is not None and upstream[0] == remote
+                if (upstream := self.git.remote_branch(name)) is not None
+                and upstream[0] == remote
+                and upstream[2] == work_tips[name]
             )
             return
         for name in branches:

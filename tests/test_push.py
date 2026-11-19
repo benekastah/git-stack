@@ -68,6 +68,57 @@ def test_push_records_remote_tip_if_a_hook_moves_the_local_branch(repo: Repo, cl
     assert repo.config("feature", "stackPulled") == pushed
 
 
+def test_push_does_not_record_a_tracking_ref_changed_after_publication(
+    repo: Repo, client: StackClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client.branch("feature")
+    repo.commit("a", "feature\n", "feature")
+    planned = repo.git("rev-parse", "feature")
+    tree = repo.git("rev-parse", f"{planned}^{{tree}}")
+    unseen = repo.git("commit-tree", tree, "-p", planned, "-m", "another writer's commit")
+    passthrough = client.git.passthrough
+
+    def publish_and_fetch(*args: str) -> bool:
+        result = passthrough(*args)
+        if result and args[0] == "push":
+            repo.git("push", "--quiet", str(repo.origin), f"{unseen}:refs/heads/feature")
+            repo.git("fetch", "--quiet", "origin")
+        return result
+
+    monkeypatch.setattr(client.git, "passthrough", publish_and_fetch)
+
+    client.push()
+
+    assert not repo.config_exists("feature", "stackPulled") or repo.config("feature", "stackPulled") != unseen
+    with pytest.raises(StackError, match="has commits that feature doesn't"):
+        client.push()
+
+
+@pytest.mark.parametrize("push_config", ["pushurls", "cleared pushurl"])
+def test_push_checks_leases_at_all_destinations_before_writing(
+    repo: Repo, client: StackClient, push_config: str
+) -> None:
+    client.branch("feature")
+    repo.commit("a", "feature\n", "feature")
+    old = repo.git("rev-parse", "feature")
+    client.push()
+    other = repo.tmp / "other-push.git"
+    repo.git("clone", "--bare", "--quiet", str(repo.origin), str(other))
+    repo.git("update-ref", "refs/heads/feature", repo.git("rev-parse", "main"), cwd=other)
+    if push_config == "pushurls":
+        repo.git("config", "--add", "remote.origin.pushurl", str(repo.origin))
+        repo.git("config", "--add", "remote.origin.pushurl", str(other))
+    else:
+        repo.git("config", "--add", "remote.origin.url", str(other))
+        repo.git("config", "--add", "remote.origin.pushurl", "")
+    repo.commit("a", "local advance\n", "advance")
+
+    with pytest.raises(StackError, match="push would fail"):
+        client.push()
+
+    assert repo.git("rev-parse", "refs/heads/feature", cwd=repo.origin) == old
+
+
 @pytest.mark.parametrize("push_config", ["pushurl", "pushInsteadOf", "multiple URLs", "second rewrite"])
 def test_push_protects_the_default_branch_at_the_actual_push_destination(
     repo: Repo, client: StackClient, push_config: str
