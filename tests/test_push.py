@@ -155,14 +155,17 @@ def test_push_protects_the_default_branch_at_the_actual_push_destination(
     other = repo.tmp / "push.git"
     repo.git("clone", "--quiet", "--bare", str(repo.origin), str(other))
     repo.git("symbolic-ref", "HEAD", "refs/heads/release", cwd=other)
+    origin_url = repo.git("config", "--get", "remote.origin.url")
+    other_url = other.as_posix()
     if push_config == "pushurl":
-        repo.git("config", "remote.origin.pushurl", str(other))
+        repo.git("config", "remote.origin.pushurl", other_url)
     elif push_config in ("pushInsteadOf", "second rewrite"):
-        repo.git("config", f"url.{other}.pushInsteadOf", str(repo.origin))
+        repo.git("config", f"url.{other_url}.pushInsteadOf", origin_url)
         if push_config == "second rewrite":
-            repo.git("config", f"url.{repo.origin}.insteadOf", str(other))
+            repo.git("config", f"url.{origin_url}.insteadOf", other_url)
     else:
-        repo.git("config", "--add", "remote.origin.url", str(other))
+        repo.git("config", "--add", "remote.origin.url", other_url)
+    assert other_url in repo.git("remote", "get-url", "--push", "--all", "origin").splitlines()
     repo.git("fetch", "origin")
     client.branch("feature")
     repo.commit("a", "feature\n", "feature")
