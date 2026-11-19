@@ -214,21 +214,23 @@ def print_tree(
             add(branch, "", drawn)
             # Upside down, the tree reads the same, mirrored.
             rows.extend(reversed(drawn) if flip else drawn)
-    # Pull request links go in a right-aligned column after the longest line.
+    # Pull request links go in a right-aligned column sized by the rows with links.
     integrations = Integrations(stack)
     sources_by_root = {
         b.name: ", ".join(source["name"] for source in integration["sources"])
         for b in branches
         if b.parent is None and (integration := integrations.read(b.name)) is not None
     }
-    widths = [len(tree) + len(label(row, painter(False), color, sources_by_root)) for tree, row in rows]
+    plain = painter(False)
+    widths = [len(tree) + len(label(row, plain, color, sources_by_root)) for tree, row in rows]
     links = [link_of(row, new_links) for _, row in rows]
-    link_width = max(len(link[0]) if link else 0 for link in links)
+    label_width = max((width for width, link in zip(widths, links, strict=True) if link), default=0)
+    link_width = max((len(link[0]) for link in links if link), default=0)
     for (tree, row), width, link in zip(rows, widths, links, strict=True):
         line = paint(tree, TREE) + label(row, paint, color, sources_by_root)
         if link:
             text, link_color = link
-            line += " " * (max(widths) - width + 2) + paint(text.rjust(link_width), link_color)
+            line += " " * (label_width - width + 2) + paint(text.rjust(link_width), link_color)
         print(line)
 
 

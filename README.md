@@ -495,7 +495,8 @@ git stack info
   [Groups](#groups)).
 - With the [GitHub adapter](#github), each branch's pull request (open or
   merged) is linked in a column at the end of its line: blue if it's open,
-  grey if it's a draft, and magenta if it was merged.
+  grey if it's a draft, and magenta if it was merged. Rows with links
+  determine the column position.
 - On a terminal, `info` and commands that show stacks use these colors:
   yellow branches marked `!` need restacking; the current branch is bold and
   green unless it needs restacking; cyan notes mark merged branches, yellow

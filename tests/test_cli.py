@@ -398,8 +398,8 @@ def test_prs_shows_the_stack_with_new_pull_requests_in_green(
     assert capsys.readouterr().out.splitlines() == [
         "skipping pr3: it has no commits of its own",
         "\033[1mmain\033[m",
-        f"\033[2m└── \033[mpr1          \033[32m{new.rjust(width)}\033[m",
-        f"\033[2m    └── \033[mpr2      \033[34m{existing.url.rjust(width)}\033[m",
+        f"\033[2m└── \033[mpr1      \033[32m{new.rjust(width)}\033[m",
+        f"\033[2m    └── \033[mpr2  \033[34m{existing.url.rjust(width)}\033[m",
         "\033[2m        └── \033[mpr3",
     ]
 
@@ -479,14 +479,48 @@ def test_info_draws_each_stack_as_a_tree(stack: Any, capsys: pytest.CaptureFixtu
 
     assert capsys.readouterr().out == (
         "main\n"
-        "├── pr1                                 https://github.com/acme/widgets/pull/9\n"
-        "│   ├── pr2 (needs restack)            https://github.com/acme/widgets/pull/13\n"
+        "├── pr1                       https://github.com/acme/widgets/pull/9\n"
+        "│   ├── pr2 (needs restack)  https://github.com/acme/widgets/pull/13\n"
         "│   └── pr2b (merged)\n"
         "├── solo * (merged, with new commits)\n"
         "└── undone (merged, then reverted)\n"
         "release\n"
         "└── hotfix (parent release missing)\n"
     )
+
+
+def test_info_integration_heading_does_not_pad_pr_links(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
+    sources = ("team/prepare-the-first-change", "team/prepare-the-second-change")
+    config = json.dumps({"sources": [{"name": name} for name in sources]})
+    stack.git.config_get.side_effect = lambda branch, key: config if branch == "combined" else None
+    url = "https://github.com/acme/widgets/pull/"
+    stack.info.return_value = [
+        BranchInfo("main", None, None, current=False),
+        BranchInfo(
+            "short",
+            "main",
+            BranchStatus.UP_TO_DATE,
+            current=False,
+            pull_request=PullRequestLink(1, f"{url}1", PullRequestState.OPEN),
+        ),
+        BranchInfo("combined", None, None, current=False),
+        BranchInfo(
+            "longer",
+            "combined",
+            BranchStatus.UP_TO_DATE,
+            current=False,
+            pull_request=PullRequestLink(2, f"{url}2", PullRequestState.OPEN),
+        ),
+    ]
+
+    main(["info"], stack=stack)
+
+    assert capsys.readouterr().out.splitlines() == [
+        "main",
+        f"└── short   {url}1",
+        f"combined (of {', '.join(sources)})",
+        f"└── longer  {url}2",
+    ]
 
 
 def test_info_colors_each_part(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
