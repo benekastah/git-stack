@@ -7,6 +7,8 @@ import pathlib
 import subprocess
 import sys
 
+import pytest
+
 from tests.helpers import FakeGitHub, Repo
 
 
@@ -79,6 +81,7 @@ def test_failure_exits_nonzero_with_message(repo: Repo) -> None:
     assert result.stderr == "git stack: main isn't in a stack; switch to a stacked branch to restack its stack\n"
 
 
+@pytest.mark.usefixtures("performance_enabled")
 def test_cli_logs_performance_without_printing_the_report(repo: Repo, performance_log: pathlib.Path) -> None:
     repo.make_stack()
     result = repo.stack_process("parent")

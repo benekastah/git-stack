@@ -1,6 +1,7 @@
 import argparse
 import pathlib
 import sys
+from contextlib import nullcontext
 from typing import Any
 
 import git_stack
@@ -31,7 +32,7 @@ from git_stack.commands import (
 from git_stack.errors import StackError
 from git_stack.git import GitClient
 from git_stack.output import JsonStream, print_event
-from git_stack.performance import Timeline, append_performance_log
+from git_stack.performance import Timeline, append_performance_log, performance_log_limit
 from git_stack.stack import StackClient
 
 # In the order `git stack -h` lists them.
@@ -102,51 +103,58 @@ def main(argv: list[str] | None = None, stack: StackClient | None = None) -> int
     a StackClient working in the directory -C names, or the current one,
     printing what it reports). Returns the exit status."""
     argv = sys.argv[1:] if argv is None else argv
-    timeline = Timeline()
-    try:
-        with timeline.activate():
-            parser = build_parser()
-            args = parser.parse_args(argv)
-            # A global flag and a command's flag may have been read by different parsers.
-            if args.json and args.command == "show-stack" and args.quiet:
-                parser.error("argument -q/--quiet: not allowed with argument --json")
-            return _run(args, stack)
-    finally:
-        try:
-            append_performance_log(argv, timeline.render())
-        except (OSError, RuntimeError) as error:
-            print(f"git stack: couldn't write the performance log: {error}", file=sys.stderr)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    # A global flag and a command's flag may have been read by different parsers.
+    if args.json and args.command == "show-stack" and args.quiet:
+        parser.error("argument -q/--quiet: not allowed with argument --json")
+    return _run(args, stack, argv)
 
 
-def _run(args: argparse.Namespace, stack: StackClient | None) -> int:
+def _run(args: argparse.Namespace, stack: StackClient | None, argv: list[str]) -> int:
     # With --json, stdout is for the JSON, so git's output goes to stderr.
     stream = JsonStream() if args.json and not getattr(args, "json_list", False) else None
-    status: int | None = None
+    timeline: Timeline | None = None
+    max_bytes: int | None = None
     try:
         if stack is None:
             # Joining starts over at an absolute path, as git's -C does. It
             # fails if there's no git to run.
             stack = StackClient(GitClient(pathlib.Path(".", *args.directories)))
-        stack.on_event = stream.event if stream else print_event
-        if stream:
-            stack.git.passthrough_stdout = sys.stderr
-        result = args.run(stack, args)
-        # A command can fail after doing part of its work (e.g. push --prs,
-        # which pushed, but couldn't open pull requests): then its error(result)
-        # says why, after its result is shown.
-        error: str | None = args.error(result) if getattr(args, "error", None) else None
-        if stream:
-            stream.result(result)
-        else:
-            # A command's show prints its result, and returns its exit status,
-            # or None for 0. It can fail too, e.g. on a bad setting for how to
-            # show it.
-            status = args.show(stack, args, result)
+        max_bytes = performance_log_limit(stack.git)
+        timeline = Timeline() if max_bytes is not None else None
+        with timeline.activate() if timeline is not None else nullcontext():
+            return _run_command(args, stack, stream)
     except StackError as e:
         if stream:
             stream.error(str(e))
         print(f"git stack: {e}", file=sys.stderr)
         return 1
+    finally:
+        if timeline is not None and max_bytes is not None:
+            try:
+                append_performance_log(argv, timeline.render(), max_bytes=max_bytes)
+            except (OSError, RuntimeError) as error:
+                print(f"git stack: couldn't write the performance log: {error}", file=sys.stderr)
+
+
+def _run_command(args: argparse.Namespace, stack: StackClient, stream: JsonStream | None) -> int:
+    stack.on_event = stream.event if stream else print_event
+    if stream:
+        stack.git.passthrough_stdout = sys.stderr
+    result = args.run(stack, args)
+    # A command can fail after doing part of its work (e.g. push --prs,
+    # which pushed, but couldn't open pull requests): then its error(result)
+    # says why, after its result is shown.
+    error: str | None = args.error(result) if getattr(args, "error", None) else None
+    status: int | None = None
+    if stream:
+        stream.result(result)
+    else:
+        # A command's show prints its result, and returns its exit status,
+        # or None for 0. It can fail too, e.g. on a bad setting for how to
+        # show it.
+        status = args.show(stack, args, result)
     if error is not None:
         print(f"git stack: {error}", file=sys.stderr)
         return 1

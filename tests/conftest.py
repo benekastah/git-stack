@@ -59,6 +59,12 @@ def performance_log(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> 
     return path
 
 
+@pytest.fixture
+def performance_enabled(git_config: pathlib.Path) -> None:
+    with git_config.open("a", encoding="utf-8") as config:
+        config.write("\n[stack]\n\tperformance = true\n")
+
+
 def make_repositories(directory: pathlib.Path) -> None:
     """origin.git, local and forge as the repo fixture starts with them."""
     repo = Repo(path=directory / "local", origin=directory / "origin.git", forge=directory / "forge", tmp=directory)

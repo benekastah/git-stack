@@ -15,21 +15,51 @@ from tests.helpers import FakeGitHub, Repo
 from tests.test_integrate import source
 
 
+def test_performance_is_off_by_default(repo: Repo, performance_log: pathlib.Path) -> None:
+    repo.make_stack()
+    assert repo.stack("parent").stdout == "pr2\n"
+    assert not performance_log.exists()
+
+
+@pytest.mark.usefixtures("performance_enabled")
+def test_local_config_can_disable_global_performance_logging(repo: Repo, performance_log: pathlib.Path) -> None:
+    repo.make_stack()
+    repo.git("config", "--local", "stack.performance", "false")
+    assert repo.stack("parent").stdout == "pr2\n"
+    assert not performance_log.exists()
+
+
+def test_local_config_enables_reporting_and_controls_the_cap(repo: Repo, performance_log: pathlib.Path) -> None:
+    repo.make_stack()
+    repo.git("config", "--local", "stack.performance", "yes")
+    repo.git("config", "--local", "stack.performanceLogMaxBytes", "1k")
+    performance_log.parent.mkdir()
+    performance_log.write_text("old\n" * 400, encoding="utf-8")
+
+    assert repo.stack("parent").stdout == "pr2\n"
+
+    assert performance_log.stat().st_size <= 1024
+    assert "Performance timeline\n" in performance_log.read_text(encoding="utf-8")
+
+
+@pytest.mark.usefixtures("performance_enabled")
 def test_cli_appends_a_command_and_report_for_success_and_failure(repo: Repo, performance_log: pathlib.Path) -> None:
     repo.make_stack()
     successful = repo.stack("info", "--offline")
-    failed = repo.stack("-C", "missing", "restack", expect_success=False)
+    repo.git("switch", "--quiet", "main")
+    failed = repo.stack("restack", expect_success=False)
 
     assert successful.stderr == ""
     assert "Performance timeline" not in failed.stderr
     first, second = performance_log.read_text(encoding="utf-8").strip().split("\n\n")
-    for entry, args in ((first, ("info", "--offline")), (second, ("-C", "missing", "restack"))):
+    for entry, args in ((first, ("info", "--offline")), (second, ("restack",))):
         command, _, report = entry.partition("\n")
         assert shlex.split(command) == ["git", "stack", "-C", str(repo.path), *args]
         assert report.startswith("Performance timeline\n")
         assert "Total" in report
 
 
+@pytest.mark.usefixtures("performance_enabled")
 def test_cli_preserves_command_error_if_log_cannot_be_written(repo: Repo, performance_log: pathlib.Path) -> None:
     performance_log.parent.write_text("a file", encoding="utf-8")
     result = repo.stack("restack", expect_success=False)
@@ -48,11 +78,10 @@ def test_log_defaults_to_the_local_state_directory(tmp_path: pathlib.Path, monke
     assert (tmp_path / ".local" / "git-stack" / "perf.log").read_text(encoding="utf-8").startswith("git stack info\n")
 
 
-def test_log_cap_retains_newest_whole_reports(performance_log: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(performance, "MAX_PERFORMANCE_LOG_BYTES", 110)
+def test_log_cap_retains_newest_whole_reports(performance_log: pathlib.Path) -> None:
     report = "Performance timeline\n" + "é" * 6
     for command in ("old", "middle", "recent"):
-        performance.append_performance_log([command], report)
+        performance.append_performance_log([command], report, max_bytes=110)
 
     assert performance_log.stat().st_size <= 110
     assert performance_log.read_text(encoding="utf-8").splitlines() == [
@@ -67,9 +96,8 @@ def test_log_cap_retains_newest_whole_reports(performance_log: pathlib.Path, mon
     ]
 
 
-def test_oversized_report_respects_cap(performance_log: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(performance, "MAX_PERFORMANCE_LOG_BYTES", 100)
-    performance.append_performance_log(["info"], "é" * 100)
+def test_oversized_report_respects_cap(performance_log: pathlib.Path) -> None:
+    performance.append_performance_log(["info"], "é" * 100, max_bytes=100)
 
     assert performance_log.stat().st_size <= 100
     assert "truncated" in performance_log.read_text(encoding="utf-8")
@@ -133,9 +161,12 @@ def timed_commands(report: str) -> list[list[str]]:
 
 def assert_git_processes_recorded(report: str, git_calls: list[GitCall]) -> None:
     calls = [call[1:] for call in timed_commands(report) if call[0] == "git" and call[1] != "cat-file"]
-    assert sorted(calls) == sorted(call for call in git_calls if call[0] != "cat-file")
+    # The initial config read decides whether to start the recorder.
+    assert git_calls[0][:2] == ["config", "--list"]
+    assert sorted(calls) == sorted(call for call in git_calls[1:] if call[0] != "cat-file")
 
 
+@pytest.mark.usefixtures("performance_enabled")
 def test_info_records_workers_and_keeps_json_parseable(
     repo: Repo, gh: FakeGitHub, git_calls: list[GitCall], performance_log: pathlib.Path
 ) -> None:
@@ -161,6 +192,7 @@ def test_info_records_workers_and_keeps_json_parseable(
     assert "Performance timeline" not in repo.stack("info", "--offline").stderr
 
 
+@pytest.mark.usefixtures("performance_enabled")
 def test_prs_records_github_stack_post(repo: Repo, gh: FakeGitHub, performance_log: pathlib.Path) -> None:
     gh.enable_stacks()
     repo.make_stack()
@@ -175,6 +207,7 @@ def test_prs_records_github_stack_post(repo: Repo, gh: FakeGitHub, performance_l
     assert gh.stacks() == [[1, 2, 3]]
 
 
+@pytest.mark.usefixtures("performance_enabled")
 def test_integrate_records_linked_worktree_calls(
     repo: Repo, git_calls: list[GitCall], performance_log: pathlib.Path
 ) -> None:
@@ -188,6 +221,7 @@ def test_integrate_records_linked_worktree_calls(
     assert any(call[:3] == ["git", "merge", "--no-ff"] for call in timed_commands(report))
 
 
+@pytest.mark.usefixtures("performance_enabled")
 def test_timeline_records_failed_gh_calls(repo: Repo, gh: FakeGitHub, performance_log: pathlib.Path) -> None:
     repo.make_stack()
     repo.client.push()
@@ -201,14 +235,17 @@ def test_timeline_records_failed_gh_calls(repo: Repo, gh: FakeGitHub, performanc
     assert any(call[:3] == ["gh", "pr", "create"] for call in timed_commands(report))
 
 
+@pytest.mark.usefixtures("performance_enabled")
 def test_failed_git_call_keeps_the_command_error(repo: Repo, performance_log: pathlib.Path) -> None:
-    result = repo.stack("-C", "missing", "restack", "--json", expect_success=False)
+    repo.make_stack()
+    repo.add_hook(repo.path, "pre-push", "#!/bin/sh\nexit 1\n")
+    result = repo.stack("push", "--json", expect_success=False)
     report = performance_log.read_text(encoding="utf-8")
 
     assert result.returncode == 1
     assert json.loads(result.stdout)["type"] == "error"
     assert "git stack:" in result.stderr and "Performance timeline" not in result.stderr
-    assert any(call[:2] == ["git", "rev-parse"] for call in timed_commands(report))
+    assert any(call[:2] == ["git", "push"] for call in timed_commands(report))
 
 
 def test_batch_clock_excludes_idle_time(repo: Repo) -> None:

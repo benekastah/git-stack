@@ -10,14 +10,20 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from threading import Lock
 from time import monotonic
-from typing import IO, Literal, override
+from typing import IO, TYPE_CHECKING, Literal, override
 
 from git_client import CLIENT_TIMEOUT, Arg, CatFile, EnvValue, Git, Timeout
 
+from git_stack.errors import StackError
 from git_stack.file_lock import file_lock
+
+if TYPE_CHECKING:
+    from git_stack.git import GitClient
 
 Tool = Literal["git", "gh"]
 MAX_PERFORMANCE_LOG_BYTES = 1_000_000
+PERFORMANCE_SETTING = "stack.performance"
+LOG_LIMIT_SETTING = "stack.performanceLogMaxBytes"
 
 
 @dataclass
@@ -41,16 +47,41 @@ def _command_line(args: Iterable[str]) -> str:
     return shlex.join(args).replace("\r", r"\r").replace("\n", r"\n")
 
 
-def append_performance_log(argv: list[str], report: str) -> None:
+def performance_log_limit(git: GitClient) -> int | None:
+    """Read the effective Git settings. None means reporting is disabled."""
+    try:
+        enabled = git.config_value(PERFORMANCE_SETTING)
+    except StackError:
+        # Commands such as install-skills can run outside a repository.
+        if git.run("config", "--type=bool", "--get", PERFORMANCE_SETTING, check=False) != "true":
+            return None
+        return _configured_log_limit(git)
+    if enabled is None or enabled.lower() in {"false", "no", "off", "0"}:
+        return None
+    # Ask Git about values such as an implicit true key or an integer.
+    if (
+        enabled.lower() not in {"true", "yes", "on", "1"}
+        and git.run("config", "--type=bool", "--get", PERFORMANCE_SETTING, check=False) != "true"
+    ):
+        return None
+    return MAX_PERFORMANCE_LOG_BYTES if git.config_value(LOG_LIMIT_SETTING) is None else _configured_log_limit(git)
+
+
+def _configured_log_limit(git: GitClient) -> int:
+    limit = int(git.run("config", "--type=int", "--get", LOG_LIMIT_SETTING, check=False) or "0")
+    return limit if limit > 0 else MAX_PERFORMANCE_LOG_BYTES
+
+
+def append_performance_log(argv: list[str], report: str, *, max_bytes: int = MAX_PERFORMANCE_LOG_BYTES) -> None:
     """Keep the newest timelines with their commands, within the byte limit."""
     override = os.environ.get("GIT_STACK_PERF_LOG")
     path = pathlib.Path(override) if override else pathlib.Path.home() / ".local" / "git-stack" / "perf.log"
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     command = _command_line(("git", "stack", *argv))
     entry = f"{command}\n{report}\n\n".encode("utf-8", errors="backslashreplace")
-    if len(entry) > MAX_PERFORMANCE_LOG_BYTES:
-        marker = b"\n[performance report truncated]\n\n"
-        limit = MAX_PERFORMANCE_LOG_BYTES - len(marker)
+    if len(entry) > max_bytes:
+        marker = b"\n[performance report truncated]\n\n"[:max_bytes]
+        limit = max_bytes - len(marker)
         entry = entry[:limit].decode("utf-8", errors="ignore").encode("utf-8") + marker
     # Commands in different repositories can finish at the same time.
     with (
@@ -58,7 +89,7 @@ def append_performance_log(argv: list[str], report: str) -> None:
         os.fdopen(os.open(path, os.O_RDWR | os.O_CREAT, 0o600), "r+b") as log,
     ):
         end = log.seek(0, os.SEEK_END)
-        remaining = MAX_PERFORMANCE_LOG_BYTES - len(entry)
+        remaining = max_bytes - len(entry)
         if end > remaining:
             # Start just before the retention window to detect a report that
             # begins exactly at its boundary.
