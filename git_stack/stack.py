@@ -1648,7 +1648,9 @@ class StackClient(StackCore):
             self.upstream_remotes(branches), self.upstream_remotes({stacks.root(b) for b in branches})
         )
 
-    def protected_sync_destinations(self, branches: list[str], roots: set[str], remote: str) -> set[str]:
+    def protected_sync_destinations(
+        self, branches: list[str], roots: set[str], remote: str, *, known_default: str | None = None
+    ) -> set[str]:
         """Those of branches whose upstream is remote's default branch, or the
         remote branch of one of roots, which only --force pushes to. Fails if
         any of them tracks remote and the server can't say what its default
@@ -1656,7 +1658,7 @@ class StackClient(StackCore):
         git = self.git
         if not any(git.config_get(b, "remote") == remote for b in branches):
             return set()
-        default = git.remote_default_branch(remote)
+        default = git.remote_default_branch(remote, known=known_default)
         if default is None:
             raise StackError(
                 f"{remote}'s default branch isn't known (couldn't ask {remote}, or its HEAD isn't a branch); "
@@ -1670,11 +1672,18 @@ class StackClient(StackCore):
         }
 
     def ensure_sync_destination(
-        self, branches: list[str], roots: set[str], remote: str, force: bool, command: str = "sync"
+        self,
+        branches: list[str],
+        roots: set[str],
+        remote: str,
+        force: bool,
+        command: str = "sync",
+        *,
+        known_default: str | None = None,
     ) -> None:
         if force:
             return
-        blocked = sorted(self.protected_sync_destinations(branches, roots, remote))
+        blocked = sorted(self.protected_sync_destinations(branches, roots, remote, known_default=known_default))
         if blocked:
             raise StackError(
                 f"{', '.join(blocked)} track {remote}'s default branch, or a stack root's remote branch; "
@@ -2398,7 +2407,6 @@ class StackClient(StackCore):
             raise StackError("can't push branches on multiple remotes atomically; select one with --remote")
         roots = {stacks.root(b) for b in stack}
         push_remote = remote if only_remote else self.stack_remote(remotes, self.upstream_remotes(roots))
-        self.ensure_sync_destination(stack, roots, push_remote, force, "push")
         if only_remote:
             for branch in stack:
                 self.settle(branch)
@@ -2414,6 +2422,8 @@ class StackClient(StackCore):
         adapter = self.checked_adapter(push_remote)
         github = adapter if prs and isinstance(adapter, GitHubAdapter) else None
         roots = {stacks.root(branch) for branch in stack}
+        known_default = adapter.default_branch_for_push() if isinstance(adapter, GitHubAdapter) else None
+        self.ensure_sync_destination(stack, roots, push_remote, force, "push", known_default=known_default)
         integrations = Integrations(self)
         selection = RefreshSelection(
             stack, {root: config for root in sorted(roots) if (config := integrations.read(root)) is not None}
@@ -2829,7 +2839,7 @@ class StackClient(StackCore):
         self.ensure_on_remote(branches, sorted({stacks.root(b) for b in branches}), remote)
         prs = adapter.pull_requests()
         allowed = {prs[b].number for b in branches if b in prs and prs[b].state is GitHubState.OPEN}
-        template = adapter.pull_request_template() or ""
+        template: str | None = None
         steps: list[PullRequestStep] = []
         for b in branches:
             parent = stacks.parent(b)
@@ -2848,6 +2858,8 @@ class StackClient(StackCore):
             if dry_run:
                 steps.append(PullRequestStep(b, parent, PullRequestAction.OPEN, title=title))
                 continue
+            if template is None:
+                template = adapter.pull_request_template() or ""
             try:
                 number, url = adapter.open_pull_request(b, parent, title, template)
             except StackError as e:

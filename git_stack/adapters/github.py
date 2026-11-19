@@ -360,6 +360,17 @@ class GitHubAdapter(GitAdapter):
         or None."""
         return self._default_branch
 
+    def default_branch_for_push(self) -> str | None:
+        """The API's default branch when Git fetches and pushes to that repository."""
+        if not self.default_branch or self.host != "github.com":
+            return None
+        # Match direct HTTPS URLs. SSH can select another destination through
+        # its configuration or a custom transport command.
+        expected = f"https://{self.repo}"
+        if self.git.direct_remote_url(self.remote) in (expected, f"{expected}.git"):
+            return self.default_branch
+        return None
+
     @property
     def viewer(self) -> str | None:
         """The gh user's login, once open_pull_requests or

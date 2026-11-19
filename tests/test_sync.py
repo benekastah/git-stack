@@ -49,6 +49,7 @@ def test_sync_reads_each_branchs_unpulled_commits_once(
     client.push()
     if local_change:
         repo.commit("c", "local change\n", "advance pr3")
+        repo.git("config", "--unset", "branch.pr3.stackPulled")
     git_calls.clear()
 
     client.sync()

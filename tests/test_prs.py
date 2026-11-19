@@ -1,6 +1,7 @@
 """git stack prs, with tests/fake_gh.py standing in for gh."""
 
 import pytest
+from git_client.testing import GitCall
 
 from git_stack import events, stack_section
 from git_stack.errors import StackError
@@ -180,7 +181,7 @@ def test_prs_refuses_unless_every_branch_matches_its_remote_branch(
     assert opened(gh) == []
 
 
-def test_prs_dry_run_opens_nothing(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+def test_prs_dry_run_opens_nothing(repo: Repo, gh: FakeGitHub, client: StackClient, git_calls: list[GitCall]) -> None:
     repo.make_stack()
     client.push()
 
@@ -192,6 +193,20 @@ def test_prs_dry_run_opens_nothing(repo: Repo, gh: FakeGitHub, client: StackClie
         ("pr3", PullRequestAction.OPEN, "pr3 c1", None),
     ]
     assert gh.calls("pr") == []
+    assert not any(call[0] == "ls-tree" for call in git_calls)
+
+
+def test_prs_skips_template_lookup_when_all_pull_requests_exist(
+    repo: Repo, gh: FakeGitHub, client: StackClient, git_calls: list[GitCall]
+) -> None:
+    repo.make_stack()
+    client.push(prs=True)
+    gh.clear_calls()
+    git_calls.clear()
+
+    assert all(step.action is PullRequestAction.EXISTS for step in client.prs().steps)
+    assert not gh.calls("pr", "create")
+    assert not any(call[0] == "ls-tree" for call in git_calls)
 
 
 def test_prs_dry_run_retargets_nothing(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:

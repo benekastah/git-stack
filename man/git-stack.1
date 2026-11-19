@@ -1162,6 +1162,10 @@ Either way, each lease is pinned to the remote\-tracking ref that was
 checked, so if someone pushes after your last fetch, the push fails
 instead of overwriting their work.
 .IP \(bu 2
+The default\-branch protection can reuse GitHub\(aqs response for a
+single direct HTTPS remote on github.com.
+Otherwise it asks Git for the server\(aqs current HEAD.
+.IP \(bu 2
 A remote branch whose commits were rebased there, e.g.
 by GitHub\(aqs \(dqRebase stack\(dq button, isn\(aqt pushed over: the
 local branch is moved to it instead, as \f[CR]sync\f[R] does (see

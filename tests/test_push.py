@@ -45,11 +45,40 @@ def test_push_records_changed_tips_together(repo: Repo, client: StackClient, git
 
     client.push()
 
+    assert not any(call[:2] in (["log", "--walk-reflogs"], ["rev-list", "--parents"]) for call in git_calls)
     publication = next(i for i, call in enumerate(git_calls) if call[0] == "push" and "--set-upstream" in call)
     assert sum(call[:2] == ["config", "--list"] for call in git_calls[publication + 1 :]) == 2
     for branch in ("pr1", "pr2", "pr3"):
         assert repo.config(branch, "stackPulled") == repo.git("rev-parse", f"refs/heads/{branch}")
         assert repo.config(branch, "stackPulledUpstream") == f"origin refs/heads/{branch}"
+
+
+@pytest.mark.parametrize(("advance", "git_budget"), [(True, 18), (False, 14)])
+def test_push_prs_keeps_subprocess_work_bounded(
+    repo: Repo, gh: FakeGitHub, git_calls: list[GitCall], advance: bool, git_budget: int
+) -> None:
+    repo.client.branch("lower")
+    repo.commit("a", "lower\n", "first")
+    repo.client.branch("upper")
+    repo.commit("b", "upper\n", "second")
+    repo.client.push()
+    if advance:
+        repo.git("switch", "--quiet", "lower")
+        repo.commit("c", "lower advanced\n", "advance lower")
+        repo.client.restack()
+    gh.fail_opening("lower")
+    gh.clear_calls()
+    git_calls.clear()
+
+    result = repo.stack("push", "--prs", expect_success=False)
+
+    assert "opening a pull request for lower failed" in result.stderr
+    assert repo.remote_subject("lower") == ("advance lower" if advance else "first")
+    assert repo.remote_subject("upper") == "second"
+    # The Git fixture counts each launched process, including the batch process once.
+    assert len(git_calls) <= git_budget, git_calls
+    gh_calls = gh.calls()
+    assert len(gh_calls) <= 2, gh_calls
 
 
 @pytest.mark.parametrize("command", ["push", "sync"])
