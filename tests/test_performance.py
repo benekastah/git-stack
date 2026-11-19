@@ -130,13 +130,46 @@ def test_truncated_report_has_one_record_boundary(performance_log: pathlib.Path)
     assert performance_log.read_bytes() == header + b"[performance report truncated]\n\n"
 
 
+def test_log_can_rotate_a_legacy_truncation_after_a_line_boundary(performance_log: pathlib.Path) -> None:
+    performance_log.parent.mkdir()
+    old = b"git stack old\nPerformance timeline\n\n[performance report truncated]\n\n"
+    performance_log.write_bytes(old)
+
+    performance.append_performance_log(performance_log, ["new"], "Performance timeline", max_bytes=len(old))
+
+    assert performance_log.read_bytes() == b"git stack new\nPerformance timeline\n\n"
+
+
+def test_log_accepts_a_legacy_standalone_truncation_before_a_report(performance_log: pathlib.Path) -> None:
+    performance_log.parent.mkdir()
+    old = b"[performance report truncated]\n\ngit stack old\nPerformance timeline\n\n"
+    performance_log.write_bytes(old)
+
+    performance.append_performance_log(performance_log, ["new"], "Performance timeline")
+
+    assert performance_log.read_bytes() == old + b"git stack new\nPerformance timeline\n\n"
+
+
+def test_log_preserves_unrecognized_data_between_reports(performance_log: pathlib.Path) -> None:
+    performance_log.parent.mkdir()
+    old = b"git stack old\nPerformance timeline\n\nunrecognized\n\ngit stack other\nPerformance timeline\n\n"
+    performance_log.write_bytes(old)
+
+    with pytest.raises(OSError, match="not a performance log"):
+        performance.append_performance_log(performance_log, ["new"], "Performance timeline")
+
+    assert performance_log.read_bytes() == old
+
+
 def test_log_can_replace_a_legacy_truncated_command(performance_log: pathlib.Path) -> None:
     performance_log.parent.mkdir()
     performance_log.write_bytes(b"git sta\n[performance report truncated]\n\n")
 
-    performance.append_performance_log(performance_log, ["info"], "Performance timeline\n  Total  0.000s")
+    report = "Performance timeline\n  Total  0.000s"
+    expected = f"git stack info\n{report}\n\n".encode()
+    performance.append_performance_log(performance_log, ["info"], report, max_bytes=len(expected))
 
-    assert performance_log.read_bytes().startswith(b"git stack info\nPerformance timeline\n")
+    assert performance_log.read_bytes() == expected
 
 
 @pytest.mark.parametrize("first_line", [b"[unrelated config]\n", b"[performance report truncated]\n\n"])

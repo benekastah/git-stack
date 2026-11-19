@@ -86,46 +86,41 @@ def _open_log(path: pathlib.Path) -> Generator[BinaryIO]:
         yield log
 
 
-def _starts_with_report(log: BinaryIO) -> bool:
+def _read_report(log: BinaryIO) -> bool:
+    """Consume a complete report, including truncation formats from older builds."""
     command = log.readline(MAX_PERFORMANCE_LOG_BYTES).rstrip(b"\r\n")
-    heading = log.readline(len(REPORT_HEADING) + 2).rstrip(b"\r\n")
-    return (command == b"git stack" or command.startswith(b"git stack ")) and heading == REPORT_HEADING.encode()
+    if command == TRUNCATION_NOTICE.rstrip(b"\n"):
+        return log.readline(2) == b"\n"
+
+    heading = log.readline(len(TRUNCATION_NOTICE)).rstrip(b"\r\n")
+    if heading == TRUNCATION_NOTICE.rstrip(b"\n"):
+        # Older builds could truncate within the command itself.
+        return (b"git stack".startswith(command) or command.startswith(b"git stack ")) and log.readline(2) == b"\n"
+    if heading != REPORT_HEADING.encode() or not (command == b"git stack" or command.startswith(b"git stack ")):
+        return False
+
+    for line in iter(log.readline, b""):
+        if line in (b"\n", b"\r\n"):
+            # Older reports could have a blank line before the truncation
+            # marker if their byte limit fell right on a line boundary.
+            boundary = log.tell()
+            if log.read(len(TRUNCATION_NOTICE)) != TRUNCATION_NOTICE:
+                log.seek(boundary)
+            return True
+    return False
 
 
 def _retained_report_start(log: BinaryIO, end: int, remaining: int) -> int | None:
     """Validate the file and find the oldest complete report that will fit."""
     log.seek(0)
-    if not _starts_with_report(log):
-        # Older builds could truncate the command itself. Accept just one
-        # truncated entry with its exact terminator and no trailing data.
-        log.seek(0)
-        data = log.read(MAX_PERFORMANCE_LOG_BYTES)
-        prefix, marker, after = data.rpartition(b"\n" + TRUNCATION_NOTICE)
-        legacy = (
-            marker
-            and not after
-            and b"\n" not in prefix
-            and (b"git stack".startswith(prefix) or prefix.startswith(b"git stack "))
-        )
-        return end if len(data) == end and (data == TRUNCATION_NOTICE or legacy) else None
-    if end <= remaining:
-        log.seek(max(0, end - 4))
-        return 0 if log.read().endswith((b"\n\n", b"\r\n\r\n")) else None
-
     start, retain = 0, end
-    while True:
-        for line in iter(log.readline, b""):
-            if line in (b"\n", b"\r\n"):
-                break
-        else:
+    while start < end:
+        if not _read_report(log):
             return None
         if start >= end - remaining and retain == end:
             retain = start
         start = log.tell()
-        if start == end:
-            return retain
-        if not _starts_with_report(log):
-            return None
+    return retain
 
 
 def append_performance_log(
