@@ -22,6 +22,46 @@ def test_github_repo_needs_no_git_process_for_a_configured_url(
     assert [call[0] for call in git_calls] == ["config"]
 
 
+@pytest.mark.parametrize("endpoint", ["direct", "rewritten", "pushurl", "push-rewritten", "multiple"])
+def test_push_reuses_github_default_only_for_a_direct_remote(
+    repo: Repo, gh: FakeGitHub, monkeypatch: pytest.MonkeyPatch, endpoint: str
+) -> None:
+    repo.git("branch", "--no-track", "local-base", "main")
+    repo.client.branch("feature", from_branch="local-base")
+    repo.commit("a", "feature\n", "feature")
+    repo.git("branch", "--set-upstream-to=origin/main", "feature")
+    if endpoint != "rewritten":
+        repo.git("config", "--unset", f"url.{repo.origin}.insteadOf")
+    if endpoint == "pushurl":
+        repo.git("config", "remote.origin.pushurl", str(repo.origin))
+    if endpoint == "push-rewritten":
+        repo.git("config", f"url.{repo.origin}.pushInsteadOf", "https://github.com/")
+    if endpoint == "multiple":
+        repo.git("config", "--add", "remote.origin.url", "https://github.com/acme/widgets.git")
+    # A clone can keep an old idea of origin's HEAD.
+    repo.git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/old")
+    asked: list[str] = []
+
+    def transport_default(git: GitClient, remote: str) -> str:
+        asked.append(remote)
+        return "main"
+
+    def unexpected_push(git: GitClient, *args: str) -> bool:
+        pytest.fail(f"default branch should have blocked git {' '.join(args)}")
+
+    monkeypatch.setattr(GitClient, "_ask_remote_default_branch", transport_default)
+    monkeypatch.setattr(GitClient, "passthrough", unexpected_push)
+    before = repo.remote_subject("main")
+
+    result = repo.stack("push", expect_success=False)
+
+    assert "rerun `git stack push --force`" in result.stderr
+    assert repo.remote_subject("main") == before
+    assert asked == ([] if endpoint == "direct" else ["origin"])
+    if endpoint == "direct":
+        assert gh.calls("api", "graphql")
+
+
 def merge_pr1_on_forge_with_a_tweak(repo: Repo, gh: FakeGitHub) -> None:
     """Squash-merge pr1 as pull request #5 with an extra change, so the merge
     doesn't match pr1's changes."""

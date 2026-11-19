@@ -13,6 +13,9 @@ man page is generated from it.
   GitHub. The GitHub adapter validates PR changes before an atomic push and
   plans any retargets that must run before publication. Run the dry push
   before applying those edits so stale leases leave the PR bases alone.
+  Push can reuse the API's default branch when the remote has one direct
+  HTTPS URL on github.com for both fetch and push. Otherwise use Git's live
+  remote HEAD.
 - `GitClient` runs git through [py-git-client](https://github.com/benekastah/py-git-client)
   (`git_client`), which git-stack shares with git-recommit and move-forward:
   its `Git` starts each process, the quickest way each system allows (and

@@ -367,6 +367,22 @@ class GitClient:
         values = self._config.get(config_key(key))
         return None if values is None else values[-1] or ""
 
+    def direct_remote_url(self, remote: str) -> str | None:
+        """The configured URL when fetch and push use it without a rewrite."""
+        self.branch_config()
+        urls = self._config.get(config_key(f"remote.{remote}.url"), [])
+        if len(urls) != 1 or not urls[0] or config_key(f"remote.{remote}.pushurl") in self._config:
+            return None
+        url = urls[0]
+        for key, prefixes in self._config.items():
+            if (
+                key.startswith("url.")
+                and key.rpartition(".")[2] in {"insteadof", "pushinsteadof"}
+                and any(prefix is None or url.startswith(prefix) for prefix in prefixes)
+            ):
+                return None
+        return url
+
     def config_get(self, branch: str, key: str) -> str | None:
         return self.branch_config().get((branch, key.lower())) or None
 
@@ -629,17 +645,16 @@ class GitClient:
             self._toplevel = pathlib.Path(self.run("rev-parse", "--show-toplevel"))
         return self._toplevel
 
-    def remote_default_branch(self, remote: str) -> str | None:
+    def remote_default_branch(self, remote: str, *, known: str | None = None) -> str | None:
         """The branch remote's HEAD points at on the server, or None if it can't
         be asked or its HEAD isn't a branch.
 
-        Asked rather than read from refs/remotes/<remote>/HEAD, which fetch
-        doesn't update when the server's default branch changes, once per
-        snapshot.
+        Asked once per snapshot unless the caller already knows the answer
+        from the server. The local refs/remotes/<remote>/HEAD can be stale.
         """
         if self._snapshot_depth and remote in self._remote_defaults:
             return self._remote_defaults[remote]
-        default = self._ask_remote_default_branch(remote)
+        default = known if known is not None else self._ask_remote_default_branch(remote)
         if self._snapshot_depth:
             self._remote_defaults[remote] = default
         return default
