@@ -20,7 +20,7 @@ lands on `main` so each merged build has a distinct version in performance logs.
   GitHub. The GitHub adapter validates PR changes before an atomic push and
   plans any retargets that must run before publication. Run the dry push
   before applying those edits so stale leases leave the PR bases alone.
-  Push can reuse the API's default branch when the remote has one direct
+  Push and sync can reuse the API's default branch when the remote has one direct
   HTTPS URL on github.com for both fetch and push. Otherwise check the live
   HEAD of the fetch remote and any separate push destinations.
 - `GitClient` runs git through [py-git-client](https://github.com/benekastah/py-git-client)

@@ -157,6 +157,46 @@ def test_sync_pushes_to_a_differently_named_upstream(repo: Repo, client: StackCl
     assert repo.git("rev-parse", "--abbrev-ref", "local-feature@{upstream}") == "origin/remote-feature"
 
 
+@pytest.mark.usefixtures("gh")
+def test_sync_reuses_the_github_default_for_a_direct_remote(
+    repo: Repo, client: StackClient, git_calls: list[GitCall], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo.make_stack()
+    client.push()
+    monkeypatch.setattr(GitClient, "direct_remote_url", lambda _git, _remote: "https://github.com/acme/widgets")
+    repo.commit("a", "local change\n", "local change")
+    git_calls.clear()
+
+    client.sync(latest=True)
+
+    assert repo.remote_subject("pr3") == "local change"
+    assert not any(call[0] == "ls-remote" for call in git_calls)
+
+
+def test_sync_checks_protected_destination_before_changing_group(repo: Repo, client: StackClient) -> None:
+    repo.git("switch", "-qc", "release")
+    repo.git("push", "-qu", "origin", "release")
+    client.branch("first")
+    repo.commit("a", "first\n", "first")
+    repo.git("branch", "--set-upstream-to=origin/main", "first")
+    client.branch("second", from_branch="release")
+    repo.commit("b", "second\n", "second")
+    repo.git("push", "-qu", "origin", "second")
+    client.group_add("related", ["first", "second"])
+    repo.git("switch", "release")
+    repo.git("merge", "--ff-only", "second")
+    repo.git("push", "-q", "origin", "release")
+    first = repo.git("rev-parse", "first")
+    second = repo.git("rev-parse", "second")
+
+    result = repo.stack("sync", "--group", "related", "--latest", "--delete", "both", expect_success=False)
+
+    assert "rerun `git stack sync --force`" in result.stderr
+    assert repo.git("rev-parse", "first") == first
+    assert repo.git("rev-parse", "second") == second
+    assert repo.git("rev-parse", "second", cwd=repo.origin) == second
+
+
 def test_sync_requires_force_to_push_to_default_branch(repo: Repo, client: StackClient) -> None:
     client.branch("feature")
     repo.commit("a", "feature\n", "feature")

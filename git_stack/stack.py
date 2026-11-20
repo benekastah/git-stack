@@ -1793,15 +1793,18 @@ class StackClient(StackCore):
         }
         root_remotes = self.upstream_remotes(roots_to_update)
         push_remote = remote if only_remote else self.stack_remote(upstream_remotes, root_remotes)
+        adapter = self.checked_adapter(push_remote)
+        known_default = (
+            adapter.default_branch_for_push() if push and not force and isinstance(adapter, GitHubAdapter) else None
+        )
         destinations = [*stack, *selection.integrations]
         protected_roots = roots | ordinary_roots
         protected = (
-            self.protected_sync_destinations(destinations, protected_roots, push_remote)
+            self.protected_sync_destinations(destinations, protected_roots, push_remote, known_default=known_default)
             if push and not force
             else set[str]()
         )
         original = self.current_checkout()
-        adapter = self.checked_adapter(push_remote)
         remotes = {push_remote} | upstream_remotes | root_remotes
         for name in sorted(remotes, key=lambda name: (name != remote, name)):
             self.fetch(name)
@@ -1818,7 +1821,9 @@ class StackClient(StackCore):
             for name in sorted(self.upstream_remotes(roots_to_update) - remotes):
                 self.fetch(name)
             if push and not force:
-                protected = self.protected_sync_destinations(destinations, protected_roots, push_remote)
+                protected = self.protected_sync_destinations(
+                    destinations, protected_roots, push_remote, known_default=known_default
+                )
         integration_leases = self.integration_leases(selection, push_remote, force, protected_roots) if push else {}
         # A group's stacks can be on different roots.
         self.preflight_integration_worktrees(selection, expected, roots_to_update)

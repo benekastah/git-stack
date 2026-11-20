@@ -1027,10 +1027,12 @@ It never forces, so it fails if \f[CR]push\f[R] would refuse.
 As with \f[CR]push\f[R], the branches are pushed in one atomic push.
 Pushing to the remote\(aqs default branch, or to a stack root\(aqs
 remote branch, requires \f[CR]\-\-force\f[R].
-The default branch is asked of the remote each time (not read from
-\f[CR]<remote>/HEAD\f[R], which fetching doesn\(aqt update); if the
-remote can\(aqt say, \f[CR]sync\f[R] fails unless \f[CR]\-\-force\f[R]
-is given.
+The default branch is checked before syncing branches that track the
+remote.
+For a direct GitHub HTTPS remote, sync can reuse the default returned by
+its pull request lookup.
+If the default cannot be determined, sync refuses unless
+\f[CR]\-\-force\f[R] is given.
 .IP \(bu 2
 Nothing is pushed if a restack or pull stops on a conflict; rerun
 \f[CR]sync\f[R] once it\(aqs resolved.
