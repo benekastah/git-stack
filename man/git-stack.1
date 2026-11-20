@@ -726,6 +726,10 @@ Run \f[CR]git stack sync\f[R] or \f[CR]git stack restack\f[R].
 With color on, the branch is yellow and marked \f[CR]!\f[R] instead; the
 marker makes its status visible without relying on color.
 .IP \(bu 2
+\f[CR](stale recorded base)\f[R]: the recorded base includes trunk
+merges in the branch\(aqs replay range.
+Run \f[CR]git stack restack\f[R] to see the suggested repair command.
+.IP \(bu 2
 \f[CR](merged)\f[R]: it was merged into its parent (see When does
 \f[CR]sync\f[R] consider a branch merged?); \f[CR]sync\f[R] or
 \f[CR]clean\f[R] will stop tracking it.
@@ -760,7 +764,7 @@ On a terminal, \f[CR]info\f[R] and commands that show stacks use these
 colors: yellow branches marked \f[CR]!\f[R] need restacking; the current
 branch is bold and green unless it needs restacking; cyan notes mark
 merged branches, yellow notes need attention, and red notes mark a
-missing parent.
+missing parent or stale base.
 Pull request links are blue for open, grey for draft, magenta for
 merged, and green when just opened or imported.
 The \f[CR]*\f[R], \f[CR]!\f[R], and status text identify branch states
@@ -784,7 +788,7 @@ an object for each branch, each stack\(aqs root first, parent before
 child.
 \f[CR]parent\f[R] and \f[CR]status\f[R] are \f[CR]null\f[R] for a root,
 and \f[CR]status\f[R] is one of \f[CR]up\-to\-date\f[R],
-\f[CR]needs\-restack\f[R], \f[CR]merged\f[R],
+\f[CR]needs\-restack\f[R], \f[CR]stale\-base\f[R], \f[CR]merged\f[R],
 \f[CR]merged\-with\-new\-commits\f[R], \f[CR]reverted\f[R] or
 \f[CR]parent\-missing\f[R].
 \f[CR]group\f[R] is the group name on the bottom branch of each grouped
@@ -1811,6 +1815,11 @@ To recognize a manually completed restack, git\-stack uses the
 branch\(aqs reflog.
 If that entry is unavailable, inspect the branch and re\-track it with
 \f[CR]git stack track <parent> \-\-base <sha>\f[R].
+If a branch\(aqs recorded base puts trunk merges in its replay range,
+\f[CR]info\f[R] marks it as having a stale recorded base.
+Restack and sync check for this before replaying the stack.
+Verify the suggested fork and use the printed \f[CR]git stack track\f[R]
+command to record it before retrying.
 For a pull, each upstream commit must be accounted for, even when
 commits share an author, date, and subject; a skipped commit is not
 counted as pulled.

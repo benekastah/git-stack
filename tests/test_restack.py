@@ -24,6 +24,150 @@ def test_restack_moves_whole_stack_after_parent_changes(repo: Repo, client: Stac
     assert all(branch.status is not BranchStatus.NEEDS_RESTACK for branch in client.info())
 
 
+@pytest.mark.parametrize("command", ["restack", "pull", "sync"])
+def test_restack_suggests_recording_the_fork_when_only_trunk_has_merges(repo: Repo, command: str) -> None:
+    old_base = repo.git("rev-parse", "main")
+    repo.git("switch", "-qc", "trunk-side")
+    repo.commit("b", "trunk change\n", "trunk change")
+    repo.git("switch", "-q", "main")
+    repo.git("merge", "--no-ff", "--no-edit", "trunk-side")
+    fork = repo.git("rev-parse", "main")
+    repo.stack("create", "feature")
+    repo.commit("a", "feature\n", "own change")
+    tip = repo.git("rev-parse", "feature")
+    repo.git("config", "branch.feature.stackBase", old_base)
+    repo.git("push", "-q", "origin", "main")
+    repo.commit_on_forge("main", "c", "new trunk change\n", "new trunk change")
+    new_trunk = repo.git("rev-parse", "main", cwd=repo.origin)
+
+    assert "stale recorded base" in repo.stack("info", "--offline").stdout
+
+    result = repo.stack(command, "--latest", expect_success=False)
+
+    assert f"git stack track main feature --base {fork}" in result.stderr
+    assert repo.git("rev-parse", "feature") == tip
+    assert repo.git("rev-parse", "main") == fork
+    assert repo.git("rev-parse", "origin/main") == (fork if command == "restack" else new_trunk)
+    assert repo.config("feature", "stackBase") == old_base
+
+    repo.stack("track", "main", "feature", "--base", fork)
+    repo.stack(command, "--latest")
+    repo.assert_stacked("feature", "main", ["own change"])
+
+
+@pytest.mark.parametrize(("landed", "fork_known"), [(False, False), (True, False), (True, True)])
+def test_pull_checks_a_stale_fork_before_moving_trunk(repo: Repo, landed: bool, fork_known: bool) -> None:
+    old = repo.git("rev-parse", "main")
+    repo.git("switch", "-qc", "side")
+    repo.commit("b", "trunk change\n", "trunk change")
+    repo.git("switch", "main")
+    repo.git("merge", "--no-ff", "--no-edit", "side")
+    fork = repo.git("rev-parse", "main")
+    repo.stack("create", "feature")
+    repo.commit("a", "feature\n", "feature")
+    repo.git("config", "branch.feature.stackBase", old)
+    repo.git("push", "-q", "origin", f"{fork}:refs/heads/main")
+    if not fork_known:
+        repo.git("update-ref", "refs/heads/main", old)
+        repo.git("update-ref", "refs/remotes/origin/main", old)
+
+    if landed:
+        repo.git("push", "-q", "origin", "feature")
+        repo.squash_merge_on_forge("feature", delete_branch=False)
+
+    result = repo.stack("pull", "--latest", expect_success=landed)
+
+    if landed:
+        assert repo.git("rev-parse", "main") == repo.git("rev-parse", "origin/main")
+        assert repo.git("show", "main:a") == "feature"
+        assert repo.client.git.config_get("feature", "stackParent") is None
+    else:
+        assert f"git stack track main feature --base {fork}" in result.stderr
+        assert repo.git("rev-parse", "main") == old
+        assert repo.git("rev-parse", "origin/main") == fork
+
+
+def test_pull_checks_landing_against_the_projected_trunk(repo: Repo) -> None:
+    old = repo.git("rev-parse", "main")
+    repo.git("switch", "-qc", "trunk-side")
+    repo.commit("b", "trunk change\n", "trunk change")
+    repo.git("switch", "main")
+    repo.git("merge", "--no-ff", "--no-edit", "trunk-side")
+    fork = repo.git("rev-parse", "main")
+    repo.stack("create", "feature")
+    repo.commit("a", "feature\n", "feature")
+    repo.git("config", "branch.feature.stackBase", old)
+    repo.git("switch", "-qc", "another-side", "main")
+    repo.commit("c", "other change\n", "other change")
+    repo.git("switch", "main")
+    repo.git("merge", "--no-ff", "--no-commit", "another-side")
+    repo.write("a", "feature\n")
+    repo.git("commit", "-am", "merge takes the feature's change")
+    local = repo.git("rev-parse", "main")
+    repo.git("push", "-q", "origin", "main")
+    repo.commit_on_forge("main", "a", "overlapping change\n", "overlapping change")
+    repo.git("switch", "feature")
+    assert "(merged)" in repo.stack("info", "--offline").stdout
+
+    result = repo.stack("pull", "--latest", expect_success=False)
+
+    assert f"git stack track main feature --base {fork}" in result.stderr
+    assert repo.git("rev-parse", "main") == local
+
+
+def test_pull_does_not_treat_a_branch_with_no_delta_from_its_stale_base_as_landed(repo: Repo) -> None:
+    old = repo.git("rev-parse", "main")
+    original = repo.git("show", "main:a") + "\n"
+    repo.git("switch", "-qc", "side")
+    repo.commit("a", "trunk edit\n", "trunk edit")
+    repo.git("switch", "main")
+    repo.git("merge", "--no-ff", "--no-edit", "side")
+    fork = repo.git("rev-parse", "main")
+    repo.git("push", "-q", "origin", "main")
+    repo.stack("create", "feature")
+    repo.commit("a", original, "feature restores original")
+    repo.git("config", "branch.feature.stackBase", old)
+    repo.commit_on_forge("main", "a", original, "trunk restores original")
+
+    result = repo.stack("pull", "--latest", expect_success=False)
+
+    assert f"git stack track main feature --base {fork}" in result.stderr
+    assert repo.git("rev-parse", "main") == fork
+
+
+def test_restack_allows_a_squash_landed_branch_with_a_stale_base(repo: Repo) -> None:
+    old = repo.git("rev-parse", "main")
+    repo.git("switch", "-qc", "side")
+    repo.commit("b", "trunk change\n", "trunk change")
+    repo.git("switch", "main")
+    repo.git("merge", "--no-ff", "--no-edit", "side")
+    repo.stack("create", "feature")
+    repo.commit("a", "feature\n", "feature")
+    repo.git("config", "branch.feature.stackBase", old)
+    repo.git("switch", "main")
+    repo.git("merge", "--squash", "feature")
+    repo.git("commit", "-m", "land feature")
+    repo.git("switch", "feature")
+
+    assert "(merged)" in repo.stack("info", "--offline").stdout
+    repo.stack("restack", "--latest")
+
+
+def test_invalid_restack_selection_leaves_other_stacks_pending(repo: Repo, client: StackClient) -> None:
+    client.branch("tracked")
+    repo.commit("a", "tracked\n", "tracked")
+    tip = repo.git("rev-parse", "tracked")
+    base = repo.git("rev-parse", "main")
+    pending = f"{tip} {base} main"
+    repo.git("config", "branch.tracked.stackPendingRestack", pending)
+    repo.git("switch", "-qc", "untracked", "main")
+
+    with pytest.raises(StackError, match="untracked isn't in a stack"):
+        client.restack()
+
+    assert repo.config("tracked", "stackPendingRestack") == pending
+
+
 def test_restack_refuses_to_drop_local_merge_changes(repo: Repo, client: StackClient) -> None:
     client.branch("pr1")
     repo.commit("a", "pr1\n", "pr1")

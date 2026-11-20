@@ -16,6 +16,7 @@ from git_stack.stack import BranchInfo, BranchStatus, StackClient
 NOTES: dict[BranchStatus, str | None] = {
     BranchStatus.UP_TO_DATE: None,
     BranchStatus.NEEDS_RESTACK: "(needs restack)",
+    BranchStatus.STALE_BASE: "(stale recorded base)",
     BranchStatus.MERGED: "(merged)",
     BranchStatus.MERGED_WITH_NEW_COMMITS: "(merged, with new commits)",
     BranchStatus.REVERTED: "(merged, then reverted)",
@@ -50,6 +51,7 @@ STATUS_COLORS = {
     BranchStatus.MERGED_WITH_NEW_COMMITS: "33",
     BranchStatus.REVERTED: "33",
     BranchStatus.PARENT_MISSING: "31",  # red
+    BranchStatus.STALE_BASE: "31",
 }
 
 type Paint = Callable[[str, str], str]

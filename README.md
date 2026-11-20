@@ -510,6 +510,8 @@ git stack info
   branch on `main`, it conflicts with `main`). Run `git stack sync` or
   `git stack restack`. With color on, the branch is yellow and marked `!`
   instead; the marker makes its status visible without relying on color.
+- `(stale recorded base)`: the recorded base includes trunk merges in the branch's
+  replay range. Run `git stack restack` to see the suggested repair command.
 - `(merged)`: it was merged into its parent (see
   [When does `sync` consider a branch merged?](#when-does-sync-consider-a-branch-merged));
   `sync` or `clean` will stop tracking it.
@@ -533,7 +535,7 @@ git stack info
 - On a terminal, `info` and commands that show stacks use these colors:
   yellow branches marked `!` need restacking; the current branch is bold and
   green unless it needs restacking; cyan notes mark merged branches, yellow
-  notes need attention, and red notes mark a missing parent. Pull request links
+  notes need attention, and red notes mark a missing parent or stale base. Pull request links
   are blue for open, grey for draft, magenta for merged, and green when just
   opened or imported. The `*`, `!`, and status text identify branch states
   without relying on color. When color is off, `(needs restack)` replaces `!`.
@@ -547,7 +549,7 @@ git stack info
 - `--json` prints the same information for scripts: a list with an object for
   each branch, each stack's root first, parent before child. `parent` and
   `status` are `null` for a root, and `status` is one of `up-to-date`,
-  `needs-restack`, `merged`, `merged-with-new-commits`, `reverted` or
+  `needs-restack`, `stale-base`, `merged`, `merged-with-new-commits`, `reverted` or
   `parent-missing`.
   `group` is the group name on the bottom branch of each grouped stack, or `null`.
   `integration_sources` lists each configured source name and whether its
@@ -1255,6 +1257,10 @@ parent and base (and the pulled upstream commits) are recorded only if the
 operation actually completed. To recognize a manually completed restack,
 git-stack uses the branch's reflog. If that entry is unavailable, inspect the
 branch and re-track it with `git stack track <parent> --base <sha>`.
+If a branch's recorded base puts trunk merges in its replay range,
+`info` marks it as having a stale recorded base. Restack and sync check for
+this before replaying the stack. Verify the suggested fork and use the printed
+`git stack track` command to record it before retrying.
 For a pull, each upstream commit must be accounted for, even when commits share
 an author, date, and subject; a skipped commit is not counted as pulled.
 

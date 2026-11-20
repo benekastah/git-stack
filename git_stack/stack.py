@@ -69,6 +69,7 @@ class BranchStatus(enum.Enum):
     UP_TO_DATE = "up-to-date"
     NEEDS_RESTACK = "needs-restack"
     PARENT_MISSING = "parent-missing"
+    STALE_BASE = "stale-base"
     MERGED = "merged"
     MERGED_WITH_NEW_COMMITS = "merged-with-new-commits"
     REVERTED = "reverted"
@@ -1143,6 +1144,8 @@ class StackClient(StackCore):
                 return BranchStatus.MERGED_WITH_NEW_COMMITS
             if state is MergeState.REVERTED:
                 return BranchStatus.REVERTED
+            if self.stale_trunk_base(branch):
+                return BranchStatus.STALE_BASE
             return BranchStatus.NEEDS_RESTACK if needs_restack else BranchStatus.UP_TO_DATE
 
         roots = sorted(set(stacks.roots()) | set(extra_roots))
@@ -1543,6 +1546,17 @@ class StackClient(StackCore):
             verified[name] = integrations.build(name, desired, observed, config, expected[name])
         return verified
 
+    def validate_restack_selection(self, branches: Sequence[str], groups: Sequence[str], onto: str | None) -> None:
+        """Reject invalid selectors before settling interrupted work in other stacks."""
+        initial = self.stacks()
+        if onto:
+            if branches and branches[0] not in initial:
+                raise StackError(f"{branches[0]} isn't in a stack; use `git stack track` first")
+            if not branches:
+                self.current_stacked_branch(initial, "restack", hint="use `git stack track` first")
+        else:
+            self.refresh_selection(branches, groups, initial, "restack")
+
     @exclusive
     def restack(
         self,
@@ -1575,6 +1589,7 @@ class StackClient(StackCore):
         self.ensure_no_operation_in_progress()
         self.ensure_clean_worktree()
         Integrations(self).restore_pending_checkout()
+        self.validate_restack_selection(branches, groups, onto)
         self.settle_all()
         stacks = self.stacks()
         original = self.current_checkout()
@@ -1603,10 +1618,16 @@ class StackClient(StackCore):
         else:
             selection = self.refresh_selection(branches, groups, stacks, "restack")
             self.ensure_owned(selection.branches, stacks, allow_shared, "restack")
-        expected = self.preflight_integrations(selection, stacks, force_name)
-        self.preflight_integration_worktrees(selection, expected)
         remote = self.default_remote(selection.branches, stacks)
         adapter = make_adapter(self, remote, fetch=False)
+        self.ensure_fresh_trunk_bases(
+            selection.branches,
+            skip=lambda branch, _parent, _trunk: (
+                adapter.merge_state(branch, stacks.parent(branch)) in {MergeState.MERGED, MergeState.REVERTED}
+            ),
+        )
+        expected = self.preflight_integrations(selection, stacks, force_name)
+        self.preflight_integration_worktrees(selection, expected)
         sources, remaining = selection.ordered(stacks)
         if sources:
             blocked = self.restack_all(self.skip_merged(sources, stacks, adapter), stacks, latest)
@@ -1810,6 +1831,8 @@ class StackClient(StackCore):
         remotes = {push_remote} | upstream_remotes | root_remotes
         for name in sorted(remotes, key=lambda name: (name != remote, name)):
             self.fetch(name)
+        # Fetch may reveal a newer fork before the local trunk moves.
+        self.check_sync_trunk_bases(stack, adapter, roots_to_update)
         if self.move_off_deleted_parents(stack, stacks, adapter, push_remote, selection, expected):
             roots = {stacks.root(b) for b in stack} | selection.integrations.keys()
             ordinary_roots = {config["root"] for config in selection.integrations.values()}
@@ -1876,6 +1899,38 @@ class StackClient(StackCore):
             remote = upstream if upstream and upstream != "." else fallback_remote
             protected.add((remote, f"refs/heads/{self.git.remote_branch_name(name, remote)}"))
         return frozenset(protected)
+
+    def check_sync_trunk_bases(self, stack: list[str], adapter: GitAdapter, roots_to_update: set[str]) -> None:
+        """Reject stale bases only when sync would need to replay the branch."""
+
+        def skip_replay(branch: str, parent: str, trunk: str) -> bool:
+            if parent in roots_to_update and trunk != self.git.rev(f"refs/heads/{parent}"):
+                target = self.fast_forward_target(parent, self.trunk_upstream(parent))
+                if target is not None:
+                    return self.lands_on_updated_trunk(adapter, branch, parent, trunk)
+            return adapter.merge_state(branch, parent) is not MergeState.NOT_MERGED
+
+        self.ensure_fresh_trunk_bases(stack, skip=skip_replay)
+
+    def lands_on_updated_trunk(self, adapter: GitAdapter, branch: str, parent: str, trunk: str) -> bool:
+        """Recognize a landing against the commit sync will install as the local trunk."""
+        git = self.git
+        if isinstance(adapter, GitHubAdapter) and (pr := adapter.pull_requests().get(branch)):
+            if (
+                pr.state is GitHubState.OPEN
+                and git.remote_branch_name(parent, adapter.remote) == adapter.default_branch
+            ):
+                return False
+            if (
+                pr.state is GitHubState.MERGED
+                and pr.merge_oid
+                and git.rev(pr.head_oid)
+                and git.is_ancestor(pr.merge_oid, trunk)
+            ):
+                return True
+        if not (git.upstream_gone(branch) or adapter.changes_something(branch)):
+            return False
+        return git.contained_in(f"refs/heads/{branch}", trunk) or adapter.landed_as_patches(branch, trunk)
 
     def refresh_and_push(
         self,
