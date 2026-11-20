@@ -86,7 +86,6 @@ wheels = [
 
 [[package]]
 name = "git-stack"
-version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "py-git-client" },

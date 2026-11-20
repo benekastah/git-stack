@@ -5,6 +5,7 @@ from contextlib import nullcontext
 from typing import Any
 
 import git_stack
+from git_stack._version import build_version
 from git_stack.commands import (
     base,
     branch,
@@ -115,6 +116,7 @@ def _run(args: argparse.Namespace, stack: StackClient | None, argv: list[str]) -
     # With --json, stdout is for the JSON, so git's output goes to stderr.
     stream = JsonStream() if args.json and not getattr(args, "json_list", False) else None
     timeline: Timeline | None = None
+    version: str | None = None
     log_settings: tuple[pathlib.Path, int] | None = None
     try:
         if stack is None:
@@ -124,6 +126,8 @@ def _run(args: argparse.Namespace, stack: StackClient | None, argv: list[str]) -
         log_settings = performance_log_settings(stack.git)
         timeline = Timeline() if log_settings is not None else None
         with timeline.activate() if timeline is not None else nullcontext():
+            if timeline is not None:
+                version = build_version()
             return _run_command(args, stack, stream)
     except StackError as e:
         if stream:
@@ -134,7 +138,7 @@ def _run(args: argparse.Namespace, stack: StackClient | None, argv: list[str]) -
         if timeline is not None and log_settings is not None:
             path, max_bytes = log_settings
             try:
-                append_performance_log(path, argv, timeline.render(), max_bytes=max_bytes)
+                append_performance_log(path, argv, timeline.render(version=version), max_bytes=max_bytes)
             except (OSError, RuntimeError) as error:
                 if not getattr(args, "quiet", False):
                     print(f"git stack: couldn't write the performance log: {error}", file=sys.stderr)

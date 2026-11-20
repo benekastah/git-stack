@@ -1,6 +1,6 @@
 [project]
 name = "git-stack"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Stacked branches that survive squash merges"
 readme = "README.md"
 license = "MIT"
@@ -35,6 +35,9 @@ dev = [{ include-group = "template-dev" }, "distlib>=0.4.4"]
 [build-system]
 requires = ["setuptools>=84"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools.dynamic]
+version = {attr = "git_stack._version.__version__"}
 
 [tool.setuptools.packages.find]
 include = ["git_stack*"]

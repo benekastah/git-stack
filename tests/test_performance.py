@@ -9,12 +9,32 @@ import sys
 import pytest
 from git_client.testing import GitCall
 
-from git_stack import performance
+from git_stack import _version, performance
 from git_stack.cli import build_parser
 from git_stack.git import GitClient
 from git_stack.performance import Timeline
+from tests.conftest import ROOT
 from tests.helpers import FakeGitHub, Repo
 from tests.test_integrate import source
+
+
+@pytest.mark.parametrize("commit", [None, "a" * 40])
+def test_build_version_includes_git_install_commit_when_available(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, commit: str | None
+) -> None:
+    # A wheel installation has no source checkout next to the package.
+    monkeypatch.setattr(_version, "__file__", str(tmp_path / "git_stack" / "_version.py"))
+
+    class InstalledPackage:
+        def read_text(self, filename: str) -> str | None:
+            assert filename == "direct_url.json"
+            if commit is None:
+                return None
+            return json.dumps({"vcs_info": {"vcs": "git", "commit_id": commit}})
+
+    monkeypatch.setattr(_version, "distribution", lambda _: InstalledPackage())
+    expected = _version.__version__ if commit is None else f"{_version.__version__} (git {commit})"
+    assert _version.build_version() == expected
 
 
 def test_performance_is_off_by_default(repo: Repo, performance_log: pathlib.Path) -> None:
@@ -52,11 +72,13 @@ def test_cli_appends_a_command_and_report_for_success_and_failure(repo: Repo, pe
 
     assert successful.stderr == ""
     assert "Performance timeline" not in failed.stderr
+    revision = repo.git("rev-parse", "HEAD", cwd=ROOT)
+    version = f"{_version.__version__} (git {revision})"
     first, second = performance_log.read_text(encoding="utf-8").strip().split("\n\n")
     for entry, args in ((first, ("info", "--offline")), (second, ("restack",))):
         command, _, report = entry.partition("\n")
         assert shlex.split(command) == ["git", "stack", "-C", str(repo.path), *args]
-        assert report.startswith("Performance timeline\n")
+        assert report.startswith(f"Performance timeline\n  Version    {version}\n")
         assert "Total" in report
 
 
@@ -123,10 +145,11 @@ def test_oversized_report_respects_cap(performance_log: pathlib.Path) -> None:
     assert "truncated" in performance_log.read_text(encoding="utf-8")
 
 
-def test_truncated_report_has_one_record_boundary(performance_log: pathlib.Path) -> None:
-    header = b"git stack info\nPerformance timeline\n"
+def test_truncated_report_preserves_version_and_record_boundary(performance_log: pathlib.Path) -> None:
+    report_header = "Performance timeline\n  Version    0.1.0\n"
+    header = f"git stack info\n{report_header}".encode()
     limit = len(header) + len(b"[performance report truncated]\n\n") + 1
-    performance.append_performance_log(performance_log, ["info"], "Performance timeline\n" + "é" * 100, max_bytes=limit)
+    performance.append_performance_log(performance_log, ["info"], report_header + "é" * 100, max_bytes=limit)
     assert performance_log.read_bytes() == header + b"[performance report truncated]\n\n"
 
 

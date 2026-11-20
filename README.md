@@ -127,9 +127,10 @@ has another name (e.g. `upstream`) needs no `--remote`.
 
 ### Performance log
 
-Set `stack.perfLog` to record each command line and its Git and `gh` timeline
-in that file. An unset or empty path disables reporting. To enable it across
-repositories, add this to `~/.gitconfig`:
+Set `stack.perfLog` to record each command line, the git-stack version, and its
+Git and `gh` timeline in that file. Source checkouts and Git-based installs
+also report their commit when available. An unset or empty path disables
+reporting. To enable it across repositories, add this to `~/.gitconfig`:
 
 ```gitconfig
 [stack]

@@ -59,8 +59,10 @@ man page is generated from it.
   `Git.process` boundary, in the snapshot's `CatFile`, and at both `gh` launches.
   Branch-status workers inherit the same recorder. Keep subprocess input,
   output and environment out of the timeline.
-  The CLI writes the command line and timeline to `stack.perfLog`, capped
-  by `stack.perfLogMaxBytes`. Tests configure their own log paths.
+  The CLI writes the command line, version and timeline to `stack.perfLog`,
+  capped by `stack.perfLogMaxBytes`. Tests configure their own log paths.
+- `git_stack/_version.py` defines the package version for setuptools and
+  adds the source commit to performance reports when it can identify it.
 - A value from a fixed set (an option's, a setting's, GitHub's) is an enum,
   converted where it's read (e.g. `Delete`, `Ownership`, `GitHubState`), so
   the code compares members rather than strings, and adding a value happens in

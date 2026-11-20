@@ -26,6 +26,7 @@ MAX_PERFORMANCE_LOG_BYTES = 1_000_000
 LOG_PATH_SETTING = "stack.perfLog"
 LOG_LIMIT_SETTING = "stack.perfLogMaxBytes"
 REPORT_HEADING = "Performance timeline"
+VERSION_PREFIX = "  Version    "
 TRUNCATION_NOTICE = b"[performance report truncated]\n\n"
 
 
@@ -137,7 +138,11 @@ def append_performance_log(
     if len(entry) > max_bytes:
         if max_bytes < len(TRUNCATION_NOTICE):
             raise OSError("performance log size limit is too small for a truncation notice")
-        header = f"{command}\n{REPORT_HEADING}\n".encode("utf-8", errors="backslashreplace")
+        heading = f"{REPORT_HEADING}\n"
+        version_line = report.removeprefix(heading).partition("\n")[0]
+        if version_line.startswith(VERSION_PREFIX):
+            heading += f"{version_line}\n"
+        header = f"{command}\n{heading}".encode("utf-8", errors="backslashreplace")
         limit = max_bytes - len(TRUNCATION_NOTICE) - 1
         if limit < len(header):
             entry = TRUNCATION_NOTICE
@@ -196,10 +201,12 @@ class Timeline:
             with self._lock:
                 call.end = self._clock() - self._start
 
-    def render(self) -> str:
+    def render(self, *, version: str | None = None) -> str:
         """Format the timeline after the command and its workers have finished."""
         total = self._clock() - self._start
         lines = [REPORT_HEADING]
+        if version is not None:
+            lines.append(f"{VERSION_PREFIX}{version}")
         for call in self._calls:
             command = _command_line((call.tool, *call.args))
             lines.append(f"  +{call.start:.3f}s  {call.end - call.start:6.3f}s  {command}")
