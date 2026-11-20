@@ -82,7 +82,8 @@ def test_install_fails_when_the_skills_cant_be_linked(monkeypatch: pytest.Monkey
     with pytest.raises(SystemExit) as exited:
         dev_project.after_install()
 
-    assert "git stack install-skills --replace" in str(exited.value.code)
+    # What to do depends on why, which the command says itself.
+    assert str(exited.value.code) == "install: couldn't link the agent skills (see above)"
 
 
 @pytest.mark.parametrize(("replace", "flags"), [(False, ()), (True, ("--replace",))])
@@ -97,6 +98,12 @@ def test_install_passes_replace_to_install_skills(
     dev_project.after_install(replace=replace)
 
     assert commands == [(dev.tool("git-stack"), "install-skills", *flags)]
+
+
+def test_the_man_page_has_a_synopsis() -> None:
+    """dev.py static only checks the page matches what it's made from, so losing MAN_SYNOPSIS
+    from dev_project.py (which then makes a page without one) goes unnoticed."""
+    assert ".SH SYNOPSIS" in (ROOT / "man" / "git-stack.1").read_text(encoding="utf-8")
 
 
 def git_version() -> tuple[int, int]:

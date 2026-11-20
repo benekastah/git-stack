@@ -43,10 +43,7 @@ def install_skills(replace: bool) -> None:
     symlink, or a junction on Windows), so they aren't `install_links()`, which makes plain
     symlinks Windows usually can't. It's no failure to find no agent."""
     if run_code(tool("git-stack"), "install-skills", *(["--replace"] if replace else [])) != 0:
-        sys.exit(
-            "install: couldn't link the agent skills (see above); `git stack install-skills"
-            " --replace` takes over a link to another clone's"
-        )
+        sys.exit("install: couldn't link the agent skills (see above)")
 
 
 def _git_has_optional_paths() -> bool:
