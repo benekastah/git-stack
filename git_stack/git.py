@@ -5,7 +5,7 @@ import tempfile
 import threading
 import uuid
 from collections import Counter
-from collections.abc import Generator, Sequence
+from collections.abc import Generator, Mapping, Sequence
 from contextlib import contextmanager
 from typing import TextIO
 
@@ -171,6 +171,7 @@ class GitClient:
         # lock is for commands that read them in several threads.
         self._snapshot_depth = 0
         self._refs: dict[str, Ref] | None = None
+        self._has_replacements = False
         self._refs_config: dict[str, list[str | None]] = {}
         self._listed_upstreams: frozenset[str] = frozenset()
         self._head: str | None = None
@@ -203,11 +204,13 @@ class GitClient:
                 self._worktrees = None
                 self._rebasing = {}
 
-    def run(self, *args: str, check: bool = True, input: str | None = None) -> str:
+    def run(
+        self, *args: str, check: bool = True, input: str | None = None, env: Mapping[str, str] | None = None
+    ) -> str:
         """Run git and return stripped stdout, even if it fails when check is
         false."""
         try:
-            return self._git.run(*args, input=input)
+            return self._git.run(*args, input=input, env=env)
         except GitError as e:
             if check:
                 raise StackError(f"git {' '.join(args)} failed:\n{e.stderr.strip()}") from e
@@ -279,6 +282,7 @@ class GitClient:
                 self._remote_defaults = {}
                 self._push_defaults = {}
                 self._refs_config = {}
+                self._ancestry.clear()
                 self._cat_file.close()
 
     def _snapshot_refs(self) -> dict[str, Ref] | None:
@@ -299,12 +303,22 @@ class GitClient:
                     else ["refs/remotes/"]
                 )
                 with git_errors():
-                    listed = git_client.refs(self._git, "refs/heads/", *patterns)
+                    listed = git_client.refs(self._git, "refs/heads/", "refs/replace/", *patterns)
                 head = next((ref.name.removeprefix("refs/heads/") for ref in listed.values() if ref.head), None)
+                self._has_replacements = any(ref.startswith("refs/replace/") for ref in listed)
                 self._refs = listed
                 self._refs_config = config
                 self._listed_upstreams, self._head = frozenset(upstreams), head
             return self._refs
+
+    def cacheable_history(self) -> bool:
+        """Whether commit IDs describe the same graph across commands."""
+        if self._snapshot_refs() is None or self._has_replacements:
+            return False
+        if {"GIT_GRAFT_FILE", "GIT_SHALLOW_FILE", "GIT_REPLACE_REF_BASE", "GIT_NAMESPACE"} & os.environ.keys():
+            return False
+        common = self.common_dir()
+        return not ((common / "shallow").exists() or (common / "info" / "grafts").exists())
 
     def _upstream_refs(self) -> list[str]:
         """The refnames of local branches' upstreams on remotes, as their
@@ -475,6 +489,11 @@ class GitClient:
         if (a, d) not in self._ancestry:
             self._ancestry[a, d] = self.ok("merge-base", "--is-ancestor", a, d)
         return self._ancestry[a, d]
+
+    def check_ancestry(self, ancestor: str, descendant: str, *, env: Mapping[str, str] | None = None) -> bool:
+        """Check ancestry without memoization. Git errors are not a negative answer."""
+        with git_errors():
+            return self._git.ok("merge-base", "--is-ancestor", ancestor, descendant, env=env)
 
     def tree(self, rev: str) -> str | None:
         """The tree of the commit rev names, or None if it names none."""

@@ -1,6 +1,7 @@
 """git stack restack."""
 
 import pytest
+from git_client.testing import GitCall
 
 from git_stack import events
 from git_stack.errors import StackError
@@ -85,6 +86,83 @@ def test_pull_checks_a_stale_fork_before_moving_trunk(repo: Repo, landed: bool, 
         assert f"git stack track main feature --base {fork}" in result.stderr
         assert repo.git("rev-parse", "main") == old
         assert repo.git("rev-parse", "origin/main") == fork
+
+
+def test_info_reuses_stale_base_check_until_trunk_moves(repo: Repo, git_calls: list[GitCall]) -> None:
+    repo.stack("create", "feature")
+    repo.commit("a", "feature\n", "feature")
+    repo.git("switch", "main")
+    repo.commit("b", "trunk\n", "trunk")
+    git_calls.clear()
+
+    first = repo.stack("info", "feature", "--offline").stdout
+    assert any(call[:2] == ["merge-base", "--all"] for call in git_calls)
+    git_calls.clear()
+
+    assert repo.stack("info", "feature", "--offline").stdout == first
+    assert not any(call[:2] == ["merge-base", "--all"] for call in git_calls)
+
+    repo.git("replace", "main", "main^")
+    git_calls.clear()
+    repo.stack("info", "feature", "--offline")
+    assert any(call[:2] == ["merge-base", "--all"] for call in git_calls)
+    repo.git("replace", "-d", "main")
+
+    repo.commit("b", "new trunk\n", "new trunk")
+    git_calls.clear()
+    repo.stack("info", "feature", "--offline")
+    assert any(call[:2] == ["merge-base", "--all"] for call in git_calls)
+
+
+def test_failed_stale_base_probe_does_not_cache_a_negative(repo: Repo, monkeypatch: pytest.MonkeyPatch) -> None:
+    old = repo.git("rev-parse", "main")
+    repo.git("switch", "-qc", "side")
+    repo.commit("b", "trunk change\n", "trunk change")
+    repo.git("switch", "main")
+    repo.git("merge", "--no-ff", "--no-edit", "side")
+    fork = repo.git("rev-parse", "main")
+    repo.stack("create", "feature")
+    repo.commit("a", "feature\n", "feature")
+    repo.git("config", "branch.feature.stackBase", old)
+
+    def unavailable(*_args: object, **_kwargs: object) -> bool:
+        raise StackError("Git could not read the base object")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(GitClient, "check_ancestry", unavailable)
+        assert repo.client.stale_trunk_base("feature") is None
+        repo.stack("info", "feature", "--offline")
+
+    result = repo.stack("restack", "feature", expect_success=False)
+
+    assert f"git stack track main feature --base {fork}" in result.stderr
+
+
+def test_stale_base_cache_uses_literal_history_if_replace_changes_during_check(repo: Repo, client: StackClient) -> None:
+    repo.git("switch", "-qc", "side")
+    repo.commit("b", "side change\n", "side")
+    side = repo.git("rev-parse", "side")
+    repo.git("switch", "-qc", "alternate", "main")
+    repo.commit("c", "different base\n", "alternate base")
+    base = repo.git("rev-parse", "alternate")
+    repo.git("switch", "main")
+    repo.git("merge", "--no-ff", "--no-edit", "side")
+    fork = repo.git("rev-parse", "main")
+    repo.stack("create", "feature")
+    repo.commit("a", "feature\n", "feature")
+    repo.git("config", "branch.feature.stackBase", base)
+    repo.git("switch", "main")
+    repo.commit("c", "later trunk change\n", "later trunk change")
+
+    with client.git.snapshot():
+        assert client.git.cacheable_history()
+        repo.git("replace", "--graft", fork, base, side)
+        assert client.stale_trunk_base("feature") is None
+    repo.git("replace", "-d", fork)
+
+    fresh = StackClient(GitClient(repo.path))
+    with fresh.git.snapshot():
+        assert fresh.stale_trunk_base("feature") is None
 
 
 def test_pull_checks_landing_against_the_projected_trunk(repo: Repo) -> None:

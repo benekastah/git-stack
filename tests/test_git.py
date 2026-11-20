@@ -280,7 +280,7 @@ def test_snapshot_reads_only_the_remote_branches_upstreams_are(repo: Repo, git_c
         assert git.rev("main@{upstream}") == git.tip("main")
 
     listing = next(call for call in git_calls if call[0] == "for-each-ref")
-    assert listing[-2:] == ["refs/heads/", "refs/remotes/origin/main"]
+    assert listing[-3:] == ["refs/heads/", "refs/replace/", "refs/remotes/origin/main"]
 
 
 def test_snapshot_reads_every_remote_branch_when_upstreams_are_too_many_to_name(
@@ -305,7 +305,7 @@ def test_snapshot_reads_every_remote_branch_when_upstreams_are_too_many_to_name(
         assert not git.upstream_gone(names[0])
 
     listing = next(call for call in git_calls if call[0] == "for-each-ref")
-    assert listing[-2:] == ["refs/heads/", "refs/remotes/"]
+    assert listing[-3:] == ["refs/heads/", "refs/replace/", "refs/remotes/"]
 
 
 def test_snapshot_can_validate_a_branch_upstream(repo: Repo, git_calls: list[GitCall]) -> None:

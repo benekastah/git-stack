@@ -10,7 +10,7 @@ from git_stack import events
 from git_stack.check_cache import CheckCache
 from git_stack.errors import BrokenStackError, StackError
 from git_stack.file_lock import file_lock
-from git_stack.git import GitClient
+from git_stack.git import GitClient, is_object_id
 from git_stack.stacks import Ownership, StackNode, Stacks
 
 PARENT_KEY = "stackParent"
@@ -61,6 +61,8 @@ CONFLICT_CHECK_KEY = "stackConflictCheck"
 # out the old way aren't used.
 LANDED_CHECK_KEY = "stackLandedCheck2"
 REVERTED_CHECK_KEY = "stackRevertedCheck"
+STALE_BASE_CHECK_KEY = "stackStaleBaseCheck"
+LITERAL_HISTORY_ENV = {"GIT_NO_REPLACE_OBJECTS": "1", "GIT_GRAFT_FILE": "", "GIT_SHALLOW_FILE": ""}
 # The group of stacks the branch's stack is in. When a branch stacked on a
 # stack's root (e.g. main) merges, the branches stacked on it become the
 # bottoms of stacks of their own, and get its group (or, if it had none, its
@@ -479,9 +481,12 @@ class StackCore:
         if cached[:-1] == inputs and cached[-1:] in (["true"], ["false"]):
             return cached[-1] == "true"
         result = check()
-        tracked = {b for (b, k) in self.git.branch_config() if k == PARENT_KEY.lower()}
-        self.checks.set(branch, key, " ".join([*inputs, str(result).lower()]), tracked)
+        self.remember_check_result(branch, key, inputs, str(result).lower())
         return result
+
+    def remember_check_result(self, branch: str, key: str, inputs: list[str], result: str) -> None:
+        tracked = {b for (b, k) in self.git.branch_config() if k == PARENT_KEY.lower()}
+        self.checks.set(branch, key, " ".join([*inputs, result]), tracked)
 
     def restack_branch(self, branch: str, parent: str, latest: bool = False) -> bool:
         """Rebase branch's own commits onto parent's current tip, if it needs it
@@ -548,17 +553,41 @@ class StackCore:
         tip = git.rev(branch_ref)
         if tip is None:
             return None
-        forks = git.run("merge-base", "--all", trunk, tip, check=False).splitlines()
-        if len(forks) != 1:
+        fork = self.stale_trunk_fork(branch, base, trunk, tip)
+        return (parent, fork, trunk) if fork else None
+
+    def stale_trunk_fork(self, branch: str, base: str, trunk: str, tip: str) -> str | None:
+        """Return a repair point, caching only checks on a complete commit graph."""
+        git = self.git
+        inputs = [tip, base, trunk]
+        cacheable = is_object_id(base) and git.cacheable_history()
+        if cacheable:
+            cached = (self.checks.get(branch, STALE_BASE_CHECK_KEY) or "").split()
+            if cached[:-1] == inputs:
+                if cached[-1] == "-":
+                    return None
+                if is_object_id(cached[-1]):
+                    return cached[-1]
+
+        # A concurrent replacement, graft or shallow fetch must not change
+        # a result that will outlive this snapshot under ordinary commit IDs.
+        env = LITERAL_HISTORY_ENV if cacheable else None
+        try:
+            forks = git.run("merge-base", "--all", trunk, tip, env=env).splitlines()
+            fork = forks[0] if len(forks) == 1 else None
+            is_candidate = fork is not None and fork not in (base, tip) and git.check_ancestry(base, fork, env=env)
+        except StackError:
+            # A missing object or a failed probe is not evidence of a clean base.
             return None
-        fork = forks[0]
-        if fork in (base, tip) or not git.is_ancestor(base, fork):
-            return None
-        if git.run("rev-list", "--max-count=1", "--merges", f"{base}..{fork}") and not git.run(
-            "rev-list", "--max-count=1", "--merges", f"{fork}..{tip}"
+        if (
+            not is_candidate
+            or not git.run("rev-list", "--max-count=1", "--merges", f"{base}..{fork}", env=env)
+            or git.run("rev-list", "--max-count=1", "--merges", f"{fork}..{tip}", env=env)
         ):
-            return parent, fork, trunk
-        return None
+            fork = None
+        if cacheable:
+            self.remember_check_result(branch, STALE_BASE_CHECK_KEY, inputs, fork or "-")
+        return fork
 
     def ensure_fresh_trunk_bases(
         self, branches: Iterable[str], *, skip: Callable[[str, str, str], bool] | None = None

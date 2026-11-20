@@ -67,7 +67,8 @@ lands on `main` so each merged build has a distinct version in performance logs.
   takes the snapshot under the lock, and one that only reads is `@snapshot`.
   Run git through `GitClient` so the snapshot is forgotten when a git command
   may change refs, and only add a command to `READ_ONLY_COMMANDS` if it never
-  does.
+  does. The stale-trunk-base check reuses results from the check cache when
+  its commit IDs describe an unmodified history graph.
 - Progress and warnings are events (`git_stack/events.py`), passed to the
   client's `on_event`. `git_stack/output.py` turns them into text, or into JSON
   lines.
