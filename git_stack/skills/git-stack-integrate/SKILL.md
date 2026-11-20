@@ -50,6 +50,21 @@ single parent. Check the selected stacks and source branches first with
   `git stack info` marks landed sources in cyan and marks an integration that
   needs refreshing as needing a restack.
 
+## Conflicts between sources
+
+Keep independent branches parallel when they merge cleanly. When two source
+branches conflict during a build or refresh, recommend stacking them, with
+the prerequisite below the dependent work. Resolve the conflict during
+`git stack restack <upper> --onto <lower>` once both branches are tracked.
+The upper branch then carries the resolution into later builds. Keep both
+source names when first creating an integration with only those two inputs.
+For an existing integration, the upper branch can replace both source names
+because its history includes the lower branch.
+
+If the user chooses to rearrange the sources during a stopped build, preserve
+any resolution they want to keep before aborting the build. Follow the
+`git-stack-rearrange` skill for the branch changes.
+
 ## Recover or promote
 
 - If a merge conflicts, use the temporary worktree path reported by git-stack.
