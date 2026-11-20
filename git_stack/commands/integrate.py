@@ -18,7 +18,10 @@ def register(subparsers: Subparsers) -> None:
     parser.add_argument("name", help="integration branch")
     parser.add_argument("sources", nargs="*", metavar="source", help="local source branches, in application order")
     parser.add_argument(
-        "-g", "--group", action="store_true", help="use the current group's leaves on the default branch"
+        "-g",
+        "--group",
+        action="store_true",
+        help="create a group integration from the current group's leaves on the default branch",
     )
     parser.add_argument("--root", help="start the build here (default: main)")
     mode = parser.add_mutually_exclusive_group()

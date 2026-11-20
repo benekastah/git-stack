@@ -1,6 +1,6 @@
 ---
 name: git-stack-integrate
-description: Build or adopt a git-stack integration root from several local branches, refresh work above it, recover an interrupted build, or promote the work after its inputs land.
+description: Build or adopt a git-stack integration root from local branches, create or refresh a group integration, refresh work above it, recover an interrupted build, or promote the work after its inputs land.
 ---
 
 # Integration branches
@@ -20,9 +20,6 @@ Check the selected stacks and source branches first with
   names are local branches in application order. The build starts at `main` by
   default. Use `git stack integrate <name> <source-a> <source-b> --root <root>`
   for a different ordinary untracked root.
-- From a stack in a group, use `git stack integrate <name> -g` to follow the
-  leaves of the group's stacks on the remote default branch. New leaves are
-  included the next time the integration refreshes.
 - Register an existing snapshot with
   `git stack integrate --adopt <name> <source-a> <source-b>`. Adoption keeps
   the current tip until the next refresh. Rerun `git stack integrate <name> <source>`
@@ -31,6 +28,12 @@ Check the selected stacks and source branches first with
 - Start the work with `git stack create <work> --from <name>`. Commit work
   on the work branches. An integration root and the branches stacked on it
   cannot supply inputs to an integration.
+
+## Group integration
+
+From a stack in the group, run `git stack integrate <name> -g` to create a
+group integration. It follows the leaves of the group's stacks on the remote
+default branch. The next refresh picks up new leaves automatically.
 
 ## Refresh and publish
 

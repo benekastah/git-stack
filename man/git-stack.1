@@ -431,9 +431,11 @@ To change the sources, run \f[CR]integrate\f[R] again with the new list.
 An existing integration can have a single source.
 The new list takes effect when the build succeeds.
 .PP
-Use \f[CR]git stack integrate <name> \-g\f[R] (or \f[CR]\-\-group\f[R])
-from a stack in a group to use every leaf in that group\(aqs stacks
-rooted at the remote\(aqs default branch.
+Create a \f[B]group integration\f[R] with
+\f[CR]git stack integrate <name> \-g\f[R] (or \f[CR]\-\-group\f[R]) from
+a stack in the group.
+It uses every leaf in the group\(aqs stacks rooted at the remote\(aqs
+default branch.
 Git\-stack reads the default from the local remote HEAD when creating or
 reconfiguring the integration.
 For a group with one eligible leaf, a single source is enough.

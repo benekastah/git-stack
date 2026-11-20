@@ -285,9 +285,9 @@ where it is until the next refresh. To change the sources, run `integrate`
 again with the new list. An existing integration can have a single source.
 The new list takes effect when the build succeeds.
 
-Use `git stack integrate <name> -g` (or `--group`) from a stack in a group
-to use every leaf in that group's stacks rooted at the remote's default
-branch. Git-stack reads the default from the local remote HEAD when creating
+Create a **group integration** with `git stack integrate <name> -g` (or
+`--group`) from a stack in the group. It uses every leaf in the group's stacks
+rooted at the remote's default branch. Git-stack reads the default from the local remote HEAD when creating
 or reconfiguring the integration. For a group with one eligible leaf, a
 single source is enough. The integration follows the group on the chosen
 root. On each refresh it keeps the order of the remaining leaves and appends
