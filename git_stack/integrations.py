@@ -48,6 +48,7 @@ class Integration(TypedDict):
     sources: list[Source]
     root_tip: str | None
     evidence_remote: NotRequired[str]
+    group: NotRequired[str]
     retired_sources: NotRequired[dict[str, RetiredSource]]
     automatic: NotRequired[bool]
     tip: str
@@ -134,7 +135,9 @@ class Integrations:
         carries over the old group's pending integration selectors."""
 
         def update(config: Integration) -> bool:
-            changed = False
+            changed = old is not None and config.get("group") == old
+            if changed:
+                config["group"] = new
             for entry in config.get("retired_sources", {}).values():
                 if old is not None and entry["group"] == old:
                     entry["group"] = new
@@ -145,7 +148,8 @@ class Integrations:
                     changed = True
             return changed
 
-        for name in self.names():
+        pending_names = {b for b, key in self.git.branch_config() if key == PENDING_KEY.lower()}
+        for name in self.names() | pending_names:
             config = self.read(name)
             if config and update(config):
                 self.save(name, config)
@@ -319,6 +323,45 @@ class Integrations:
         if not self.finish_interrupted(name):
             self.remove_build(name)
 
+    @staticmethod
+    def source_names(config: Integration, stacks: Stacks) -> list[str]:
+        """Resolve a live group selector, retaining the order of surviving inputs."""
+        recorded = [source["name"] for source in config["sources"]]
+        if (group := config.get("group")) is None:
+            return recorded
+        selected = stacks.group_leaves(group, config["root"])
+        selected_names = set(selected)
+        return list(dict.fromkeys([*(name for name in recorded if name in selected_names), *selected]))
+
+    def source_dependencies(self, config: Integration, stacks: Stacks) -> list[str]:
+        """Include recorded inputs and group leaves that would join at the next refresh."""
+        recorded = [source["name"] for source in config["sources"]]
+        return list(dict.fromkeys([*recorded, *self.source_names(config, stacks)]))
+
+    def selected_sources(self, config: Integration, stacks: Stacks) -> list[Source]:
+        if "group" not in config:
+            return config["sources"]
+        known = {name: retired["source"] for name, retired in config.get("retired_sources", {}).items()}
+        known.update({source["name"]: source for source in config["sources"]})
+        return [
+            known[name] if name in known else self.source(name, self.git.tip(name))
+            for name in self.source_names(config, stacks)
+        ]
+
+    def group_inputs_changed(self, config: Integration, stacks: Stacks) -> bool:
+        """Whether locally known active inputs would change with the same root tip."""
+        if (root_tip := config["root_tip"]) is None:
+            return True
+        active: list[tuple[str, str]] = []
+        for recorded in self.selected_sources(config, stacks):
+            name = recorded["name"]
+            tip = self.git.rev(f"refs/heads/{name}")
+            if tip is None:
+                return True
+            if not self.local_landing(self.source(name, tip, recorded), root_tip):
+                active.append((name, tip))
+        return active != self.active_sources(config)
+
     def source(self, name: str, tip: str, previous: Source | None = None) -> Source:
         remote = self.git.config_get(name, "remote") or (previous and previous["remote"])
         if remote == ".":
@@ -361,12 +404,14 @@ class Integrations:
             if generated and source_tip and self.git.is_ancestor(generated, source_tip):
                 raise StackError(f"{source} contains the generated tip of {name} and depends on it")
 
-    def ensure_independent(self, name: str, stacks: Stacks) -> None:
+    def ensure_independent(self, name: str, stacks: Stacks, original_stacks: Stacks) -> None:
         """A newly registered integration cannot be an input of an existing one."""
         for other in self.names() - {name}:
             config = self.read(other)
             assert config is not None
-            if config["root"] == name or any(stacks.root(src["name"]) == name for src in config["sources"]):
+            if config["root"] == name or any(
+                stacks.root(source) == name for source in self.source_dependencies(config, original_stacks)
+            ):
                 raise StackError(f"{name} is an input of integration {other}")
 
     def preflight(self, name: str, *, force: bool = False) -> Integration:
@@ -395,6 +440,7 @@ class Integrations:
         fetch: bool,
         *,
         previous: Integration | None = None,
+        group: str | None = None,
     ) -> tuple[Integration, dict[str, str | None]]:
         root_tip = self.git.tip(root)
         observed: dict[str, str | None] = {root: root_tip}
@@ -404,7 +450,9 @@ class Integrations:
         retired = previous.get("retired_sources", {}) if previous else {}
         pending = self.pending(name) if retired else None
         pending_sources = {source["name"]: source for source in pending["integration"]["sources"]} if pending else {}
-        still_retired: dict[str, RetiredSource] = {}
+        # A retired group leaf is no longer an input, but its retry selectors
+        # are needed until publication succeeds.
+        still_retired = retired.copy() if group is not None else {}
         for source in sources:
             branch = source["name"]
             live = self.git.rev(f"refs/heads/{branch}")
@@ -414,6 +462,7 @@ class Integrations:
             current = self.source(branch, live or recorded["tip"], recorded)
             if entry:
                 current = self.retired_input(source, current, pending_sources.get(branch))
+            still_retired.pop(branch, None)
             if entry and live in (None, entry["source"]["tip"]):
                 still_retired[branch] = {**entry, "source": current}
             if self.local_landing(current, root_tip):
@@ -433,6 +482,8 @@ class Integrations:
                     f"`git stack integrate {name} <source>...`."
                 )
         desired = Integration(root=root, sources=inputs, root_tip=root_tip, evidence_remote=remote, tip=root_tip)
+        if group is not None:
+            desired["group"] = group
         if still_retired:
             desired["retired_sources"] = still_retired
         return desired, observed
@@ -527,6 +578,7 @@ class Integrations:
                 build["expected"] != expected
                 or build["observed"] != observed
                 or saved["root"] != root
+                or saved.get("group") != desired.get("group")
                 or [(s["name"], s["tip"]) for s in saved["sources"]]
                 != [(s["name"], s["tip"]) for s in desired["sources"]]
                 or self.active_sources(saved) != inputs

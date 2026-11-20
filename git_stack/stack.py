@@ -116,10 +116,10 @@ class RefreshSelection:
         """Process selected source stacks before refreshing integration roots."""
         selected_bottoms = {stacks.bottom(branch) for branch in self.branches}
         source_bottoms = {
-            stacks.bottom(source["name"])
+            stacks.bottom(source)
             for integration in self.integrations.values()
-            for source in integration["sources"]
-            if source["name"] in stacks
+            for source in Integrations.source_names(integration, stacks)
+            if source in stacks
         } & selected_bottoms
         source_bottoms.update(
             stacks.bottom(branch)
@@ -993,12 +993,13 @@ class StackClient(StackCore):
         self.restack_all(stacks.descendants(name), stacks)
         return Unreverted(name, parent, tuple(commits), tuple(stack))
 
-    def default_branch(self, remote: str) -> str:
+    def default_branch(self, remote: str, *, from_option: bool = True) -> str:
         """remote's default branch, as its HEAD names it (e.g. main)."""
         head = self.git.run("symbolic-ref", "--quiet", "--short", f"refs/remotes/{remote}/HEAD", check=False)
         if not head:
+            override = "pass --from, or " if from_option else ""
             raise StackError(
-                f"{remote}'s default branch isn't known; pass --from, or run `git remote set-head {remote} --auto`"
+                f"{remote}'s default branch isn't known; {override}run `git remote set-head {remote} --auto`"
             )
         return head.removeprefix(f"{remote}/")
 
@@ -1207,7 +1208,8 @@ class StackClient(StackCore):
         root_status = None
         if config is not None:
             root_tip = git.rev(f"refs/heads/{config['root']}")
-            sources: list[Source] = [source.copy() for source in config["sources"]]
+            selected = integrations.selected_sources(config, self.stacks()) if "group" in config else config["sources"]
+            sources = [source.copy() for source in selected]
             if root_tip:
                 unresolved = [source for source in sources if not integrations.local_landing(source, root_tip)]
                 if isinstance(adapter, GitHubAdapter) and unresolved:
@@ -1219,10 +1221,14 @@ class StackClient(StackCore):
                         for source in unresolved:
                             source["landing"] = landed.get((source["head"], source["tip"]))
             integration_sources = tuple((source["name"], bool(source["landing"])) for source in sources)
-            changed = root_tip != config["root_tip"] or any(
-                git.rev(f"refs/heads/{source['name']}") not in (None, source["tip"])
-                or bool(source["landing"]) != bool(original["landing"])
-                for source, original in zip(sources, config["sources"], strict=True)
+            changed = (
+                root_tip != config["root_tip"]
+                or [source["name"] for source in sources] != [source["name"] for source in config["sources"]]
+                or any(
+                    git.rev(f"refs/heads/{source['name']}") not in (None, source["tip"])
+                    or bool(source["landing"]) != bool(original["landing"])
+                    for source, original in zip(sources, config["sources"], strict=True)
+                )
             )
             if changed:
                 root_status = BranchStatus.NEEDS_RESTACK
@@ -1284,7 +1290,14 @@ class StackClient(StackCore):
 
     @exclusive
     def integrate(
-        self, name: str, sources: Sequence[str], *, root: str | None = None, adopt: bool = False, abort: bool = False
+        self,
+        name: str,
+        sources: Sequence[str],
+        *,
+        root: str | None = None,
+        group: bool = False,
+        adopt: bool = False,
+        abort: bool = False,
     ) -> Integrated:
         """Create, replace or adopt an integration root, or abort its pending build."""
         git = self.git
@@ -1293,7 +1306,7 @@ class StackClient(StackCore):
             raise StackError(f"{name} isn't a valid integration branch name")
         integrations.restore_pending_checkout()
         if abort:
-            if sources or root is not None:
+            if sources or root is not None or group:
                 raise StackError("--abort takes only the integration name")
             integrations.abort(name)
             return Integrated(name, None)
@@ -1306,27 +1319,61 @@ class StackClient(StackCore):
             integrations.preflight(name)
         elif adopt != (expected is not None):
             raise StackError(f"{name} already exists; use --adopt" if expected else f"{name} isn't a local branch")
-        minimum = 1 if previous else 2
-        if len(sources) < minimum or len(set(sources)) != len(sources):
-            raise StackError(f"an integration needs at least {minimum} distinct local sources")
-        root = root if root is not None else previous["root"] if previous else "main"
         stacks = self.stacks()
+        root, sources, source_group = self.choose_integration_inputs(sources, root, group, previous, stacks)
+        original_stacks = stacks
         if adopt and name in stacks:
+            stacks = stacks.copy()
             stacks.untrack([name])
         integrations.validate(
             name, root, sources, stacks, previous["tip"] if previous and previous["root_tip"] else None
         )
-        integrations.ensure_independent(name, stacks)
+        integrations.ensure_independent(name, stacks, original_stacks)
         captured = [integrations.source(source, git.tip(source)) for source in sources]
         if adopt:
             assert expected is not None
             self.save(stacks)
-            integrations.save(name, Integration(root=root, sources=captured, root_tip=None, tip=expected))
+            config = Integration(root=root, sources=captured, root_tip=None, tip=expected)
+            if source_group is not None:
+                config["group"] = source_group
+            integrations.save(name, config)
         else:
             remote = self.stack_remote(set(), self.upstream_remotes([root]))
-            desired, observed = integrations.inputs(name, root, captured, remote, fetch=False, previous=previous)
+            desired, observed = integrations.inputs(
+                name, root, captured, remote, fetch=False, previous=previous, group=source_group
+            )
             integrations.build(name, desired, observed, previous, expected)
         return Integrated(name, git.tip(name))
+
+    def choose_integration_inputs(
+        self,
+        sources: Sequence[str],
+        root: str | None,
+        group: bool,
+        previous: Integration | None,
+        stacks: Stacks,
+    ) -> tuple[str, Sequence[str], str | None]:
+        if group:
+            if sources or root is not None:
+                raise StackError("--group supplies both the root and the sources")
+            current = self.current_stacked_branch(stacks, "integrate", hint="switch to a stack in a group")
+            group_name = stacks.group(stacks.bottom(current))
+            if group_name is None:
+                raise StackError(f"{current}'s stack isn't in a group")
+            remote = self.stack_remote(set(), self.upstream_remotes([stacks.root(current)]))
+            root = self.default_branch(remote, from_option=False)
+            leaves = (
+                Integrations.source_names(previous, stacks)
+                if previous and previous["root"] == root and previous.get("group") == group_name
+                else stacks.group_leaves(group_name, root)
+            )
+            if not leaves:
+                raise StackError(f"group {group_name} has no stacks on {root}")
+            return root, leaves, group_name
+        minimum = 1 if previous else 2
+        if len(sources) < minimum or len(set(sources)) != len(sources):
+            raise StackError(f"an integration needs at least {minimum} distinct local sources")
+        return root if root is not None else previous["root"] if previous else "main", sources, None
 
     def refresh_selection(
         self, branches: Sequence[str], groups: Sequence[str], stacks: Stacks, command: str
@@ -1470,8 +1517,7 @@ class StackClient(StackCore):
             for branch in (name, root):
                 if branch in stacks and branch not in previous:
                     raise StackError(f"{branch} must remain an untracked root for integration {name}")
-            for source in config["sources"]:
-                branch = source["name"]
+            for branch in integrations.source_dependencies(config, previous):
                 root_after = stacks.root(branch)
                 if root_after in names and root_after != previous.root(branch):
                     raise StackError(f"{branch} is an integration or depends on one")
@@ -1491,7 +1537,7 @@ class StackClient(StackCore):
             integrations.validate(
                 name,
                 config["root"],
-                [source["name"] for source in config["sources"]],
+                integrations.source_names(config, stacks),
                 stacks,
                 config["tip"] if config["root_tip"] else None,
                 names=names,
@@ -1508,6 +1554,7 @@ class StackClient(StackCore):
     ) -> None:
         """Catch known blocked rebuilds before changing the trunk or source refs."""
         git = self.git
+        integrations = Integrations(self)
         for name, config in selection.integrations.items():
             if (path := git.other_worktree_of(name)) is None:
                 continue
@@ -1517,10 +1564,14 @@ class StackClient(StackCore):
             if (
                 expected[name] != config["tip"]
                 or git.rev(root_tip) != config["root_tip"]
-                or any(
-                    (tip := git.rev(f"refs/heads/{source['name']}")) != source["tip"]
-                    and (tip is not None or not source["landing"])
-                    for source in config["sources"]
+                or (
+                    integrations.group_inputs_changed(config, self.stacks())
+                    if "group" in config
+                    else any(
+                        (tip := git.rev(f"refs/heads/{source['name']}")) != source["tip"]
+                        and (tip is not None or not source["landing"])
+                        for source in config["sources"]
+                    )
                 )
             ):
                 raise StackError(f"can't move integration {name}: checked out in another worktree at {path}")
@@ -1543,8 +1594,14 @@ class StackClient(StackCore):
             root = config["root"]
             root_remote = self.git.config_get(root, "remote")
             evidence_remote = root_remote if root_remote and root_remote != "." else remote
+            sources = config["sources"]
+            if "group" in config:
+                stacks = self.stacks()
+                sources = integrations.selected_sources(config, stacks)
+                generated_tip = config["tip"] if config["root_tip"] else None
+                integrations.validate(name, root, [source["name"] for source in sources], stacks, generated_tip)
             desired, observed = integrations.inputs(
-                name, root, config["sources"], evidence_remote, fetch, previous=config
+                name, root, sources, evidence_remote, fetch, previous=config, group=config.get("group")
             )
             verified[name] = integrations.build(name, desired, observed, config, expected[name])
         return verified
@@ -2130,7 +2187,7 @@ class StackClient(StackCore):
                 groups_by_root.setdefault(stacks.root(bottom), set()).add(group)
         inputs: dict[str, list[tuple[str, Source]]] = {}
         for name, config in selection.integrations.items():
-            for source in config["sources"]:
+            for source in integrations.selected_sources(config, stacks):
                 if source["name"] in selected_sources:
                     inputs.setdefault(source["name"], []).append((name, source))
 
@@ -2150,12 +2207,15 @@ class StackClient(StackCore):
             for name, source in entries:
                 config = integrations.read(name)
                 assert config is not None
+                refresh_groups = groups_by_root.get(name, set()) | (
+                    selection.selected_groups & {config.get("group", "")}
+                )
                 config.setdefault("retired_sources", {})[branch] = RetiredSource(
                     source=integrations.source(branch, tip, source),
                     parent=bottom if parent in stacks else None,
                     group=group,
                     members=source_members[branch],
-                    integration_groups=sorted(groups_by_root.get(name, ())),
+                    integration_groups=sorted(refresh_groups),
                     refresh_remote=remote,
                 )
                 integrations.save(name, config)
