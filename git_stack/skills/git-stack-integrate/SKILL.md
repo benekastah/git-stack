@@ -48,9 +48,11 @@ default branch. The next refresh picks up new leaves automatically.
   Standalone `git stack prs --protect-prs` requires the integration to be on the remote.
 - A typical edit is to commit on a source, run `git stack restack <name>`,
   switch to the work branch, commit the work, and run `git stack push --protect-prs`.
-- Naming the integration selects its dependent stacks. Use a group selector
-  to include source stacks that also need restacking or syncing. Excluded
-  sources contribute their local tips.
+- Restacking the integration or a branch above it includes the tracked
+  source branches and their ancestors. Check those branches for shared work
+  and queued PRs before restacking. With pull or sync, use a group selector
+  to include source stacks that need updating. Other sources contribute
+  their local tips.
 - A source drops out when its exact included tip is proven to have landed on
   the configured root. If a source is missing and there is no proof, inspect
   it and confirm the replacement inputs before changing the source list.

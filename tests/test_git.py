@@ -86,11 +86,11 @@ def test_push_destinations_see_changes_in_an_included_config(repo: Repo, explici
         repo.git("config", "--file", str(included), "remote.origin.pushurl", str(repo.origin))
     git = GitClient(repo.path)
     with git.snapshot():
-        assert git.push_urls("origin") == (str(repo.origin),)
+        assert tuple(map(pathlib.Path, git.push_urls("origin"))) == (repo.origin,)
         if not explicit:
             repo.git("config", "--file", str(included), "remote.origin.pushurl", str(repo.origin))
         repo.git("config", "--file", str(included), "--add", "remote.origin.pushurl", "second-destination")
-        assert git.push_urls("origin") == (str(repo.origin), "second-destination")
+        assert tuple(map(pathlib.Path, git.push_urls("origin"))) == (repo.origin, pathlib.Path("second-destination"))
 
 
 def test_config_get_handles_dots_in_branch_names_and_any_key_case(repo: Repo) -> None:

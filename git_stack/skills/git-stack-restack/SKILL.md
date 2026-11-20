@@ -12,7 +12,9 @@ local rewrites, including with `--latest`, and follow the open-PR checks in
 `git-stack` before publishing.
 
 - Use `git stack restack` for the current stack or `git stack restack <branch>`
-  for a named stack. Pass `-g` to include its group.
+  for a named stack. Pass `-g` to include its group. Restacking an
+  integration or work above it also restacks tracked sources and their
+  ancestors. Check those dependencies for shared work and queued PRs.
 - A branch directly on an ordinary root moves if it conflicts with that
   root. Use `git stack restack --latest` to move it onto the latest local
   root either way. Use `git-stack-pull` when you also need to fetch.

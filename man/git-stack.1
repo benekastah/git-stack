@@ -460,12 +460,15 @@ restack.
 integration roots needed by the selected stacks.
 From an integration branch, they select its dependent stacks.
 An explicitly named integration selects the same scope.
-Use a group selector to include its other stacks.
-A selected source stack updates before the integration is rebuilt.
-An excluded source contributes its local tip.
-\f[CR]restack\f[R] uses local refs.
-\f[CR]pull\f[R] and \f[CR]sync\f[R] fetch and fast\-forward the
-configured root when possible before rebuilding.
+\f[CR]restack\f[R] uses local refs and automatically restacks tracked
+sources and their ancestors before rebuilding the integration.
+It skips sources whose exact tips are already proven to have landed.
+Untracked sources contribute their local tips.
+For \f[CR]pull\f[R] and \f[CR]sync\f[R], include the source stacks in
+the selection, for example with a group selector, to update them before
+rebuilding.
+These commands also fetch and fast\-forward the configured root when
+possible.
 \f[CR]push\f[R] refreshes the integration from local source tips and
 restacks the selected work on it.
 It publishes the integration and work in the same atomic push with

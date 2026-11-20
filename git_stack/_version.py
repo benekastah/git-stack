@@ -11,7 +11,7 @@ from git_client import GitError
 from git_stack.git import GIT_DIR_VARIABLES, GIT_VARIABLE, is_object_id
 from git_stack.performance import TimedGit
 
-__version__ = "0.1.11"
+__version__ = "0.1.12"
 
 
 def build_version() -> str:

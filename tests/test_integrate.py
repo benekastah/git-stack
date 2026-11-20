@@ -73,6 +73,150 @@ def test_group_integration_refreshes_its_leaves_and_keeps_source_order(repo: Rep
     assert tip(repo, "combined") == previous
 
 
+@pytest.mark.parametrize(("group", "selector"), [(False, "branch-d"), (True, "branch-d"), (False, "combined")])
+def test_restack_replays_integration_inputs_and_ancestors(
+    repo: Repo, client: StackClient, group: bool, selector: str
+) -> None:
+    repo.git("remote", "set-head", "origin", "main")
+    client.branch("branch-a", group="topic", from_branch="main")
+    repo.commit("a", "a contribution\n", "branch a")
+    client.branch("branch-b")
+    repo.commit("b", "b contribution\n", "branch b")
+    client.branch("branch-c", group="topic", from_branch="main")
+    repo.commit("c", "c contribution\n", "branch c")
+    repo.stack("integrate", "combined", *(["-g"] if group else ["branch-b", "branch-c"]))
+    client.branch("branch-d", from_branch="combined")
+    repo.write("work.txt", "work\n")
+    repo.git("add", "work.txt")
+    repo.git("commit", "-qm", "branch d")
+    repo.git("switch", "main")
+    repo.git("commit", "--amend", "-qm", "rewritten root")
+
+    repo.stack("restack", selector)
+
+    repo.assert_stacked("branch-a", "main", ["branch a"])
+    repo.assert_stacked("branch-b", "branch-a", ["branch b"])
+    repo.assert_stacked("branch-c", "main", ["branch c"])
+    repo.assert_stacked("branch-d", "combined", ["branch d"])
+    config = Integrations(client).read("combined")
+    assert config is not None
+    assert {s["tip"] for s in config["sources"]} == {tip(repo, "branch-b"), tip(repo, "branch-c")}
+
+
+def test_restack_integration_stops_if_a_source_needs_another_worktree(repo: Repo, client: StackClient) -> None:
+    integration(repo, tracked=True)
+    client.branch("work", from_branch="combined")
+    previous = tip(repo, "combined")
+    repo.git("worktree", "add", str(repo.tmp / "source-worktree"), "one")
+    repo.git("switch", "main")
+    repo.git("commit", "--amend", "-qm", "rewritten root")
+
+    result = repo.stack("restack", "work", expect_success=False)
+
+    assert "couldn't update selected integration source stacks: one" in result.stderr
+    assert tip(repo, "combined") == previous
+
+
+def test_restack_preserves_a_reverted_landed_source(repo: Repo, client: StackClient) -> None:
+    client.branch("parent")
+    repo.commit("a", "parent\n", "parent")
+    client.branch("child")
+    repo.commit("b", "child\n", "child")
+    source(repo, "other", "c")
+    repo.git("switch", "-qc", "release", "main")
+    repo.git("merge", "--no-ff", "--no-edit", "child")
+    repo.git("revert", "--no-edit", "-m", "1", "HEAD")
+    repo.stack("integrate", "combined", "child", "other", "--root", "release")
+    previous_child = tip(repo, "child")
+    previous_integration = tip(repo, "combined")
+    repo.git("switch", "parent")
+    repo.git("commit", "--amend", "-qm", "rewritten parent")
+
+    repo.stack("restack", "combined")
+
+    assert tip(repo, "child") == previous_child
+    assert tip(repo, "combined") == previous_integration
+
+
+def test_restack_preserves_a_landed_ancestor_named_as_a_source(repo: Repo, client: StackClient) -> None:
+    repo.git("commit", "--allow-empty", "-qm", "source trunk")
+    client.branch("parent")
+    repo.commit("a", "parent\n", "parent")
+    client.branch("child")
+    repo.commit("b", "child\n", "child")
+    repo.git("switch", "-qc", "release", "main")
+    repo.git("merge", "--no-ff", "--no-edit", "parent")
+    repo.git("revert", "--no-edit", "-m", "1", "HEAD")
+    repo.stack("integrate", "combined", "parent", "child", "--root", "release")
+    previous = tip(repo, "combined")
+    repo.git("switch", "main")
+    repo.git("commit", "--amend", "--allow-empty", "-qm", "rewritten source trunk")
+
+    repo.stack("restack", "combined")
+
+    assert tip(repo, "combined") == previous
+    assert repo.git("show", "combined:a") == repo.git("show", "release:a")
+
+    result = repo.stack("restack", "combined", "parent", expect_success=False)
+
+    assert "exact tip is recorded as landed for integration combined" in result.stderr
+    assert tip(repo, "combined") == previous
+
+
+def test_restack_allows_a_merged_source_no_op_in_another_worktree(repo: Repo, client: StackClient) -> None:
+    client.branch("parent")
+    repo.commit("a", "parent\n", "parent")
+    client.branch("child")
+    repo.commit("b", "child\n", "child")
+    source(repo, "other", "c")
+    repo.stack("integrate", "combined", "child", "other")
+    previous = tip(repo, "combined")
+    repo.git("worktree", "add", str(repo.tmp / "integration-worktree"), "combined")
+    repo.git("switch", "parent")
+    repo.git("merge", "--ff-only", "child")
+    repo.commit("a", "updated parent\n", "updated parent")
+
+    repo.stack("restack", "combined")
+
+    assert tip(repo, "combined") == previous
+
+
+def test_restack_checks_linked_integration_before_rewriting_sources(repo: Repo, client: StackClient) -> None:
+    client.branch("parent")
+    repo.commit("a", "parent\n", "parent")
+    client.branch("child")
+    repo.commit("b", "child\n", "child")
+    source(repo, "other", "c")
+    repo.stack("integrate", "combined", "child", "other")
+    previous_child = tip(repo, "child")
+    repo.git("worktree", "add", str(repo.tmp / "integration-worktree"), "combined")
+    repo.git("switch", "parent")
+    repo.git("commit", "--amend", "-qm", "rewritten parent")
+
+    result = repo.stack("restack", "combined", expect_success=False)
+
+    assert "checked out in another worktree" in result.stderr
+    assert tip(repo, "child") == previous_child
+
+
+def test_restack_keeps_work_remote_when_source_tracks_another_remote(
+    repo: Repo, client: StackClient, gh: FakeGitHub
+) -> None:
+    integration(repo, tracked=True)
+    client.branch("work", from_branch="combined")
+    repo.git("remote", "set-url", "origin", str(repo.origin))
+    repo.git("remote", "add", "forge", "https://github.com/example/repo.git")
+    repo.git("config", "branch.one.remote", "origin")
+    repo.git("config", "branch.one.merge", "refs/heads/one")
+    repo.git("config", "branch.work.remote", "forge")
+    repo.git("config", "branch.work.merge", "refs/heads/work")
+    repo.git("config", "stack.adapter", "github")
+
+    repo.stack("restack", "combined")
+
+    assert any("owner=example" in call for call in gh.calls("api", "graphql"))
+
+
 def test_group_integration_uses_the_remote_default_and_tracks_group_rename(repo: Repo, client: StackClient) -> None:
     repo.git("switch", "-qc", "trunk")
     repo.git("push", "--quiet", "--set-upstream", "origin", "trunk")
@@ -658,6 +802,27 @@ def interrupt_integration_build(repo: Repo, monkeypatch: pytest.MonkeyPatch, *co
         patch.setattr(Integrations, "publish", stop_before_publishing)
         assert "interrupted before publication" in repo.stack(*command, expect_success=False).stderr
     return Integrations(repo.client).path("combined")
+
+
+def test_restack_keeps_source_tips_pinned_by_an_interrupted_pull(
+    repo: Repo, client: StackClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client.branch("parent")
+    repo.commit("a", "parent\n", "parent")
+    client.branch("child")
+    repo.commit("b", "child\n", "child")
+    source(repo, "other", "c")
+    repo.stack("integrate", "combined", "child", "other")
+    previous_child = tip(repo, "child")
+    repo.commit("c", "updated other\n", "updated source")
+    repo.git("switch", "parent")
+    repo.git("commit", "--amend", "-qm", "rewritten parent")
+    interrupt_integration_build(repo, monkeypatch, "pull", "combined")
+
+    result = repo.stack("restack", "combined", expect_success=False)
+
+    assert "stopped build that needs its current source tips" in result.stderr
+    assert tip(repo, "child") == previous_child
 
 
 def test_conflict_can_be_resolved_by_restacking_the_source(repo: Repo) -> None:

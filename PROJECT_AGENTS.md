@@ -56,6 +56,7 @@ lands on `main` so each merged build has a distinct version in performance logs.
   survives worktree cleanup.
   The refresh commands order selected source stacks before the integration builds, then
   use the ordinary single-parent rebase path for the work above each integration.
+  Local restack adds each integration's tracked sources and their ancestors to its selection.
 - Each command is a module in `git_stack/commands/` with `register`, `run` and
   `show`: `run` does the command and returns a dataclass result, and `show`
   prints it as text. With `--json`, the CLI prints the result as JSON instead

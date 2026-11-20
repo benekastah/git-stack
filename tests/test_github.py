@@ -528,7 +528,9 @@ def test_sync_trusts_merged_pr_whose_merge_differs_from_branch(repo: Repo, gh: F
     repo.assert_untracked("pr1")
     repo.assert_stacked("pr2", "main", ["pr2 c1"])
     repo.assert_stacked("pr3", "pr2", ["pr3 c1"])
-    assert len(gh.calls("api", "graphql")) == 1
+    lookup, protection = gh.calls("api", "graphql")
+    assert any("headRefName:" in arg for arg in lookup)
+    assert any("associatedPullRequests" in arg or "baseRefName:" in arg for arg in protection)
 
 
 def merge_pr1_after_update_branch(repo: Repo, gh: FakeGitHub) -> str:

@@ -4,6 +4,7 @@ import functools
 from collections.abc import Callable, Iterable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
+from itertools import takewhile
 from typing import Concatenate
 
 from git_stack import events
@@ -16,6 +17,7 @@ from git_stack.adapters.github import (
     PRProtection,
     PullRequest,
     check_github_login,
+    github_repo,
     github_repo_from_url,
 )
 from git_stack.adapters.merge_state import MergeState
@@ -121,6 +123,8 @@ class RefreshSelection:
     recovered_sources: frozenset[str] = frozenset()
     selected_groups: frozenset[str] = frozenset()
     recovery_remotes: dict[str, set[str]] = field(default_factory=dict)
+
+    restack_inputs: dict[str, Integration] = field(default_factory=dict)
 
     def ordered(self, stacks: Stacks) -> tuple[list[str], list[str]]:
         """Process selected source stacks before refreshing integration roots."""
@@ -1283,7 +1287,14 @@ class StackClient(StackCore):
             adapter.protection = protection
         return protection
 
-    def skip_merged(self, branches: Iterable[str], stacks: Stacks, adapter: GitAdapter) -> list[str]:
+    def skip_merged(
+        self,
+        branches: Iterable[str],
+        stacks: Stacks,
+        adapter: GitAdapter,
+        *,
+        branch_adapters: dict[str, GitAdapter] | None = None,
+    ) -> list[str]:
         """Leave merged branches out of branches (parent-before-child), moving
         their children down in stacks (see Stacks.drop). Leave reverted ones
         out too, with the branches stacked on them, as sync does."""
@@ -1295,13 +1306,14 @@ class StackClient(StackCore):
                 self.emit(events.ParentSkipped(branch, parent))
                 skipped.add(branch)
                 continue
-            state = adapter.merge_state(branch, parent)
+            branch_adapter = branch_adapters.get(branch, adapter) if branch_adapters is not None else adapter
+            state = branch_adapter.merge_state(branch, parent)
             if state is MergeState.MERGED:
                 self.emit(events.SkippedMerged(branch, parent))
                 stacks.drop(branch)
             elif state is MergeState.REVERTED:
                 # Restacking it could drop its commits, as already in parent.
-                self.emit(self.reverted(branch, stacks, adapter))
+                self.emit(self.reverted(branch, stacks, branch_adapter))
                 skipped.add(branch)
             else:
                 remaining.append(branch)
@@ -1595,6 +1607,130 @@ class StackClient(StackCore):
             ):
                 raise StackError(f"can't move integration {name}: checked out in another worktree at {path}")
 
+    def observe_integration_inputs(
+        self,
+        integrations: Integrations,
+        name: str,
+        config: Integration,
+        sources: list[Source],
+        remote: str,
+        *,
+        fetch: bool,
+        prior: Integration | None = None,
+    ) -> tuple[Integration, dict[str, str | None]]:
+        root = config["root"]
+        root_remote = self.git.config_get(root, "remote")
+        evidence_remote = root_remote if root_remote and root_remote != "." else remote
+        if prior is not None:
+            evidence = {source["name"]: source for source in prior["sources"]}
+            sources = [evidence.get(source["name"], source) for source in sources]
+        return integrations.inputs(
+            name, root, sources, evidence_remote, fetch, previous=prior or config, group=config.get("group")
+        )
+
+    def select_restack_dependencies(
+        self, selection: RefreshSelection, stacks: Stacks, remote: str
+    ) -> dict[str, list[str]]:
+        """Plan source restacks while the original tips can still prove landing."""
+        integrations = Integrations(self)
+        for name, config in selection.integrations.items():
+            if not any(source in stacks for source in integrations.source_names(config, stacks)):
+                continue
+            sources = integrations.selected_sources(config, stacks)
+            inputs, _ = self.observe_integration_inputs(integrations, name, config, sources, remote, fetch=False)
+            selection.restack_inputs[name] = inputs
+        # A landed input can also be an ancestor of an active input. Its
+        # exact tip must stay put to preserve the integration's landing proof.
+        landed = {
+            source["name"]
+            for inputs in selection.restack_inputs.values()
+            for source in inputs["sources"]
+            if source["landing"]
+        }
+        dependencies = {
+            name: list(
+                dict.fromkeys(
+                    branch
+                    for source in inputs["sources"]
+                    for branch in reversed(
+                        list(
+                            takewhile(
+                                lambda ancestor: ancestor in stacks and ancestor not in landed,
+                                stacks.ancestry(source["name"]),
+                            )
+                        )
+                    )
+                )
+            )
+            for name, inputs in selection.restack_inputs.items()
+        }
+        selection.branches = list(
+            dict.fromkeys([*(branch for branches in dependencies.values() for branch in branches), *selection.branches])
+        )
+        return dependencies
+
+    def preflight_restack_dependencies(
+        self, dependencies: dict[str, list[str]], unmerged: set[str], stacks: Stacks, latest: bool
+    ) -> None:
+        """Don't move a source when its integration can't accept changed inputs."""
+        integrations = Integrations(self)
+        for name, branches in dependencies.items():
+            path = self.git.other_worktree_of(name)
+            if path is None and integrations.pending(name) is None:
+                continue
+            if not any(self.source_needs_restack(branch, stacks, latest) for branch in branches if branch in unmerged):
+                continue
+            if path is not None:
+                raise StackError(f"can't move integration {name}: checked out in another worktree at {path}")
+            raise StackError(
+                f"integration {name} has a stopped build that needs its current source tips. "
+                f"Run `git stack integrate --abort {name}` before restacking its sources."
+            )
+
+    def ensure_restack_preserves_landings(
+        self, selection: RefreshSelection, unmerged: set[str], stacks: Stacks, latest: bool
+    ) -> None:
+        """An explicitly selected branch can still contain a proven landed input."""
+        for name, inputs in selection.restack_inputs.items():
+            for source in inputs["sources"]:
+                branch = source["name"]
+                if (
+                    source["landing"]
+                    and branch in unmerged
+                    and any(
+                        self.source_needs_restack(ancestor, stacks, latest)
+                        for ancestor in stacks.ancestry(branch)
+                        if ancestor in unmerged
+                    )
+                ):
+                    raise StackError(
+                        f"can't restack {branch}: its exact tip is recorded as landed for integration {name}"
+                    )
+
+    def source_needs_restack(self, branch: str, stacks: Stacks, latest: bool) -> bool:
+        parent = stacks.parent(branch)
+        parent_tip = self.git.rev(f"refs/heads/{parent}")
+        return parent_tip is not None and self.needs_restack(
+            branch, parent, self.recorded_base(branch, parent), parent_tip, latest
+        )
+
+    def implicit_source_adapters(
+        self, branches: Iterable[str], stacks: Stacks, original: GitAdapter, remote: str
+    ) -> dict[str, GitAdapter]:
+        """Resolve merge evidence on the implicit sources' remotes."""
+        git = self.git
+        adapters = {remote: original}
+        result: dict[str, GitAdapter] = {}
+        for branch in branches:
+            source_remote = git.config_get(branch, "remote") or git.config_get(stacks.root(branch), "remote") or remote
+            if source_remote not in adapters:
+                if isinstance(original, GitHubAdapter) and github_repo(git, source_remote) is None:
+                    adapters[source_remote] = GitAdapter(self)
+                else:
+                    adapters[source_remote] = make_adapter(self, source_remote, fetch=False)
+            result[branch] = adapters[source_remote]
+        return result
+
     def refresh_integrations(
         self,
         selection: RefreshSelection,
@@ -1611,16 +1747,14 @@ class StackClient(StackCore):
             assert config is not None
             selection.integrations[name] = config
             root = config["root"]
-            root_remote = self.git.config_get(root, "remote")
-            evidence_remote = root_remote if root_remote and root_remote != "." else remote
             sources = config["sources"]
             if "group" in config:
                 stacks = self.stacks()
                 sources = integrations.selected_sources(config, stacks)
                 generated_tip = config["tip"] if config["root_tip"] else None
                 integrations.validate(name, root, [source["name"] for source in sources], stacks, generated_tip)
-            desired, observed = integrations.inputs(
-                name, root, sources, evidence_remote, fetch, previous=config, group=config.get("group")
+            desired, observed = self.observe_integration_inputs(
+                integrations, name, config, sources, remote, fetch=fetch, prior=selection.restack_inputs.get(name)
             )
             verified[name] = integrations.build(name, desired, observed, config, expected[name])
         return verified
@@ -1648,7 +1782,9 @@ class StackClient(StackCore):
     ) -> None:
         """Rebase every branch that needs it onto its parent, bottom-up (see
         needs_restack), in the current stack, or in the stacks of the branches
-        that branches and groups name (see named).
+        that branches and groups name (see named). If a selected stack uses
+        an integration, first restack the integration's tracked sources and
+        their ancestors, then rebuild it.
 
         onto first retargets one branch: the one branches names, or the
         current one if it names none. It can't be combined with groups or
@@ -1696,20 +1832,30 @@ class StackClient(StackCore):
             latest = latest or was_integrated
         else:
             selection = self.refresh_selection(branches, groups, stacks, "restack")
-            self.ensure_owned(selection.branches, stacks, allow_shared, "restack")
         remote = self.default_remote(selection.branches, stacks)
         adapter = make_adapter(self, remote, fetch=False)
+        explicitly_selected = set(selection.branches)
+        expected = self.preflight_integrations(selection, stacks, force_name)
+        dependencies = self.select_restack_dependencies(selection, stacks, remote)
+        self.ensure_owned(selection.branches, stacks, allow_shared, "restack")
+        branch_adapters = self.implicit_source_adapters(
+            (branch for branch in selection.branches if branch not in explicitly_selected), stacks, adapter, remote
+        )
         self.ensure_fresh_trunk_bases(
             selection.branches,
             skip=lambda branch, _parent, _trunk: (
-                adapter.merge_state(branch, stacks.parent(branch)) in {MergeState.MERGED, MergeState.REVERTED}
+                branch_adapters.get(branch, adapter).merge_state(branch, stacks.parent(branch))
+                in {MergeState.MERGED, MergeState.REVERTED}
             ),
         )
-        expected = self.preflight_integrations(selection, stacks, force_name)
         self.preflight_integration_worktrees(selection, expected)
         sources, remaining = selection.ordered(stacks)
-        if sources:
-            blocked = self.restack_all(self.skip_merged(sources, stacks, adapter), stacks, latest)
+        unmerged = self.skip_merged(sources, stacks, adapter, branch_adapters=branch_adapters)
+        unmerged_names = set(unmerged)
+        self.ensure_restack_preserves_landings(selection, unmerged_names, stacks, latest)
+        self.preflight_restack_dependencies(dependencies, unmerged_names, stacks, latest)
+        if unmerged:
+            blocked = self.restack_all(unmerged, stacks, latest)
             if blocked:
                 raise StackError(f"couldn't update selected integration source stacks: {', '.join(blocked)}")
         self.refresh_integrations(selection, remote, expected, fetch=False)

@@ -304,11 +304,14 @@ restack. `info --offline` uses locally available landing evidence.
 
 `restack`, `pull`, and `sync` refresh the integration roots needed by the
 selected stacks. From an integration branch, they select its dependent
-stacks. An explicitly named integration selects the same scope. Use a group
-selector to include its other stacks. A selected source stack updates
-before the integration is rebuilt. An excluded source contributes its local
-tip. `restack` uses local refs. `pull` and `sync` fetch and fast-forward the
-configured root when possible before rebuilding.
+stacks. An explicitly named integration selects the same scope.
+`restack` uses local refs and automatically restacks tracked sources and
+their ancestors before rebuilding the integration. It skips sources whose
+exact tips are already proven to have landed. Untracked sources contribute
+their local tips. For `pull` and `sync`, include the source
+stacks in the selection, for example with a group selector, to update
+them before rebuilding. These commands also fetch and fast-forward the
+configured root when possible.
 `push` refreshes the integration from local source tips and restacks the
 selected work on it. It publishes the integration and work in the same
 atomic push with leases. `sync` also publishes the integration atomically
