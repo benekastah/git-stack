@@ -227,8 +227,10 @@ the repository\(aqs only remote if it has no \f[CR]origin\f[R].
 So a clone whose remote has another name (e.g.
 \f[CR]upstream\f[R]) needs no \f[CR]\-\-remote\f[R].
 .SS Performance log
-Set \f[CR]stack.perfLog\f[R] to record each command line and its Git and
-\f[CR]gh\f[R] timeline in that file.
+Set \f[CR]stack.perfLog\f[R] to record each command line, the git\-stack
+version, and its Git and \f[CR]gh\f[R] timeline in that file.
+Source checkouts and Git\-based installs also report their commit when
+available.
 An unset or empty path disables reporting.
 To enable it across repositories, add this to
 \f[CR]\(ti/.gitconfig\f[R]:

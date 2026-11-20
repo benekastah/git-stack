@@ -5,6 +5,13 @@ made from python-template; where the two disagree, this file wins. Keep this fil
 the shape of the code or a rule here changes. The README is the user documentation, and the
 man page is generated from it.
 
+## Versioning
+
+Every merge into `main` must update `__version__` in `git_stack/_version.py`.
+Bump the patch component relative to the current version on `main` unless the
+change warrants a minor or major bump. Include the bump in the commit that
+lands on `main` so each merged build has a distinct version in performance logs.
+
 ## Shape of the code
 
 - `git_stack/stack.py` (`StackClient`) and `git_stack/core.py` (`StackCore`) do
@@ -59,8 +66,10 @@ man page is generated from it.
   `Git.process` boundary, in the snapshot's `CatFile`, and at both `gh` launches.
   Branch-status workers inherit the same recorder. Keep subprocess input,
   output and environment out of the timeline.
-  The CLI writes the command line and timeline to `stack.perfLog`, capped
-  by `stack.perfLogMaxBytes`. Tests configure their own log paths.
+  The CLI writes the command line, version and timeline to `stack.perfLog`,
+  capped by `stack.perfLogMaxBytes`. Tests configure their own log paths.
+- `git_stack/_version.py` defines the package version for setuptools and
+  adds the source commit to performance reports when it can identify it.
 - A value from a fixed set (an option's, a setting's, GitHub's) is an enum,
   converted where it's read (e.g. `Delete`, `Ownership`, `GitHubState`), so
   the code compares members rather than strings, and adding a value happens in
