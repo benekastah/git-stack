@@ -619,7 +619,10 @@ def test_failed_integration_discards_its_conflicting_checkout(repo: Repo) -> Non
     assert not Integrations(repo.client).path("combined").exists()
 
 
-def test_integration_preserves_source_merge_edits_and_aborts_native_merge_conflicts(repo: Repo) -> None:
+@pytest.mark.parametrize("abort_result", ["clean", "failed", "untracked"])
+def test_integration_preserves_source_merge_edits_and_aborts_native_merge_conflicts(
+    repo: Repo, monkeypatch: pytest.MonkeyPatch, git_calls: list[GitCall], abort_result: str
+) -> None:
     source(repo, "side", "c")
     source(repo, "one", "a")
     repo.merge_with_an_edit("side", "d", "merge edit\n")
@@ -634,14 +637,63 @@ def test_integration_preserves_source_merge_edits_and_aborts_native_merge_confli
     assert repo.git("show", "combined:d") == "merge edit"
 
     previous = tip(repo, "combined")
+    good_source = tip(repo, "two")
     repo.commit("a", "conflict with one\n", "conflict")
     repo.merge_with_an_edit("side", "d", "other merge edit\n")
+    if abort_result == "untracked":
+        repo.git("config", "status.showUntrackedFiles", "no")
+    if abort_result != "clean":
+        git_ok = GitClient.ok
+
+        def abort_with_failure_or_artifact(git: GitClient, *args: str) -> bool:
+            if args != ("merge", "--abort"):
+                return git_ok(git, *args)
+            if abort_result == "failed":
+                return False
+            result = git_ok(git, *args)
+            (git.directory / "merge-artifact").write_text("untracked\n", encoding="utf-8")
+            return result
+
+        monkeypatch.setattr(GitClient, "ok", abort_with_failure_or_artifact)
     result = repo.stack("restack", "combined", expect_success=False)
 
     assert "git stack restack two" in result.stderr
     assert tip(repo, "combined") == previous
     assert Integrations(repo.client).pending("combined") is None
-    assert not Integrations(repo.client).path("combined").exists()
+    path = Integrations(repo.client).path("combined")
+    reuse = abort_result == "clean"
+    assert path.exists() == reuse
+    if reuse:
+        assert not repo.git("status", "--porcelain", cwd=path)
+        assert not GitClient(path).operation_in_progress()
+
+    repo.git("switch", "two")
+    repo.git("restore", "--source", good_source, "--", "a", "d")
+    repo.git("commit", "-am", "restore the source changes that merged")
+    git_calls.clear()
+    repo.stack("restack", "combined")
+    assert any(call[:2] == ["worktree", "add"] for call in git_calls) == (not reuse)
+
+
+def test_integration_reuses_its_worktree_after_aborting_a_conflicting_pick(
+    repo: Repo, monkeypatch: pytest.MonkeyPatch, git_calls: list[GitCall]
+) -> None:
+    integration(repo)
+    previous = tip(repo, "combined")
+    repo.git("switch", "two")
+    repo.commit("a", "conflicting pick\n", "conflicting pick")
+    # Force the incremental path to exercise abort if a replay step conflicts.
+    monkeypatch.setattr(Integrations, "disjoint_source_paths", lambda _self, _root, _inputs: True)
+    git_calls.clear()
+
+    result = repo.stack("restack", "combined", expect_success=False)
+
+    assert "integration build for combined aborted" in result.stderr
+    assert ["cherry-pick", "--abort"] in git_calls
+    assert tip(repo, "combined") == previous
+    path = Integrations(repo.client).path("combined")
+    assert not repo.git("status", "--porcelain", cwd=path)
+    assert Integrations(repo.client).pending("combined") is None
 
 
 def test_retry_keeps_a_staged_resolution_from_a_legacy_build(repo: Repo, monkeypatch: pytest.MonkeyPatch) -> None:

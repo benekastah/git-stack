@@ -836,11 +836,27 @@ class Integrations:
         if build:
             against = build["integration"]["root"]
             self.preserve_retired_landings(name, build)
-        self.remove_build(name)
+        keep = build is not None and self.read(name) is not None and self.abort_conflicting_step(name, build)
+        self.remove_build(name, keep_worktree=keep)
         return StackError(
             f"integration build for {name} aborted: changes from {source} conflict with {against} or another source. "
             f"Run `git stack restack {source} --onto <dependency>`, resolve the conflict there, and rerun this command."
         )
+
+    def abort_conflicting_step(self, name: str, build: Build) -> bool:
+        """Keep the registered integration's worktree only after a clean abort."""
+        worktree = GitClient(self.path(name))
+        command = "cherry-pick" if build.get("replay") else "merge"
+        try:
+            return (
+                worktree.ok(command, "--abort")
+                and worktree.rev("HEAD") == build["head"]
+                and worktree.current_branch() is None
+                and not worktree.operation_in_progress()
+                and not worktree.run("status", "--porcelain", "--untracked-files=all", "--ignore-submodules=none")
+            )
+        except StackError:
+            return False
 
     def publish(self, name: str, build: Build, result: str) -> None:
         self.ensure_available_worktree(name)

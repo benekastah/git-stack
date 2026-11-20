@@ -48,8 +48,8 @@ lands on `main` so each merged build has a distinct version in performance logs.
   The merge checkpoint stores only the step and HEAD so it can advance without rewriting those
   inputs. A build that cherry-picks pins its plan on disk. Fast-forward changes to
   independent, linear sources can extend a previous build, and successful builds
-  reuse a detached worktree. Conflicts in a new build discard it so sources can be
-  restacked. Existing stopped operations are recoverable. Sync records merged
+  reuse a detached worktree. A conflict in an existing integration keeps the
+  cache only if the failed step aborts and leaves a clean detached worktree. Existing stopped operations are recoverable. Sync records merged
   source tips and stack selectors before untracking
   them so a retry can recover the inputs, group scope and remote. Queued remote deletions
   retain their dependent branches and leases. The checkout recovery marker

@@ -62,7 +62,8 @@ default branch. The next refresh picks up new leaves automatically.
 ## Conflicts between sources
 
 A merge or cherry-pick conflict aborts the build and keeps the previous
-integration tip. Keep independent branches parallel when they merge cleanly. When two source
+integration tip. An existing integration can reuse its worktree after a
+clean abort. Keep independent branches parallel when they merge cleanly. When two source
 branches conflict during a build or refresh, recommend stacking them, with
 the prerequisite below the dependent work. Follow `git-stack-rearrange`
 and get the user's approval before resolving the conflict with

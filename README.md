@@ -358,7 +358,8 @@ with the integration named explicitly. Move an integration out of any other
 worktree before refreshing it.
 
 If a merge or cherry-pick conflicts, git-stack aborts the build and keeps
-the previous integration tip. Restack the conflicting source onto the
+the previous integration tip. An existing integration retains its detached
+worktree when the failed step aborts cleanly. Restack the conflicting source onto the
 branch it depends on, resolve the conflict in that source, and rerun the
 original command. Use `git stack integrate --abort <name>` to discard a build
 interrupted for another reason. Release the cached worktree before deleting
