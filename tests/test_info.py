@@ -148,9 +148,26 @@ def test_info_reports_integration_lookup_warning_on_the_calling_thread(
     assert warnings[-1] == ("h0", get_ident())
 
 
-def test_info_current_requires_a_tracked_branch(repo: Repo, client: StackClient) -> None:
-    with pytest.raises(StackError, match="main isn't in a stack"):
-        client.info(current=True, offline=True)
+@pytest.mark.parametrize("checkout", ["main", "untracked"])
+@pytest.mark.parametrize("output", [(), ("--json",)])
+def test_info_from_an_untracked_branch_matches_all(repo: Repo, checkout: str, output: tuple[str, ...]) -> None:
+    repo.make_stack()
+    repo.stack("create", "other", "--from", "main")
+    if checkout == "untracked":
+        repo.git("switch", "-qc", checkout, "main")
+    else:
+        repo.git("switch", "--quiet", checkout)
+
+    explicit = repo.stack("info", "-a", "--offline", *output)
+    implicit = repo.stack("info", "--offline", *output)
+
+    assert implicit.stdout == explicit.stdout
+    assert implicit.stderr == explicit.stderr == ""
+
+
+def test_info_group_selector_still_requires_a_current_stack(repo: Repo) -> None:
+    result = repo.stack("info", "-g", "--offline", expect_success=False)
+    assert "main isn't in a stack" in result.stderr
 
 
 def test_bare_group_selects_all_current_group_stacks(repo: Repo, client: StackClient) -> None:

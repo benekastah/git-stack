@@ -20,6 +20,7 @@ from, usually `main`), **tracked** (git-stack knows the branch), **group** (stac
 bottom branch merged). Most commands act on the *current stack*: every branch connected to the one you're
 on, including siblings.
 Commands select just that stack. Pass `-g` to include its group.
+From an ordinary untracked branch such as `main`, plain `git stack info` shows all stacks.
 
 ## Rules
 

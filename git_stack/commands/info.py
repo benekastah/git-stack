@@ -68,7 +68,11 @@ class Args(argparse.Namespace):
 
 
 def register(subparsers: Subparsers) -> None:
-    p = subparsers.add_parser("info", help="show the current stack (or the named ones)")
+    p = subparsers.add_parser(
+        "info",
+        help="show the current stack, the named stacks, or all stacks from an untracked branch",
+        description="Show the current stack or the named stacks. On an ordinary untracked branch, show all stacks.",
+    )
     add_stack_arguments(p, "show", optional_group=True)
     p.add_argument("-a", "--all", action="store_true", help="show every tracked stack")
     p.add_argument(
