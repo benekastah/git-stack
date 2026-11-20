@@ -10,7 +10,7 @@ Read `git-stack` first for selection, ownership and timing. Check
 uses leases, sets upstreams and updates pull request bases.
 
 Follow the open-PR checks in `git-stack` before pushing or running
-`git stack prs`. Preserve queued PRs and warn before updates that could
+`git stack prs --protect-prs`. Preserve queued PRs and warn before updates that could
 invalidate approvals.
 
 Before pushing a rearranged stack or updating its PRs, verify the bases and
@@ -18,11 +18,11 @@ merge queue status of all affected PRs and confirm that the user's approval
 covers publication and any retargeting. Follow the approval rules in
 `git-stack`, including for drafts.
 
-- Use `git stack push` for the current stack or `git stack push <branch>` for a
+- Use `git stack push --protect-prs` for the current stack or `git stack push --protect-prs <branch>` for a
   named stack. Pass `-g` to include its group. Use `--remote <name>` to
   select one remote when tracked branches use several.
-- Use `git stack push --prs` to publish and open missing draft pull requests.
-  Both `git stack push --prs` and `git stack prs` can also retarget existing
+- Use `git stack push --protect-prs --prs` to publish and open missing draft pull requests.
+  Both `git stack push --protect-prs --prs` and `git stack prs --protect-prs` can also retarget existing
   PRs, edit their descriptions, and update their GitHub stack links. Compare
   existing PR bases with the intended remote parents before running either.
 - With work stacked on an integration root, start from a clean worktree.

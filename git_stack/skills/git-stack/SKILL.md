@@ -31,8 +31,8 @@ From an ordinary untracked branch such as `main`, plain `git stack info` shows a
 2. **Never use plain git on a tracked branch** for what a git-stack command does. It moves the branch
    without updating the recorded base, and the next restack then replays the wrong commits.
    - New branch: `git stack create <name>`, not `git switch -c`.
-   - Rebase onto the parent or main: `git stack restack` or `git stack sync`, not `git rebase`.
-   - Push: `git stack push`, not `git push`. Update from remote: `git stack pull` or `git stack sync`,
+   - Rebase onto the parent or main: `git stack restack` or `git stack sync --protect-prs`, not `git rebase`.
+   - Push: `git stack push --protect-prs`, not `git push`. Update from remote: `git stack pull` or `git stack sync --protect-prs`,
      not `git pull`.
    - Rename: `git stack rename <new>`, not `git branch -m`. Stop tracking: `git stack untrack`.
    - After amending a branch's own commits, restack so the branches above it
@@ -50,9 +50,9 @@ each affected PR's base, head, draft status, approvals, required checks,
 mergeability, and queue status. Pause if an affected PR's queue status is
 unknown.
 
-- **Queued:** Preserve its head, base, GitHub stack membership, and queue entry.
-  Exclude it from the operation, including local moves or rebases that would
-  rewrite its branch. Stop and explain if the selection cannot exclude it.
+- **Queued:** Preserve its head, base, GitHub stack membership, and queue entry
+  by default. Exclude it from local moves and rebases. If publication would
+  affect it, stop and ask before using the explicit override below.
 - **Approved, out of draft, and targeting `main`:** Preserve its reviewed head
   and base by default, even if checks are pending. Before changing either or
   the reviewed diff, name the PR, explain the risk to its approvals and merge
@@ -71,6 +71,18 @@ failed push. A command can edit PR bases before the push or fail while updating
 PRs after it. Inspect the live refs and PRs after a failure, and report changes
 that already happened before deciding whether to retry.
 
+## Flags for publishing
+
+Use `--protect-prs` for every `push`, `sync`, and `prs`, and for
+`git stack clean` with `-d remote` or `-d both`. If protection stops a change, tell the user
+which PR and what would change. Get explicit approval before adding
+`--allow-pr-update <number>` for that PR. Repeat the option only for PRs
+the user approved updating. For a PR from a fork, use
+`--allow-pr-update 'OWNER/REPO#NUMBER'` with the base repository. A queued PR
+also requires `--force`, which you may pass only with the user's explicit permission. Always keep
+`--protect-prs` on these retries. Leave a merge-ready PR targeting `main`
+on that base.
+
 ## Approval for rearranging existing stacks
 
 - Get the user's approval before changing an existing stack's parent
@@ -84,8 +96,8 @@ that already happened before deciding whether to retry.
   Recheck the queue before running the approved move.
 - Before publishing a rearrangement, recheck PR bases and queue status.
   Confirm the user's approval covers the affected branches and PR base changes.
-  If the approval covers only local steps, ask before running `git stack push`,
-  `git stack sync`, `git stack prs`, or editing a PR directly. Ask again if the
+  If the approval covers only local steps, ask before publishing with
+  `push`, `sync`, or `prs`, or editing a PR directly. Ask again if the
   scope changes.
 
 ## Starting and managing a stack
@@ -95,7 +107,7 @@ git stack create add-api --from main   # PR 1, on main
 # ...commit...
 git stack create use-api       # PR 2, on add-api
 # ...commit...
-git stack push --prs           # push both, open draft PRs, each into its parent's branch
+git stack push --protect-prs --prs  # push both, open draft PRs, each into its parent's branch
 ```
 
 | Task | Command |
@@ -105,8 +117,8 @@ git stack push --prs           # push both, open draft PRs, each into its parent
 | Track existing branches | `git stack track <parent> <branch>...` (`--base <sha>` if the parent moved) |
 | Track open PRs, e.g. new clone | `git stack import` (`-n` previews) |
 | Move through the stack | `git stack next`, `git stack prev` |
-| Push without opening PRs | `git stack push` |
-| Open or update PRs and their stack sections | `git stack prs` |
+| Push without opening PRs | `git stack push --protect-prs` |
+| Open or update PRs and their stack sections | `git stack prs --protect-prs` |
 | Rename | `git stack rename <new>` |
 | Stop tracking | `git stack untrack <branch>` |
 | Group stacks to act on them together | `git stack group add <name> <branch>...` |

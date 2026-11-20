@@ -18,7 +18,9 @@ lands on `main` so each merged build has a distinct version in performance logs.
   the work. `git_stack/git.py` (`GitClient`) runs git; the adapters in
   `git_stack/adapters/` say which branches were merged, locally or by asking
   GitHub. The GitHub adapter validates PR changes before an atomic push and
-  plans any retargets that must run before publication. PR body updates use
+  plans any retargets that must run before publication. PR protection uses
+  live GitHub state before writes. The Git push leases still guard ref
+  updates independently. PR body updates use
   bounded GraphQL batches and send the body data on stdin. Run the dry push
   before applying those edits so stale leases leave the PR bases alone.
   Push and sync can reuse the API's default branch when the remote has one direct

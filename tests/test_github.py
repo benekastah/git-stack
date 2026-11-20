@@ -1006,7 +1006,14 @@ def fake_ssh(repo: Repo, tmp_path: pathlib.Path) -> None:
     install_command(tmp_path / "bin", "ssh", "tests.fake_ssh")
 
 
-@pytest.mark.parametrize("url", ["git@github-work:acme/widgets.git", "ssh://git@github-work/acme/widgets.git"])
+@pytest.mark.parametrize(
+    "url",
+    [
+        "git@github-work:acme/widgets.git",
+        "ssh://git@github-work/acme/widgets.git",
+        "ssh://git@ssh.github.com:443/acme/widgets.git",
+    ],
+)
 def test_github_repo_resolves_ssh_host_alias(repo: Repo, fake_ssh: None, url: str) -> None:
     repo.git("config", "remote.origin.url", url)
 

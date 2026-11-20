@@ -506,8 +506,9 @@ A source drops out of the generated history when its tip is already on
 the configured root or when a merged GitHub PR proves that exact tip
 landed there.
 Unchanged tips can reuse a recent GitHub check for up to five minutes.
-A deleted source requires proof for its last included tip and is checked
-again if that tip has no recorded proof.
+For integrations with a fixed list of sources, a deleted source requires
+proof for its last included tip and is checked again if that tip has no
+recorded proof.
 If there\(aqs no proof, replace the source list with
 \f[CR]git stack integrate <name> <source>...\f[R].
 When all sources land, the integration follows the configured root.
@@ -1151,6 +1152,31 @@ Runs from any branch, even one that isn\(aqt in a stack.
 Uncommitted changes are fine, unless you\(aqre on a stack\(aqs root,
 which \f[CR]clean\f[R] fast\-forwards, or, with \f[CR]\-d local\f[R] or
 \f[CR]\-d both\f[R], on a tracked branch, which it could delete.
+.SS Protecting open pull requests
+\f[CR]git stack push\f[R], \f[CR]git stack sync\f[R],
+\f[CR]git stack prs\f[R], and remote deletions from
+\f[CR]git stack clean\f[R] require \f[CR]\-\-force\f[R] to change a
+GitHub pull request in the merge queue.
+Updates to approved PRs are allowed by default.
+.PP
+Use \f[CR]\-\-protect\-prs\f[R] when automating these commands.
+It refuses updates to approved or queued PRs and to merge\-ready PRs on
+\f[CR]main\f[R].
+When you intend to update a protected PR, pass
+\f[CR]\-\-allow\-pr\-update <number>\f[R] for that PR.
+Repeat it to allow more than one.
+Queued PRs still require \f[CR]\-\-force\f[R].
+In protected mode, a merge\-ready or queued PR targeting \f[CR]main\f[R]
+cannot be retargeted away from it.
+A bare number refers to the selected GitHub repository.
+For a PR in a different repository, use its base repository and number,
+for example \f[CR]\-\-allow\-pr\-update \(aqowner/repo#123\(aq\f[R].
+.PP
+The checks cover pushes and deletions of PR base and head branches, as
+well as PR edits made by git\-stack, including changes to GitHub stack
+membership.
+Review the affected branches and PRs before publishing a stack.
+A remote PR\(aqs status can change between a check and the update.
 .SS \f[CR]git stack push [<branch|glob>...] [\-g [<group>]] [\-\-remote <name>] [\-\-force] [\-\-no\-verify] [\-\-prs] [\-\-allow\-shared] [\-\-rebuild\-stack]\f[R]
 Force\-push (with lease) every branch in the current stack (or the ones
 named, see Groups), and set each one\(aqs upstream.

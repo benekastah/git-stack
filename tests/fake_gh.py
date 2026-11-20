@@ -72,7 +72,7 @@ def respond(args: list[str], state: dict[str, Any]) -> str | None:
             if " stack {" in query and "stacks" not in state and state.get("no_stack_field"):
                 raise GhError("gh: Field 'stack' doesn't exist on type 'PullRequest'")
             return pull_requests_by_number(query, state)
-        return pull_requests_by_head(args, query, prs)
+        return pull_requests_by_ref(args, query, prs)
     path = next((a for a in args if "/stacks" in a), None)
     if args[0] == "api" and path is not None:
         return stacks_api(path, state)
@@ -148,6 +148,14 @@ def field_of(pr: dict[str, Any], name: str, state: dict[str, Any]) -> object:
         return stack_of(pr["number"], state)
     if name == "timelineItems":
         return {"nodes": pr.get("baseChanges", [])}
+    if name == "isInMergeQueue":
+        return pr.get(name, False)
+    if name == "latestOpinionatedReviews":
+        return {"nodes": [{"state": review} for review in pr.get(name, [])], "pageInfo": {"hasNextPage": False}}
+    if name in ("reviewDecision", "mergeStateStatus"):
+        return pr.get(name, "UNKNOWN" if name == "mergeStateStatus" else None)
+    if name == "isDraft":
+        return pr.get(name, False)
     return pr.get(name, "")
 
 
@@ -211,32 +219,66 @@ def link_stack(path: str, numbers: list[int], state: dict[str, Any]) -> str:
     return json.dumps({"pull_requests": [{"number": n} for n in numbers]})
 
 
-def pull_requests_by_head(args: list[str], query: str, prs: list[dict[str, Any]]) -> str:
+def pull_requests_by_ref(args: list[str], query: str, prs: list[dict[str, Any]]) -> str:
     """The pull requests of the branches query names, and the default branch."""
     found: dict[str, Any] = {"defaultBranchRef": {"name": "main"}}
-    for alias, variable in re.findall(r"(\w+): pullRequests\(headRefName: \$(\w+)", query):
+    connections = [
+        (alias, ref_field, variable, False)
+        for alias, ref_field, variable in re.findall(r"(\w+): pullRequests\((headRefName|baseRefName): \$(\w+)", query)
+    ]
+    connections.extend(
+        (alias, "headRefName", variable, True)
+        for alias, variable in re.findall(r"(\w+): ref\(qualifiedName: \$(\w+)", query)
+    )
+    for alias, ref_field, variable, associated in connections:
+        repository = f"{opt_value(args, 'owner')}/{opt_value(args, 'name')}"
+        ref = opt_value(args, variable).removeprefix("refs/heads/") if associated else opt_value(args, variable)
         # Newest first, taking higher numbers as newer.
         matching = sorted(
             (
                 p
                 for p in prs
-                if p["headRefName"] == opt_value(args, variable)
+                if p[ref_field] == ref
                 and (
-                    f"{alias}: pullRequests(headRefName: ${variable}, states: MERGED" not in query
+                    not associated
+                    or p["state"] == "OPEN"
+                    and p.get("headRepository", repository if not p["isCrossRepository"] else "") == repository
+                )
+                and (
+                    f"{alias}: pullRequests({ref_field}: ${variable}, states: MERGED" not in query
                     or p["state"] == "MERGED"
+                )
+                and (
+                    f"{alias}: pullRequests({ref_field}: ${variable}, states: OPEN" not in query or p["state"] == "OPEN"
                 )
             ),
             key=lambda p: p["number"],
             reverse=True,
         )
         if "pageInfo { hasNextPage endCursor }" in query:
-            cursor = re.search(rf"\b{alias}: pullRequests\([^)]*after: \$(\w+)", query)
+            connection = r"ref\([^)]*\) \{ associatedPullRequests" if associated else "pullRequests"
+            cursor = re.search(rf"\b{alias}: {connection}\([^)]*after: \$(\w+)", query)
             key = (cursor[1] if cursor else "after") + "="
             start = int(next((a.removeprefix(key) for a in args if a.startswith(key)), "0"))
             end = start + 10
             found[alias] = {
                 "nodes": [
-                    {"isDraft": False, "mergedAt": "", **{k: p[k] for k in PR_FIELDS if k in p}}
+                    {
+                        "isDraft": False,
+                        "mergedAt": "",
+                        "repository": {"nameWithOwner": p.get("baseRepository", repository)},
+                        **{k: p[k] for k in PR_FIELDS if k in p},
+                        **{
+                            k: field_of(p, k, {})
+                            for k in (
+                                "isInMergeQueue",
+                                "reviewDecision",
+                                "mergeStateStatus",
+                                "latestOpinionatedReviews",
+                            )
+                            if k in query
+                        },
+                    }
                     for p in matching[start:end]
                 ],
                 "pageInfo": {"hasNextPage": end < len(matching), "endCursor": str(end)},
@@ -247,6 +289,8 @@ def pull_requests_by_head(args: list[str], query: str, prs: list[dict[str, Any]]
                     {"isDraft": False, "mergedAt": "", **{k: p[k] for k in PR_FIELDS if k in p}} for p in matching
                 ]
             }
+        if associated:
+            found[alias] = {"associatedPullRequests": found[alias]}
     return json.dumps({"data": {"repository": found}})
 
 

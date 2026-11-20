@@ -1,11 +1,12 @@
-import argparse
-
 from git_stack.commands import (
+    PRProtectionArgs,
     Subparsers,
     add_allow_shared_argument,
+    add_pr_protection_arguments,
     add_rebuild_stack_argument,
     add_stack_arguments,
     named_stacks,
+    pr_protection,
 )
 from git_stack.commands.info import print_tree
 from git_stack.commands.prs import show_steps
@@ -13,13 +14,12 @@ from git_stack.git import DEFAULT_REMOTE
 from git_stack.stack import PushResult, StackClient
 
 
-class Args(argparse.Namespace):
+class Args(PRProtectionArgs):
     """The arguments register's parser produces."""
 
     branches: list[str]
     groups: list[str]
     remote: str | None
-    force: bool
     prs: bool
     allow_shared: bool
     rebuild_stack: bool
@@ -39,7 +39,7 @@ def register(subparsers: Subparsers) -> None:
         "--force",
         action="store_true",
         help="push even if that drops commits on a remote branch that the local one doesn't "
-        "have. Still fails if a remote branch changed since the last fetch",
+        "have, or update queued pull requests. Still checks the lease",
     )
     p.add_argument(
         "--prs",
@@ -49,6 +49,7 @@ def register(subparsers: Subparsers) -> None:
     )
     add_allow_shared_argument(p)
     add_rebuild_stack_argument(p)
+    add_pr_protection_arguments(p)
     p.set_defaults(run=run, show=show, error=lambda result: result.error)
 
 
@@ -63,6 +64,7 @@ def run(stack: StackClient, args: Args) -> PushResult:
         allow_shared=args.allow_shared,
         rebuild_stack=args.rebuild_stack,
         no_verify=args.no_verify,
+        **pr_protection(args),
     )
 
 

@@ -701,15 +701,24 @@ class GitClient:
             self._push_defaults[remote] = defaults
         return defaults
 
-    def has_multiple_push_urls(self, remote: str) -> bool:
-        """Whether Git can push this remote's refspecs to more than one URL."""
+    def push_urls(self, remote: str) -> tuple[str, ...]:
+        """The effective push URLs for a remote."""
         shared_url = self._shared_remote_url(remote)
         # The main config file can stay unchanged when an include or worktree
         # config changes, even during a restack hook. Ask Git in those cases.
         separate_config = any(
             key in ("include.path", "extensions.worktreeconfig") or key.startswith("includeif.") for key in self._config
         )
-        return (shared_url is None or separate_config) and len(self._resolved_push_urls(remote)) > 1
+        return self._resolved_push_urls(remote) if shared_url is None or separate_config else (shared_url,)
+
+    def configured_push_urls(self, remote: str) -> list[str]:
+        """Original destinations, for host identity behind an insteadOf transport rewrite."""
+        explicit = self._configured_remote_urls(remote, "pushurl")
+        return explicit or [
+            url
+            for url in self._configured_remote_urls(remote, "url")
+            if not self._url_is_rewritten(url, "pushinsteadof")
+        ]
 
     def _resolved_push_urls(self, remote: str) -> tuple[str, ...]:
         try:

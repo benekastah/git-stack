@@ -934,6 +934,7 @@ class StackCore:
         no_verify: bool = False,
         defer: Callable[[RemoteDeletion], None] | None = None,
         protected_refs: frozenset[tuple[str, str]] = frozenset(),
+        check_delete: Callable[[RemoteDeletion], None] | None = None,
     ) -> bool:
         """Stop tracking merged branch, deleting what delete says, and moving its children onto its parent (see remove_merged).
         Returns False, leaving branch alone, if its remote branch couldn't be
@@ -971,6 +972,8 @@ class StackCore:
                 return True
             children = tuple((child, git.remote_branch_name(child, remote_name)) for child in stacks.children(branch))
             deletion = RemoteDeletion(remote_name, ref, tip, children)
+            if check_delete is not None and defer is None:
+                check_delete(deletion)
             if not self.delete_merged_upstream(branch, deletion, no_verify, defer):
                 return False
             self.remove_merged(branch, stacks, delete_local)

@@ -51,7 +51,7 @@ def test_the_core_skill_exists() -> None:
 def test_stack_update_command_has_its_own_skill(command: str) -> None:
     skill = SKILLS / f"git-stack-{command}" / "SKILL.md"
     assert skill.is_file(), f"missing {skill.parent.name}"
-    assert command in stack_commands(skill.read_text(encoding="utf-8"))
+    assert any(line.split()[0] == command for line in stack_commands(skill.read_text(encoding="utf-8")))
 
 
 @pytest.mark.parametrize("path", SKILL_FILES, ids=lambda p: f"{p.parent.name}/{p.name}")
@@ -66,6 +66,14 @@ def test_every_git_stack_command_in_a_skill_parses(path: pathlib.Path) -> None:
             if e.code == 0:  # --help
                 continue
             pytest.fail(f"`git stack {command}` in {path.name} isn't a git-stack command line")
+
+
+@pytest.mark.parametrize("path", SKILL_FILES, ids=lambda p: p.parent.name)
+def test_skill_publication_commands_protect_prs(path: pathlib.Path) -> None:
+    for command in stack_commands(path.read_text(encoding="utf-8")):
+        parts = shlex.split(command)
+        if parts[0] in ("push", "sync", "prs", "pr"):
+            assert "--protect-prs" in parts, f"{path}: git stack {command}"
 
 
 @pytest.mark.parametrize("path", sorted(SKILLS.glob("*/SKILL.md")), ids=lambda p: p.parent.name)

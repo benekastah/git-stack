@@ -1,13 +1,14 @@
-import argparse
-
 from git_stack.commands import (
+    PRProtectionArgs,
     Subparsers,
     add_allow_shared_argument,
     add_delete_argument,
     add_ignore_revert_argument,
     add_latest_argument,
+    add_pr_protection_arguments,
     add_rebuild_stack_argument,
     add_stack_arguments,
+    pr_protection,
 )
 from git_stack.commands.info import print_tree
 from git_stack.core import Delete
@@ -15,7 +16,7 @@ from git_stack.git import DEFAULT_REMOTE
 from git_stack.stack import StackClient, SyncResult
 
 
-class Args(argparse.Namespace):
+class Args(PRProtectionArgs):
     """The arguments register's parser produces."""
 
     branches: list[str]
@@ -27,7 +28,6 @@ class Args(argparse.Namespace):
     allow_shared: bool
     pull_tracked_upstream: bool
     rewritten_upstream: bool
-    force: bool
     rebuild_stack: bool
     no_verify: bool
 
@@ -41,7 +41,11 @@ def register(subparsers: Subparsers) -> None:
     add_stack_arguments(p, "sync", optional_group=True)
     p.add_argument("--remote", help="only sync branches tracking this remote")
     p.add_argument("--no-verify", action="store_true", help="skip the pre-push hook")
-    p.add_argument("--force", action="store_true", help="allow syncing a branch to the remote default branch")
+    p.add_argument(
+        "--force",
+        action="store_true",
+        help="allow syncing to the remote default branch or updating queued pull requests",
+    )
     add_delete_argument(p)
     add_latest_argument(p)
     add_ignore_revert_argument(p)
@@ -55,6 +59,7 @@ def register(subparsers: Subparsers) -> None:
     p.add_argument(
         "--rewritten-upstream", action="store_true", help="pull unseen commits from rewritten upstream history"
     )
+    add_pr_protection_arguments(p)
     p.set_defaults(run=run, show=show)
 
 
@@ -74,6 +79,7 @@ def run(stack: StackClient, args: Args) -> SyncResult:
         force=args.force,
         rebuild_stack=args.rebuild_stack,
         no_verify=args.no_verify,
+        **pr_protection(args),
     )
 
 

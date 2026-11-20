@@ -59,7 +59,7 @@ rebuild the commits first, choosing changes a hunk or a line at a time.
 - The shape is what you planned: `git stack info --all --offline`.
 
 If the split rearranges an existing stack, follow the approval rules in
-`git-stack` to confirm the user approved publication. Use `git stack push --prs`
+`git-stack` to confirm the user approved publication. Use `git stack push --protect-prs --prs`
 to open a draft PR per branch, each into its parent's branch, with a stack
 section listing the others. Write each PR's description to say where it sits in the stack and what
 the next step adds.
