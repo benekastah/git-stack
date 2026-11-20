@@ -3,13 +3,21 @@ import fnmatch
 import functools
 from collections.abc import Callable, Iterable, Sequence
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Concatenate
 
 from git_stack import events
 from git_stack.adapters import ADAPTER_SETTING, make_adapter
 from git_stack.adapters.git import GitAdapter, PullRequestLink
-from git_stack.adapters.github import GitHubAdapter, GitHubState, OpenPullRequest, PullRequest, check_github_login
+from git_stack.adapters.github import (
+    GitHubAdapter,
+    GitHubState,
+    OpenPullRequest,
+    PRProtection,
+    PullRequest,
+    check_github_login,
+    github_repo_from_url,
+)
 from git_stack.adapters.merge_state import MergeState
 from git_stack.core import (
     BASE_KEY,
@@ -31,6 +39,8 @@ from git_stack.integrations import Integration, Integrations, RetiredSource, Sou
 from git_stack.json_fields import json_name
 from git_stack.performance import active_timeline
 from git_stack.stacks import Ownership, Stacks
+
+DEFAULT_PR_PROTECTION = PRProtection()
 
 
 def exclusive[Client: StackCore, **Params, Result](
@@ -363,6 +373,7 @@ class SyncState:
     broken: list[str] = field(default_factory=list)
     confirmed_merged: dict[str, str | None] = field(default_factory=dict)
     defer_delete: Callable[[RemoteDeletion], None] | None = None
+    check_delete: Callable[[RemoteDeletion], None] | None = None
     protected_deletes: frozenset[tuple[str, str]] = frozenset()
     pushable: list[str] = field(default_factory=list)
     unpushed: list[str] = field(default_factory=list)
@@ -1264,6 +1275,14 @@ class StackClient(StackCore):
             ) from e
         return adapter
 
+    @staticmethod
+    def configure_pr_protection(adapter: GitAdapter, protection: PRProtection, force: bool) -> PRProtection:
+        if force and not protection.force:
+            protection = replace(protection, force=True)
+        if isinstance(adapter, GitHubAdapter):
+            adapter.protection = protection
+        return protection
+
     def skip_merged(self, branches: Iterable[str], stacks: Stacks, adapter: GitAdapter) -> list[str]:
         """Leave merged branches out of branches (parent-before-child), moving
         their children down in stacks (see Stacks.drop). Leave reverted ones
@@ -1822,6 +1841,7 @@ class StackClient(StackCore):
         only_remote: bool = False,
         rebuild_stack: bool = False,
         no_verify: bool = False,
+        protection: PRProtection = DEFAULT_PR_PROTECTION,
     ) -> SyncResult:
         """Fetch, untrack the merged branches in the current stack, or in the
         stacks of the branches that branches and groups name (see named), deleting what
@@ -1877,6 +1897,7 @@ class StackClient(StackCore):
         root_remotes = self.upstream_remotes(roots_to_update)
         push_remote = remote if only_remote else self.stack_remote(upstream_remotes, root_remotes)
         adapter = self.checked_adapter(push_remote)
+        protection = self.configure_pr_protection(adapter, protection, force)
         known_default = (
             adapter.default_branch_for_push() if push and not force and isinstance(adapter, GitHubAdapter) else None
         )
@@ -1930,7 +1951,8 @@ class StackClient(StackCore):
             no_verify,
         )
         state.protected_deletes = self.integration_deletion_refs(delete, roots, push_remote)
-        self.refresh_and_push(selection, expected, adapter, state, integration_leases, rebuild_stack)
+        state.check_delete = lambda deletion: self.protect_deletion(deletion, adapter, protection, push_remote)
+        self.refresh_and_push(selection, expected, adapter, state, integration_leases, rebuild_stack, protection)
         if push and state.blocked:
             raise StackError(
                 f"didn't push {', '.join(state.blocked)}: checked out in another worktree, or stacked on a branch "
@@ -2000,6 +2022,7 @@ class StackClient(StackCore):
         state: SyncState,
         leases: dict[str, tuple[str, str | None]],
         rebuild_stack: bool,
+        protection: PRProtection,
     ) -> None:
         integrations = Integrations(self)
         pending: dict[str, QueuedRemoteDeletion] = {}
@@ -2036,6 +2059,7 @@ class StackClient(StackCore):
                 no_verify=state.no_verify,
                 integration_pushes=integration_pushes,
                 deletions=deletions,
+                protection=protection,
             )
             if not (state.blocked or state.broken) and len(deletions) == len(pending):
                 integrations.clear_retired_sources(leases, state.stacks, state.scope)
@@ -2391,6 +2415,7 @@ class StackClient(StackCore):
             confirmed=confirmed,
             no_verify=state.no_verify,
             defer=state.defer_delete,
+            check_delete=state.check_delete,
             protected_refs=state.protected_deletes,
         ):
             state.skipped.add(branch)
@@ -2460,6 +2485,7 @@ class StackClient(StackCore):
         ignore_reverts: Sequence[str] = (),
         allow_shared: bool = False,
         no_verify: bool = False,
+        protection: PRProtection = DEFAULT_PR_PROTECTION,
     ) -> list[BranchInfo]:
         """Fetch and untrack merged branches in every stack, deleting what delete
         says, without restacking anything. ignore_reverts is as for sync; no_verify
@@ -2504,6 +2530,7 @@ class StackClient(StackCore):
                         delete,
                         confirmed=confirmed,
                         no_verify=no_verify,
+                        check_delete=lambda deletion: self.protect_deletion(deletion, adapter, protection, remote),
                         protected_refs=protected_deletes,
                     )
                     and branch == original
@@ -2537,6 +2564,7 @@ class StackClient(StackCore):
         rebuild_stack: bool = False,
         only_remote: bool = False,
         no_verify: bool = False,
+        protection: PRProtection = DEFAULT_PR_PROTECTION,
     ) -> PushResult:
         """Force-push (with lease) every unmerged branch in the current stack, or
         in the stacks of the branches that branches and groups name (see named), then let
@@ -2577,6 +2605,7 @@ class StackClient(StackCore):
         if not stack or len(remotes) > 1 or (remotes and push_remote not in remotes):
             raise StackError("the selected upstreams changed while settling; retry the push")
         adapter = self.checked_adapter(push_remote)
+        protection = self.configure_pr_protection(adapter, protection, force)
         github = adapter if prs and isinstance(adapter, GitHubAdapter) else None
         roots = {stacks.root(branch) for branch in stack}
         known_default = adapter.default_branch_for_push() if isinstance(adapter, GitHubAdapter) else None
@@ -2596,6 +2625,7 @@ class StackClient(StackCore):
             rebuild_stack=rebuild_stack,
             use_upstreams=True,
             no_verify=no_verify,
+            protection=protection,
             integration_pushes=integration_pushes,
         )
         steps = (
@@ -2712,6 +2742,7 @@ class StackClient(StackCore):
         no_verify: bool = False,
         integration_pushes: Sequence[IntegrationPush] = (),
         deletions: list[RemoteDeletion] | None = None,
+        protection: PRProtection = DEFAULT_PR_PROTECTION,
     ) -> list[str]:
         """Force-push (with lease) branches, which must be unmerged, in one atomic
         push, then let the adapter update their pull requests (see
@@ -2737,7 +2768,11 @@ class StackClient(StackCore):
         integrations = Integrations(self)
         for integration in integration_pushes:
             integrations.verify(integration.refs)
-        multiple_destinations = git.has_multiple_push_urls(remote)
+        push_urls = git.push_urls(remote)
+        multiple_destinations = len(push_urls) > 1
+        self.protect_push(leases, refspecs, remote, adapter, protection, push_urls)
+        if opening and isinstance(adapter, GitHubAdapter):
+            self.protect_pr_opening(branches, stacks, adapter)
         self.retarget_before_push(
             branches,
             stacks,
@@ -2771,6 +2806,95 @@ class StackClient(StackCore):
                 f"pushed, but updating pull requests failed (set {ADAPTER_SETTING} to git to stop using GitHub): {e}"
             ) from e
         return branches
+
+    def protect_pr_opening(self, branches: list[str], stacks: Stacks, adapter: GitHubAdapter) -> None:
+        prs = adapter.pull_requests()
+        opening = (b for b in branches if b not in prs and self.git.tip(b) != self.recorded_base(b, stacks.parent(b)))
+        adapter.protect_pr_opening(branches, opening, stacks)
+
+    def protect_push(
+        self,
+        leases: list[str],
+        refspecs: list[str],
+        remote: str,
+        adapter: GitAdapter,
+        protection: PRProtection,
+        urls: tuple[str, ...],
+    ) -> None:
+        if protection.force and not protection.protect:
+            return
+        changed = set[str]()
+        for lease, refspec in zip(leases, refspecs, strict=True):
+            _, _, old = lease.rpartition(":")
+            source, separator, target = refspec.partition(":")
+            if not separator:
+                source = target = f"refs/heads/{source}"
+            # An empty lease can only create a branch. A no-op under a
+            # nonempty lease can't change the ref in any destination.
+            if old and old != (self.git.rev(source) if source else None):
+                changed.add(target.removeprefix("refs/heads/"))
+        self.protect_remote_heads(remote, adapter, protection, changed, urls)
+
+    def protect_remote_heads(
+        self,
+        remote: str,
+        adapter: GitAdapter,
+        protection: PRProtection,
+        heads: set[str],
+        urls: tuple[str, ...],
+        *,
+        primary_remote: bool = True,
+    ) -> None:
+        if not heads or (protection.force and not protection.protect):
+            return
+        repositories = self.github_push_adapters(remote, adapter, urls)
+        hosts = {github.host for github in repositories}
+        if isinstance(adapter, GitHubAdapter):
+            hosts.add(adapter.host)
+            number_repo = adapter.repo.casefold()
+        else:
+            number_repo = repositories[0].repo if len(repositories) == 1 else None
+        if protection.allowed and len(hosts) > 1:
+            raise StackError("--allow-pr-update requires one GitHub host; PR identifiers can refer to different PRs")
+        for github in repositories:
+            # Bare PR numbers refer to the selected repository, even if Git
+            # pushes to a different repository or clean deletes other refs.
+            github.protection = protection
+            try:
+                github.protect_ref_updates(heads, allow_number=primary_remote and github.repo == number_repo)
+            except FileNotFoundError as error:
+                raise StackError(f"checking the pull requests on {github.repo} requires gh on PATH") from error
+
+    def github_push_adapters(self, remote: str, adapter: GitAdapter, urls: tuple[str, ...]) -> list[GitHubAdapter]:
+        """Find GitHub repositories behind the push URLs, which can differ from fetch."""
+        hosts = {"github.com"}
+        if isinstance(adapter, GitHubAdapter):
+            hosts.add(adapter.host)
+        repositories = self.github_push_repositories(urls, hosts)
+        if not repositories:
+            repositories = self.github_push_repositories(self.git.configured_push_urls(remote), hosts)
+        return [GitHubAdapter(self, remote, *repo, fetch=False) for repo in sorted(repositories)]
+
+    @staticmethod
+    def github_push_repositories(urls: Iterable[str], hosts: set[str]) -> set[tuple[str, str, str]]:
+        repositories: set[tuple[str, str, str]] = set()
+        for url in urls:
+            if (repo := github_repo_from_url(url)) is not None and repo[0] in hosts:
+                host, owner, name = repo
+                repositories.add((host, owner.casefold(), name.casefold()))
+        return repositories
+
+    def protect_deletion(
+        self, deletion: RemoteDeletion, adapter: GitAdapter, protection: PRProtection, primary_remote: str
+    ) -> None:
+        self.protect_remote_heads(
+            deletion.remote,
+            adapter,
+            protection,
+            {deletion.ref.removeprefix("refs/heads/")},
+            self.git.push_urls(deletion.remote),
+            primary_remote=deletion.remote == primary_remote,
+        )
 
     def retarget_before_push(
         self,
@@ -2976,6 +3100,7 @@ class StackClient(StackCore):
         remote: str | None = None,
         dry_run: bool = False,
         rebuild_stack: bool = False,
+        protection: PRProtection = DEFAULT_PR_PROTECTION,
     ) -> PrsResult:
         """Open a draft pull request into its stack parent for each unmerged
         branch in the current stack (or in the stacks of the branches that
@@ -2999,6 +3124,7 @@ class StackClient(StackCore):
         remote = remote or self.default_remote(stack, stacks)
         adapter = ensure_github(make_adapter(self, remote, fetch=True), remote)
         adapter.ensure_available()
+        adapter.protection = protection
         branches = self.skip_merged(stack, stacks, adapter)
         self.ensure_published_pr_roots({stacks.root(b) for b in branches}, remote)
         steps = self.open_pull_requests(branches, stacks, adapter, remote, dry_run, rebuild_stack)
@@ -3019,6 +3145,9 @@ class StackClient(StackCore):
         self.ensure_on_remote(branches, sorted({stacks.root(b) for b in branches}), remote)
         prs = adapter.pull_requests()
         allowed = {prs[b].number for b in branches if b in prs and prs[b].state is GitHubState.OPEN}
+        if not dry_run:
+            adapter.protect_retargets(branches, stacks)
+            self.protect_pr_opening(branches, stacks, adapter)
         template: str | None = None
         steps: list[PullRequestStep] = []
         for b in branches:

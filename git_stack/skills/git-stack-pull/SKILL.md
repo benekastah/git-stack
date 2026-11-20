@@ -7,8 +7,9 @@ description: Fetch and bring a stack up to date locally with git stack pull. Use
 
 Read `git-stack` first for selection, ownership and timing. Start with a clean
 worktree. Pull fetches, fast-forwards local roots, untracks merged branches,
-restacks survivors, and takes unseen upstream commits. It leaves remote refs
-alone.
+restacks survivors, and takes unseen upstream commits. It updates local refs.
+Exclude queued PR branches from local rewrites, including with `--latest`.
+Follow the open-PR checks in `git-stack` before publishing the result.
 
 - Use `git stack pull` for the current stack or `git stack pull <branch>` for a
   named stack. Pass `-g` to include its group. Use `--remote <name>` to select

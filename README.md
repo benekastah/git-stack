@@ -339,7 +339,7 @@ the integration to be on the remote already.
 A source drops out of the generated history when its tip is already on the
 configured root or when a merged GitHub PR proves that exact tip landed
 there. Unchanged tips can reuse a recent GitHub check for up to five minutes.
-A deleted source requires proof for its last included tip and is checked
+For integrations with a fixed list of sources, a deleted source requires proof for its last included tip and is checked
 again if that tip has no recorded proof. If there's no proof, replace the source list with `git stack integrate
 <name> <source>...`. When all sources land, the integration follows the
 configured root. To promote the work, switch to the bottom work branch,
@@ -830,6 +830,26 @@ git stack clean -d local
 - Runs from any branch, even one that isn't in a stack. Uncommitted changes
   are fine, unless you're on a stack's root, which `clean` fast-forwards, or,
   with `-d local` or `-d both`, on a tracked branch, which it could delete.
+
+#### Protecting open pull requests
+
+`git stack push`, `git stack sync`, `git stack prs`, and remote deletions
+from `git stack clean` require `--force` to change a GitHub pull request in the
+merge queue. Updates to approved PRs are allowed by default.
+
+Use `--protect-prs` when automating these commands. It refuses updates to
+approved or queued PRs and to merge-ready PRs on `main`. When you intend to
+update a protected PR, pass `--allow-pr-update <number>` for that PR. Repeat it
+to allow more than one. Queued PRs still require `--force`. In protected mode,
+a merge-ready or queued PR targeting `main` cannot be retargeted away from it.
+A bare number refers to the selected GitHub repository. For a PR in a
+different repository, use its base repository and number, for example
+`--allow-pr-update 'owner/repo#123'`.
+
+The checks cover pushes and deletions of PR base and head branches, as well as
+PR edits made by git-stack, including changes to GitHub stack membership. Review
+the affected branches and PRs before publishing a stack. A remote PR's status
+can change between a check and the update.
 
 ### `git stack push [<branch|glob>...] [-g [<group>]] [--remote <name>] [--force] [--no-verify] [--prs] [--allow-shared] [--rebuild-stack]`
 

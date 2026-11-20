@@ -1,18 +1,20 @@
-import argparse
 from dataclasses import dataclass
 
 from git_stack.commands import (
+    PRProtectionArgs,
     Subparsers,
     add_allow_shared_argument,
     add_delete_argument,
     add_ignore_revert_argument,
+    add_pr_protection_arguments,
+    pr_protection,
 )
 from git_stack.commands.info import print_tree
 from git_stack.core import Delete
 from git_stack.stack import BranchInfo, StackClient
 
 
-class Args(argparse.Namespace):
+class Args(PRProtectionArgs):
     """The arguments register's parser produces."""
 
     remote: str | None
@@ -29,6 +31,7 @@ def register(subparsers: Subparsers) -> None:
     add_delete_argument(p)
     add_ignore_revert_argument(p)
     add_allow_shared_argument(p)
+    add_pr_protection_arguments(p, add_force=True)
     p.set_defaults(run=run, show=show)
 
 
@@ -47,6 +50,7 @@ def run(stack: StackClient, args: Args) -> Cleaned:
             ignore_reverts=args.ignore_reverts,
             allow_shared=args.allow_shared,
             no_verify=args.no_verify,
+            **pr_protection(args, separate_force=True),
         )
     )
 

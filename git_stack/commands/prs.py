@@ -1,16 +1,17 @@
-import argparse
-
 from git_stack.commands import (
+    PRProtectionArgs,
     Subparsers,
+    add_pr_protection_arguments,
     add_rebuild_stack_argument,
     add_stack_arguments,
     named_stacks,
+    pr_protection,
 )
 from git_stack.commands.info import print_tree
 from git_stack.stack import BranchInfo, PrsResult, PullRequestAction, PullRequestStep, StackClient
 
 
-class Args(argparse.Namespace):
+class Args(PRProtectionArgs):
     """The arguments register's parser produces."""
 
     branches: list[str]
@@ -33,12 +34,18 @@ def register(subparsers: Subparsers) -> None:
     p.add_argument(
         "-n", "--dry-run", action="store_true", help="print the pull requests it would open, without opening them"
     )
+    add_pr_protection_arguments(p, add_force=True)
     p.set_defaults(run=run, show=show)
 
 
 def run(stack: StackClient, args: Args) -> PrsResult:
     return stack.prs(
-        args.branches, args.groups, remote=args.remote, dry_run=args.dry_run, rebuild_stack=args.rebuild_stack
+        args.branches,
+        args.groups,
+        remote=args.remote,
+        dry_run=args.dry_run,
+        rebuild_stack=args.rebuild_stack,
+        **pr_protection(args, separate_force=True),
     )
 
 

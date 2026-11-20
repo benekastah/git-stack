@@ -32,6 +32,11 @@ PR_FIELDS = "number state isDraft isCrossRepository headRefOid baseRefName merge
 # How many of a branch's pull requests to look at, newest first. More than one
 # only if its name was reused, or a pull request was closed and replaced.
 PRS_PER_BRANCH = 10
+QUEUE_FIELDS = "number state isInMergeQueue"
+REVIEW_FIELDS = (
+    "isDraft baseRefName reviewDecision mergeStateStatus "
+    "latestOpinionatedReviews(first: 20) { nodes { state } pageInfo { hasNextPage } }"
+)
 DESCRIPTION_BATCH_SIZE = 10
 # Where GitHub looks for a repository's pull request template, matching names
 # case-insensitively. GitHub doesn't say which wins if there are several.
@@ -168,6 +173,55 @@ def check_github_login(login: str) -> None:
         raise StackError(f"{login} isn't a GitHub username")
 
 
+@dataclass(frozen=True)
+class PRProtection:
+    """Consent for changes to existing pull requests on this invocation."""
+
+    force: bool = False
+    protect: bool = False
+    allowed: frozenset[int | str] = frozenset()
+
+    @property
+    def fields(self) -> str:
+        return f"{QUEUE_FIELDS} {REVIEW_FIELDS}" if self.protect else QUEUE_FIELDS
+
+    def check(self, pr: object, action: str, *, repo: str, new_base: str | None = None, foreign: bool = False) -> None:
+        if field(pr, "state", str) != GitHubState.OPEN.value:
+            return
+        number = field(pr, "number", int)
+        queued = field(pr, "isInMergeQueue", bool)
+        on_main = self.protect and not field(pr, "isDraft", bool) and field(pr, "baseRefName", str) == "main"
+        ready = on_main and field(pr, "mergeStateStatus", str) in ("CLEAN", "HAS_HOOKS")
+        if on_main and (ready or queued) and new_base is not None and new_base != "main":
+            reason = "in the merge queue" if queued else "ready to merge"
+            raise StackError(f"can't retarget PR #{number} away from main: it is {reason}")
+        qualified = f"{repo.casefold()}#{number}"
+        approval = qualified if foreign else str(number)
+        label = f"{repo}#{number}" if foreign else f"#{number}"
+        allowed = qualified in self.allowed or (number in self.allowed and not foreign)
+        consent = self.protect and not allowed
+        if queued and (not self.force or consent):
+            options = f"--force --allow-pr-update {approval}" if consent else "--force"
+            raise StackError(f"can't {action} PR {label}: it is in the merge queue; retry with {options} if authorized")
+        if consent:
+            status = "approved" if self.has_approvals(pr) else "ready to merge" if ready else None
+            if status is not None:
+                raise StackError(
+                    f"can't {action} PR {label}: it is {status} and the change may clear reviews; "
+                    f"get permission, then pass --allow-pr-update {approval}"
+                )
+
+    @staticmethod
+    def has_approvals(pr: object) -> bool:
+        if optional_field(pr, "reviewDecision", str) == "APPROVED":
+            return True
+        reviews = field(pr, "latestOpinionatedReviews", dict)
+        if any(field(review, "state", str) == "APPROVED" for review in field(reviews, "nodes", list)):
+            return True
+        # A long review history can hide an approval outside this page.
+        return field(field(reviews, "pageInfo", dict), "hasNextPage", bool)
+
+
 class GitHubAdapter(GitAdapter):
     """Asks GitHub, through the gh CLI, whether each branch's pull request was
     merged, and keeps pull requests' bases in step with the stack when
@@ -201,6 +255,7 @@ class GitHubAdapter(GitAdapter):
         self._pull_requests_lock = threading.Lock()
         self._default_branch: str | None = None
         self._viewer: str | None = None
+        self.protection = PRProtection()
 
     def gh(self, *args: str, input: str | None = None, partial_errors: list[str] | None = None) -> str:
         # As bytes, so Windows doesn't turn the \n in input (e.g. a pull
@@ -216,6 +271,106 @@ class GitHubAdapter(GitAdapter):
             if error:
                 partial_errors.append(error)
         return result.stdout.decode("utf-8", "replace" if result.returncode else "strict").strip()
+
+    def protect_ref_updates(self, refs: Iterable[str], *, allow_number: bool = True) -> None:
+        """Check open PRs whose head or base ref the push would change."""
+        if self.protection.force and not self.protection.protect:
+            return
+        targets = [(ref, side) for ref in sorted(set(refs)) for side in ("head", "base")]
+        for start in range(0, len(targets), PRS_PER_BRANCH):
+            self.protect_ref_batch(targets[start : start + PRS_PER_BRANCH], allow_number=allow_number)
+
+    def protect_ref_batch(self, targets: list[tuple[str, str]], *, allow_number: bool) -> None:
+        """Check a bounded batch of ref connections, following their independent cursors."""
+        pending: dict[tuple[str, str], str | None] = dict.fromkeys(targets)
+        seen: set[tuple[str, str, str]] = set()
+        while pending:
+            variables = ["$owner: String!", "$name: String!"]
+            args = ["-f", f"owner={self.owner}", "-f", f"name={self.name}"]
+            connections: list[str] = []
+            for i, ((ref, side), after) in enumerate(pending.items()):
+                alias = f"ref{i}"
+                variables.append(f"${alias}: String!")
+                name = f"refs/heads/{ref}" if side == "head" else ref
+                args.extend(("-f", f"{alias}={name}"))
+                cursor = ""
+                if after is not None:
+                    variables.append(f"$cursor{i}: String!")
+                    args.extend(("-f", f"cursor{i}={after}"))
+                    cursor = f", after: $cursor{i}"
+                pagination = f"states: OPEN, first: {PRS_PER_BRANCH}{cursor}"
+                selection = (
+                    f"{{ nodes {{ {self.protection.fields} repository {{ nameWithOwner }} }} "
+                    "pageInfo { hasNextPage endCursor } }"
+                )
+                if side == "head":
+                    connections.append(
+                        f"{alias}: ref(qualifiedName: ${alias}) {{ associatedPullRequests({pagination}) {selection} }}"
+                    )
+                else:
+                    connections.append(f"{alias}: pullRequests(baseRefName: ${alias}, {pagination}) {selection}")
+            query = (
+                f"query({', '.join(variables)}) {{ repository(owner: $owner, name: $name) "
+                f"{{ {' '.join(connections)} }} }}"
+            )
+            found = field(
+                field(
+                    parse_json(self.gh("api", "graphql", "--hostname", self.host, *args, "-f", f"query={query}")),
+                    "data",
+                    dict,
+                ),
+                "repository",
+                dict,
+            )
+            remaining: dict[tuple[str, str], str | None] = {}
+            for i, (ref, side) in enumerate(pending):
+                node = optional_field(found, f"ref{i}", dict)
+                if side == "head" and node is None:
+                    continue  # The destination ref was deleted since the fetch.
+                page = field(node, "associatedPullRequests", dict) if side == "head" else field(found, f"ref{i}", dict)
+                for pr in field(page, "nodes", list):
+                    repo = field(field(pr, "repository", dict), "nameWithOwner", str)
+                    own_repo = repo.casefold() == f"{self.owner}/{self.name}".casefold()
+                    self.protection.check(
+                        pr,
+                        f"update {self.remote}/{ref}, the {side} of",
+                        repo=repo,
+                        foreign=not (own_repo and allow_number),
+                    )
+                info = field(page, "pageInfo", dict)
+                if field(info, "hasNextPage", bool):
+                    after = field(info, "endCursor", str)
+                    if (ref, side, after) in seen:
+                        raise StackError(f"GitHub repeated a pull request page for {side} {ref}")
+                    seen.add((ref, side, after))
+                    remaining[ref, side] = after
+            pending = remaining
+
+    def protect_edits(self, changes: dict[int, str | None], action: str) -> None:
+        """Check the live state of PRs about to be edited. A value is the new base, if any."""
+        if self.protection.force and not self.protection.protect:
+            return
+        for number, pr in self.pull_request_fields(changes, self.protection.fields).items():
+            self.protection.check(pr, action, repo=f"{self.owner}/{self.name}", new_base=changes[number])
+
+    def protect_retargets(self, branches: Iterable[str], stacks: Stacks) -> None:
+        prs = self.pull_requests()
+        changes: dict[int, str | None] = {}
+        for branch in branches:
+            if (pr := prs.get(branch)) is not None and pr.state is GitHubState.OPEN:
+                base = self.git.remote_branch_name(stacks.parent(branch), self.remote)
+                if base != pr.base:
+                    changes[pr.number] = base
+        self.protect_edits(changes, "retarget")
+
+    def protect_pr_opening(self, branches: list[str], opening: Iterable[str], stacks: Stacks) -> None:
+        """New PRs can change the stack sections or membership of existing ones."""
+        prs = self.pull_requests()
+        affected = {member for b in opening for member in stacks.stack_of(b)}
+        self.protect_edits(
+            {prs[b].number: None for b in branches if b in affected and b in prs and prs[b].state is GitHubState.OPEN},
+            "change the stack of",
+        )
 
     def pull_requests(self) -> dict[str, PullRequest]:
         """{branch: pull request} for tracked branches with a pull request.
@@ -768,6 +923,7 @@ class GitHubAdapter(GitAdapter):
         # only then discovering that unstacking requires consent.
         prs = self.pull_requests()
         self.ensure_pr_parent_remotes(to_push, stacks, prs, opening)
+        self.protect_retargets(to_push, stacks)
         allowed = {
             prs[b].number
             for b in (scope if scope is not None else to_push)
@@ -787,6 +943,8 @@ class GitHubAdapter(GitAdapter):
                 pending.add(pr.number)
             else:
                 ready.append((branch, parent))
+        if rebuild_stack:
+            pending.update(prs[branch].number for branch, _ in ready)
         if pending:
             self.validate_deferred_retargets(pending, rebuild_stack, allowed)
 
@@ -814,8 +972,12 @@ class GitHubAdapter(GitAdapter):
                 f"changing the base of {', '.join(f'#{n}' for n in sorted(stacks))} requires unstacking its "
                 "GitHub stack; rerun with --rebuild-stack to allow it"
             )
+        members: set[int] = set()
         for number in sorted(stacks):
-            self.ensure_stack_scope(GitHubStack.from_json(stacks[number]), allowed)
+            stack = GitHubStack.from_json(stacks[number])
+            self.ensure_stack_scope(stack, allowed)
+            members.update(n for n, state in stack.entries if state is GitHubState.OPEN)
+        self.protect_edits(dict.fromkeys(members), "unstack")
 
     def after_push(
         self,
@@ -851,6 +1013,7 @@ class GitHubAdapter(GitAdapter):
         base = self.git.remote_branch_name(base, self.remote)
         if pr.base == base:
             return
+        self.protect_edits({pr.number: base}, "retarget")
         edit = ("pr", "edit", str(pr.number), "--repo", self.repo, "--base", base)
         try:
             self.gh(*edit)
@@ -903,6 +1066,7 @@ class GitHubAdapter(GitAdapter):
         current = {field(pr, "number", int) for pr in field(found[0], "pull_requests", list)}
         if current != {n for n, _ in github_stack.entries}:
             raise StackError(f"GitHub stack {stack} changed while checking it; retry the command")
+        self.protect_edits({n: None for n, state in github_stack.entries if state is GitHubState.OPEN}, "unstack")
         self.gh("api", "--hostname", self.host, "-X", "POST", f"{self.stacks_path()}/{stack}/unstack")
         self.changes.append(
             f"GitHub stack {stack} was unstacked (once they're pushed, `git stack prs` links a linear stack's "
@@ -1115,6 +1279,7 @@ class GitHubAdapter(GitAdapter):
 
     def update_descriptions(self, edits: dict[int, str], fields: dict[int, object]) -> None:
         """Batch body-only changes and verify each mutation's result."""
+        self.protect_edits(dict.fromkeys(edits), "edit the description of")
         numbers = list(edits)
         if len(numbers) == 1:
             number = numbers[0]
@@ -1311,7 +1476,7 @@ class GitHubAdapter(GitAdapter):
             if dry_run:
                 self.core.emit(events.GitHubStackAddPlanned(stack.number, tuple(chain[len(bottom) :])))
                 return kept
-            return chain if self.stacks_api(f"/{stack.number}/add", chain[len(bottom) :]) else kept
+            return chain if self.stacks_api(f"/{stack.number}/add", chain[len(bottom) :], bottom) else kept
         if dry_run and not found:
             self.core.emit(events.GitHubStackRebuildPlanned((), tuple(chain)))
             return []
@@ -1330,6 +1495,7 @@ class GitHubAdapter(GitAdapter):
         if dry_run:
             self.core.emit(events.GitHubStackRebuildPlanned(tuple(sorted(found)), tuple(chain)))
             return False
+        self.protect_edits(dict.fromkeys(chain), "rebuild the stack of")
         for existing in found.values():
             representative = next(n for n, state in existing.entries if state is GitHubState.OPEN and n in chain)
             self.unstack(representative, set(chain))
@@ -1339,9 +1505,10 @@ class GitHubAdapter(GitAdapter):
         setting = self.git.run("config", "--type=bool", "--get", GITHUB_STACKS_SETTING, check=False)
         return setting != "false"
 
-    def stacks_api(self, path: str, numbers: list[int]) -> bool:
+    def stacks_api(self, path: str, numbers: list[int], existing: Iterable[int] = ()) -> bool:
         """POST numbers to path in the repository's stacks API. Returns
         False if the repository doesn't have stacked pull requests."""
+        self.protect_edits(dict.fromkeys([*existing, *numbers]), "change the stack of")
         args = ("api", "--hostname", self.host, "-X", "POST", f"{self.stacks_path()}{path}", "--input", "-")
         with measure_gh(args):
             result = subprocess.run(
@@ -1423,23 +1590,23 @@ def github_stack_paths(
 
 
 def github_repo(git: GitClient, remote: str) -> tuple[str, str, str] | None:
-    """Return (host, owner, name) of remote's repository, or None if its URL isn't one.
+    """The configured repository, or the fetch URL after applying insteadOf."""
+    return github_repo_from_url(git.config_value(f"remote.{remote}.url") or "") or github_repo_from_url(
+        git.run("remote", "get-url", remote, check=False)
+    )
 
-    Tries the URL as configured, then with url.<base>.insteadOf applied. For an
-    SSH URL, host is the one ssh connects to, so a Host alias in ~/.ssh/config
-    (e.g. github-work for github.com) is resolved.
-    """
-    url = git.config_value(f"remote.{remote}.url") or ""
-    match = REMOTE_URL.match(url)
-    if match is None:
-        url = git.run("remote", "get-url", remote, check=False)
-        match = REMOTE_URL.match(url)
+
+def github_repo_from_url(url: str) -> tuple[str, str, str] | None:
+    """The repository and host, resolving SSH aliases."""
+    match = REMOTE_URL.fullmatch(url)
     if match is None:
         return None
     host, owner, name = match.groups()
     if "://" not in url or url.startswith(("ssh://", "git+ssh://", "ssh+git://")):
-        host = ssh_hostname(host)
-    return host, owner, name
+        host = ssh_hostname(host).lower()
+        if host == "ssh.github.com":
+            host = "github.com"
+    return host.lower(), owner, name
 
 
 def ssh_hostname(host: str) -> str:

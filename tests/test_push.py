@@ -248,7 +248,8 @@ def test_push_prs_keeps_subprocess_work_bounded(
     # The Git fixture counts each launched process, including the batch process once.
     assert len(git_calls) <= git_budget, git_calls
     gh_calls = gh.calls()
-    assert len(gh_calls) <= 2, gh_calls
+    # Changed remote refs need one batched live PR protection query.
+    assert len(gh_calls) <= (3 if advance else 2), gh_calls
 
 
 @pytest.mark.parametrize("command", ["push", "sync"])
@@ -540,3 +541,268 @@ def test_push_skips_reverted_branch_and_its_children(
     assert events.Reverted("pr1", "main", (repo.git("rev-parse", "main"),), ("pr2",)) in emitted
     assert events.ParentSkipped("pr2", "pr1") in emitted
     assert repo.remote_subject("pr2") == "pr2 c1"
+
+
+@pytest.mark.parametrize("command", ["push", "sync"])
+@pytest.mark.parametrize(
+    ("queued", "options", "error"),
+    [
+        (True, (), "merge queue"),
+        (True, ("--protect-prs", "--force"), "merge queue"),
+        (True, ("--protect-prs", "--allow-pr-update", "3"), "merge queue"),
+        (True, ("--protect-prs", "--force", "--allow-pr-update", "2"), "merge queue"),
+        (True, ("--protect-prs", "--force", "--allow-pr-update", "3"), None),
+        (True, ("--force",), None),
+        (False, (), None),
+        (False, ("--protect-prs",), "approved"),
+        (False, ("--protect-prs", "--allow-pr-update", "3"), None),
+    ],
+)
+def test_pr_protection_on_head_updates(
+    repo: Repo, gh: FakeGitHub, command: str, queued: bool, options: tuple[str, ...], error: str | None
+) -> None:
+    repo.make_stack()
+    repo.stack("push")
+    gh.add_pr(
+        number=3,
+        state="OPEN",
+        headRefName="pr3",
+        baseRefName="pr2",
+        headRefOid=repo.git("rev-parse", "pr3"),
+        mergeCommit=None,
+        reviewDecision="APPROVED",
+        isInMergeQueue=queued,
+    )
+    repo.commit("c", "update\n", "advance pr3")
+
+    result = repo.stack(command, *options, expect_success=error is None)
+
+    if error:
+        assert error in result.stderr
+        assert "#3" in result.stderr
+    assert repo.remote_subject("pr3") == ("pr3 c1" if error else "advance pr3")
+
+
+@pytest.mark.parametrize(
+    ("queued", "merge_status", "reason"), [(False, "CLEAN", "ready to merge"), (True, "BLOCKED", "merge queue")]
+)
+def test_protected_prs_keeps_ready_or_queued_pr_targeting_main(
+    repo: Repo, gh: FakeGitHub, queued: bool, merge_status: str, reason: str
+) -> None:
+    repo.make_stack()
+    repo.stack("push")
+    gh.add_pr(
+        number=2,
+        state="OPEN",
+        headRefName="pr2",
+        baseRefName="main",
+        headRefOid=repo.git("rev-parse", "pr2"),
+        mergeCommit=None,
+        reviewDecision="APPROVED",
+        mergeStateStatus=merge_status,
+        isInMergeQueue=queued,
+        body="",
+    )
+
+    result = repo.stack("prs", "--protect-prs", "--force", "--allow-pr-update", "2", expect_success=False)
+
+    assert "#2" in result.stderr
+    assert reason in result.stderr
+    assert not gh.calls("pr", "create")
+    assert not gh.calls("pr", "edit")
+
+
+def test_protected_push_only_checks_prs_whose_heads_would_change(repo: Repo, gh: FakeGitHub) -> None:
+    repo.make_stack()
+    repo.stack("push")
+    gh.add_pr(
+        number=1,
+        state="OPEN",
+        headRefName="pr1",
+        baseRefName="main",
+        mergeCommit=None,
+        headRefOid=repo.git("rev-parse", "pr1"),
+        isInMergeQueue=True,
+    )
+    repo.commit("c", "updated\n", "advance pr3")
+
+    repo.stack("push", "--protect-prs")
+
+    assert repo.remote_subject("pr3") == "advance pr3"
+    assert repo.remote_subject("pr1") == "pr1 c2"
+
+
+def test_protected_push_preserves_an_individual_approval(repo: Repo, gh: FakeGitHub) -> None:
+    repo.make_stack()
+    repo.stack("push")
+    gh.add_pr(
+        number=3,
+        state="OPEN",
+        headRefName="pr3",
+        baseRefName="pr2",
+        headRefOid=repo.git("rev-parse", "pr3"),
+        mergeCommit=None,
+        reviewDecision="REVIEW_REQUIRED",
+        latestOpinionatedReviews=["APPROVED"],
+    )
+    repo.commit("c", "update\n", "advance pr3")
+
+    result = repo.stack("push", "--protect-prs", expect_success=False)
+
+    assert "PR #3: it is approved" in result.stderr
+    assert repo.remote_subject("pr3") == "pr3 c1"
+
+
+def test_protected_prs_leaves_queued_description_alone(repo: Repo, gh: FakeGitHub) -> None:
+    repo.make_stack()
+    repo.stack("push", "--prs")
+    state = gh.load()
+    state["prs"][0].update(isInMergeQueue=True, body="")
+    gh.save(state)
+
+    result = repo.stack("prs", "--protect-prs", expect_success=False)
+
+    assert "merge queue" in result.stderr
+    assert gh.load()["prs"][0]["body"] == ""
+
+
+def test_protected_push_preserves_approved_pr_on_a_changed_base(repo: Repo, gh: FakeGitHub) -> None:
+    repo.client.branch("base")
+    repo.commit("a", "base contribution\n", "publish base")
+    repo.stack("push")
+    gh.add_pr(
+        number=7,
+        state="OPEN",
+        headRefName="unselected",
+        baseRefName="base",
+        headRefOid=repo.git("rev-parse", "base"),
+        mergeCommit=None,
+        reviewDecision="APPROVED",
+    )
+    repo.commit("a", "base rewritten\n", "update base")
+
+    result = repo.stack("push", "--protect-prs", expect_success=False)
+
+    assert "the base of PR #7" in result.stderr
+    assert repo.remote_subject("base") == "publish base"
+
+
+def test_fork_pr_requires_consent_scoped_to_its_base_repo(repo: Repo, gh: FakeGitHub) -> None:
+    repo.make_stack()
+    repo.stack("push")
+    gh.add_pr(
+        number=7,
+        state="OPEN",
+        headRefName="pr3",
+        baseRefName="main",
+        headRefOid=repo.git("rev-parse", "pr3"),
+        mergeCommit=None,
+        isCrossRepository=True,
+        headRepository="acme/widgets",
+        baseRepository="upstream/widgets",
+        isInMergeQueue=True,
+    )
+    repo.commit("c", "advance\n", "update fork")
+    result = repo.stack("push", "--protect-prs", "--force", "--allow-pr-update", "7", expect_success=False)
+
+    assert "upstream/widgets#7" in result.stderr
+    assert repo.remote_subject("pr3") == "pr3 c1"
+
+    repo.stack("push", "--protect-prs", "--force", "--allow-pr-update", "upstream/widgets#7")
+
+    assert repo.remote_subject("pr3") == "update fork"
+
+
+def test_queue_protection_follows_ref_pagination(repo: Repo, gh: FakeGitHub) -> None:
+    repo.make_stack()
+    repo.stack("push")
+    for number in range(1, 12):
+        gh.add_pr(
+            number=number,
+            state="OPEN",
+            headRefName="pr3",
+            baseRefName="main",
+            headRefOid=repo.git("rev-parse", "pr3"),
+            mergeCommit=None,
+            isInMergeQueue=number == 1,
+        )
+    repo.commit("c", "advance\n", "update pr3")
+
+    result = repo.stack("push", expect_success=False)
+
+    assert "PR #1: it is in the merge queue" in result.stderr
+    assert repo.remote_subject("pr3") == "pr3 c1"
+
+
+@pytest.mark.parametrize("command", ["clean", "sync"])
+def test_commands_keep_the_remote_base_of_a_queued_pr(repo: Repo, gh: FakeGitHub, command: str) -> None:
+    repo.make_stack()
+    repo.stack("push")
+    repo.merge_on_forge("pr1", delete_branch=False)
+    gh.add_pr(
+        number=7,
+        state="OPEN",
+        headRefName="unselected",
+        baseRefName="pr1",
+        headRefOid=repo.git("rev-parse", "pr1"),
+        mergeCommit=None,
+        isInMergeQueue=True,
+    )
+
+    result = repo.stack(command, "-d", "remote", expect_success=False)
+
+    assert "the base of PR #7: it is in the merge queue" in result.stderr
+    assert repo.remote_subject("pr1") == "pr1 c2"
+
+
+def test_push_does_not_check_a_github_fetch_repository_that_isnt_pushed(repo: Repo, gh: FakeGitHub) -> None:
+    repo.make_stack()
+    repo.stack("push")
+    gh.add_pr(
+        number=3,
+        state="OPEN",
+        headRefName="pr3",
+        baseRefName="pr2",
+        headRefOid=repo.git("rev-parse", "pr3"),
+        mergeCommit=None,
+        isInMergeQueue=True,
+    )
+    mirror = repo.tmp / "mirror.git"
+    repo.git("clone", "--bare", "--quiet", str(repo.origin), str(mirror))
+    repo.git("config", "remote.origin.pushurl", str(mirror))
+    repo.commit("c", "advance\n", "update mirror")
+
+    repo.stack("push", "--protect-prs")
+
+    assert repo.git("log", "-1", "--format=%s", "pr3", cwd=mirror) == "update mirror"
+    assert repo.remote_subject("pr3") == "pr3 c1"
+
+
+def test_bare_pr_consent_cannot_authorize_a_different_push_repository(repo: Repo, gh: FakeGitHub) -> None:
+    repo.make_stack()
+    repo.stack("push")
+    mirror = repo.tmp / "mirror.git"
+    repo.git("clone", "--bare", "--quiet", str(repo.origin), str(mirror))
+    url = "https://github.com/acme/mirror.git"
+    repo.git("config", f"url.{mirror}.insteadOf", url)
+    repo.git("config", "remote.origin.pushurl", url)
+    gh.add_pr(
+        number=3,
+        state="OPEN",
+        headRefName="pr3",
+        baseRefName="pr2",
+        headRefOid=repo.git("rev-parse", "pr3"),
+        mergeCommit=None,
+        baseRepository="acme/mirror",
+        reviewDecision="APPROVED",
+    )
+    repo.commit("c", "advance\n", "update mirror")
+
+    rejected = repo.stack("push", "--protect-prs", "--allow-pr-update", "3", expect_success=False)
+    assert "acme/mirror#3" in rejected.stderr
+    assert repo.git("log", "-1", "--format=%s", "pr3", cwd=mirror) == "pr3 c1"
+
+    repo.stack("push", "--protect-prs", "--allow-pr-update", "acme/mirror#3")
+
+    assert repo.git("log", "-1", "--format=%s", "pr3", cwd=mirror) == "update mirror"
+    assert repo.remote_subject("pr3") == "pr3 c1"

@@ -1176,3 +1176,23 @@ def test_push_rebuild_allows_unrelated_closed_pr_before_pushing_new_parent(
 
     assert repo.git("rev-parse", "refs/remotes/origin/pr2") == repo.git("rev-parse", "pr2")
     assert gh.load()["prs"][1]["baseRefName"] == "pr1b"
+
+
+def test_push_checks_protected_stack_member_before_publishing_new_parent(repo: Repo, gh: FakeGitHub) -> None:
+    gh.enable_stacks()
+    repo.make_stack()
+    repo.stack("push", "--prs")
+    state = gh.load()
+    state["prs"][0]["isInMergeQueue"] = True
+    gh.save(state)
+    repo.git("switch", "--quiet", "pr1")
+    repo.client.branch("pr1b")
+    repo.commit("a", "new parent\n", "new parent")
+    repo.git("switch", "--quiet", "pr2")
+    repo.client.restack(onto="pr1b")
+
+    result = repo.stack("push", "--rebuild-stack", expect_success=False)
+
+    assert "can't unstack PR #1: it is in the merge queue" in result.stderr
+    assert gh.stacks() == [[1, 2, 3]]
+    assert not repo.git("branch", "--list", "pr1b", cwd=repo.origin)
