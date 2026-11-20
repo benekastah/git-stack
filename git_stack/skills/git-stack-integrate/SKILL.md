@@ -62,8 +62,9 @@ default branch. The next refresh picks up new leaves automatically.
 A merge or cherry-pick conflict aborts the build and keeps the previous
 integration tip. Keep independent branches parallel when they merge cleanly. When two source
 branches conflict during a build or refresh, recommend stacking them, with
-the prerequisite below the dependent work. Resolve the conflict during
-`git stack restack <upper> --onto <lower>` once both branches are tracked.
+the prerequisite below the dependent work. Follow `git-stack-rearrange`
+and get the user's approval before resolving the conflict with
+`git stack restack <upper> --onto <lower>`.
 The upper branch then carries the resolution into later builds. Keep both
 source names when first creating an integration with only those two inputs.
 For an existing integration, the upper branch can replace both source names
@@ -80,7 +81,8 @@ Rerun the original command with its selectors after restacking. Follow the
 - If the integration tip has direct commits, inspect the commits listed by
   git-stack. `git stack restack <name> --force` replaces that integration's
   tip and removes those commits from it. Get authorization for that rewrite.
-- To promote the work after its inputs land on `main`, run
-  `git stack restack <work> --onto main` with the bottom work branch, then
-  `git stack push <work>` to update the work's PRs. Check that no stack or PR
-  uses the integration before deleting its refs with the user's approval.
+- To promote work after its inputs land on `main`, get the user's approval
+  to move the bottom work branch with `git stack restack <work> --onto main`.
+  Confirm the approval covers publication and PR retargeting before running
+  `git stack push <work>`. Check that no stack or PR uses the integration
+  before deleting its refs with the user's approval.

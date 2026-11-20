@@ -26,7 +26,8 @@ instructions).
    so they can be reviewed and merged in any order; pieces that depend on one another are a stack.
    Group related stacks so one command covers them: `git stack group add <name> <branch>...`.
 4. **Show the user the plan** (branches, order, what goes in each, rough size) and get agreement
-   before building it.
+   before building it. If the split changes an existing stack, first check the
+   affected PRs and follow the rearrangement approval rules in `git-stack`.
 
 ## Build it
 
@@ -57,6 +58,8 @@ rebuild the commits first, choosing changes a hunk or a line at a time.
   ```
 - The shape is what you planned: `git stack info --all --offline`.
 
-Then `git stack push --prs` opens a draft PR per branch, each into its parent's branch, with a stack
+If the split rearranges an existing stack, follow the approval rules in
+`git-stack` to confirm the user approved publication. Use `git stack push --prs`
+to open a draft PR per branch, each into its parent's branch, with a stack
 section listing the others. Write each PR's description to say where it sits in the stack and what
 the next step adds.

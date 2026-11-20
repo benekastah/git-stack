@@ -41,6 +41,39 @@ From an ordinary untracked branch such as `main`, plain `git stack info` shows a
 4. **Don't pass `--allow-shared` or `--force` on your own.** A shared stack (someone else's commits)
    is protected on purpose. Ask the user first.
 
+## Protect queued and merge-ready PRs
+
+Before a stack operation that could update PRs, check merge readiness and
+queue status on GitHub for the full scope, including descendants and any
+stacks selected by group. Pause if you cannot verify an affected PR's queue
+status.
+
+- **Queued to merge:** Preserve the PR's head, base, and queue entry. Exclude
+  the PR from updates. If the available selectors cannot safely exclude it,
+  stop and explain what would change.
+- **Ready to merge:** Before publishing changes that could alter the PR's
+  head, target branch, or reviewed diff, warn that GitHub may dismiss approvals
+  or require fresh review. This applies to pushes, syncs, and PR retargets.
+  If the repository's rules require fresh review for the planned change,
+  tell the user before proceeding.
+
+## Approval for rearranging existing stacks
+
+- Get the user's approval before changing an existing stack's parent
+  relationships, branch order, or group membership. Show the proposed change
+  and the affected branches, descendants, and pull requests.
+- Before asking for approval, check the affected PRs on GitHub for their
+  bases, merge readiness, and queue status. Pause if queue status is unknown.
+  Keep queued PRs targeting their current base and exclude their branches from
+  the local rearrangement, even when publication is planned for later. Warn
+  that moving a merge-ready, conflict-free PR off `main` will delay its merge.
+  Recheck the queue before running the approved move.
+- Before publishing a rearrangement, recheck PR bases and queue status.
+  Confirm the user's approval covers the affected branches and PR base changes.
+  If the approval covers only local steps, ask before running `git stack push`,
+  `git stack sync`, `git stack prs`, or editing a PR directly. Ask again if the
+  scope changes.
+
 ## Starting and managing a stack
 
 ```sh
