@@ -7,7 +7,9 @@ description: Replay a stack onto its local parents with git stack restack. Use a
 
 Read `git-stack` first for selection, ownership and timing. Start with a clean
 worktree. Restack replays each branch's own commits from its recorded base,
-starting at the bottom. It uses local refs and makes no remote updates.
+starting at the bottom. It uses local refs. Exclude queued PR branches from
+local rewrites, including with `--latest`, and follow the open-PR checks in
+`git-stack` before publishing.
 
 - Use `git stack restack` for the current stack or `git stack restack <branch>`
   for a named stack. Pass `-g` to include its group.

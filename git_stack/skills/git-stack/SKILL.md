@@ -35,31 +35,41 @@ From an ordinary untracked branch such as `main`, plain `git stack info` shows a
    - Push: `git stack push`, not `git push`. Update from remote: `git stack pull` or `git stack sync`,
      not `git pull`.
    - Rename: `git stack rename <new>`, not `git branch -m`. Stop tracking: `git stack untrack`.
-   - Committing and amending a branch's own commits are fine; restack afterwards so the branches
-     above it follow.
+   - After amending a branch's own commits, restack so the branches above it
+     follow. Before rewriting published commits, check the PR protections below.
 3. **Commit before running.** `restack` and `sync` refuse a dirty worktree.
 4. **Don't pass `--allow-shared` or `--force` on your own.** A shared stack (someone else's commits)
    is protected on purpose. Ask the user first.
 
-## Protect queued PRs and existing approvals
+## Protect open pull requests
 
-Before a stack operation that could update PRs, check merge readiness and
-queue status on GitHub for the full scope, including descendants and any
-stacks selected by group. Pause if you cannot verify an affected PR's queue
-status.
+Before an operation that can update published branches or PRs, check their
+actual upstreams and GitHub PRs. A branch argument can select the whole stack,
+including siblings and descendants. A group can select several stacks. Check
+each affected PR's base, head, draft status, approvals, required checks,
+mergeability, and queue status. Pause if an affected PR's queue status is
+unknown.
 
-- **Queued to merge:** Preserve the PR's head, base, and queue entry. Exclude
-  the PR from updates. If the available selectors cannot safely exclude it,
-  stop and explain what would change.
-- **Ready to merge:** Before publishing changes that could alter the PR's
-  head, target branch, or reviewed diff, warn that GitHub may dismiss approvals
-  or require fresh review. This applies to pushes, syncs, and PR retargets.
-  If the repository's rules require fresh review for the planned change,
-  tell the user before proceeding.
-- **Existing approvals on sync:** Check for approvals on each PR in the sync
-  scope. Before syncing, name the approved PRs whose commits or PR bases could
-  change and warn that they may need fresh reviews. Apply this check even
-  when required checks are still pending.
+- **Queued:** Preserve its head, base, GitHub stack membership, and queue entry.
+  Exclude it from the operation, including local moves or rebases that would
+  rewrite its branch. Stop and explain if the selection cannot exclude it.
+- **Approved, out of draft, and targeting `main`:** Preserve its reviewed head
+  and base by default, even if checks are pending. Before changing either or
+  the reviewed diff, name the PR, explain the risk to its approvals and merge
+  timing, and get the user's explicit approval covering that change.
+- **Fully ready to merge:** When required reviews and checks are satisfied and
+  the PR is mergeable, prefer letting it merge first. If an update is needed,
+  call out the risk of losing approvals or rerunning checks and get explicit
+  approval before proceeding.
+- **Any PR with existing approvals:** Before a push, sync, or PR retarget that
+  could alter its head, base, or reviewed diff, name it and warn that fresh
+  review may be required. If the repository's rules make that outcome known,
+  say so.
+
+Recheck affected PRs before publishing and before retrying after a conflict or
+failed push. A command can edit PR bases before the push or fail while updating
+PRs after it. Inspect the live refs and PRs after a failure, and report changes
+that already happened before deciding whether to retry.
 
 ## Approval for rearranging existing stacks
 
