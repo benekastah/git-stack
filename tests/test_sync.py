@@ -1,6 +1,8 @@
 """git stack sync."""
 
+import sys
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -12,7 +14,7 @@ from git_stack.errors import StackError
 from git_stack.git import GitClient
 from git_stack.stack import BranchStatus, StackClient
 from git_stack.stacks import Ownership
-from tests.helpers import Repo
+from tests.helpers import FakeGitHub, Repo, install_command
 
 
 def test_sync_refuses_unseen_upstream_merge_commits(repo: Repo, client: StackClient) -> None:
@@ -158,19 +160,83 @@ def test_sync_pushes_to_a_differently_named_upstream(repo: Repo, client: StackCl
 
 
 @pytest.mark.usefixtures("gh")
-def test_sync_reuses_the_github_default_for_a_direct_remote(
-    repo: Repo, client: StackClient, git_calls: list[GitCall], monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    ("url", "ssh_command", "probe"),
+    [
+        ("https://github.com/acme/widgets", None, False),
+        ("git@github-work:acme/widgets.git", None, False),
+        ("ssh://git@ssh.github.com:443/acme/widgets.git", None, False),
+        ("git@github-proxy:acme/widgets.git", None, True),
+        ("git@github-split:acme/widgets.git", None, True),
+        ("ssh://git@github.com:2222/acme/widgets.git", None, True),
+        ("git@github-work:acme/another.git", None, True),
+        ("git@github-work:acme/widgets.git", "different-ssh", True),
+        ("git@github-work:acme/widgets.git", "exec-path-wrapper", True),
+    ],
+)
+def test_sync_reuses_the_github_default_only_for_a_verified_remote(
+    repo: Repo,
+    client: StackClient,
+    git_calls: list[GitCall],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    url: str,
+    ssh_command: str | None,
+    probe: bool,
 ) -> None:
+    install_command(tmp_path / "bin", "ssh", "tests.fake_ssh")
     repo.make_stack()
     client.push()
-    monkeypatch.setattr(GitClient, "direct_remote_url", lambda _git, _remote: "https://github.com/acme/widgets")
+    if ssh_command == "exec-path-wrapper":
+        exec_path = tmp_path / "exec-path"
+        exec_path.mkdir()
+        wrapper = exec_path / "ssh"
+        wrapper.write_text("exit 1\n", encoding="utf-8")
+        wrapper.chmod(0o755)
+        monkeypatch.setenv("GIT_EXEC_PATH", str(exec_path))
+    elif ssh_command is not None:
+        repo.git("config", "core.sshCommand", ssh_command)
+    monkeypatch.setattr(GitClient, "direct_remote_url", lambda _git, _remote: url)
     repo.commit("a", "local change\n", "local change")
     git_calls.clear()
 
     client.sync(latest=True)
 
     assert repo.remote_subject("pr3") == "local change"
+    windows_ssh = sys.platform == "win32" and not url.startswith("https://")
+    assert any(call[0] == "ls-remote" for call in git_calls) == (probe or windows_ssh)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Git for Windows retains the live SSH probe")
+def test_sync_verified_ssh_uses_githubs_default_with_protocol_one(
+    repo: Repo,
+    gh: FakeGitHub,
+    client: StackClient,
+    git_calls: list[GitCall],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    install_command(tmp_path / "bin", "ssh", "tests.fake_ssh")
+    state = gh.load()
+    state["default_branch"] = "release"
+    gh.save(state)
+    repo.git("push", "-q", "origin", "main:release")
+    repo.git("fetch", "-q")
+    client.branch("feature")
+    repo.commit("a", "feature\n", "feature")
+    repo.git("branch", "--set-upstream-to=origin/release", "feature")
+    repo.git("config", "protocol.version", "1")
+    (repo.path / "nested").mkdir()
+    monkeypatch.setenv("GIT_NO_REPLACE_OBJECTS", "1")
+    monkeypatch.setenv("FAKE_SSH_ROOT", str(repo.path))
+    monkeypatch.setattr(GitClient, "direct_remote_url", lambda _git, _remote: "git@github-protocol1:acme/widgets.git")
+    git_calls.clear()
+
+    result = repo.stack("-C", "nested", "sync", expect_success=False)
+
+    assert "rerun `git stack sync --force`" in result.stderr
     assert not any(call[0] == "ls-remote" for call in git_calls)
+    assert repo.remote_subject("release") == repo.remote_subject("main")
 
 
 def test_sync_checks_protected_destination_before_changing_group(repo: Repo, client: StackClient) -> None:

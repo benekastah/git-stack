@@ -2754,7 +2754,7 @@ class StackClient(StackCore):
         protection = self.configure_pr_protection(adapter, protection, force)
         github = adapter if prs and isinstance(adapter, GitHubAdapter) else None
         roots = {stacks.root(branch) for branch in stack}
-        known_default = adapter.default_branch_for_push() if isinstance(adapter, GitHubAdapter) else None
+        known_default = adapter.default_branch_for_push() if not force and isinstance(adapter, GitHubAdapter) else None
         self.ensure_sync_destination(stack, roots, push_remote, force, "push", known_default=known_default)
         integrations = Integrations(self)
         selection = RefreshSelection(

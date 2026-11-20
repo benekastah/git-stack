@@ -23,9 +23,10 @@ lands on `main` so each merged build has a distinct version in performance logs.
   updates independently. PR body updates use
   bounded GraphQL batches and send the body data on stdin. Run the dry push
   before applying those edits so stale leases leave the PR bases alone.
-  Push and sync can reuse the API's default branch when the remote has one direct
-  HTTPS URL on github.com for both fetch and push. Otherwise check the live
-  HEAD of the fetch remote and any separate push destinations.
+  Push and sync can reuse the API's default for a single github.com repository
+  reached over direct HTTPS or verified SSH. SSH verification uses the
+  effective OpenSSH configuration for both Git services. Other remotes use
+  live HEAD probes for the fetch remote and any separate push destinations.
 - `GitClient` runs git through [py-git-client](https://github.com/benekastah/py-git-client)
   (`git_client`), which git-stack shares with git-recommit and move-forward:
   its `Git` starts each process, the quickest way each system allows (and

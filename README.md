@@ -760,8 +760,8 @@ git stack sync -d both          # ...and their remote branches
   `push`, the branches are pushed in one atomic push. Pushing to the remote's
   default branch, or to a stack root's remote branch, requires `--force`. The
   default branch is checked before syncing branches that track the remote.
-  For a direct GitHub HTTPS remote, sync can reuse the default returned by
-  its pull request lookup. If the default cannot be determined, sync refuses
+  When fetch and push resolve to the same GitHub repository over direct
+  HTTPS or verified SSH, sync can reuse the default from its PR lookup. If the default cannot be determined, sync refuses
   unless `--force` is given.
 - Nothing is pushed if a restack or pull stops on a conflict; rerun `sync`
   once it's resolved.
@@ -904,9 +904,10 @@ git stack push --prs            # then open pull requests, as `git stack prs` do
   or pass `--force` to drop them. Either way, each lease is pinned to the
   remote-tracking ref that was checked, so if someone pushes after your last
   fetch, the push fails instead of overwriting their work.
-- The default-branch protection can reuse GitHub's response for a single
-  direct HTTPS remote on github.com. Otherwise it asks Git for the current
-  HEAD of the fetch remote and any separate push destinations.
+- Default-branch protection can reuse GitHub's response for a single
+  github.com repository over direct HTTPS or verified SSH. Push checks the
+  live HEAD of the fetch remote and any separate destinations when it
+  cannot verify that they use the same GitHub repository.
 - A remote branch whose commits were rebased there, e.g. by GitHub's
   "Rebase stack" button, isn't pushed over: the local branch is moved to it
   instead, as `sync` does (see

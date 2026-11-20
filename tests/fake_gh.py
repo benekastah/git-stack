@@ -72,7 +72,7 @@ def respond(args: list[str], state: dict[str, Any]) -> str | None:
             if " stack {" in query and "stacks" not in state and state.get("no_stack_field"):
                 raise GhError("gh: Field 'stack' doesn't exist on type 'PullRequest'")
             return pull_requests_by_number(query, state)
-        return pull_requests_by_ref(args, query, prs)
+        return pull_requests_by_ref(args, query, prs, state.get("default_branch", "main"))
     path = next((a for a in args if "/stacks" in a), None)
     if args[0] == "api" and path is not None:
         return stacks_api(path, state)
@@ -219,9 +219,9 @@ def link_stack(path: str, numbers: list[int], state: dict[str, Any]) -> str:
     return json.dumps({"pull_requests": [{"number": n} for n in numbers]})
 
 
-def pull_requests_by_ref(args: list[str], query: str, prs: list[dict[str, Any]]) -> str:
+def pull_requests_by_ref(args: list[str], query: str, prs: list[dict[str, Any]], default: str) -> str:
     """The pull requests of the branches query names, and the default branch."""
-    found: dict[str, Any] = {"defaultBranchRef": {"name": "main"}}
+    found: dict[str, Any] = {"defaultBranchRef": {"name": default}}
     connections = [
         (alias, ref_field, variable, False)
         for alias, ref_field, variable in re.findall(r"(\w+): pullRequests\((headRefName|baseRefName): \$(\w+)", query)

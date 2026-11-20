@@ -1059,8 +1059,8 @@ Pushing to the remote\(aqs default branch, or to a stack root\(aqs
 remote branch, requires \f[CR]\-\-force\f[R].
 The default branch is checked before syncing branches that track the
 remote.
-For a direct GitHub HTTPS remote, sync can reuse the default returned by
-its pull request lookup.
+When fetch and push resolve to the same GitHub repository over direct
+HTTPS or verified SSH, sync can reuse the default from its PR lookup.
 If the default cannot be determined, sync refuses unless
 \f[CR]\-\-force\f[R] is given.
 .IP \(bu 2
@@ -1248,10 +1248,11 @@ Either way, each lease is pinned to the remote\-tracking ref that was
 checked, so if someone pushes after your last fetch, the push fails
 instead of overwriting their work.
 .IP \(bu 2
-The default\-branch protection can reuse GitHub\(aqs response for a
-single direct HTTPS remote on github.com.
-Otherwise it asks Git for the current HEAD of the fetch remote and any
-separate push destinations.
+Default\-branch protection can reuse GitHub\(aqs response for a single
+github.com repository over direct HTTPS or verified SSH.
+Push checks the live HEAD of the fetch remote and any separate
+destinations when it cannot verify that they use the same GitHub
+repository.
 .IP \(bu 2
 A remote branch whose commits were rebased there, e.g.
 by GitHub\(aqs \(dqRebase stack\(dq button, isn\(aqt pushed over: the

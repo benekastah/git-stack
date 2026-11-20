@@ -1,8 +1,12 @@
 # pyright: reportUnknownVariableType=false
 import enum
 import json
+import os
+import pathlib
 import re
+import stat
 import subprocess
+import sys
 import threading
 import urllib.parse
 from collections.abc import Callable, Iterable
@@ -22,6 +26,21 @@ from git_stack.stacks import Stacks
 # Matches https://host/owner/repo, ssh://user@host:port/owner/repo and
 # user@host:owner/repo, with or without .git.
 REMOTE_URL = re.compile(r"^(?:[a-z+]+://)?(?:[^@/]+@)?([^:/]+)(?::\d+)?[:/]([^/]+)/([^/]+?)(?:\.git)?/?$")
+# Only unambiguous SSH repository paths, with GitHub's explicit login user.
+SSH_REPO_URL = re.compile(
+    r"(?:(?P<scheme>ssh://))?(?P<destination>git@[A-Za-z0-9][A-Za-z0-9_.-]*)"
+    r"(?(scheme)(?::(?P<port>[0-9]+))?/|:)"
+    r"(?P<repo>[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*)"
+)
+GITHUB_SSH_ENDPOINTS = {("github.com", "22"), ("ssh.github.com", "443")}
+SSH_REDIRECT_SETTINGS = (
+    "proxycommand",
+    "proxyjump",
+    "remotecommand",
+    "hostkeyalias",
+    "controlpath",
+    "knownhostscommand",
+)
 # What GitHub allows in a username, so one can't add to a search query.
 GITHUB_LOGIN = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})")
 # A pull request's number, and the path of its page (or one of its tabs, e.g.
@@ -538,12 +557,89 @@ class GitHubAdapter(GitAdapter):
         """The API's default branch when Git fetches and pushes to that repository."""
         if not self.default_branch or self.host != "github.com":
             return None
-        # Match direct HTTPS URLs. SSH can select another destination through
-        # its configuration or a custom transport command.
+        url = self.git.direct_remote_url(self.remote)
         expected = f"https://{self.repo}"
-        if self.git.direct_remote_url(self.remote) in (expected, f"{expected}.git"):
+        if url in (expected, f"{expected}.git") or url and self.matches_direct_ssh(url):
             return self.default_branch
         return None
+
+    def matches_direct_ssh(self, url: str) -> bool:
+        match = SSH_REPO_URL.fullmatch(url)
+        if match is None or not self.uses_openssh():
+            return False
+        destination = match["destination"]
+        repo = match["repo"]
+        if repo.removesuffix(".git").casefold() != f"{self.owner}/{self.name}".casefold():
+            return False
+        protocol = self.git.config_value("protocol.version") or "2"
+        if protocol not in ("0", "1", "2"):
+            return False
+        port_args = ("-p", match["port"]) if match["port"] else ()
+        path = f"/{repo}" if match["scheme"] else repo
+        env = self.git_ssh_environment()
+        if env is None:
+            return False
+        cwd = self.git.toplevel()
+        program = git_ssh_program(cwd, env["PATH"])
+        if program is None:
+            return False
+        # OpenSSH Match blocks can select settings by service or environment.
+        # Git downgrades protocol v2 to v0 for receive-pack.
+        return self.github_ssh_service(program, destination, port_args, path, "upload", protocol, cwd, env) and (
+            self.github_ssh_service(
+                program, destination, port_args, path, "receive", "0" if protocol == "2" else protocol, cwd, env
+            )
+        )
+
+    def git_ssh_environment(self) -> dict[str, str] | None:
+        """Use Git's executable lookup and the environment it passes to SSH."""
+        env = {**os.environ}
+        if "PATH" not in env or "GIT_TEST_PROTOCOL_VERSION" in env:
+            return None
+        try:
+            exec_path = self.git.run("--exec-path")
+            if not pathlib.Path(exec_path).is_absolute():
+                return None
+            local_names = self.git.run("rev-parse", "--local-env-vars")
+        except StackError:
+            return None
+        for key in local_names.splitlines():
+            env.pop(key, None)
+        env["GIT_EXEC_PATH"] = exec_path
+        env["PATH"] = os.pathsep.join((exec_path, env["PATH"]))
+        return env
+
+    @staticmethod
+    def github_ssh_service(
+        program: pathlib.Path,
+        destination: str,
+        port_args: tuple[str, ...],
+        path: str,
+        service: str,
+        protocol: str,
+        cwd: pathlib.Path,
+        env: dict[str, str],
+    ) -> bool:
+        options = ("-o", "SendEnv=GIT_PROTOCOL") if protocol != "0" else ()
+        environment = {**env, "GIT_PROTOCOL": f"version={protocol}"} if options else env
+        config = ssh_configuration(
+            *options, *port_args, destination, f"git-{service}-pack '{path}'", cwd=cwd, env=environment, program=program
+        )
+        return direct_github_ssh(config)
+
+    def uses_openssh(self) -> bool:
+        variant = os.environ.get("GIT_SSH_VARIANT") or self.git.config_value("ssh.variant") or "auto"
+        overrides = (
+            "core.sshCommand",
+            *(f"remote.{self.remote}.{key}" for key in ("vcs", "uploadpack", "receivepack")),
+        )
+        # Git for Windows can adjust PATH inside its bundled runtime.
+        return (
+            sys.platform != "win32"
+            and variant in ("auto", "ssh")
+            and not {"GIT_SSH", "GIT_SSH_COMMAND"} & os.environ.keys()
+            and all(self.git.config_value(key) is None for key in overrides)
+        )
 
     @property
     def viewer(self) -> str | None:
@@ -1610,16 +1706,55 @@ def github_repo_from_url(url: str) -> tuple[str, str, str] | None:
 
 
 def ssh_hostname(host: str) -> str:
-    """The host ssh connects to for host, after ~/.ssh/config's Host aliases, or
-    host itself if ssh can't tell."""
+    """The host ssh connects to after resolving aliases."""
+    return ssh_configuration(host).get("hostname", host)
+
+
+def git_ssh_program(cwd: pathlib.Path, path: str) -> pathlib.Path | None:
+    """Find the first executable Git would try on POSIX."""
+    for entry in path.split(os.pathsep):
+        candidate = cwd / entry / "ssh"
+        try:
+            mode = candidate.stat().st_mode
+        except OSError:
+            continue
+        if stat.S_ISREG(mode) and mode & stat.S_IXUSR:
+            return candidate
+    return None
+
+
+def ssh_configuration(
+    *args: str,
+    cwd: pathlib.Path | None = None,
+    env: dict[str, str] | None = None,
+    program: pathlib.Path | None = None,
+) -> dict[str, str]:
     try:
         result = subprocess.run(
-            ["ssh", "-G", host], capture_output=True, encoding="utf-8", stdin=subprocess.DEVNULL, check=False
+            ["ssh", "-G", *args],
+            # Python can skip a text executable that Git would run with sh.
+            executable=program,
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            stdin=subprocess.DEVNULL,
+            check=False,
+            cwd=cwd,
+            env=env,
         )
     except OSError:
-        return host
-    for line in result.stdout.splitlines() if result.returncode == 0 else ():
-        key, _, value = line.partition(" ")
-        if key == "hostname" and value:
-            return value
-    return host
+        return {}
+    if result.returncode != 0:
+        return {}
+    return {fields[0]: fields[1] for line in result.stdout.splitlines() if len(fields := line.split(maxsplit=1)) == 2}
+
+
+def direct_github_ssh(config: dict[str, str]) -> bool:
+    """Confirm that effective SSH settings use one of GitHub's endpoints."""
+    endpoint = config.get("hostname", "").lower(), config.get("port", "")
+    return (
+        endpoint in GITHUB_SSH_ENDPOINTS
+        and config.get("user") == "git"
+        and config.get("stricthostkeychecking") not in ("no", "off", "false")
+        and all(config.get(key) in (None, "none") for key in SSH_REDIRECT_SETTINGS)
+    )
