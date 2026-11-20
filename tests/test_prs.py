@@ -1,11 +1,14 @@
 """git stack prs, with tests/fake_gh.py standing in for gh."""
 
+from collections.abc import Callable
+
 import pytest
 from git_client.testing import GitCall
 
 from git_stack import events, stack_section
 from git_stack.errors import StackError
 from git_stack.stack import BranchStatus, PullRequestAction, PullRequestStep, StackClient
+from tests import fake_gh
 from tests.helpers import FakeGitHub, Repo
 
 # Without a trailing newline, which git-stack strips like the rest of git's output.
@@ -377,6 +380,64 @@ def test_prs_shows_a_merged_branch_it_skipped(repo: Repo, gh: FakeGitHub, client
         ("pr2", BranchStatus.UP_TO_DATE),
         ("pr3", BranchStatus.UP_TO_DATE),
     ]
+
+
+def test_prs_batches_changed_descriptions(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+    repo.make_stack()
+    client.push()
+
+    client.prs()
+
+    assert len(gh.calls("api", "graphql", "--hostname", "github.com", "--input", "-")) == 1
+    assert not gh.calls("pr", "edit")
+    assert body(gh, 2) == stack("- `main`", "  - #1", "    - #2 👈", "      - #3")
+
+
+def test_prs_reports_the_failed_description_from_a_partial_batch(
+    repo: Repo, gh: FakeGitHub, client: StackClient
+) -> None:
+    repo.make_stack()
+    client.push(prs=True)
+    state = gh.load()
+    for pr in state["prs"]:
+        pr["body"] = "new description"
+    state["fail_edits"] = [2]
+    gh.save(state)
+
+    with pytest.raises(StackError, match=r"couldn't update descriptions for #2(?s:.*)fake gh: failing as asked"):
+        client.prs()
+
+    assert stack_section.START in body(gh, 1)
+    assert body(gh, 2) == "new description"
+    assert stack_section.START in body(gh, 3)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        b"caf\xe9",
+        b"[]",
+        b'{"data":{"p1":{"pullRequest":{"number":1}},"p2":null,"p3":{"pullRequest":{"number":3}}},"errors":[null]}',
+    ],
+)
+def test_description_batch_keeps_gh_error_with_an_invalid_response(
+    repo: Repo, gh: FakeGitHub, client: StackClient, monkeypatch: pytest.MonkeyPatch, payload: bytes
+) -> None:
+    repo.make_stack()
+    client.push()
+    run_gh = fake_gh.run
+
+    def gh_response(args: list[str], read_input: Callable[[], bytes]) -> tuple[int, bytes, bytes]:
+        if args[:2] == ["api", "graphql"] and "--input" in args:
+            return 1, payload, b"gh: upstream proxy failed"
+        return run_gh(args, read_input)
+
+    monkeypatch.setattr(fake_gh, "run", gh_response)
+
+    with pytest.raises(StackError, match="gh: upstream proxy failed") as failure:
+        client.prs()
+    if b'"p2":null' in payload:
+        assert "couldn't update descriptions for #2;" in str(failure.value)
 
 
 def test_prs_moves_the_stack_to_the_end_keeping_the_rest(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:

@@ -6,6 +6,7 @@ import subprocess
 import threading
 import urllib.parse
 from collections.abc import Callable, Iterable
+from contextlib import suppress
 from dataclasses import dataclass, replace
 from typing import Self
 
@@ -31,6 +32,7 @@ PR_FIELDS = "number state isDraft isCrossRepository headRefOid baseRefName merge
 # How many of a branch's pull requests to look at, newest first. More than one
 # only if its name was reused, or a pull request was closed and replaced.
 PRS_PER_BRANCH = 10
+DESCRIPTION_BATCH_SIZE = 10
 # Where GitHub looks for a repository's pull request template, matching names
 # case-insensitively. GitHub doesn't say which wins if there are several.
 TEMPLATE_DIRECTORIES = (".github", "", "docs")
@@ -200,16 +202,20 @@ class GitHubAdapter(GitAdapter):
         self._default_branch: str | None = None
         self._viewer: str | None = None
 
-    def gh(self, *args: str, input: str | None = None) -> str:
+    def gh(self, *args: str, input: str | None = None, partial_errors: list[str] | None = None) -> str:
         # As bytes, so Windows doesn't turn the \n in input (e.g. a pull
         # request's description) into \r\n.
         with measure_gh(args):
             result = subprocess.run(
                 ["gh", *args], capture_output=True, input=None if input is None else input.encode("utf-8"), check=False
             )
-        if result.returncode != 0:
-            raise StackError(f"gh {' '.join(args)} failed:\n{result.stderr.decode('utf-8', 'replace').strip()}")
-        return result.stdout.decode("utf-8").strip()
+        if result.returncode:
+            error = result.stderr.decode("utf-8", "replace").strip()
+            if partial_errors is None or not result.stdout:
+                raise StackError(f"gh {' '.join(args)} failed:\n{error}")
+            if error:
+                partial_errors.append(error)
+        return result.stdout.decode("utf-8", "replace" if result.returncode else "strict").strip()
 
     def pull_requests(self) -> dict[str, PullRequest]:
         """{branch: pull request} for tracked branches with a pull request.
@@ -1016,11 +1022,11 @@ class GitHubAdapter(GitAdapter):
         history_roots = self.stack_section_history_roots(branches, stacks, prs, to_update)
         numbers = sorted(set(to_update.values()) | history_roots.keys())
         try:
-            fields = self.pull_request_fields(numbers, f"body {BASE_CHANGES} {STACK_FIELDS}")
+            fields = self.pull_request_fields(numbers, f"id body {BASE_CHANGES} {STACK_FIELDS}")
         except StackError:
             # E.g. GitHub Enterprise without stacked pull requests, which
             # doesn't know the field.
-            fields = self.pull_request_fields(numbers, f"body {BASE_CHANGES}")
+            fields = self.pull_request_fields(numbers, f"id body {BASE_CHANGES}")
         merged = self.merged_parents({n: fields[n] for n in history_roots}, history_roots)
         for root in sorted({stacks.root(b) for b in branches}):
             on_root = [b for b in branches if stacks.root(b) == root]
@@ -1092,6 +1098,7 @@ class GitHubAdapter(GitAdapter):
         )
         if dry_run:
             return
+        edits: dict[int, str] = {}
         for branch, number in to_update.items():
             body = field(fields[number], "body", str)
             if len(stacks.group_bottoms(stacks.bottom(branch))) > 1:
@@ -1103,7 +1110,55 @@ class GitHubAdapter(GitAdapter):
                 section = stack_section.render({root: tree}, set(merged.values()), number)
                 new_body = stack_section.replace(body, section)
             if new_body != body:
-                self.gh("pr", "edit", str(number), "--repo", self.repo, "--body-file", "-", input=new_body)
+                edits[number] = new_body
+        self.update_descriptions(edits, fields)
+
+    def update_descriptions(self, edits: dict[int, str], fields: dict[int, object]) -> None:
+        """Batch body-only changes and verify each mutation's result."""
+        numbers = list(edits)
+        if len(numbers) == 1:
+            number = numbers[0]
+            self.gh("pr", "edit", str(number), "--repo", self.repo, "--body-file", "-", input=edits[number])
+            return
+        for start in range(0, len(numbers), DESCRIPTION_BATCH_SIZE):
+            batch = numbers[start : start + DESCRIPTION_BATCH_SIZE]
+            inputs = {f"p{n}": {"pullRequestId": field(fields[n], "id", str), "body": edits[n]} for n in batch}
+            declarations = ", ".join(f"${alias}: UpdatePullRequestInput!" for alias in inputs)
+            mutations = " ".join(
+                f"{alias}: updatePullRequest(input: ${alias}) {{ pullRequest {{ number }} }}" for alias in inputs
+            )
+            # The descriptions can be long and belong on stdin, outside the
+            # command line and performance log.
+            request = json.dumps({"query": f"mutation({declarations}) {{ {mutations} }}", "variables": inputs})
+            errors: list[str] = []
+            raw_response = self.gh(
+                "api", "graphql", "--hostname", self.host, "--input", "-", input=request, partial_errors=errors
+            )
+            try:
+                response = parse_json(raw_response)
+                data = optional_field(response, "data", dict) or {}
+            except StackError as error:
+                if errors:
+                    raise StackError("\n".join(errors)) from error
+                raise
+            failed = [
+                n
+                for n in batch
+                if not isinstance(entry := data.get(f"p{n}"), dict) or entry.get("pullRequest") != {"number": n}
+            ]
+            if failed:
+                names = ", ".join(f"#{n}" for n in failed)
+                # A partial response can omit or garble these diagnostics.
+                with suppress(StackError):
+                    for item in optional_field(response, "errors", list) or []:
+                        with suppress(StackError):
+                            message = optional_field(item, "message", str)
+                            if message and not any(message in error for error in errors):
+                                errors.append(message)
+                details = "".join(f"\n{error}" for error in errors)
+                raise StackError(
+                    f"couldn't update descriptions for {names}; rerun to update the remaining pull requests{details}"
+                )
 
     def link_github_stacks(
         self, chains: list[list[int]], stacks: dict[int, GitHubStack | None], rebuild_stack: bool, dry_run: bool
