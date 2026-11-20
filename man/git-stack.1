@@ -1805,6 +1805,9 @@ To recognize a manually completed restack, git\-stack uses the
 branch\(aqs reflog.
 If that entry is unavailable, inspect the branch and re\-track it with
 \f[CR]git stack track <parent> \-\-base <sha>\f[R].
+If a restack stops because the recorded base puts trunk merges in its
+replay range, verify the suggested fork and use the printed
+\f[CR]git stack track\f[R] command to record it before retrying.
 For a pull, each upstream commit must be accounted for, even when
 commits share an author, date, and subject; a skipped commit is not
 counted as pulled.

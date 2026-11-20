@@ -1,5 +1,6 @@
 import enum
 import fnmatch
+import shlex
 from collections import Counter
 from collections.abc import Callable, Generator, Iterable, Sequence
 from contextlib import contextmanager
@@ -504,7 +505,14 @@ class StackCore:
             # There's no rebase to wait for.
             self.set_parent(branch, parent)
             return True
-        if git.run("rev-list", "--merges", f"{base}..refs/heads/{branch}"):
+        branch_ref = f"refs/heads/{branch}"
+        if git.run("rev-list", "--max-count=1", "--merges", f"{base}..{branch_ref}"):
+            if fork := self.newer_trunk_fork(branch, parent, parent_tip, base):
+                repair = shlex.join(("git", "stack", "track", parent, branch, "--base", fork))
+                raise StackError(
+                    f"{branch}'s recorded base puts trunk merge commits in its restack range. "
+                    f"If {fork} is the intended fork, run `{repair}` and retry"
+                )
             raise StackError(
                 f"{branch} contains merge commits; restack it manually while preserving merges, "
                 f"then run `git stack track {parent} --base <sha>`"
@@ -521,6 +529,22 @@ class StackCore:
             raise self.stopped(f"restacking {branch}", "rebase", "rerun this command to finish the stack")
         git.config_unset(branch, PENDING_RESTACK_KEY)
         raise StackError(f"restacking {branch} onto {parent} failed; see git's output above")
+
+    def newer_trunk_fork(self, branch: str, parent: str, parent_tip: str, base: str) -> str | None:
+        """Find a repair candidate when every merge in the replay range belongs to trunk."""
+        git = self.git
+        if git.config_get(branch, PARENT_KEY) != parent or any(
+            git.config_get(parent, key) is not None for key in (PARENT_KEY, INTEGRATION_KEY)
+        ):
+            return None
+        branch_ref = f"refs/heads/{branch}"
+        forks = git.run("merge-base", "--all", parent_tip, branch_ref, check=False).splitlines()
+        if len(forks) != 1:
+            return None
+        fork = forks[0]
+        if fork == base or not git.is_ancestor(base, fork):
+            return None
+        return None if git.run("rev-list", "--max-count=1", "--merges", f"{fork}..{branch_ref}") else fork
 
     def restack_all(self, branches: Iterable[str], stacks: Stacks, latest: bool = False) -> list[str]:
         """Restack branches, parent-before-child, returning the ones blocked by another worktree."""

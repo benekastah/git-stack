@@ -24,6 +24,34 @@ def test_restack_moves_whole_stack_after_parent_changes(repo: Repo, client: Stac
     assert all(branch.status is not BranchStatus.NEEDS_RESTACK for branch in client.info())
 
 
+@pytest.mark.parametrize("command", ["restack", "pull"])
+def test_restack_suggests_recording_the_fork_when_only_trunk_has_merges(repo: Repo, command: str) -> None:
+    old_base = repo.git("rev-parse", "main")
+    repo.git("switch", "-qc", "trunk-side")
+    repo.commit("b", "trunk change\n", "trunk change")
+    repo.git("switch", "-q", "main")
+    repo.git("merge", "--no-ff", "--no-edit", "trunk-side")
+    fork = repo.git("rev-parse", "main")
+    repo.stack("create", "feature")
+    repo.commit("a", "feature\n", "own change")
+    tip = repo.git("rev-parse", "feature")
+    repo.git("config", "branch.feature.stackBase", old_base)
+    repo.git("switch", "-q", "main")
+    repo.commit("c", "new trunk change\n", "new trunk change")
+    repo.git("push", "-q", "origin", "main")
+    repo.git("switch", "-q", "feature")
+
+    result = repo.stack(command, "--latest", expect_success=False)
+
+    assert f"git stack track main feature --base {fork}" in result.stderr
+    assert repo.git("rev-parse", "feature") == tip
+    assert repo.config("feature", "stackBase") == old_base
+
+    repo.stack("track", "main", "feature", "--base", fork)
+    repo.stack(command, "--latest")
+    repo.assert_stacked("feature", "main", ["own change"])
+
+
 def test_restack_refuses_to_drop_local_merge_changes(repo: Repo, client: StackClient) -> None:
     client.branch("pr1")
     repo.commit("a", "pr1\n", "pr1")
