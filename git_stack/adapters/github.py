@@ -177,10 +177,20 @@ class GitHubAdapter(GitAdapter):
     locally.
     """
 
-    def __init__(self, core: StackCore, remote: str, host: str, owner: str, name: str, fetch: bool) -> None:
+    def __init__(
+        self,
+        core: StackCore,
+        remote: str,
+        host: str,
+        owner: str,
+        name: str,
+        fetch: bool,
+        lookup_branches: Iterable[str] | None = None,
+    ) -> None:
         super().__init__(core)
         self.remote = remote
         self.fetch = fetch
+        self._lookup_branches = tuple(lookup_branches) if lookup_branches is not None else None
         self.host, self.owner, self.name = host, owner, name
         self.repo = f"{host}/{owner}/{name}"
         self._pull_requests: dict[str, PullRequest] | None = None
@@ -236,7 +246,8 @@ class GitHubAdapter(GitAdapter):
             ) from e
 
     def look_up_pull_requests(self) -> dict[str, PullRequest]:
-        branches = [b for b in self.core.stacks() if self.git.config_get(b, "remote") == self.remote]
+        candidates = self.core.stacks() if self._lookup_branches is None else self._lookup_branches
+        branches = [b for b in candidates if self.git.config_get(b, "remote") == self.remote]
         if not branches:
             return {}
         # Branch names are passed as variables, so they needn't be escaped.

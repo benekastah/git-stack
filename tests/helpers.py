@@ -7,6 +7,7 @@ import pathlib
 import subprocess
 import sys
 import tempfile
+import threading
 from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -293,6 +294,8 @@ class InProcessGh:
     """The subprocess module, but for running gh, which tests/fake_gh.py's
     run answers in this process, as the gh command it stands in for would."""
 
+    _lock = threading.Lock()
+
     def __getattr__(self, name: str) -> Any:
         return getattr(subprocess, name)
 
@@ -310,7 +313,8 @@ class InProcessGh:
         # Only the ways git-stack runs gh: its output captured, with or without input.
         assert kwargs == {"capture_output": True}, kwargs
         stdin = input.encode(encoding or "utf-8") if isinstance(input, str) else input or b""
-        status, out, err = fake_gh.run(args[1:], lambda: stdin)
+        with InProcessGh._lock:
+            status, out, err = fake_gh.run(args[1:], lambda: stdin)
         result: subprocess.CompletedProcess[Any] = (
             subprocess.CompletedProcess(args, status, out, err)
             if encoding is None
