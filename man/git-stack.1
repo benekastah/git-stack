@@ -681,8 +681,10 @@ its root (e.g.
 Use \f[CR]\-\-all\f[R] (or \f[CR]\-a\f[R]) to show every tracked stack,
 including in JSON output.
 It cannot be combined with branch or group selectors.
-Without selectors, \f[CR]info\f[R] requires the current branch to be
-tracked in a stack.
+Without selectors, \f[CR]info\f[R] shows every stack from an ordinary
+untracked branch such as \f[CR]main\f[R].
+From a tracked branch or an integration root, it shows the current
+stack.
 \f[CR]\-g\f[R] without a name also selects the current stack and its
 group, and can be combined with other selectors.
 Put it after positional branches, since the following word is read as a

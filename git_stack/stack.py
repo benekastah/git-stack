@@ -1096,10 +1096,13 @@ class StackClient(StackCore):
     ) -> list[BranchInfo]:
         """Every tracked stack (or the stacks of the branches that branches and
         groups name, see named), as a list of BranchInfo: each stack's root, then its
-        branches, parent-before-child. offline checks for merges like the git
-        adapter does, without asking GitHub about pull requests."""
+        branches, parent-before-child. current selects the checkout's stack when
+        it has one. offline checks for merges locally, without asking GitHub."""
         stacks = self.settled_stacks()
         integration_roots = Integrations(self).names() & self.git.local_branches()
+        if current and not (branches or groups):
+            checkout = self.git.current_branch()
+            current = checkout is None or checkout in stacks or checkout in integration_roots
         if current or branches or groups:
             selected = self.refresh_selection(branches, groups, stacks, "show")
             stacks = stacks.restricted(selected.branches)

@@ -476,7 +476,8 @@ Show the current stack (or the ones named, see [Groups](#groups)) as a tree,
 with its root (e.g. `main`) on top and the branches built on it below.
 Use `--all` (or `-a`) to show every tracked stack, including in JSON output.
 It cannot be combined with branch or group selectors. Without selectors,
-`info` requires the current branch to be tracked in a stack.
+`info` shows every stack from an ordinary untracked branch such as `main`.
+From a tracked branch or an integration root, it shows the current stack.
 `-g` without a name also selects the current stack and its group, and can be
 combined with other selectors. Put it after positional branches, since the
 following word is read as a group name. `ownership` also accepts `-g` without
