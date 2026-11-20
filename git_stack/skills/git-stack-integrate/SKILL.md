@@ -11,12 +11,13 @@ Count each `cat-file` batch request as a Git call. Include batch shutdown in Git
 Report any overlap shown and flag the slowest call if it explains a delay.
 
 Use an integration root when one stack needs several unmerged branch tips.
-It combines the tips with native Git merges and serves as the work stack's
-single parent. Check the selected stacks and source branches first with
+It merges source tips and serves as the work stack's single parent. A refresh
+can cherry-pick appended commits when the source histories are independent.
+Check the selected stacks and source branches first with
 `git stack info --all --offline`.
 
 - Create with `git stack integrate <name> <source-a> <source-b>`. Source
-  names are local branches in merge order. The build starts at `main` by
+  names are local branches in application order. The build starts at `main` by
   default. Use `git stack integrate <name> <source-a> <source-b> --root <root>`
   for a different ordinary untracked root.
 - Register an existing snapshot with
@@ -52,7 +53,8 @@ single parent. Check the selected stacks and source branches first with
 
 ## Conflicts between sources
 
-Keep independent branches parallel when they merge cleanly. When two source
+A merge or cherry-pick conflict aborts the build and keeps the previous
+integration tip. Keep independent branches parallel when they merge cleanly. When two source
 branches conflict during a build or refresh, recommend stacking them, with
 the prerequisite below the dependent work. Resolve the conflict during
 `git stack restack <upper> --onto <lower>` once both branches are tracked.
@@ -61,20 +63,14 @@ source names when first creating an integration with only those two inputs.
 For an existing integration, the upper branch can replace both source names
 because its history includes the lower branch.
 
-If the user chooses to rearrange the sources during a stopped build, preserve
-any resolution they want to keep before aborting the build. Follow the
+Rerun the original command with its selectors after restacking. Follow the
 `git-stack-rearrange` skill for the branch changes.
 
 ## Recover or promote
 
-- If a merge conflicts, use the temporary worktree path reported by git-stack.
-  Resolve and stage the conflicts there, run
-  `git -C "<path>" -c core.editor=true merge --continue`, then rerun the
-  original command with the same selectors. The retry keeps surviving work
-  in the source stack selected even if sync removed the branch you named.
-  Keep that work selected when retrying a queued remote branch deletion.
-  To discard the build, use
-  `git stack integrate --abort <name>` from the regular worktree.
+- Preserve any staged resolution in a legacy stopped build before discarding it.
+- Use `git stack integrate --abort <name>` to discard a build interrupted for
+  another reason or release its cached worktree.
 - If the integration tip has direct commits, inspect the commits listed by
   git-stack. `git stack restack <name> --force` replaces that integration's
   tip and removes those commits from it. Get authorization for that rewrite.

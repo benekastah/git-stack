@@ -2,7 +2,6 @@
 
 import json
 import pathlib
-import shlex
 import shutil
 
 import pytest
@@ -78,9 +77,8 @@ def work(repo: Repo) -> None:
 def test_create_refresh_and_replace_ordered_sources(repo: Repo, git_calls: list[GitCall]) -> None:
     integration(repo)
     before = tip(repo, "combined")
-    assert repo.git("rev-parse", "refs/heads/combined^2") == tip(repo, "two")
-    assert repo.git("rev-parse", "refs/heads/combined^1^2") == tip(repo, "one")
-    assert repo.git("rev-parse", "refs/heads/combined^1^1") == tip(repo, "main")
+    assert repo.git("rev-parse", "combined~1^2", "combined^2").splitlines() == [tip(repo, "one"), tip(repo, "two")]
+    assert repo.git("rev-parse", "refs/heads/combined~2") == tip(repo, "main")
 
     repo.git("switch", "--quiet", "combined")
     assert repo.stack("info", "--offline").stdout.splitlines()[0] == "combined (of one, two) *"
@@ -91,10 +89,206 @@ def test_create_refresh_and_replace_ordered_sources(repo: Repo, git_calls: list[
 
     repo.stack("integrate", "combined", "two")
     assert repo.stack("info", "--offline").stdout.splitlines()[0] == "combined (of two) *"
-    assert repo.git("rev-parse", "refs/heads/combined^2") == tip(repo, "two")
+    assert repo.git("show", "combined:b") == repo.git("show", "two:b")
     assert repo.git("rev-parse", "refs/heads/combined^1") == tip(repo, "main")
     assert repo.git("branch", "--show-current") == "combined"
     assert repo.git("status", "--porcelain") == ""
+
+
+def test_integration_appends_new_commits_in_the_existing_build_worktree(repo: Repo, git_calls: list[GitCall]) -> None:
+    integration(repo)
+    previous = tip(repo, "combined")
+    repo.git("switch", "one")
+    repo.commit("a", "later change\n", "later change")
+    git_calls.clear()
+
+    repo.stack("restack", "combined")
+
+    assert repo.git("rev-parse", "combined^") == previous
+    assert repo.git("show", "combined:a") == "later change"
+    assert sum(call[0] == "cherry-pick" for call in git_calls) == 1
+    assert not any(call[:2] in (["worktree", "add"], ["worktree", "remove"]) for call in git_calls)
+
+
+def test_integration_refresh_preserves_shared_changes_when_one_source_reverts(repo: Repo) -> None:
+    for name in ("one", "two"):
+        source(repo, name, "a")
+        repo.write("a", "shared change\n")
+        repo.git("commit", "--amend", "-am", f"shared change in {name}")
+    repo.stack("integrate", "combined", "one", "two")
+    repo.git("switch", "one")
+    repo.git("revert", "--no-edit", "HEAD")
+
+    repo.stack("restack", "combined")
+    repo.stack("integrate", "fresh", "one", "two")
+
+    assert repo.git("show", "combined:a") == "shared change"
+    assert repo.git("rev-parse", "combined^{tree}") == repo.git("rev-parse", "fresh^{tree}")
+
+
+def test_integration_rebuilds_for_paths_that_alias_on_case_insensitive_filesystems(
+    repo: Repo, git_calls: list[GitCall]
+) -> None:
+    repo.git("switch", "-qc", "one", "main")
+    repo.write("alpha", "keep this\n")
+    repo.git("add", "alpha")
+    repo.git("commit", "-m", "add alpha")
+    source(repo, "two", "b")
+    repo.stack("integrate", "combined", "one", "two")
+    repo.git("switch", "two")
+    repo.write("ALPHA", "temporary\n")
+    repo.git("add", "ALPHA")
+    repo.git("commit", "-m", "add uppercase alpha")
+    repo.git("revert", "--no-edit", "HEAD")
+    git_calls.clear()
+
+    repo.stack("restack", "combined")
+
+    assert repo.git("show", "combined:alpha") == "keep this"
+    assert not any(call[0] == "cherry-pick" for call in git_calls)
+
+
+def test_integration_rebuilds_when_an_appended_commit_aliases_an_unchanged_root_file(
+    repo: Repo, git_calls: list[GitCall]
+) -> None:
+    repo.git("config", "core.ignorecase", "true")
+    integration(repo)
+    repo.git("switch", "one")
+    before = tip(repo, "one")
+    clean_tree = repo.git("rev-parse", "HEAD^{tree}")
+    # Record a spelling Git can represent even on a case-insensitive worktree.
+    blob = repo.git("rev-parse", "HEAD:c")
+    repo.git("update-index", "--add", "--cacheinfo", f"100644,{blob},C")
+    alias_tree = repo.git("write-tree")
+    repo.git("read-tree", clean_tree)
+    alias = repo.git("commit-tree", alias_tree, "-p", before, "-m", "add alias")
+    without_alias = repo.git("commit-tree", clean_tree, "-p", alias, "-m", "remove alias")
+    repo.git("switch", "two")
+    repo.git("update-ref", "refs/heads/one", without_alias, before)
+    git_calls.clear()
+
+    repo.stack("restack", "combined")
+
+    assert repo.git("show", "combined:c") == repo.git("show", "main:c")
+    assert not any(call[0] == "cherry-pick" for call in git_calls)
+
+
+def test_integration_combines_source_tips_without_replaying_reverted_conflicts(repo: Repo) -> None:
+    source(repo, "one", "a")
+    source(repo, "two", "a")
+    repo.git("revert", "--no-edit", "HEAD")
+
+    repo.stack("integrate", "combined", "one", "two")
+
+    assert repo.git("show", "combined:a") == "one"
+
+
+def test_integration_refresh_respects_merge_signature_verification(repo: Repo, git_calls: list[GitCall]) -> None:
+    integration(repo)
+    previous = tip(repo, "combined")
+    repo.git("config", "merge.verifySignatures", "true")
+    repo.git("switch", "one")
+    repo.commit("a", "unsigned change\n", "unsigned change")
+    git_calls.clear()
+
+    result = repo.stack("restack", "combined", expect_success=False)
+
+    assert "signature" in result.stderr.lower()
+    assert tip(repo, "combined") == previous
+    assert not any(call[0] == "cherry-pick" for call in git_calls)
+
+
+def test_releasing_the_cached_worktree_keeps_the_integration(repo: Repo) -> None:
+    integration(repo)
+    previous = tip(repo, "combined")
+    path = Integrations(repo.client).path("combined")
+    assert path.is_dir()
+
+    repo.stack("integrate", "--abort", "combined")
+
+    assert tip(repo, "combined") == previous
+    assert not path.exists()
+
+
+def test_integration_rebuilds_after_a_source_commit_is_amended(repo: Repo) -> None:
+    integration(repo)
+    previous = tip(repo, "combined")
+    repo.git("switch", "one")
+    repo.write("a", "rewritten change\n")
+    repo.git("commit", "--amend", "-am", "rewritten change")
+
+    repo.stack("restack", "combined")
+
+    assert repo.git("rev-parse", "combined~1^2") == tip(repo, "one")
+    assert repo.git("merge-base", "combined", previous) == tip(repo, "two")
+    assert repo.git("show", "combined:a") == "rewritten change"
+    assert repo.git("show", "combined:b") == "two"
+
+
+def test_failed_integration_discards_its_conflicting_checkout(repo: Repo) -> None:
+    source(repo, "one", "a")
+    source(repo, "two", "a")
+
+    result = repo.stack("integrate", "combined", "one", "two", expect_success=False)
+
+    assert "restack" in result.stderr and "two" in result.stderr
+    assert not repo.git("branch", "--list", "combined")
+    assert Integrations(repo.client).pending("combined") is None
+    assert not Integrations(repo.client).path("combined").exists()
+
+
+def test_integration_preserves_source_merge_edits_and_aborts_native_merge_conflicts(repo: Repo) -> None:
+    source(repo, "side", "c")
+    source(repo, "one", "a")
+    repo.merge_with_an_edit("side", "d", "merge edit\n")
+    source(repo, "two", "b")
+    repo.stack("integrate", "combined", "one", "two")
+    assert repo.git("show", "combined:d") == "merge edit"
+    assert repo.git("merge-base", "combined", "one") == tip(repo, "one")
+
+    repo.commit("b", "later change\n", "later change")
+    repo.stack("restack", "combined")
+    assert repo.git("rev-parse", "combined^2") == tip(repo, "two")
+    assert repo.git("show", "combined:d") == "merge edit"
+
+    previous = tip(repo, "combined")
+    repo.commit("a", "conflict with one\n", "conflict")
+    repo.merge_with_an_edit("side", "d", "other merge edit\n")
+    result = repo.stack("restack", "combined", expect_success=False)
+
+    assert "git stack restack two" in result.stderr
+    assert tip(repo, "combined") == previous
+    assert Integrations(repo.client).pending("combined") is None
+    assert not Integrations(repo.client).path("combined").exists()
+
+
+def test_retry_keeps_a_staged_resolution_from_a_legacy_build(repo: Repo, monkeypatch: pytest.MonkeyPatch) -> None:
+    source(repo, "one", "a")
+    source(repo, "two", "a")
+    integrations = Integrations(repo.client)
+    path = integrations.path("combined")
+
+    def stop(integrations: Integrations, name: str, source: str) -> StackError:
+        build = integrations.pending(name)
+        assert build is not None
+        build.pop("replay")
+        build["integration"].pop("automatic")
+        integrations.journal(name, build)
+        return StackError("legacy merge stopped")
+
+    command = ("integrate", "combined", "one", "two")
+    with monkeypatch.context() as patch:
+        patch.setattr(Integrations, "conflict", stop)
+        assert "legacy merge stopped" in repo.stack(*command, expect_success=False).stderr
+    (path / "a").write_text("manual resolution\n", encoding="utf-8")
+    repo.git("add", "a", cwd=path)
+
+    assert "merge --continue" in repo.stack(*command, expect_success=False).stderr
+    assert repo.git("show", ":a", cwd=path) == "manual resolution"
+
+    repo.git("commit", "--no-edit", cwd=path)
+    repo.stack(*command)
+    assert repo.git("show", "combined:a") == "manual resolution"
 
 
 def test_integration_rejects_alias_of_generated_tip(repo: Repo) -> None:
@@ -196,43 +390,48 @@ def test_selected_sources_run_first_and_excluded_sources_stay_put(repo: Repo) ->
     before = tip(repo, "one")
     repo.stack("pull", "-g", "both", "--latest")
     assert tip(repo, "one") != before
-    assert repo.git("rev-parse", "refs/heads/combined^1^2") == tip(repo, "one")
+    assert repo.git("show", "combined:a") == repo.git("show", "one:a")
 
     repo.stack("group", "remove", "one")
     before = tip(repo, "one")
     repo.commit_on_forge("main", "d", "another\n", "another")
     repo.stack("pull", "-g", "both", "--latest")
     assert tip(repo, "one") == before
-    assert repo.git("rev-parse", "refs/heads/combined^1^2") == before
+    assert repo.git("show", "combined:a") == repo.git("show", f"{before}:a")
 
 
-def conflict_worktree(stderr: str) -> pathlib.Path:
-    line = next(line for line in stderr.splitlines() if "merge --continue" in line)
-    return pathlib.Path(shlex.split(line.strip())[2])
+def resolve_source(repo: Repo, parent: str = "main") -> None:
+    repo.git("switch", "--quiet", "two")
+    if not repo.config_exists("two", "stackParent"):
+        repo.stack("track", "main", "two")
+    command = ("restack", "two", "--onto", parent)
+    assert "CONFLICT" in repo.stack(*command, expect_success=False).stdout
+    repo.write("a", "resolved\n")
+    repo.git("add", "a")
+    repo.git("-c", "core.editor=true", "rebase", "--continue")
+    repo.stack(*command)
 
 
-def test_conflict_continue_and_abort(repo: Repo) -> None:
+def interrupt_integration_build(repo: Repo, monkeypatch: pytest.MonkeyPatch, *command: str) -> pathlib.Path:
+    def stop_before_publishing(*args: object, **kwargs: object) -> None:
+        raise StackError("interrupted before publication")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Integrations, "publish", stop_before_publishing)
+        assert "interrupted before publication" in repo.stack(*command, expect_success=False).stderr
+    return Integrations(repo.client).path("combined")
+
+
+def test_conflict_can_be_resolved_by_restacking_the_source(repo: Repo) -> None:
     source(repo, "one", "a")
     source(repo, "two", "a")
-    result = repo.stack("integrate", "combined", "one", "two", expect_success=False)
-    path = conflict_worktree(result.stderr)
-    assert repo.git("branch", "--list", "combined") == ""
-    (path / "a").write_text("resolved\n", encoding="utf-8")
-    repo.git("add", "a", cwd=path)
-    repo.git("-c", "core.editor=true", "merge", "--continue", cwd=path)
+    command = ("integrate", "combined", "one", "two")
+    assert "git stack restack two" in repo.stack(*command, expect_success=False).stderr
+    resolve_source(repo, parent="one")
 
-    repo.stack("integrate", "combined", "one", "two")
+    repo.stack(*command)
 
     assert repo.git("show", "refs/heads/combined:a") == "resolved"
-    assert not path.exists()
-    prior = tip(repo, "combined")
-    repo.git("switch", "--quiet", "two")
-    repo.commit("a", "conflict again\n", "another")
-    repo.stack("restack", "combined", expect_success=False)
-    repo.git("merge", "--abort", cwd=path)
-    repo.stack("integrate", "--abort", "combined")
-    assert not path.exists()
-    assert tip(repo, "combined") == prior
 
 
 def test_missing_source_needs_exact_landing_evidence(repo: Repo) -> None:
@@ -248,7 +447,7 @@ def test_missing_source_needs_exact_landing_evidence(repo: Repo) -> None:
     repo.git("merge", "--ff-only", one)
     repo.stack("restack", "combined")
     assert repo.git("rev-parse", "refs/heads/combined^1") == tip(repo, "main")
-    assert repo.git("rev-parse", "refs/heads/combined^2") == tip(repo, "two")
+    assert repo.git("show", "combined:b") == repo.git("show", "two:b")
 
 
 def test_sync_pushes_integration_and_work_atomically(repo: Repo, git_calls: list[GitCall]) -> None:
@@ -332,10 +531,12 @@ def test_squash_evidence_for_older_tip_does_not_drop_new_work(repo: Repo, gh: Fa
     )
     repo.commit("a", "new work\n", "new work")
 
+    before = tip(repo, "combined")
     result = repo.stack("pull", "combined", expect_success=False)
 
-    assert "merge --continue" in result.stderr
-    repo.stack("integrate", "--abort", "combined")
+    assert "git stack restack one" in result.stderr
+    assert tip(repo, "combined") == before
+    assert repo.git("show", "one:a") == "new work"
 
 
 def test_integration_checked_out_in_another_worktree(repo: Repo) -> None:
@@ -382,13 +583,12 @@ def test_sync_leaves_remote_base_and_work_unchanged_when_work_is_blocked(repo: R
     assert tip(repo, "work", remote=True) == tip(repo, "work")
 
 
-def test_aborting_missing_worktree_preserves_previous_tip(repo: Repo) -> None:
+def test_aborting_missing_worktree_preserves_previous_tip(repo: Repo, monkeypatch: pytest.MonkeyPatch) -> None:
     integration(repo)
     before = tip(repo, "combined")
     repo.git("switch", "--quiet", "two")
-    repo.commit("a", "conflicting\n", "conflict")
-    result = repo.stack("restack", "combined", expect_success=False)
-    path = conflict_worktree(result.stderr)
+    repo.commit("b", "new source change\n", "change")
+    path = interrupt_integration_build(repo, monkeypatch, "restack", "combined")
     shutil.rmtree(path)
 
     repo.stack("integrate", "--abort", "combined")
@@ -398,22 +598,22 @@ def test_aborting_missing_worktree_preserves_previous_tip(repo: Repo) -> None:
     assert repo.client.git.config_get("combined", "stackIntegrationBuild") is None
 
 
-def test_input_moving_during_merge_prevents_publish(repo: Repo, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_input_moving_during_replay_prevents_publish(repo: Repo, monkeypatch: pytest.MonkeyPatch) -> None:
     integration(repo)
     before = tip(repo, "combined")
     old_one = tip(repo, "one")
     repo.git("switch", "--quiet", "two")
     repo.commit("b", "changed\n", "changed")
-    passthrough = GitClient.passthrough
+    run = GitClient.run
 
-    def move_input(git: GitClient, *args: str) -> bool:
-        result = passthrough(git, *args)
-        if args[:1] == ("merge",) and tip(repo, "one") == old_one:
+    def move_input(git: GitClient, *args: str, check: bool = True, input: str | None = None) -> str:
+        result = run(git, *args, check=check, input=input)
+        if args[:1] == ("cherry-pick",) and tip(repo, "one") == old_one:
             repo.git("update-ref", "refs/heads/one", tip(repo, "main"), old_one)
         return result
 
     with monkeypatch.context() as patch:
-        patch.setattr(GitClient, "passthrough", move_input)
+        patch.setattr(GitClient, "run", move_input)
         result = repo.stack("restack", "combined", expect_success=False)
 
     assert "integration refs changed" in result.stderr
@@ -496,7 +696,7 @@ def test_failed_refresh_stops_selected_source_remote_deletion(repo: Repo) -> Non
 
     result = repo.stack("sync", "-g", "both", "--delete", "remote", expect_success=False)
 
-    assert "merge --continue" in result.stderr
+    assert "git stack restack two" in result.stderr
     assert tip(repo, "one", remote=True) == one
     assert tip(repo, "work", remote=True) == old_work
     assert tip(repo, "work") == old_work
@@ -532,11 +732,9 @@ def test_sync_resumes_conflict_after_deleting_rewritten_source(
             patch.setattr(Integrations, "build", stop_before_journal)
             assert "interrupted before build" in repo.stack(*command, expect_success=False).stderr
         assert repo.git("branch", "--list", "one") == ""
-    path = conflict_worktree(repo.stack(*command, expect_success=False).stderr)
+    assert "git stack restack two" in repo.stack(*command, expect_success=False).stderr
     assert repo.git("branch", "--list", "one") == ""
-    (path / "a").write_text("resolved\n", encoding="utf-8")
-    repo.git("add", "a", cwd=path)
-    repo.git("-c", "core.editor=true", "merge", "--continue", cwd=path)
+    resolve_source(repo)
 
     if interrupt_before_build:
         repo.stack("sync", "combined")
@@ -552,9 +750,8 @@ def test_sync_resumes_conflict_after_deleting_rewritten_source(
     repo.stack(*command)
 
     assert repo.git("show", "refs/heads/combined:a") == "resolved"
-    assert repo.git("rev-parse", "refs/heads/combined^1") == replacement
+    assert repo.git("merge-base", "combined", replacement) == replacement
     assert repo.git("merge-base", "source-child", replacement, cwd=repo.origin) == replacement
-    assert not path.exists()
     saved = Integrations(repo.client).read("combined")
     assert saved is not None and "retired_sources" not in saved
 
@@ -586,10 +783,8 @@ def test_retired_source_keeps_squash_evidence_offline(
     assert (repo.git("branch", "--list", "one") == "") is delete_local
     repo.git("config", "stack.adapter", "git")
     if conflict:
-        path = conflict_worktree(result.stderr)
-        (path / "a").write_text("resolved\n", encoding="utf-8")
-        repo.git("add", "a", cwd=path)
-        repo.git("-c", "core.editor=true", "merge", "--continue", cwd=path)
+        assert "git stack restack two" in result.stderr
+        resolve_source(repo)
         repo.stack(*command)
     repo.stack("restack", "combined")
     assert repo.git("show", "combined:a") == ("resolved" if conflict else "landed replacement")
@@ -608,10 +803,8 @@ def test_retry_with_only_retired_source_preserves_group_scope(repo: Repo) -> Non
     repo.git("switch", "two")
     repo.commit("a", "conflict\n", "conflict")
     command = ("sync", "-g", "both", "--delete", "local")
-    path = conflict_worktree(repo.stack(*command, expect_success=False).stderr)
-    (path / "a").write_text("resolved\n", encoding="utf-8")
-    repo.git("add", "a", cwd=path)
-    repo.git("-c", "core.editor=true", "merge", "--continue", cwd=path)
+    assert "git stack restack two" in repo.stack(*command, expect_success=False).stderr
+    resolve_source(repo)
 
     repo.stack(*command)
 
@@ -631,12 +824,8 @@ def test_retry_keeps_unselected_group_peer_out_of_scope(repo: Repo) -> None:
     repo.commit("a", "conflict\n", "conflict")
     before = tip(repo, "peer")
     command = ("sync", "combined", "one", "--delete", "local")
-    path = conflict_worktree(repo.stack(*command, expect_success=False).stderr)
-    failure = repo.stack("rename", "child", "renamed-child", expect_success=False)
-    assert "git stack integrate --abort combined" in failure.stderr
-    (path / "a").write_text("resolved\n", encoding="utf-8")
-    repo.git("add", "a", cwd=path)
-    repo.git("-c", "core.editor=true", "merge", "--continue", cwd=path)
+    assert "git stack restack two" in repo.stack(*command, expect_success=False).stderr
+    resolve_source(repo)
 
     repo.stack("sync", "-g", "both")
     assert repo.git("ls-remote", "origin", "refs/heads/combined") == ""
@@ -977,10 +1166,8 @@ def test_narrow_retry_keeps_queued_source_deletion_until_child_is_selected(
     repo.git("switch", "two")
     repo.commit("a", "conflict\n", "conflict")
     command = ("sync", "combined", "one", "--delete", "both")
-    path = conflict_worktree(repo.stack(*command, expect_success=False).stderr)
-    (path / "a").write_text("resolved\n", encoding="utf-8")
-    repo.git("add", "a", cwd=path)
-    repo.git("-c", "core.editor=true", "merge", "--continue", cwd=path)
+    assert "git stack restack two" in repo.stack(*command, expect_success=False).stderr
+    resolve_source(repo)
     if mode == "untracked":
         repo.stack("untrack", "source-child")
 
@@ -1138,7 +1325,7 @@ def test_sync_leaves_source_branch_and_pr_outside_the_selected_group(repo: Repo,
     repo.stack("sync", "-g", "app", "--latest")
 
     assert tip(repo, "one") == tip(repo, "one", remote=True) != before
-    assert repo.git("rev-parse", "refs/heads/combined^1^2") == tip(repo, "one")
+    assert repo.git("show", "combined:a") == repo.git("show", "one:a")
     assert next(pr for pr in gh.load()["prs"] if pr["headRefName"] == "one")["baseRefName"] == "main"
 
 
@@ -1189,10 +1376,12 @@ def test_rename_updates_integration_inputs_and_root(repo: Repo) -> None:
     assert tip(repo, "combined") == before
 
 
-def test_rename_refuses_to_move_input_during_first_integration_build(repo: Repo) -> None:
+def test_rename_refuses_to_move_input_during_first_integration_build(
+    repo: Repo, monkeypatch: pytest.MonkeyPatch
+) -> None:
     source(repo, "one", "a")
-    source(repo, "two", "a")
-    path = conflict_worktree(repo.stack("integrate", "combined", "one", "two", expect_success=False).stderr)
+    source(repo, "two", "b")
+    path = interrupt_integration_build(repo, monkeypatch, "integrate", "combined", "one", "two")
     before = tip(repo, "one")
 
     failure = repo.stack("rename", "one", "renamed-source", expect_success=False)
@@ -1331,12 +1520,11 @@ def test_recovery_survives_completion_from_another_worktree(repo: Repo, monkeypa
     assert repo.git("branch", "--show-current") == "combined"
 
 
-def test_rename_refuses_pending_integration_build(repo: Repo) -> None:
+def test_rename_refuses_pending_integration_build(repo: Repo, monkeypatch: pytest.MonkeyPatch) -> None:
     integration(repo)
     repo.git("switch", "--quiet", "two")
-    repo.commit("a", "conflicting\n", "conflict")
-    result = repo.stack("restack", "combined", expect_success=False)
-    path = conflict_worktree(result.stderr)
+    repo.commit("b", "new source change\n", "change")
+    path = interrupt_integration_build(repo, monkeypatch, "restack", "combined")
 
     assert "--abort" in repo.stack("rename", "combined", "renamed", expect_success=False).stderr
     repo.stack("integrate", "--abort", "combined")
@@ -1498,7 +1686,7 @@ def test_negative_evidence_expires_with_unchanged_root_and_source(
     repo.git("switch", "--quiet", "main")
     repo.git("merge", "--ff-only", "refs/remotes/origin/main")
     repo.stack("integrate", "combined", "one", "two")
-    assert repo.git("rev-parse", "refs/heads/combined^1^2") == tip(repo, "one")
+    assert repo.git("show", "combined:a") == repo.git("show", "one:a")
     gh.add_pr(
         number=4,
         state="MERGED",
@@ -1657,9 +1845,11 @@ def test_push_refreshes_integration_and_publishes_work_with_its_base(
     result = repo.stack("push")
 
     assert ("rebuilding integration combined" in result.stdout) is not restack_first
-    assert ("removing the temporary worktree for combined" in result.stdout) is not restack_first
+    assert "removing the temporary worktree for combined" not in result.stdout
     if not restack_first:
-        assert result.stdout.index("rebuilding integration combined") < result.stdout.index("Merge made by")
+        assert result.stdout.index("rebuilding integration combined") < result.stdout.index(
+            "restacking work onto combined"
+        )
     assert repo.git("show", "refs/heads/work:b", cwd=repo.origin) == "latest source"
     remote_base = tip(repo, "combined", remote=True)
     assert remote_base == tip(repo, "combined")
@@ -1710,11 +1900,11 @@ def test_push_conflict_leaves_remote_integration_and_work_untouched(repo: Repo) 
     repo.git("switch", "--quiet", "work")
     repo.commit("c", "unpushed work\n", "advance work")
 
-    assert "merge --continue" in repo.stack("push", expect_success=False).stderr
+    assert "git stack restack two" in repo.stack("push", expect_success=False).stderr
 
     assert tip(repo, "combined", remote=True) == base
     assert tip(repo, "work", remote=True) == work_tip
-    repo.stack("integrate", "--abort", "combined")
+    assert Integrations(repo.client).pending("combined") is None
 
 
 def test_push_recovers_new_work_upstream_after_publication(repo: Repo, monkeypatch: pytest.MonkeyPatch) -> None:

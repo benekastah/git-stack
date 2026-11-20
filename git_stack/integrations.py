@@ -1,9 +1,10 @@
-"""Metadata and recoverable native merges for integration roots."""
+"""Metadata and recoverable builds for integration roots."""
 
 import hashlib
 import json
 import pathlib
 import time
+import unicodedata
 from collections.abc import Iterable, Sequence
 from typing import NotRequired, TypedDict, cast
 
@@ -48,6 +49,7 @@ class Integration(TypedDict):
     root_tip: str | None
     evidence_remote: NotRequired[str]
     retired_sources: NotRequired[dict[str, RetiredSource]]
+    automatic: NotRequired[bool]
     tip: str
 
 
@@ -59,11 +61,12 @@ class Build(TypedDict):
     head: str
     result: str | None
     checkout: NotRequired[str]
+    replay: NotRequired[bool]
 
 
 class Integrations:
-    """Build against pinned refs in a detached worktree. Journal the next
-    merge before starting it and the result before moving the branch."""
+    """Build against pinned refs in a detached worktree, with a checkpoint
+    for each step and the result journaled before moving the branch."""
 
     def __init__(self, core: StackCore) -> None:
         self.core = core
@@ -249,6 +252,9 @@ class Integrations:
     def progress_path(self, name: str) -> pathlib.Path:
         return self.path(name).with_suffix(".progress")
 
+    def replay_path(self, name: str) -> pathlib.Path:
+        return self.path(name).with_suffix(".replay")
+
     def write_progress(self, name: str, build: Build) -> None:
         """Write a small checkpoint without rewriting the immutable build inputs."""
         path = self.progress_path(name)
@@ -256,16 +262,22 @@ class Integrations:
         staging.write_text(f"{build['step']} {build['head']}\n", encoding="utf-8")
         staging.replace(path)
 
-    def remove_build(self, name: str) -> None:
+    def remove_build(self, name: str, *, keep_worktree: bool = False) -> None:
+        if not keep_worktree:
+            self.remove_worktree(name)
+        self.git.config_unset(name, PENDING_KEY)
+        self.progress_path(name).unlink(missing_ok=True)
+        self.progress_path(name).with_suffix(".tmp").unlink(missing_ok=True)
+        self.replay_path(name).unlink(missing_ok=True)
+
+    def remove_worktree(self, name: str, *, force: bool = True) -> None:
         path = self.path(name)
         # Git can remove a registered worktree even if its files are gone.
         registered = self.git.run("worktree", "list", "--porcelain", "-z").split("\0")
         if any(path == pathlib.Path(entry[9:]) for entry in registered if entry.startswith("worktree ")):
             self.core.emit(events.RemovingIntegrationWorktree(name))
-            self.git.run("worktree", "remove", "--force", str(path))
-        self.git.config_unset(name, PENDING_KEY)
-        self.progress_path(name).unlink(missing_ok=True)
-        self.progress_path(name).with_suffix(".tmp").unlink(missing_ok=True)
+            flags = ["--force"] if force else []
+            self.git.run("worktree", "remove", *flags, str(path))
 
     def restore_pending_checkout(self) -> None:
         """Restore the integration if an interruption left this worktree detached."""
@@ -295,12 +307,15 @@ class Integrations:
         self.save(name, build["integration"])
         if (checkout := build.get("checkout")) and not self.git.config_get(name, CHECKOUT_KEY):
             self.git.config_set(name, CHECKOUT_KEY, json.dumps([checkout, result]))
-        self.remove_build(name)
+        self.remove_build(name, keep_worktree="replay" in build)
         return True
 
     def abort(self, name: str) -> None:
         if self.pending(name) is None:
-            raise StackError(f"{name} has no integration build to abort")
+            if not (self.path(name) / ".git").is_file():
+                raise StackError(f"{name} has no integration build to abort")
+            self.remove_worktree(name, force=False)
+            return
         if not self.finish_interrupted(name):
             self.remove_build(name)
 
@@ -527,19 +542,113 @@ class Integrations:
             and self.active_sources(previous) == inputs
         ):
             desired["tip"] = previous["tip"]
+            if previous.get("automatic"):
+                desired["automatic"] = True
             if desired != previous:
                 self.save(name, desired)
             return {**observed, name: expected}
         else:
             self.ensure_available_worktree(name)
             self.core.emit(events.RebuildingIntegration(name))
-            build = Build(integration=desired, expected=expected, observed=observed, step=0, head=root_tip, result=None)
+            start, replay = self.replay_plan(name, root_tip, inputs, previous, expected)
+            desired["automatic"] = True
+            build = Build(
+                integration=desired,
+                expected=expected,
+                observed=observed,
+                step=0,
+                head=start,
+                result=None,
+                replay=replay is not None,
+            )
             self.progress_path(name).unlink(missing_ok=True)
+            if replay is not None:
+                # A large source history would not fit in a git config argument,
+                # especially on Windows. Pin the ordered plan on disk first.
+                path = self.replay_path(name)
+                path.parent.mkdir(exist_ok=True)
+                path.write_text(json.dumps(replay), encoding="utf-8")
             self.journal(name, build)
         self.ensure_available_worktree(name)
-        result = self.merge(name, build, inputs)
+        result = self.apply(name, build, inputs)
         self.publish(name, build, result)
         return {**observed, name: result}
+
+    def replay_plan(
+        self, name: str, root: str, inputs: list[tuple[str, str]], previous: Integration | None, expected: str | None
+    ) -> tuple[str, list[tuple[str, str]] | None]:
+        """Append new commits if the previous inputs still form a basis of this build."""
+        if not previous or not previous.get("automatic") or previous["root_tip"] != root or expected != previous["tip"]:
+            return root, None
+        old = self.active_sources(previous)
+        if len(old) != len(inputs) or any(
+            old_name != name or not self.git.is_ancestor(old_tip, tip)
+            for (old_name, old_tip), (name, tip) in zip(old, inputs, strict=True)
+        ):
+            return root, None
+        path = self.path(name)
+        # Respect the merge policy as seen by the detached build worktree.
+        if not (path / ".git").is_file() or GitClient(path).ok("config", "--get", "merge.verifySignatures"):
+            return root, None
+        if not self.disjoint_source_paths(root, inputs):
+            return root, None
+        picks = [
+            (name, commit)
+            for (_, old_tip), (name, tip) in zip(old, inputs, strict=True)
+            if old_tip != tip
+            for commit in self.git.run("rev-list", "--reverse", f"{old_tip}..{tip}").splitlines()
+        ]
+        return previous["tip"], picks
+
+    def disjoint_source_paths(self, root: str, inputs: list[tuple[str, str]]) -> bool:
+        """Only replay independent linear histories that touch separate top-level paths."""
+        claimed: set[str] = set()
+        spellings: dict[str, str] = {}
+        for _, tip in inputs:
+            history = f"{root}..{tip}"
+            if not self.git.is_ancestor(root, tip) or self.git.run("rev-list", "--max-count=1", "--merges", history):
+                return False
+            paths = self.git.run(
+                "log",
+                "--format=",
+                "--no-show-signature",
+                "--no-relative",
+                "--no-renames",
+                "--ignore-submodules=none",
+                "--name-status",
+                "-z",
+                history,
+                "--",
+            ).split("\0")[1::2]
+            if any(path.rsplit("/", 1)[-1].casefold() == ".gitattributes" for path in paths):
+                return False
+            # Treat a directory and all its descendants as one unit so a
+            # directory rename can't relocate another source's files.
+            top_level = {self.portable_path(path.split("/", 1)[0]) for path in paths if path}
+            if top_level & claimed or not self.record_path_spellings(spellings, paths):
+                return False
+            claimed.update(top_level)
+        # Git objects distinguish spellings that may name the same file on disk.
+        entries = self.git.run("ls-tree", "-r", "-z", root).split("\0")
+        root_paths = (entry.partition("\t")[2] for entry in entries if entry)
+        return self.record_path_spellings(
+            spellings, (path for path in root_paths if self.portable_path(path.split("/", 1)[0]) in claimed)
+        )
+
+    @staticmethod
+    def portable_path(path: str) -> str:
+        return unicodedata.normalize("NFD", unicodedata.normalize("NFD", path).casefold())
+
+    @classmethod
+    def record_path_spellings(cls, spellings: dict[str, str], paths: Iterable[str]) -> bool:
+        """Reject aliases, including alternative spellings of a directory component."""
+        for path in paths:
+            while path:
+                key = cls.portable_path(path)
+                if spellings.setdefault(key, path) != path:
+                    return False
+                path = path.rpartition("/")[0]
+        return True
 
     @staticmethod
     def active_sources(integration: Integration) -> list[tuple[str, str]]:
@@ -549,29 +658,35 @@ class Integrations:
         if (path := self.git.other_worktree_of(name, fresh=True)) is not None:
             raise StackError(f"can't move integration {name}: checked out in another worktree at {path}")
 
-    def merge(self, name: str, build: Build, inputs: list[tuple[str, str]]) -> str:
+    def apply(self, name: str, build: Build, inputs: list[tuple[str, str]]) -> str:
         if build["result"] is not None:
             return build["result"]
-        if not inputs:
+        cherry_pick = build.get("replay", False)
+        try:
+            steps = (
+                cast(list[tuple[str, str]], json.loads(self.replay_path(name).read_text(encoding="utf-8")))
+                if cherry_pick
+                else inputs
+            )
+        except (FileNotFoundError, json.JSONDecodeError) as error:
+            raise StackError(
+                f"integration replay plan is missing or invalid; run `git stack integrate --abort {name}`"
+            ) from error
+        if not steps:
             return build["head"]
         worktree = self.merge_worktree(name, build)
-        for index in range(build["step"], len(inputs)):
-            source, tip = inputs[index]
-            before, head = build["head"], worktree.rev("HEAD")
-            if head != before:
-                # The merge completed before its next step was journaled,
-                # possibly with a conflict resolution made by the user.
-                parents = worktree.run("show", "-s", "--format=%P", "HEAD").split()
-                if parents != [before, tip]:
-                    raise StackError(
-                        f"integration worktree HEAD changed unexpectedly; run `git stack integrate --abort {name}`"
-                    )
-            elif not worktree.is_ancestor(tip, before) and not worktree.passthrough(
-                "merge", "--no-ff", "--no-edit", "-m", f"Merge {source} into {name}", tip
-            ):
-                if worktree.operation_in_progress():
-                    raise self.stopped(name)
-                raise StackError(f"merging {source} into {name} failed; run `git stack integrate --abort {name}`")
+        for index in range(build["step"], len(steps)):
+            source, tip = steps[index]
+            before = build["head"]
+            if worktree.rev("HEAD") != before:
+                self.verify_completed_step(name, worktree, before, tip, cherry_pick)
+                # An interrupted step can have been completed by hand.
+                if build["integration"].pop("automatic", False):
+                    self.journal(name, build)
+            elif cherry_pick:
+                self.pick_step(name, worktree, source, tip)
+            elif not worktree.is_ancestor(tip, before):
+                self.merge_step(name, worktree, source, tip)
             build["head"] = worktree.run("rev-parse", "HEAD")
             build["step"] = index + 1
             self.write_progress(name, build)
@@ -579,30 +694,100 @@ class Integrations:
             raise StackError(f"integration worktree changed unexpectedly; run `git stack integrate --abort {name}`")
         return build["head"]
 
+    def verify_completed_step(self, name: str, worktree: GitClient, before: str, tip: str, cherry_pick: bool) -> None:
+        """An interrupted command may have committed before recording its checkpoint."""
+        parents = worktree.run("show", "-s", "--format=%P", "HEAD").split()
+        if cherry_pick:
+            valid = parents == [before] and worktree.run("show", "-s", "--format=%B", "HEAD").endswith(
+                f"(cherry picked from commit {tip})"
+            )
+        else:
+            valid = parents == [before, tip]
+        if not valid:
+            raise StackError(
+                f"integration worktree HEAD changed unexpectedly; run `git stack integrate --abort {name}`"
+            )
+
+    def merge_step(self, name: str, worktree: GitClient, source: str, tip: str) -> None:
+        try:
+            worktree.run("merge", "--no-ff", "--no-edit", "-m", f"Merge {source} into {name}", tip)
+        except StackError as error:
+            if worktree.run("ls-files", "-u"):
+                raise self.conflict(name, source) from None
+            raise StackError(
+                f"merging {source} into {name} failed; run `git stack integrate --abort {name}`: {error}"
+            ) from error
+
+    def pick_step(self, name: str, worktree: GitClient, source: str, commit: str) -> None:
+        try:
+            worktree.run("cherry-pick", "-x", "--allow-empty", commit)
+        except StackError as error:
+            if worktree.run("ls-files", "-u"):
+                raise self.conflict(name, source) from None
+            # Git 2.38 stops when a patch's changes are already present.
+            if worktree.operation_in_progress() and worktree.ok("diff", "--cached", "--quiet", "HEAD", "--"):
+                worktree.run("cherry-pick", "--skip")
+                return
+            raise StackError(
+                f"applying {source} to {name} failed; run `git stack integrate --abort {name}`: {error}"
+            ) from error
+
     def merge_worktree(self, name: str, build: Build) -> GitClient:
-        """Open the detached worktree, creating it for the first merge."""
+        """Prepare the cached detached worktree once, then reopen it on retries."""
         path = self.path(name)
         path.parent.mkdir(exist_ok=True)
         worktree = GitClient(path)
         worktree.passthrough_stdout = self.git.passthrough_stdout
-        if not (path / ".git").is_file():
+        cached = (path / ".git").is_file()
+        if not cached:
             if build["step"]:
                 raise StackError(f"integration worktree is missing; run `git stack integrate --abort {name}`")
             self.git.run("worktree", "add", "--quiet", "--detach", str(path), build["head"])
         if worktree.current_branch() is not None:
             raise StackError(f"integration worktree is no longer detached; run `git stack integrate --abort {name}`")
         if worktree.operation_in_progress():
-            raise self.stopped(name)
+            if build["integration"].pop("automatic", False):
+                self.journal(name, build)
+            command = "cherry-pick" if build.get("replay") else "merge"
+            raise StackError(
+                f"integration worktree has a stopped operation in {path}. "
+                f'Run `git -C "{path}" {command} --continue` to keep its changes, '
+                f"or discard it with `git stack integrate --abort {name}`."
+            )
+        if "replay" in build and not self.progress_path(name).exists():
+            if cached and worktree.run("status", "--porcelain"):
+                raise StackError(f"integration worktree changed unexpectedly in {path}")
+            if worktree.rev("HEAD") != build["head"]:
+                worktree.run("switch", "--quiet", "--detach", build["head"])
+            self.write_progress(name, build)
         return worktree
 
-    def stopped(self, name: str) -> StackError:
-        path = self.path(name)
+    def preserve_retired_landings(self, name: str, build: Build) -> None:
+        """Keep landing evidence for removed inputs even when a build cannot publish."""
+        previous = self.read(name)
+        if previous is None or not (retired := previous.get("retired_sources")):
+            return
+        sources = {source["name"]: source for source in build["integration"]["sources"]}
+        changed = False
+        for branch, record in retired.items():
+            old = record["source"]
+            source = self.retired_input(old, old, sources.get(branch))
+            if source != old:
+                record["source"] = source
+                changed = True
+        if changed:
+            self.save(name, previous)
+
+    def conflict(self, name: str, source: str) -> StackError:
+        build = self.pending(name)
+        against = "the integration root"
+        if build:
+            against = build["integration"]["root"]
+            self.preserve_retired_landings(name, build)
+        self.remove_build(name)
         return StackError(
-            f"integration merge stopped in {path}. Resolve and stage the conflicts, then run:\n"
-            f'  git -C "{path}" merge --continue\n'
-            f'Or back out with:\n  git -C "{path}" merge --abort\n'
-            f"Then rerun the original git-stack command, or discard the build with "
-            f"`git stack integrate --abort {name}`."
+            f"integration build for {name} aborted: changes from {source} conflict with {against} or another source. "
+            f"Run `git stack restack {source} --onto <dependency>`, resolve the conflict there, and rerun this command."
         )
 
     def publish(self, name: str, build: Build, result: str) -> None:
@@ -628,7 +813,7 @@ class Integrations:
             if checked_out:
                 self.git.switch(name)
                 self.git.config_unset(name, CHECKOUT_KEY)
-        self.remove_build(name)
+        self.remove_build(name, keep_worktree="replay" in build)
 
     def verify(self, refs: dict[str, str | None], update: tuple[str, str] | None = None) -> None:
         """Verify inputs together, with the update in the same ref transaction."""

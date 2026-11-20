@@ -421,9 +421,9 @@ that.
 Nothing is written unless every branch can be tracked, so a bad argument
 doesn\(aqt leave the stack half\-tracked.
 .SS \f[CR]git stack integrate <name> <source> <source>... [\-\-root <branch>] [\-\-adopt]\f[R]
-Build a local integration branch by merging the source branches in the
-order given, starting from \f[CR]main\f[R] or the ordinary untracked
-branch named by \f[CR]\-\-root\f[R].
+Build a local integration branch by merging source tips in the given
+order, starting from \f[CR]main\f[R] or the ordinary untracked branch
+named by \f[CR]\-\-root\f[R].
 Name at least two distinct local sources when creating an integration.
 To register an existing snapshot, use \f[CR]\-\-adopt\f[R].
 Its tip stays where it is until the next refresh.
@@ -434,7 +434,7 @@ The new list takes effect when the build succeeds.
 Switch to the integration branch and use
 \f[CR]git stack create <work>\f[R] to start a stack on it.
 \f[CR]git stack info\f[R] lists the root\(aqs configured sources in
-merge order, for example \f[CR](of branch\-a, branch\-b)\f[R].
+application order, for example \f[CR](of branch\-a, branch\-b)\f[R].
 Integration branches and work stacked above them cannot supply inputs to
 an integration.
 In color, sources proven to have landed on the configured root are cyan.
@@ -459,8 +459,14 @@ leases.
 \f[CR]sync\f[R] also publishes the integration atomically with eligible
 selected work.
 The first publication sets the integration\(aqs upstream.
-Git\-stack reports when it starts rebuilding the integration, removes
-the temporary worktree, and checks the atomic push with the remote.
+When the root is unchanged and each source only adds commits to its
+linear history, refresh can cherry\-pick the new commits if the sources
+touch separate top\-level paths and Git does not require merge signature
+checks.
+Other changes rebuild the integration from the source tips.
+A successful build keeps a detached worktree under Git\(aqs directory
+for reuse.
+To release it, run \f[CR]git stack integrate \-\-abort <name>\f[R].
 If sync also deletes merged remote branches, those deletions wait for
 the same push.
 If the push fails, sync reports the remote branches it kept.
@@ -506,15 +512,13 @@ To discard those commits, run
 explicitly.
 Move an integration out of any other worktree before refreshing it.
 .PP
-If a merge conflicts, git\-stack reports the temporary worktree.
-Resolve and stage the files there, then run
-\f[CR]git merge \-\-continue\f[R].
-To undo the current merge, run \f[CR]git merge \-\-abort\f[R] there.
-Rerun the original git\-stack command to resume the build.
-To discard the entire pending build, run
-\f[CR]git stack integrate \-\-abort <name>\f[R] from your regular
-worktree.
-The prior integration tip stays in place until a build completes.
+If a merge or cherry\-pick conflicts, git\-stack aborts the build and
+keeps the previous integration tip.
+Restack the conflicting source onto the branch it depends on, resolve
+the conflict in that source, and rerun the original command.
+Use \f[CR]git stack integrate \-\-abort <name>\f[R] to discard a build
+interrupted for another reason.
+Release the cached worktree before deleting the integration branch.
 Sync records a selected source\(aqs tip and stack before removing the
 merged branch.
 Rerun the original command with the same selectors.
