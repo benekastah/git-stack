@@ -41,7 +41,7 @@ From an ordinary untracked branch such as `main`, plain `git stack info` shows a
 4. **Don't pass `--allow-shared` or `--force` on your own.** A shared stack (someone else's commits)
    is protected on purpose. Ask the user first.
 
-## Protect queued and merge-ready PRs
+## Protect queued PRs and existing approvals
 
 Before a stack operation that could update PRs, check merge readiness and
 queue status on GitHub for the full scope, including descendants and any
@@ -56,6 +56,10 @@ status.
   or require fresh review. This applies to pushes, syncs, and PR retargets.
   If the repository's rules require fresh review for the planned change,
   tell the user before proceeding.
+- **Existing approvals on sync:** Check for approvals on each PR in the sync
+  scope. Before syncing, name the approved PRs whose commits or PR bases could
+  change and warn that they may need fresh reviews. Apply this check even
+  when required checks are still pending.
 
 ## Approval for rearranging existing stacks
 

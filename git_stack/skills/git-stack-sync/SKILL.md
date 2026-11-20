@@ -10,9 +10,10 @@ worktree. Sync fetches, fast-forwards the root, untracks merged branches,
 restacks the survivors, incorporates upstream commits, and pushes changed
 branches that already track a remote.
 
-Follow the queued and merge-ready PR checks in `git-stack` before syncing.
-Preserve queued PRs and warn before any update that could cost a merge-ready
-PR its existing approvals, even when its base stays the same.
+Before syncing, follow the queue and approval checks in `git-stack` for the
+full scope. Preserve queued PRs. If sync could push new commits or retarget a
+PR with existing approvals, name the PR and warn that fresh reviews may be
+required, even while checks are pending or the PR will keep its current base.
 
 Before syncing a rearranged stack, verify the affected PR bases and merge
 queue status. Confirm the user approved publishing those changes in the full
@@ -32,7 +33,8 @@ rules in `git-stack`.
 
 If sync stops on a rebase or cherry-pick conflict, no branches are pushed.
 Use the recovery steps in `git-stack-restack` or `git-stack-pull` for the
-operation shown by `git status`. Then rerun the original sync with the same
+operation shown by `git status`. Recheck queue status and approvals before
+rerunning the original sync with the same
 selectors and options. Check the result with `git stack info --all --offline`.
 
 Ask before overriding protections with `--force`, `--allow-shared`,
