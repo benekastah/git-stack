@@ -41,17 +41,30 @@ From an ordinary untracked branch such as `main`, plain `git stack info` shows a
 4. **Don't pass `--allow-shared` or `--force` on your own.** A shared stack (someone else's commits)
    is protected on purpose. Ask the user first.
 
+## Protect queued and merge-ready PRs
+
+Before a stack operation that could update PRs, check merge readiness and
+queue status on GitHub for the full scope, including descendants and any
+stacks selected by group. Pause if you cannot verify an affected PR's queue
+status.
+
+- **Queued to merge:** Preserve the PR's head, base, and queue entry. Exclude
+  the PR from updates. If the available selectors cannot safely exclude it,
+  stop and explain what would change.
+- **Ready to merge:** Before a push that would update the PR's head or a sync
+  that could rebase and push it, warn the user that GitHub may dismiss existing
+  approvals or require fresh review under the repository's rules. This applies
+  even when the PR's target branch stays the same. If the applicable rules are
+  known and require fresh review for the planned change, say so.
+
 ## Approval for rearranging existing stacks
 
 - Get the user's approval before changing an existing stack's parent
   relationships, branch order, or group membership. Show the proposed change
   and the affected branches, descendants, and pull requests.
 - Before making the change, check the affected PRs on GitHub for their current
-  bases and merge queue status. Keep PRs queued for `main` targeting `main` and
-  exclude them from operations that would rewrite their heads. If queue status
-  cannot be verified for an affected PR, pause and tell the user. Warn before
-  moving a merge-ready, conflict-free PR off `main` that it will delay the merge
-  and a later rebase and push may dismiss reviews.
+  bases and merge queue status. Warn before moving a merge-ready,
+  conflict-free PR off `main` that doing so will delay the merge.
 - Before publishing a rearrangement, recheck PR bases and queue status.
   Confirm the user's approval covers the affected branches and PR base changes.
   If the approval covers only local steps, ask before running `git stack push`,
