@@ -8,6 +8,7 @@ class Args(argparse.Namespace):
     name: str
     sources: list[str]
     root: str | None
+    group: bool
     adopt: bool
     abort: bool
 
@@ -16,6 +17,9 @@ def register(subparsers: Subparsers) -> None:
     parser = subparsers.add_parser("integrate", help="build an integration root from local source branches")
     parser.add_argument("name", help="integration branch")
     parser.add_argument("sources", nargs="*", metavar="source", help="local source branches, in application order")
+    parser.add_argument(
+        "-g", "--group", action="store_true", help="use the current group's leaves on the default branch"
+    )
     parser.add_argument("--root", help="start the build here (default: main)")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--adopt", action="store_true", help="register an existing snapshot and rebuild it on refresh")
@@ -24,7 +28,9 @@ def register(subparsers: Subparsers) -> None:
 
 
 def run(stack: StackClient, args: Args) -> Integrated:
-    return stack.integrate(args.name, args.sources, root=args.root, adopt=args.adopt, abort=args.abort)
+    return stack.integrate(
+        args.name, args.sources, root=args.root, group=args.group, adopt=args.adopt, abort=args.abort
+    )
 
 
 def show(stack: StackClient, args: Args, result: Integrated) -> None:

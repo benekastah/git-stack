@@ -41,7 +41,8 @@ lands on `main` so each merged build has a distinct version in performance logs.
   `StackCore.save()` writes only what changed. Walk and change the tree through
   it rather than with a `{branch: parent}` map of your own.
 - `git_stack/integrations.py` keeps integration roots out of `Stacks`. Its branch config
-  records exact tips, merge evidence, build inputs and pending publication. The merge
+  records exact tips, merge evidence, build inputs and pending publication. Group-based
+  integrations also record the group selector and resolve its current leaves at refresh. The merge
   checkpoint stores only the step and HEAD so it can advance without rewriting those
   inputs. A build that cherry-picks pins its plan on disk. Fast-forward changes to
   independent, linear sources can extend a previous build, and successful builds

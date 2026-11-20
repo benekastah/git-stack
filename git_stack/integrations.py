@@ -48,6 +48,7 @@ class Integration(TypedDict):
     sources: list[Source]
     root_tip: str | None
     evidence_remote: NotRequired[str]
+    group: NotRequired[str]
     retired_sources: NotRequired[dict[str, RetiredSource]]
     automatic: NotRequired[bool]
     tip: str
@@ -134,7 +135,9 @@ class Integrations:
         carries over the old group's pending integration selectors."""
 
         def update(config: Integration) -> bool:
-            changed = False
+            changed = old is not None and config.get("group") == old
+            if changed:
+                config["group"] = new
             for entry in config.get("retired_sources", {}).values():
                 if old is not None and entry["group"] == old:
                     entry["group"] = new
@@ -319,6 +322,26 @@ class Integrations:
         if not self.finish_interrupted(name):
             self.remove_build(name)
 
+    @staticmethod
+    def source_names(config: Integration, stacks: Stacks) -> list[str]:
+        """Resolve a live group selector, retaining the order of surviving inputs."""
+        recorded = [source["name"] for source in config["sources"]]
+        if (group := config.get("group")) is None:
+            return recorded
+        selected = [*stacks.group_leaves(group, config["root"]), *config.get("retired_sources", {})]
+        selected_names = set(selected)
+        return list(dict.fromkeys([*(name for name in recorded if name in selected_names), *selected]))
+
+    def selected_sources(self, config: Integration, stacks: Stacks) -> list[Source]:
+        if "group" not in config:
+            return config["sources"]
+        known = {name: retired["source"] for name, retired in config.get("retired_sources", {}).items()}
+        known.update({source["name"]: source for source in config["sources"]})
+        return [
+            known[name] if name in known else self.source(name, self.git.tip(name))
+            for name in self.source_names(config, stacks)
+        ]
+
     def source(self, name: str, tip: str, previous: Source | None = None) -> Source:
         remote = self.git.config_get(name, "remote") or (previous and previous["remote"])
         if remote == ".":
@@ -395,6 +418,7 @@ class Integrations:
         fetch: bool,
         *,
         previous: Integration | None = None,
+        group: str | None = None,
     ) -> tuple[Integration, dict[str, str | None]]:
         root_tip = self.git.tip(root)
         observed: dict[str, str | None] = {root: root_tip}
@@ -433,6 +457,8 @@ class Integrations:
                     f"`git stack integrate {name} <source>...`."
                 )
         desired = Integration(root=root, sources=inputs, root_tip=root_tip, evidence_remote=remote, tip=root_tip)
+        if group is not None:
+            desired["group"] = group
         if still_retired:
             desired["retired_sources"] = still_retired
         return desired, observed
@@ -527,6 +553,7 @@ class Integrations:
                 build["expected"] != expected
                 or build["observed"] != observed
                 or saved["root"] != root
+                or saved.get("group") != desired.get("group")
                 or [(s["name"], s["tip"]) for s in saved["sources"]]
                 != [(s["name"], s["tip"]) for s in desired["sources"]]
                 or self.active_sources(saved) != inputs

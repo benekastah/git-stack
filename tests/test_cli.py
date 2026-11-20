@@ -157,7 +157,7 @@ def stack(autospec_stack: Any) -> Any:
             ["integrate", "--adopt", "combined", "a", "b", "--root", "release"],
             "integrate",
             ("combined", ["a", "b"]),
-            {"root": "release", "adopt": True, "abort": False},
+            {"root": "release", "group": False, "adopt": True, "abort": False},
         ),
         (["restack", "-l"], "restack", ([], []), {"onto": None, "latest": True}),
         (["restack", "--allow-shared"], "restack", ([], []), {"onto": None, "latest": False}),

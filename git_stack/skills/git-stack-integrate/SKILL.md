@@ -20,6 +20,9 @@ Check the selected stacks and source branches first with
   names are local branches in application order. The build starts at `main` by
   default. Use `git stack integrate <name> <source-a> <source-b> --root <root>`
   for a different ordinary untracked root.
+- From a stack in a group, use `git stack integrate <name> -g` to follow the
+  leaves of the group's stacks on the remote default branch. New leaves are
+  included the next time the integration refreshes.
 - Register an existing snapshot with
   `git stack integrate --adopt <name> <source-a> <source-b>`. Adoption keeps
   the current tip until the next refresh. Rerun `git stack integrate <name> <source>`

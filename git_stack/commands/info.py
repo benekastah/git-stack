@@ -128,7 +128,7 @@ def label(branch: BranchInfo | GroupHeader, paint: Paint, color: bool, sources_b
                 paint(name, STATUS_COLORS[BranchStatus.MERGED]) if landed else name
                 for name, landed in branch.integration_sources
             )
-            parts.append(f"(of {sources})" + (" *" if branch.current else ""))
+            parts.append((f"(of {sources})" if sources else "(integration)") + (" *" if branch.current else ""))
         elif (sources := sources_by_root.get(branch.name)) is not None:
             parts.append(f"(of {sources})" + (" *" if branch.current else ""))
         if branch.integration_needs_restack and not color:

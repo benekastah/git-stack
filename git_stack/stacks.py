@@ -158,6 +158,16 @@ class Stacks:
                     self._group_bottoms.setdefault(node.group, []).append(name)
         return list(self._group_bottoms.get(group, ()))
 
+    def group_leaves(self, group: str, root: str) -> list[str]:
+        """The leaf branches of stacks in group with the given root."""
+        return [
+            branch
+            for bottom in self.bottoms_in(group)
+            if self.parent(bottom) == root
+            for branch in (bottom, *self.descendants(bottom))
+            if not self.children(branch)
+        ]
+
     def group_bottoms(self, bottom: str) -> list[str]:
         """bottom, a branch at the bottom of a stack, followed by the others
         in its group, if it has one, sorted."""

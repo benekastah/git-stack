@@ -13,6 +13,7 @@ from git_stack.core import RemoteDeletion
 from git_stack.errors import StackError
 from git_stack.git import GitClient
 from git_stack.integrations import Integration, Integrations
+from git_stack.stack import StackClient
 from git_stack.stacks import StackNode, Stacks
 from tests.helpers import FakeGitHub, Repo, captured_output
 
@@ -34,6 +35,98 @@ def integration(repo: Repo, *, tracked: bool = False) -> None:
     source(repo, "one", "a", tracked=tracked)
     source(repo, "two", "b")
     repo.stack("integrate", "combined", "one", "two")
+
+
+def test_group_integration_refreshes_its_leaves_and_keeps_source_order(repo: Repo, client: StackClient) -> None:
+    repo.git("remote", "set-head", "origin", "main")
+    client.branch("bottom", group="topic", from_branch="main")
+    repo.commit("a", "bottom\n", "bottom")
+    client.branch("leaf")
+    repo.commit("b", "leaf\n", "leaf")
+    client.branch("other", group="topic", from_branch="main")
+    repo.commit("c", "other\n", "other")
+    source(repo, "unrelated", "a", tracked=True)
+    repo.git("switch", "-qc", "release", "main")
+    client.branch("elsewhere", group="topic")
+    repo.commit("a", "elsewhere\n", "elsewhere")
+    repo.git("switch", "leaf")
+
+    repo.stack("integrate", "combined", "-g")
+
+    assert "(of leaf, other)" in repo.stack("info", "combined", "--offline").stdout
+    client.branch("new-top")
+    repo.commit("a", "new top\n", "new top")
+    client.branch("added", group="topic", from_branch="main")
+    repo.write("added.txt", "added\n")
+    repo.git("add", "added.txt")
+    repo.git("commit", "-m", "added")
+    assert "(of other, new-top, added) (needs restack)" in repo.stack("info", "combined", "--offline").stdout
+
+    repo.stack("restack", "combined")
+
+    assert repo.git("show", "combined:a") == "new top"
+    assert repo.git("show", "combined:added.txt") == "added"
+    assert "(of other, new-top, added) (needs restack)" not in repo.stack("info", "combined", "--offline").stdout
+
+
+def test_group_integration_uses_the_remote_default_and_tracks_group_rename(repo: Repo, client: StackClient) -> None:
+    repo.git("switch", "-qc", "trunk")
+    repo.git("push", "--quiet", "--set-upstream", "origin", "trunk")
+    repo.git("remote", "set-head", "origin", "trunk")
+    client.branch("only", group="topic")
+    repo.commit("a", "only\n", "only")
+
+    repo.stack("integrate", "combined", "--group")
+    assert repo.git("rev-parse", "combined^1") == tip(repo, "trunk")
+    client.group_rename("renamed", "topic")
+    client.branch("new", group="renamed", from_branch="trunk")
+    repo.commit("b", "new\n", "new")
+
+    repo.stack("restack", "combined")
+
+    assert repo.git("show", "combined:b") == "new"
+
+
+def test_pull_updates_a_new_group_source_before_rebuilding(repo: Repo, client: StackClient) -> None:
+    repo.git("remote", "set-head", "origin", "main")
+    client.branch("first", group="topic")
+    repo.commit("a", "first\n", "first")
+    repo.stack("integrate", "combined", "-g")
+    client.branch("new", group="topic", from_branch="main")
+    repo.commit("b", "new\n", "new")
+    repo.commit_on_forge("main", "c", "trunk change\n", "trunk change")
+
+    repo.stack("pull", "combined", "-g", "topic", "--latest")
+
+    assert repo.git("merge-base", "combined", "new") == tip(repo, "new")
+    assert repo.git("show", "combined:c") == "trunk change"
+    repo.assert_stacked("new", "main", ["new"])
+
+
+def test_group_integration_can_refresh_with_no_remaining_leaves(repo: Repo, client: StackClient) -> None:
+    repo.git("remote", "set-head", "origin", "main")
+    client.branch("only", group="topic")
+    repo.commit("a", "only\n", "only")
+    repo.stack("integrate", "combined", "-g")
+    client.group_remove(["only"])
+
+    repo.stack("restack", "combined")
+
+    assert tip(repo, "combined") == tip(repo, "main")
+    assert "combined (integration)" in repo.stack("info", "combined", "--offline").stdout
+    client.branch("new", group="topic", from_branch="main")
+    repo.commit("b", "new\n", "new")
+    repo.stack("restack", "combined")
+
+    assert repo.git("show", "combined:b") == "new"
+
+
+def test_group_integration_requires_a_group(repo: Repo, client: StackClient) -> None:
+    client.branch("solo")
+    result = repo.stack("integrate", "combined", "-g", expect_success=False)
+
+    assert "isn't in a group" in result.stderr
+    assert not repo.git("branch", "--list", "combined")
 
 
 def test_info_marks_landed_integration_input_and_refresh(repo: Repo, gh: FakeGitHub) -> None:
