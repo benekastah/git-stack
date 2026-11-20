@@ -41,6 +41,23 @@ From an ordinary untracked branch such as `main`, plain `git stack info` shows a
 4. **Don't pass `--allow-shared` or `--force` on your own.** A shared stack (someone else's commits)
    is protected on purpose. Ask the user first.
 
+## Approval for rearranging existing stacks
+
+- Get the user's approval before changing an existing stack's parent
+  relationships, branch order, or group membership. Show the proposed change
+  and the affected branches, descendants, and pull requests.
+- Before making the change, check the affected PRs on GitHub for their current
+  bases and merge queue status. Keep PRs queued for `main` targeting `main` and
+  exclude them from operations that would rewrite their heads. If queue status
+  cannot be verified for an affected PR, pause and tell the user. Warn before
+  moving a merge-ready, conflict-free PR off `main` that it will delay the merge
+  and a later rebase and push may dismiss reviews.
+- Before publishing a rearrangement, recheck PR bases and queue status.
+  Confirm the user's approval covers the affected branches and PR base changes.
+  If the approval covers only local steps, ask before running `git stack push`,
+  `git stack sync`, `git stack prs`, or editing a PR directly. Ask again if the
+  scope changes.
+
 ## Starting and managing a stack
 
 ```sh

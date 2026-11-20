@@ -9,6 +9,11 @@ Read `git-stack` first for selection, ownership and timing. Check
 `git stack info --all --offline` and publish only the intended stack. Push
 uses leases, sets upstreams and updates pull request bases.
 
+Before pushing a rearranged stack or updating its PRs, verify the bases and
+merge queue status of all affected PRs and confirm that the user's approval
+covers publication and any retargeting. Follow the approval rules in
+`git-stack`, including for drafts. Keep PRs queued for `main` targeting `main`.
+
 - Use `git stack push` for the current stack or `git stack push <branch>` for a
   named stack. Pass `-g` to include its group. Use `--remote <name>` to
   select one remote when tracked branches use several.

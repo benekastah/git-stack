@@ -15,7 +15,8 @@ starting at the bottom. It uses local refs and makes no remote updates.
   root. Use `git stack restack --latest` to move it onto the latest local
   root either way. Use `git-stack-pull` when you also need to fetch.
 - Use `git stack restack <branch> --onto <parent>` to move one branch and its
-  descendants. See `git-stack-rearrange` for changes to the stack's shape.
+  descendants only after the user approves the rearrangement. Follow
+  `git-stack-rearrange` to check affected PRs before moving them.
 - A branch that needs restacking in another worktree is skipped along with
   its descendants. Coordinate with whoever is using the worktree before
   retrying. Ask before overriding protections with `--allow-shared` or

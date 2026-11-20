@@ -22,6 +22,8 @@ Per branch it records `stackParent` (its parent), `stackBase` (the parent commit
 and sometimes `stackGroup`, `stackOwnership` and `stackPending...` (a stopped restack or pull).
 Prefer `git stack track <parent> <branch>` to editing these by hand. Before any hand edit, back up
 `.git/config`. Never `git reset --hard`, and never delete `.git/config`.
+If a repair changes an existing stack's parent relationships, follow the
+approval rules in `git-stack` before moving branches or publishing the repair.
 
 ## Symptoms and fixes
 

@@ -10,6 +10,11 @@ worktree. Sync fetches, fast-forwards the root, untracks merged branches,
 restacks the survivors, incorporates upstream commits, and pushes changed
 branches that already track a remote.
 
+Before syncing a rearranged stack, verify the affected PR bases and merge
+queue status. Confirm the user approved publishing those changes in the full
+selected scope, including any stacks selected by group. Follow the approval
+rules in `git-stack` and keep PRs queued for `main` targeting `main`.
+
 - Use `git stack sync` for the current stack or `git stack sync <branch>` for a
   named stack. Pass `-g` for its group or `-g <group>` for a named group. Use
   `--remote <name>` if the selected branches track different remotes.

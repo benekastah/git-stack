@@ -10,11 +10,18 @@ how many Git and `gh` calls ran, the time spent in each tool, and the time spent
 Count each `cat-file` batch request as a Git call. Include batch shutdown in Git time only.
 Report any overlap shown and flag the slowest call if it explains a delay.
 
-Read the `git-stack` skill first. Commit everything first: restacking needs a clean worktree.
-Every move below is `git stack restack <branch> --onto <parent>` (the branch's children come along,
-and only its own commits are replayed) or `git stack track <parent> <branch>`, which only records a
-new parent and base. Naming the branch means you needn't switch to it.
-After rearranging, run `git stack info --all --offline` to check the shape, then `git stack push`.
+Read the approval rules in `git-stack` first. Show the proposed stack
+shape and affected PRs, including descendants. Verify their bases and queue
+status, then get the user's approval before running any move below.
+
+Start with a clean worktree. `git stack restack <branch> --onto <parent>`
+moves the branch and its descendants. `git stack track <parent> <branch>`
+records a new parent and base. Naming the branch means you needn't switch to it.
+
+After rearranging, run `git stack info --all --offline` to verify the shape.
+Before publishing with `git stack push`, `git stack sync`, or `git stack prs`,
+recheck the queue and confirm the user's approval covers the resulting PR
+base changes.
 
 ## Moves
 
