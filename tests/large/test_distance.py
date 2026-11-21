@@ -20,7 +20,8 @@ SIZES = [1, 3, 10]
 # stack is, which each test checks at every distance.
 INFO_FIRST = {1: 16, 3: 18, 10: 25}
 RESTACK = {1: 17, 3: 21, 10: 35}
-RESTACK_LATEST = {1: 26, 3: 49, 10: 133}
+# One rebase for the whole chain from 3 branches up (see restack_chain): 26 for 1 branch, which has no chain.
+RESTACK_LATEST = {1: 26, 3: 40, 10: 89}
 SYNC = {1: 14, 3: 16, 10: 23}
 
 
