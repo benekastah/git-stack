@@ -150,7 +150,8 @@ Text meant for people (messages, `info`'s tree) can change.
   repository fails rather than reach the clone the tests were started in.
   Code that names `ROOT` (`dev.py`, `dev_project.py`) still runs there. `git_calls` lists the git processes
   git-stack starts; the tests' own (`Repo.git`) aren't in it.
-- Performance tests declare how many git processes and `gh` commands they may run, with
+- Performance tests declare how many git processes and `gh` commands they may run (on Linux only: see
+  "Linux, macOS and Windows"), with
   `tests/operations.py`'s `expect_operations(git=N, gh=M)`: as a decorator for the whole test
   body, or as a `with` target for a block (e.g. one stack size in a loop). It counts what git-stack
   starts (the batch `cat-file` once, like `git_calls`) and what it runs against `tests/fake_gh.py`,
@@ -176,6 +177,10 @@ Text meant for people (messages, `info`'s tree) can change.
 
 On top of `AGENTS.md`'s rules:
 
+- **Never detect the system to change which git or gh commands run**, or their arguments: they must
+  work the same on Linux, macOS and Windows. What differs between systems is how Python runs them
+  (paths, how a process is started, a lock, a link), not what is run, so a command starts the same
+  processes everywhere. (This is why the performance tests, which count them, run on Linux only.)
 - Compare paths as `Path`s, not as strings: git writes Windows paths with `/`.
   To tell whether two paths name the same file, use `git.same_file`, since
   resolving a path doesn't fix its case.
