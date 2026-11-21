@@ -79,7 +79,9 @@ def make_repositories(directory: pathlib.Path) -> None:
 
 @pytest.fixture(params=[1, 3, 10], ids=lambda size: f"{size}-branches")
 def chain(repo: Repo, request: pytest.FixtureRequest) -> list[str]:
-    """A stack of 1, 3 and 10 branches, the last checked out."""
+    """A stack of 1, 3 and 10 branches, the last checked out: the sizes the performance tests
+    (tests/test_operations_*.py) run each scenario at, to show what grows with the stack. A
+    fixture, so that the commits it makes aren't counted by a decorator on the test."""
     return repo.make_chain(request.param)
 
 
