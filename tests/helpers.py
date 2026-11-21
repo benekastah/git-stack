@@ -181,9 +181,14 @@ class Repo:
 
     def make_chain(self, size: int) -> list[str]:
         """main <- chain1 <- chain2 <- ... <- chain<size>, each with a commit of its own file, and the
-        last checked out. Returns the branches, bottom first."""
+        last checked out. Returns the branches, bottom first.
+
+        Each branch's commit is a new file of its own, so restacking one onto a changed parent
+        never conflicts, which a performance test's count shouldn't depend on. (`commit` changes
+        a file that's already there, which is what makes a conflict.)"""
         names = [f"chain{i}" for i in range(1, size + 1)]
         for name in names:
+            # In this process, as the test's setup: it isn't what the test counts.
             self.client.branch(name)
             self.write(f"{name}.txt", f"{name}\n")
             self.git("add", f"{name}.txt")
