@@ -10,6 +10,10 @@ import pytest
 from tests.helpers import FakeGitHub, Repo
 from tests.operations import expect_operations
 
+# `gh` makes the repository look like a GitHub one, with tests/fake_gh.py as `gh` (in this process,
+# for the setup that uses the client, and as a command for the `git stack` processes the tests
+# start, which read and write the same state file: that's how a pull request opened here is seen
+# there, and how the commands they run are counted).
 pytestmark = [pytest.mark.usefixtures("separate_processes", "gh")]
 
 # Each is (git processes, gh commands) at 1, 3 and 10 branches.
@@ -31,7 +35,8 @@ INFO = {1: (4, 1), 3: (4, 1), 10: (4, 1)}
 
 
 def open_pull_requests(repo: Repo) -> None:
-    """Push the stack and open a pull request for each branch."""
+    """Push the stack and open a pull request for each branch, as setup: in this process, outside
+    what a test counts, into the state the fake gh keeps for the process that does."""
     repo.client.push(prs=True)
 
 
@@ -75,6 +80,9 @@ def test_sync_with_nothing_to_do(repo: Repo, chain: list[str]) -> None:
 
 def test_sync_after_the_bottom_pull_request_was_merged(repo: Repo, gh: FakeGitHub, chain: list[str]) -> None:
     open_pull_requests(repo)
+    # What GitHub's "Squash and merge" does: main gets one new commit with the pull request's
+    # changes, which no branch above it has, and the pull request is marked merged. `sync` then
+    # moves the branches above onto main, which is most of what it costs.
     repo.squash_merge_on_forge("chain1")
     state = gh.load()
     state["prs"][0]["state"] = "MERGED"
@@ -87,6 +95,8 @@ def test_sync_after_the_bottom_pull_request_was_merged(repo: Repo, gh: FakeGitHu
 
 def test_import_tracks_each_open_pull_request(repo: Repo, chain: list[str]) -> None:
     open_pull_requests(repo)
+    # Forget the stack, keeping its pull requests, which is what `import` is for: tracking them
+    # again, as in a fresh clone.
     repo.client.untrack(["chain*"])
     git, gh = IMPORT[len(chain)]
 
@@ -95,6 +105,7 @@ def test_import_tracks_each_open_pull_request(repo: Repo, chain: list[str]) -> N
 
 
 def test_info_asks_github_about_each_branch(repo: Repo, chain: list[str]) -> None:
+    # Without --offline, so GitHub is asked, for every branch at once: the gh count stays at 1.
     open_pull_requests(repo)
     git, gh = INFO[len(chain)]
 
