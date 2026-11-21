@@ -51,12 +51,13 @@ stacks that still need to sync.
 
 The README says `parent`, `base` and `show-stack` "only read git config, so they're fast, and
 they're safe to run while another git-stack command is running". They start 3 git processes
-(`config --list`, a check for a stopped rebase or cherry-pick, and a `for-each-ref`), and `base`
+(`config --list`, a check for a stopped rebase, cherry-pick, revert or merge, and a `for-each-ref`),
+and `base`
 5 (also the batch `cat-file` and a `merge-base --is-ancestor`), however long the stack is
 (`tests/test_operations_read_only.py` allots them). A shell prompt or editor running one on every
 keystroke pays for them.
 
-Each also begins with `settled_stacks`, which records a restack the user finished by hand, so
+Each also begins with `settled_stacks`, which records a restack or a pull the user finished by hand, so
 one of them can write branch config, without the lock that the commands that change metadata
 hold, while another git-stack process may be running. That only happens when such a restack is
 waiting to be recorded, but then the prompt or editor is the one that writes it. Either the

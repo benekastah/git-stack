@@ -10,7 +10,7 @@ stopped doing its work would otherwise pass."""
 
 import pytest
 
-from tests.helpers import Repo
+from tests.helpers import Repo, mentions
 from tests.operations import expect_operations
 
 pytestmark = pytest.mark.usefixtures("separate_processes")
@@ -24,7 +24,8 @@ def below_the_last(chain: list[str]) -> str:
 # `chain` makes the stack before the decorator starts counting. The same count at 1, 3 and 10
 # branches is the point: nothing here depends on the stack's length.
 #
-# Each of these reads the config, checks for a stopped rebase or cherry-pick, and reads the refs.
+# Each of these reads the config, checks for a stopped rebase, cherry-pick, revert or merge, and
+# reads the refs.
 @expect_operations(git=3)
 def test_parent_runs_the_same_for_any_stack_size(repo: Repo, chain: list[str]) -> None:
     assert repo.stack_process("parent").stdout == f"{below_the_last(chain)}\n"
@@ -69,7 +70,7 @@ def test_the_first_info_checks_each_branch_for_having_landed_in_its_parent(repo:
     with expect_operations(git=5 + len(chain)):
         result = repo.stack_process("info", "--offline")
 
-    assert all(branch in result.stdout for branch in chain)
+    assert all(mentions(result.stdout, branch) for branch in chain)
 
 
 @pytest.mark.parametrize(
@@ -87,4 +88,17 @@ def test_info_runs_the_same_for_any_stack_size_once_its_branches_are_checked(
     with expect_operations(git=git):
         result = repo.stack_process(*args)
 
-    assert all(branch in result.stdout for branch in chain)
+    assert all(mentions(result.stdout, branch) for branch in chain)
+
+
+@pytest.mark.parametrize(
+    ("output", "branch", "found"),
+    [
+        ("└── chain10 *\n", "chain1", False),
+        ("└── chain1 *\n", "chain1", True),
+        ("main\n└── chain1\n    └── chain10\n", "chain10", True),
+        ("feature-chain1\n", "chain1", False),
+    ],
+)
+def test_mentions_finds_whole_branch_names_only(output: str, branch: str, found: bool) -> None:
+    assert mentions(output, branch) is found

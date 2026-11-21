@@ -4,6 +4,7 @@ import io
 import json
 import os
 import pathlib
+import re
 import subprocess
 import sys
 import tempfile
@@ -404,3 +405,8 @@ class FakeGitHub:
         state = self.load()
         state["fail_heads"] = list(heads)
         self.save(state)
+
+
+def mentions(output: str, branch: str) -> bool:
+    """Whether output names branch, as a whole name: `chain1` isn't in a line about `chain10`."""
+    return re.search(rf"(?<![\w-]){re.escape(branch)}(?![\w-])", output) is not None
