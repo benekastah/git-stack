@@ -78,7 +78,8 @@ stacks that still need to sync.
 ## An older git-stack can't finish a restack this one stopped
 
 A restack that stops on a conflict is recorded in one setting,
-`stackPendingRestack`, which versions before it don't read. Finishing the
+`stackPendingRestack` (or, for a chain of branches rebased together,
+`stackPendingRestackBatch`), which versions before it don't read. Finishing the
 rebase with an older git-stack leaves that record behind, and the next run
 of a newer one may then apply it over what the older one did since (e.g. a
 `track` onto another parent). Finish a stopped restack with the version
