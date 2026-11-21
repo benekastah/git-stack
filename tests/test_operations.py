@@ -1,11 +1,12 @@
 """tests/operations.py: declaring how many git and gh operations a test (or a block of it) runs."""
 
 import threading
+import warnings
 
 import pytest
 
 from tests.helpers import FakeGitHub, InProcessGh, Repo
-from tests.operations import expect_operations
+from tests.operations import UnderBudget, expect_operations
 
 
 def run_git(repo: Repo, *args: str) -> None:
@@ -46,28 +47,54 @@ def test_a_with_block_counts_nothing_before_or_after_it(repo: Repo) -> None:
 
 
 def test_gh_defaults_to_none(repo: Repo, gh: FakeGitHub) -> None:
-    with pytest.raises(AssertionError, match="expected 0 gh commands, ran 1"), expect_operations(git=0):
+    with pytest.raises(AssertionError, match="ran 1 gh command, 0 allotted"), expect_operations(git=0):
         run_gh()
 
 
-@pytest.mark.parametrize(("expected", "ran"), [(1, 2), (3, 2), (0, 2)])
-def test_a_different_number_of_git_processes_fails_and_lists_them(repo: Repo, expected: int, ran: int) -> None:
-    with pytest.raises(AssertionError) as failure, expect_operations(git=expected):
+@pytest.mark.parametrize("allotted", [1, 0])
+def test_more_git_processes_than_allotted_fails_and_lists_them(repo: Repo, allotted: int) -> None:
+    with pytest.raises(AssertionError) as failure, expect_operations(git=allotted):
         run_git(repo, "rev-parse", "HEAD")
         run_git(repo, "status", "--porcelain")
 
     message = str(failure.value)
-    assert f"expected {expected} git process{'' if expected == 1 else 'es'}, ran {ran}" in message
+    assert f"ran 2 git processes, {allotted} allotted" in message
     assert "git rev-parse HEAD" in message
     assert "git status --porcelain" in message
 
 
-def test_a_different_number_of_gh_commands_fails_and_lists_them(repo: Repo, gh: FakeGitHub) -> None:
+def test_fewer_git_processes_than_allotted_warns_to_lower_the_number(repo: Repo) -> None:
+    @expect_operations(git=3)
+    def two() -> None:
+        run_git(repo, "rev-parse", "HEAD")
+        run_git(repo, "status", "--porcelain")
+
+    with pytest.warns(UnderBudget, match="ran 2 of the 3 git processes allotted: lower the number to 2"):
+        two()
+
+
+def test_exactly_the_allotted_number_is_silent(repo: Repo, gh: FakeGitHub) -> None:
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        with expect_operations(git=1, gh=1):
+            run_git(repo, "rev-parse", "HEAD")
+            run_gh()
+
+
+def test_fewer_gh_commands_than_allotted_warns_to_lower_the_number(repo: Repo, gh: FakeGitHub) -> None:
+    with (
+        pytest.warns(UnderBudget, match="ran 1 of the 2 gh commands allotted: lower the number to 1"),
+        expect_operations(git=0, gh=2),
+    ):
+        run_gh()
+
+
+def test_more_gh_commands_than_allotted_fails_and_lists_them(repo: Repo, gh: FakeGitHub) -> None:
     with pytest.raises(AssertionError) as failure, expect_operations(git=0, gh=1):
         run_gh()
         run_gh()
 
-    assert "expected 1 gh command, ran 2" in str(failure.value)
+    assert "ran 2 gh commands, 1 allotted" in str(failure.value)
     assert "gh api graphql -f 'query=pullRequests(baseRefName: $base, states: MERGED' -f base=main" in str(
         failure.value
     )
@@ -120,7 +147,7 @@ def test_the_decorator_fails_the_test_that_runs_a_different_number(repo: Repo) -
         run_git(repo, "rev-parse", "HEAD")
         run_git(repo, "rev-parse", "HEAD")
 
-    with pytest.raises(AssertionError, match="expected 1 git process, ran 2"):
+    with pytest.raises(AssertionError, match="ran 2 git processes, 1 allotted"):
         twice()
 
 

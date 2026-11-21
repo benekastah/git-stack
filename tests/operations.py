@@ -14,8 +14,9 @@ the processes it starts (GIT_TRACE2_EVENT, keeping those git-stack starts, not t
 starts for them, e.g. under `git rebase`) and the calls fake gh keeps, so it's counted
 as a user's would run, with nothing cached in Python between runs.
 
-The count has to be exact: a test that runs fewer should have its number lowered, so an
-improvement is kept. A mismatch lists what ran.
+The numbers are what the block is allotted: running more fails, listing what ran. Running
+fewer is an improvement, and warns (UnderBudget) to lower the number to what ran, so it's kept
+and the next one is looked for.
 
 Work a test needs before the block (its repositories and stacks) belongs in fixtures or
 before the `with`, since what the block runs counts.
@@ -28,6 +29,7 @@ import pathlib
 import shlex
 import tempfile
 import threading
+import warnings
 from collections.abc import Generator
 from dataclasses import dataclass, field
 from types import TracebackType
@@ -46,6 +48,11 @@ _ACTIVE: list[Operations] = []
 
 _SHOWN = 160
 """How many characters of a command a failure shows, so one long `git log` doesn't bury the rest."""
+
+
+class UnderBudget(UserWarning):
+    """A block ran fewer git processes or gh commands than it was allotted: its number can be
+    lowered, to keep the improvement."""
 
 
 @dataclass
@@ -165,9 +172,9 @@ def _listing(program: str, commands: list[list[str]]) -> str:
 
 
 class expect_operations(contextlib.ContextDecorator):
-    """Fail unless exactly `git` git processes and `gh` gh commands run, in a `with` block
-    (which gives the Operations that ran) or in a decorated function (each call). Failing
-    inside doesn't hide the error that did."""
+    """Fail if more than `git` git processes or `gh` gh commands run, in a `with` block (which
+    gives the Operations that ran) or in a decorated function (each call), and warn if fewer
+    (see UnderBudget). Failing inside doesn't hide the error that did."""
 
     def __init__(self, *, git: int, gh: int = 0) -> None:
         self.git = git
@@ -194,14 +201,24 @@ class expect_operations(contextlib.ContextDecorator):
         if exc_type is not None:
             return
         problems: list[str] = []
-        for program, expected, ran, singular, plural in (
+        under: list[str] = []
+        for program, allotted, ran, singular, plural in (
             ("git", self.git, self.operations.git, "process", "processes"),
             ("gh", self.gh, self.operations.gh, "command", "commands"),
         ):
-            if len(ran) != expected:
+            count = len(ran)
+            if count > allotted:
                 problems.append(
-                    f"expected {expected} {program} {_plural(expected, singular, plural)}, ran {len(ran)}:\n"
-                    + (_listing(program, ran) or "  (none)")
+                    f"ran {count} {program} {_plural(count, singular, plural)}, {allotted} allotted:\n"
+                    + _listing(program, ran)
                 )
+            elif count < allotted:
+                under.append(
+                    f"ran {count} of the {allotted} {program} {_plural(allotted, singular, plural)} allotted: "
+                    f"lower the number to {count}"
+                )
+        # A failure is the news; a warning could be hidden by it.
         if problems:
             raise AssertionError("\n".join(problems))
+        for message in under:
+            warnings.warn(message, UnderBudget, stacklevel=2)
