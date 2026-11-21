@@ -1,9 +1,12 @@
 """How many git processes the read-only commands run, at several stack sizes: none of them should
-run more for a longer stack, except the first `info`, which checks each branch against its parent
-(and remembers the answer on disk, in `.git/git-stack-cache.json`, for the next process).
+run more for a longer stack, except the first `info`, which checks each branch for having landed
+in its parent (and remembers the answer on disk, in `.git/git-stack-cache.json`, for the next
+process).
 
 Each command is a `git stack` process of its own, as a user runs it, in a repository of its
-own, so nothing is cached in Python, or left by another test, to skew a count."""
+own, so nothing is cached in Python, or left by another test, to skew a count. Each test also
+checks what the command did: running fewer operations than allotted only warns, so a command that
+stopped doing its work would otherwise pass."""
 
 import pytest
 
@@ -13,34 +16,38 @@ from tests.operations import expect_operations
 pytestmark = pytest.mark.usefixtures("separate_processes")
 
 
-# `chain` makes the stack before the decorator starts counting, and is used by name, not as an
-# argument, since the test doesn't need what it returns. The same count at 1, 3 and 10 branches
-# is the point: nothing here depends on the stack's length.
+def below_the_last(chain: list[str]) -> str:
+    """The branch the chain's last is stacked on: main, for a chain of one."""
+    return chain[-2] if len(chain) > 1 else "main"
+
+
+# `chain` makes the stack before the decorator starts counting. The same count at 1, 3 and 10
+# branches is the point: nothing here depends on the stack's length.
 #
 # Each of these reads the config, checks for a stopped rebase or cherry-pick, and reads the refs.
-@pytest.mark.usefixtures("chain")
 @expect_operations(git=3)
-def test_parent_runs_the_same_for_any_stack_size(repo: Repo) -> None:
-    repo.stack_process("parent")
+def test_parent_runs_the_same_for_any_stack_size(repo: Repo, chain: list[str]) -> None:
+    assert repo.stack_process("parent").stdout == f"{below_the_last(chain)}\n"
 
 
-@pytest.mark.usefixtures("chain")
 @expect_operations(git=3)
-def test_show_stack_runs_the_same_for_any_stack_size(repo: Repo) -> None:
-    repo.stack_process("show-stack")
+def test_show_stack_runs_the_same_for_any_stack_size(repo: Repo, chain: list[str]) -> None:
+    assert repo.stack_process("show-stack").stdout == "".join(f"{branch}\n" for branch in chain)
 
 
-# ...and base also checks that the base is in the branch's history.
-@pytest.mark.usefixtures("chain")
+# ...and base also asks git for the commit and checks that it's in the branch's history: the
+# batch `cat-file` (which counts once however much it's asked) and a `merge-base --is-ancestor`.
 @expect_operations(git=5)
-def test_base_runs_the_same_for_any_stack_size(repo: Repo) -> None:
-    repo.stack_process("base")
+def test_base_runs_the_same_for_any_stack_size(repo: Repo, chain: list[str]) -> None:
+    assert repo.stack_process("base").stdout.strip() == repo.git("rev-parse", below_the_last(chain))
 
 
-@pytest.mark.usefixtures("chain")
+# ...and prev and next also `git switch` to the branch.
 @expect_operations(git=4)
-def test_prev_runs_the_same_for_any_stack_size(repo: Repo) -> None:
+def test_prev_runs_the_same_for_any_stack_size(repo: Repo, chain: list[str]) -> None:
     repo.stack_process("prev")
+
+    assert repo.git("branch", "--show-current") == below_the_last(chain)
 
 
 def test_next_runs_the_same_for_any_stack_size(repo: Repo, chain: list[str]) -> None:
@@ -50,14 +57,19 @@ def test_next_runs_the_same_for_any_stack_size(repo: Repo, chain: list[str]) -> 
     with expect_operations(git=4):
         repo.stack_process("next")
 
+    assert repo.git("branch", "--show-current") == chain[-1]
 
-def test_the_first_info_checks_each_branch_against_its_parent(repo: Repo, chain: list[str]) -> None:
+
+def test_the_first_info_checks_each_branch_for_having_landed_in_its_parent(repo: Repo, chain: list[str]) -> None:
     # The config, a check for a stopped operation, the refs, a long-lived `cat-file`, and the
-    # colors, and one `merge-tree` for each branch: whether it conflicts with its parent. That
-    # is the one count here that grows with the stack. Each test has a repository of its own, with
-    # no cache of those checks on disk yet, so this first `info` always has them all to do.
+    # colors, and one `merge-tree` for each branch: merging it into its parent, to see whether
+    # that changes nothing, which is how a branch whose changes landed (a merged one) is found.
+    # That is the one count here that grows with the stack. Each test has a repository of its own,
+    # with no cache of those checks on disk yet, so this first `info` always has them all to do.
     with expect_operations(git=5 + len(chain)):
-        repo.stack_process("info", "--offline")
+        result = repo.stack_process("info", "--offline")
+
+    assert all(branch in result.stdout for branch in chain)
 
 
 @pytest.mark.parametrize(
@@ -73,4 +85,6 @@ def test_info_runs_the_same_for_any_stack_size_once_its_branches_are_checked(
     repo.stack_process("info", "--offline")
 
     with expect_operations(git=git):
-        repo.stack_process(*args)
+        result = repo.stack_process(*args)
+
+    assert all(branch in result.stdout for branch in chain)

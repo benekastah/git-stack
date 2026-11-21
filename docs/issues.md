@@ -4,15 +4,6 @@ What's wrong with what's built: bugs, and gaps against the rules in `AGENTS.md` 
 `PROJECT_AGENTS.md`, most severe first. New work is in [roadmap.md](roadmap.md). When a change
 fixes one, remove it in the same change; when a change leaves something wrong, add it.
 
-## The scripting commands run more than the README says
-
-The README says `parent`, `base` and `show-stack` "only read git config, so they're fast".
-They start 3 git processes (`config --list`, a check for a stopped rebase or cherry-pick, and a
-`for-each-ref`), and `base` 5 (also the batch `cat-file` and a `merge-base --is-ancestor`), however
-long the stack is (`tests/test_operations_read_only.py` pins these). A shell prompt or editor
-running one on every keystroke pays for them. Either the README's claim goes, or the commands
-read only what they need (the stopped-operation check isn't needed to print a parent).
-
 ## A change undone some other way can look like a revert
 
 Revert detection compares patch-ids without context lines, so a revert still
@@ -55,6 +46,23 @@ and the atomic push fails, the group can lose its connection to the
 integration when no source was retired. To retry, name the integration
 explicitly with `git stack sync <integration>` and include any surviving
 stacks that still need to sync.
+
+## The scripting commands run more than the README says, and can write config
+
+The README says `parent`, `base` and `show-stack` "only read git config, so they're fast, and
+they're safe to run while another git-stack command is running". They start 3 git processes
+(`config --list`, a check for a stopped rebase or cherry-pick, and a `for-each-ref`), and `base`
+5 (also the batch `cat-file` and a `merge-base --is-ancestor`), however long the stack is
+(`tests/test_operations_read_only.py` allots them). A shell prompt or editor running one on every
+keystroke pays for them.
+
+Each also begins with `settled_stacks`, which records a restack the user finished by hand, so
+one of them can write branch config, without the lock that the commands that change metadata
+hold, while another git-stack process may be running. That only happens when such a restack is
+waiting to be recorded, but then the prompt or editor is the one that writes it. Either the
+README's claims go, or these commands settle only under the lock, or not at all. The check for a
+stopped operation has to stay: it's what keeps `settled_stacks` from settling in the middle of a
+rebase.
 
 ## An older git-stack can't finish a restack this one stopped
 
