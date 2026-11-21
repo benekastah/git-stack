@@ -19,6 +19,7 @@ on:
       - tests/helpers.py
       - tests/conftest.py
       - tests/fake_gh.py
+      - dev.py
       - dev_project.py
       - pyproject.toml
       - uv.lock

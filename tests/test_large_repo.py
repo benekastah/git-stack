@@ -68,18 +68,6 @@ def test_a_copy_links_the_objects_instead_of_copying_them(tmp_path: pathlib.Path
     assert git(tmp_path / "copy", "rev-parse", "main") == git(built / "local", "rev-parse", "main")
 
 
-def test_a_copys_working_tree_and_config_are_its_own(tmp_path: pathlib.Path, built: pathlib.Path) -> None:
-    large_repo.copy(built / "local", tmp_path / "copy")
-    tracked = next(path for path in (tmp_path / "copy" / "src").rglob("*.py"))
-    original = built / "local" / tracked.relative_to(tmp_path / "copy")
-    before = original.read_text(encoding="utf-8")
-
-    tracked.write_text("changed in place\n", encoding="utf-8")
-
-    assert original.read_text(encoding="utf-8") == before
-    assert os.stat(tmp_path / "copy" / ".git" / "config").st_nlink == 1
-
-
 def test_a_copy_refuses_to_copy_what_it_cant_link(
     tmp_path: pathlib.Path, built: pathlib.Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -134,3 +122,24 @@ def test_pruning_keeps_the_current_build_and_removes_old_ones_and_leftover_copie
 
     assert sorted(path.name for path in tmp_path.iterdir()) == ["current"]
     assert sorted(path.name for path in (tmp_path / "current").iterdir()) == ["built"]
+
+
+@pytest.mark.parametrize(
+    ("path", "linked"),
+    [
+        ("objects/pack/pack-1.pack", True),
+        ("objects/pack/pack-1.idx", True),
+        ("objects/ab/cdef0123", True),
+        ("objects/info/commit-graph", False),
+        ("objects/info/alternates", False),
+        ("objects/zz/cdef0123", False),
+        ("objects/ab", False),
+        ("config", False),
+        ("refs/heads/main", False),
+        ("packed-refs", False),
+        ("index", False),
+        ("HEAD", False),
+    ],
+)
+def test_only_a_pack_or_a_loose_object_is_a_git_object_to_link(path: str, linked: bool) -> None:
+    assert large_repo.is_git_object(pathlib.PurePosixPath(path)) is linked

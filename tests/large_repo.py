@@ -204,7 +204,8 @@ def ensure_one_process() -> None:
 def prune(parent: pathlib.Path, keep: str) -> None:
     """Remove what's in parent, where repositories are built, besides the one named keep: builds
     made by an older recipe or version of this file, and the copies (`keep/work`) that a run
-    which was killed left (the repository's other files are kept for the next)."""
+    which was killed left (the repository's other files are kept for the next). So one run at a
+    time in a clone: another that started meanwhile would lose the copies it's using."""
     for entry in parent.iterdir():
         if entry.name != keep:
             shutil.rmtree(entry, ignore_errors=True)

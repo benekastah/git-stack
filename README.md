@@ -1734,7 +1734,8 @@ a minute, and pytest's cache (`.pytest_cache`, a few hundred MB) keeps it for th
 next; the tests take a few minutes. Each runs a `git stack` command as a process of
 its own and checks how many git and `gh` operations it ran, which has to be what
 the same scenario in the small repository declares. How long each took is printed,
-and never checked. `.github/workflows/large.yml` runs it weekly and by hand.
+and never checked. `.github/workflows/large.yml` runs it weekly, by hand, and on pull requests that change what it
+runs. Run one at a time in a clone: a second would remove the copies the first is using.
 
 CI (`.github/workflows/ci.yml`, with git-stack's own jobs in `project.yml`)
 runs `dev.py static`, `dev.py types-other-platforms` and `dev.py coverage`

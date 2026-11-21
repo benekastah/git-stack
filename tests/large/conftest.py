@@ -30,7 +30,7 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
 def large_repository(request: pytest.FixtureRequest) -> pathlib.Path:
     """The repository, built once and kept in pytest's cache (so the next run reuses it) until its
     recipe, or how it's built, changes, when the old one is removed. It can only be built in one
-    process (see large_repo.ensure_one_process)."""
+    process (see large_repo.ensure_one_process), and one run at a time in a clone (see large_repo.prune)."""
     large_repo.ensure_one_process()
     parent = pathlib.Path(request.config.cache.mkdir("large-repositories"))
     directory = parent / RECIPE.key()
