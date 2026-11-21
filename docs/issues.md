@@ -74,6 +74,15 @@ Restacking replays a branch for 12 processes each (the rebase, and the checks ar
 repository with thousands of branches and a stack of a dozen, these are the ones to batch (one
 `for-each-ref` or `config` read in place of one per branch), which the tests would then show.
 
+## Syncing, importing and opening pull requests start many processes for a long stack
+
+`tests/test_operations_github.py` pins them at 1, 3 and 10 branches. Pushing a stack that was
+never pushed starts 12, 18 and 39 git processes; `push --prs` 14, 25 and 60 git and 2, 8 and 15
+`gh` (more than one `gh` call for each of 10 pull requests); `sync` after the bottom pull request
+merged 32, 72 and 205 git and up to 6 `gh`; and `import` 19, 36 and 92 git for 1, 3 and 10 pull
+requests (its `gh` stays at 2). On a stack of a dozen, `sync` is over 200 processes, of which the
+restacks are most (see the issue above). `info` and a `sync` with nothing to do keep `gh` at 1.
+
 ## An older git-stack can't finish a restack this one stopped
 
 A restack that stops on a conflict is recorded in one setting,
