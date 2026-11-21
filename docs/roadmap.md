@@ -62,3 +62,11 @@ git-stack itself. The README is too long to hand over whole. A `git stack docs
 [<section>]` command that prints sections of a bundled copy would let the agent
 skills point at the right part of it. How the sections are named, and whether
 the man page and this command share one source, is undecided.
+
+## Get rid of the performance tests' tables of counts
+
+`tests/test_operations_*.py` and `tests/large/test_distance.py` allot git processes and `gh` commands
+in a table for each command, by stack size, because today's counts are irregular: they grow with the
+stack in ways that fit no one equation. Once the commands are made to run a flat number (a few, with
+one rebase for a chain), each table becomes a constant, or an equation where growth is inherent (a
+rebase for each branch replayed), and the tables go.

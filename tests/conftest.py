@@ -45,6 +45,20 @@ os.environ[GIT_VARIABLE] = real_git()
 GIT_EXEC_PATH = pathlib.Path(real_git()).parent
 
 
+def pytest_configure(config: pytest.Config) -> None:
+    config.addinivalue_line(
+        "markers", "large: a test of a large repository (tests/large); run by `dev.py large-tests`, never by default"
+    )
+
+
+def pytest_ignore_collect(collection_path: pathlib.Path, config: pytest.Config) -> bool | None:
+    """Collect tests/large only when `-m large` asks for it: building and copying the repository
+    takes minutes and a few hundred MB, so it's never part of `dev.py tests` or CI's test jobs."""
+    if collection_path == ROOT / "tests" / "large" and "large" not in (config.getoption("markexpr") or ""):
+        return True
+    return None
+
+
 @pytest.fixture(autouse=True)
 def _outside_any_repository(outside_any_repository: pathlib.Path) -> None:  # pyright: ignore[reportUnusedFunction]
     """Run every test from a directory where git finds no repository, so
