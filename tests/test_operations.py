@@ -174,3 +174,13 @@ def test_nested_blocks_each_count_a_git_stack_process(repo: Repo) -> None:
 
     with expect_operations(git=3), expect_operations(git=3):
         repo.stack_process("parent")
+
+
+@pytest.mark.usefixtures("separate_processes")
+def test_a_performance_test_cant_run_git_stack_in_this_process(repo: Repo) -> None:
+    repo.make_stack()
+
+    with pytest.raises(pytest.fail.Exception, match="stack_process"):
+        repo.stack("parent")
+
+    assert repo.stack_process("parent").stdout == "pr2\n"

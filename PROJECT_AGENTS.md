@@ -156,7 +156,8 @@ Text meant for people (messages, `info`'s tree) can change.
   starts (the batch `cat-file` once, like `git_calls`) and what it runs against `tests/fake_gh.py`,
   in this process or in a `Repo.stack_process` one, which it counts from outside (git's own
   `GIT_TRACE2_EVENT`, and the calls fake gh keeps), so nothing cached in Python skews it; use that
-  for performance tests. A test's setup goes in fixtures or before the `with`. A count that falls should be lowered in
+  for performance tests, with the `separate_processes` fixture, which refuses `Repo.stack` (in this
+  process). A test's setup goes in fixtures or before the `with`. A count that falls should be lowered in
   the same change, so an improvement is kept; a mismatch lists the commands that ran.
 - The man page, `man/git-stack.1`, is generated from the README by
   `dev.py man` (the template's), and `dev.py static` fails if it's out of

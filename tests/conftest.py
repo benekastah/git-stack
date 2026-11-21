@@ -77,6 +77,19 @@ def make_repositories(directory: pathlib.Path) -> None:
     repo.git("clone", "--quiet", str(repo.origin), str(repo.forge), cwd=directory)
 
 
+@pytest.fixture
+def separate_processes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """For performance tests: git stack runs only as a process of its own (`Repo.stack_process`),
+    as a user runs it, so nothing Python caches in this process between runs skews a count."""
+
+    def refuse(self: Repo, *args: str, **kwargs: object) -> None:
+        pytest.fail(
+            "a performance test runs git stack with stack_process: in this process, Python caches what it learns"
+        )
+
+    monkeypatch.setattr(Repo, "stack", refuse)
+
+
 @pytest.fixture(autouse=True)
 def count_operations(monkeypatch: pytest.MonkeyPatch) -> None:
     """Record the git processes and gh commands a test runs, for tests.operations.expect_operations."""
