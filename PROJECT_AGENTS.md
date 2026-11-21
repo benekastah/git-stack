@@ -150,6 +150,16 @@ Text meant for people (messages, `info`'s tree) can change.
   repository fails rather than reach the clone the tests were started in.
   Code that names `ROOT` (`dev.py`, `dev_project.py`) still runs there. `git_calls` lists the git processes
   git-stack starts; the tests' own (`Repo.git`) aren't in it.
+- Performance tests declare how many git processes and `gh` commands they may run, with
+  `tests/operations.py`'s `expect_operations(git=N, gh=M)`: as a decorator for the whole test
+  body, or as a `with` target for a block (e.g. one stack size in a loop). It counts what git-stack
+  starts (the batch `cat-file` once, like `git_calls`) and what it runs against `tests/fake_gh.py`,
+  in this process or in a `Repo.stack_process` one, which it counts from outside (git's own
+  `GIT_TRACE2_EVENT`, and the calls fake gh keeps), so nothing cached in Python skews it; use that
+  for performance tests, with the `separate_processes` fixture, which refuses `Repo.stack` (in this
+  process). A test's setup goes in fixtures or before the `with`. Running more fails and lists the
+  commands that ran; running fewer warns (`UnderBudget`) to lower the number to what ran, so an
+  improvement is kept and the next is looked for.
 - The man page, `man/git-stack.1`, is generated from the README by
   `dev.py man` (the template's), and `dev.py static` fails if it's out of
   date: the pre-commit hook regenerates it (or run `python3 dev.py man`).
