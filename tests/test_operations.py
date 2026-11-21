@@ -1,12 +1,15 @@
 """tests/operations.py: declaring how many git and gh operations a test (or a block of it) runs."""
 
+import os
+import subprocess
 import threading
 import warnings
+from typing import Any
 
 import pytest
 
 from tests.helpers import FakeGitHub, InProcessGh, Repo
-from tests.operations import UnderBudget, expect_operations
+from tests.operations import TRACE_VARIABLE, UnderBudget, expect_operations, subcommand
 
 
 def run_git(repo: Repo, *args: str) -> None:
@@ -26,7 +29,11 @@ def test_a_with_block_counts_the_git_processes_it_starts(repo: Repo) -> None:
         run_git(repo, "rev-parse", "HEAD")
         run_git(repo, "status", "--porcelain")
 
-    assert operations.git == [["rev-parse", "HEAD"], ["status", "--porcelain"]]
+    # Whole commands, with the directory git is run in, so a test can say which command ran.
+    assert operations.git == [
+        ["-C", str(repo.path), "rev-parse", "HEAD"],
+        ["-C", str(repo.path), "status", "--porcelain"],
+    ]
     assert operations.gh == []
 
 
@@ -158,7 +165,8 @@ def test_a_with_block_counts_the_git_processes_of_a_git_stack_process(repo: Repo
     with expect_operations(git=3) as operations:
         repo.stack_process("parent")
 
-    assert [command[0] for command in operations.git] == ["config", "rev-parse", "for-each-ref"]
+    assert [subcommand(command)[0] for command in operations.git] == ["config", "rev-parse", "for-each-ref"]
+    assert all(command[0] == "-C" for command in operations.git)
 
 
 def test_a_git_stack_process_runs_the_same_git_processes_as_one_in_this_process(repo: Repo) -> None:
@@ -171,7 +179,9 @@ def test_a_git_stack_process_runs_the_same_git_processes_as_one_in_this_process(
     with expect_operations(git=3) as separate:
         repo.stack_process("parent")
 
-    assert separate.git == here.git
+    # The same commands. Only the directory differs: git-stack is given the repository as `-C <path>`,
+    # which one process had as a path and the other as ".".
+    assert [subcommand(command) for command in separate.git] == [subcommand(command) for command in here.git]
 
 
 def test_a_with_block_counts_the_gh_commands_of_a_git_stack_process(repo: Repo, gh: FakeGitHub) -> None:
@@ -192,7 +202,8 @@ def test_only_what_git_stack_starts_is_counted_not_what_git_starts_for_it(repo: 
         repo.stack_process("restack")
 
     # Each branch is rebased by a `git rebase`, which runs `git notes copy` itself.
-    assert [command[0] for command in operations.git if command[0] in ("rebase", "notes")] == ["rebase", "rebase"]
+    ran = [subcommand(command)[0] for command in operations.git]
+    assert [name for name in ran if name in ("rebase", "notes")] == ["rebase", "rebase"]
 
 
 def test_the_tests_own_git_is_not_counted_in_a_block_with_a_git_stack_process(repo: Repo) -> None:
@@ -220,3 +231,47 @@ def test_a_performance_test_cant_run_git_stack_in_this_process(repo: Repo) -> No
         repo.stack("parent")
 
     assert repo.stack_process("parent").stdout == "pr2\n"
+
+
+def test_a_block_that_ends_first_doesnt_end_an_equal_one_around_it(repo: Repo) -> None:
+    # Both are empty when the inner one ends, so equal; the outer one must still be recording.
+    with expect_operations(git=1):
+        with expect_operations(git=0):
+            pass
+        run_git(repo, "rev-parse", "HEAD")
+
+
+def test_only_the_git_stack_process_gets_the_trace_variable(repo: Repo, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo.make_stack()
+    environments: list[dict[str, str] | None] = []
+    run: Any = subprocess.run
+
+    def spy(*args: Any, **kwargs: Any) -> Any:
+        environments.append(kwargs.get("env"))
+        return run(*args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", spy)
+
+    with expect_operations(git=3):
+        # In this process, so that its own git (and git-stack's, in it) would inherit and double count it.
+        assert TRACE_VARIABLE not in os.environ
+        repo.stack_process("parent")
+        assert TRACE_VARIABLE not in os.environ
+
+    (child,) = environments
+    assert child is not None
+    assert TRACE_VARIABLE in child
+
+
+def test_a_trace_session_inherited_from_the_test_run_doesnt_hide_git_stacks_processes(
+    repo: Repo, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo.make_stack()
+    # As if the tests were run by a git with trace2 on: every process then has a parent session, and
+    # so a `/` in its own, which is what marks one that git started for git-stack.
+    monkeypatch.setenv("GIT_TRACE2_PARENT_SID", "20260101T000000Z-H0-P0")
+
+    # Counted, not just allotted: counting none would only warn.
+    with expect_operations(git=3) as ran:
+        repo.stack_process("parent")
+    assert len(ran.git) == 3

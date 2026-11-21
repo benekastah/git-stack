@@ -134,13 +134,13 @@ class Repo:
         In an `expect_operations` block, the git and gh commands it runs are counted from outside
         (see tests/operations.py), by tracing git in the new process only; without one, the
         process gets this process's environment as it is."""
-        with operations.traced_subprocess() as extra_environment:
+        with operations.traced_subprocess() as environment:
             result = subprocess.run(
                 [sys.executable, "-m", "git_stack", "-C", str(self.path), *args],
                 cwd=self.tmp,
                 capture_output=True,
                 encoding="utf-8",
-                env={**os.environ, **extra_environment} if extra_environment else None,
+                env=environment,
                 timeout=60,
                 check=False,
             )
