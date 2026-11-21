@@ -410,3 +410,19 @@ class FakeGitHub:
 def mentions(output: str, branch: str) -> bool:
     """Whether output names branch, as a whole name: `chain1` isn't in a line about `chain10`."""
     return re.search(rf"(?<![\w-]){re.escape(branch)}(?![\w-])", output) is not None
+
+
+def chain_tips(repo: Repo, chain: list[str]) -> dict[str, str]:
+    """The commit each branch of a chain (see Repo.make_chain) is at."""
+    return {branch: repo.git("rev-parse", branch) for branch in chain}
+
+
+def assert_chain_stacked(repo: Repo, chain: list[str]) -> None:
+    """Each branch of a chain is recorded on the one before it (the first on main), which is in its
+    history. Performance tests check this, which is what a command is for, because running fewer
+    operations than allotted only warns, so one that stopped doing its work would otherwise pass.
+    (`Repo.assert_stacked` is for one branch and its own commits.)"""
+    for branch, parent in zip(chain, ["main", *chain], strict=False):
+        # Fails the test if it isn't: `merge-base --is-ancestor` exits with 1.
+        repo.git("merge-base", "--is-ancestor", parent, branch)
+        assert repo.config(branch, "stackParent") == parent
