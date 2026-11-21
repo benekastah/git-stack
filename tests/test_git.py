@@ -9,7 +9,7 @@ from typing import Any
 
 import git_client
 import pytest
-from git_client import Arg, Git, GitError
+from git_client import Arg, ConfigSet, ConfigUnset, Git, GitError
 from git_client.testing import GitCall, real_git
 
 from git_stack.adapters.git import GitAdapter
@@ -440,6 +440,38 @@ def test_snapshot_reads_an_unborn_current_branch(repo: Repo) -> None:
     git = GitClient(repo.path)
     with git.snapshot():
         assert git.current_branch() == "new"
+
+
+def test_apply_config_makes_every_change(repo: Repo) -> None:
+    repo.git("config", "branch.main.stackOld", "1")
+    git = GitClient(repo.path)
+
+    git.apply_config(
+        ConfigSet("branch.main.stackA", "a"), ConfigSet("branch.main.stackB", "b"), ConfigUnset("branch.main.stackOld")
+    )
+
+    assert repo.git("config", "--get-regexp", "^branch.main.stack").splitlines() == [
+        "branch.main.stacka a",
+        "branch.main.stackb b",
+    ]
+
+
+def test_apply_config_ignores_an_unset_of_what_is_not_there(repo: Repo) -> None:
+    git = GitClient(repo.path)
+
+    git.config_unset("main", "stackMissing")
+    git.apply_config(ConfigUnset("branch.main.stackMissing"), ConfigSet("branch.main.stackA", "a"))
+
+    assert repo.git("config", "branch.main.stackA") == "a"
+
+
+def test_apply_config_reports_a_set_git_rejects(repo: Repo) -> None:
+    repo.git("config", "--add", "branch.main.stackTwo", "1")
+    repo.git("config", "--add", "branch.main.stackTwo", "2")
+    git = GitClient(repo.path)
+
+    with pytest.raises(StackError, match="git config failed"):
+        git.apply_config(ConfigSet("branch.main.stackTwo", "3"))
 
 
 def separate_patch_ids(repo: Repo, *command: str) -> list[tuple[str, str]]:

@@ -10,7 +10,7 @@ from contextlib import contextmanager
 from typing import TextIO
 
 import git_client
-from git_client import GitError, Ref, config_key, git_common_dir, git_paths
+from git_client import ConfigSet, ConfigUnset, GitError, Ref, config_key, git_common_dir, git_paths
 
 from git_stack.errors import StackError
 from git_stack.performance import TimedCatFile, TimedGit
@@ -414,35 +414,29 @@ class GitClient:
         return self.branch_config().get((branch, key.lower())) or None
 
     def config_set(self, branch: str, key: str, value: str) -> None:
-        self.write_config(f"branch.{branch}.{key}", value)
+        self.apply_config(ConfigSet(f"branch.{branch}.{key}", value))
 
     def config_unset(self, branch: str, key: str, value: str | None = None) -> None:
         """Unset branch's key, or, if value is given, only if it's still value."""
-        self.write_config(
-            "--unset",
-            *(("--fixed-value",) if value is not None else ()),
-            f"branch.{branch}.{key}",
-            *((value,) if value is not None else ()),
-            check=False,
-        )
+        self.apply_config(ConfigUnset(f"branch.{branch}.{key}", value), check=False)
 
-    def write_config(self, *args: str, check: bool = True) -> None:
-        """Run `git config <args>`, trying it again for up to
-        CONFIG_LOCK_TIMEOUT seconds while another process has the config file
-        locked (see git_client's Git.write_config).
+    def apply_config(self, *changes: ConfigSet | ConfigUnset, check: bool = True) -> None:
+        """Make changes to the config together (see git_client's Git.write_config), trying again
+        for up to CONFIG_LOCK_TIMEOUT seconds while another process has the config file locked.
+        An unset of a key that isn't there, or that has several values, is no error; any other
+        failure is one unless check is false.
 
         Writing anything but git-stack's own settings (see core.PARENT_KEY and
         the rest, which all start with "stack") forgets the ref snapshot, since
         it may change a branch's upstream.
         """
         try:
-            self._git.write_config(*args, wait=CONFIG_LOCK_TIMEOUT)
+            self._git.write_config(*changes, wait=CONFIG_LOCK_TIMEOUT)
         except GitError as e:
             if check:
-                raise StackError(f"git config {' '.join(args)} failed:\n{e.stderr.strip()}") from e
+                raise StackError(f"git config failed:\n{e.stderr.strip()}") from e
         finally:
-            key = next((a for a in args if not a.startswith("-")), "")
-            if not key.rpartition(".")[2].lower().startswith("stack"):
+            if any(not change.key.rpartition(".")[2].lower().startswith("stack") for change in changes):
                 # A config write can't move a worktree's HEAD.
                 self._forget_refs(worktrees=False)
 
