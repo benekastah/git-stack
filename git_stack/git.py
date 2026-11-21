@@ -554,6 +554,11 @@ class GitClient:
             return self._head
         return self.run("branch", "--show-current") or None
 
+    def head_is_known(self) -> bool:
+        """Whether operation_in_progress, within this snapshot, read what HEAD is (a branch, or
+        detached), which it can't for an unborn branch."""
+        return self._probed_head is not None
+
     def local_branch_exists(self, name: str) -> bool:
         if (refs := self._snapshot_refs()) is not None and f"refs/heads/{name}" in refs:
             return True

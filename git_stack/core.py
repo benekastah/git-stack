@@ -224,10 +224,10 @@ class StackCore:
             self.on_event(event)
 
     def stacks(self, *, check_existence: bool = True) -> Stacks:
-        """Every tracked branch that still exists, read from git config. Unless
-        check_existence is set, which asks git for the branches (the refs), every one
-        the config has, including one deleted without git-stack: for a caller that
-        only looks up a branch it knows exists, e.g. the one checked out."""
+        """Every tracked branch that still exists, read from git config. That asks git
+        which branches exist (the refs): with check_existence false it doesn't, and has
+        every branch the config does, including one deleted without git-stack, for a
+        caller that only looks up a branch it knows exists, e.g. the one checked out."""
         existing = self.git.local_branches() if check_existence else None
         config = self.git.branch_config()
         return Stacks(

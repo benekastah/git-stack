@@ -26,6 +26,17 @@ def test_parent_refuses_untracked_branch(repo: Repo, client: StackClient) -> Non
         client.parent("main")
 
 
+def test_parent_refuses_an_unborn_branch_with_config_left_from_a_deleted_one(repo: Repo, client: StackClient) -> None:
+    repo.make_stack()
+    repo.git("switch", "--quiet", "pr1")
+    # `update-ref -d` deletes the branch without its config, which is left under the name of a new one.
+    repo.git("update-ref", "-d", "refs/heads/pr3")
+    repo.git("switch", "--quiet", "--orphan", "pr3")
+
+    with pytest.raises(StackError, match="pr3 isn't in a stack"):
+        client.parent()
+
+
 def test_base_is_where_branch_was_created(repo: Repo, client: StackClient) -> None:
     main = repo.git("rev-parse", "main")
     repo.make_stack()

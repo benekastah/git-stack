@@ -1060,6 +1060,10 @@ class StackClient(StackCore):
         """The branch that branch (default: the current branch) is stacked on."""
         # The branch checked out exists, so the refs needn't be read to know it does.
         stacks = self.settled_stacks(check_existence=branch is not None)
+        if branch is None and not self.git.head_is_known():
+            # Unless it's unborn, which isn't a ref: config left from a branch of that name that was
+            # deleted without git-stack would make it look tracked.
+            stacks = self.stacks()
         return stacks.parent(self.stacked_branch(branch, stacks))
 
     @snapshot

@@ -500,12 +500,16 @@ def test_the_branch_it_read_with_the_stopped_operation_check_follows_a_switch(re
         assert git.current_branch() is None
 
 
-def test_the_stopped_operation_check_reads_a_detached_head(repo: Repo) -> None:
+def test_the_stopped_operation_check_reads_a_detached_head(repo: Repo, git_calls: list[GitCall]) -> None:
     repo.git("switch", "--quiet", "--detach")
     git = GitClient(repo.path)
+    git_calls.clear()
     with git.snapshot():
         assert not git.operation_in_progress()
         assert git.current_branch() is None
+        assert git.head_is_known()
+
+    assert [call[0] for call in git_calls] == ["rev-parse"]
 
 
 def test_the_stopped_operation_check_leaves_an_unborn_branch_to_be_asked(repo: Repo) -> None:
@@ -514,14 +518,18 @@ def test_the_stopped_operation_check_leaves_an_unborn_branch_to_be_asked(repo: R
     with git.snapshot():
         assert not git.operation_in_progress()
         assert git.current_branch() == "new"
+        assert not git.head_is_known()
 
 
-def test_the_stopped_operation_check_reads_the_branch_of_its_own_worktree(repo: Repo) -> None:
+def test_the_stopped_operation_check_reads_the_branch_of_its_own_worktree(repo: Repo, git_calls: list[GitCall]) -> None:
     repo.git("worktree", "add", "--quiet", "-b", "elsewhere", str(repo.tmp / "elsewhere"))
     git = GitClient(repo.tmp / "elsewhere")
+    git_calls.clear()
     with git.snapshot():
         assert not git.operation_in_progress()
         assert git.current_branch() == "elsewhere"
+
+    assert [call[0] for call in git_calls] == ["rev-parse"]
 
 
 def test_the_branch_read_with_the_stopped_operation_check_isnt_kept_past_the_snapshot(repo: Repo) -> None:
