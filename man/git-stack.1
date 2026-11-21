@@ -943,6 +943,7 @@ git stack restack \-\-latest              \f[I]# also move the stack onto main\(
 .IP \(bu 2
 Only the branches\(aq own commits are replayed (from their recorded
 base), so a parent that was squash\-merged doesn\(aqt cause conflicts.
+Branches that follow one another are replayed by one rebase.
 See How it works.
 .IP \(bu 2
 A branch with merge commits must be restacked manually while preserving
@@ -1857,6 +1858,12 @@ run \f[CR]git rebase \-\-continue\f[R] /
 \f[CR]git cherry\-pick \-\-continue\f[R] /
 \f[CR]git revert \-\-continue\f[R] (or \f[CR]\-\-abort\f[R]) as usual,
 then rerun the git\-stack command to finish the rest of the stack.
+A chain of branches is one rebase (see How it works), so no branch in it
+has moved while it\(aqs stopped: \f[CR]\-\-abort\f[R] leaves every one
+as it was, and \f[CR]\-\-continue\f[R] goes on through the rest of the
+chain, which can stop on another conflict, so resolve each as it comes.
+Where \f[CR]\-\-abort\f[R] or the rebase leaves you is the chain\(aqs
+last branch, not the one that conflicted.
 The new parent and base (and the pulled upstream commits) are recorded
 only if the operation actually completed.
 To recognize a manually completed restack, git\-stack uses the
@@ -1982,6 +1989,18 @@ Restacking runs
 \f[CR]git rebase \-\-onto <parent> <stackBase> <branch>\f[R], which
 replays only the branch\(aqs own commits, so PR 1\(aqs original commits
 never collide with the squashed version in \f[CR]main\f[R].
+.PP
+Branches that follow one another, each stacked on the one before and
+based on its tip, are restacked with one
+\f[CR]git rebase \-\-update\-refs \-\-onto <parent> <stackBase of the first> <the last>\f[R],
+which moves each of them as it passes (so a stack of ten is one rebase,
+not ten).
+Git moves them only when the rebase finishes.
+Where several branches are stacked on one, the chain follows the first,
+and the others are restacked after it, on the branch once it has moved.
+A branch that\(aqs checked out in another worktree, has merge commits,
+or whose base isn\(aqt where the one before it was, isn\(aqt part of a
+chain, and is restacked on its own, which tells you what\(aqs wrong.
 .PP
 A branch stacked directly on a stack\(aqs root (e.g.
 \f[CR]main\f[R]) is only restacked when it conflicts with the root\(aqs

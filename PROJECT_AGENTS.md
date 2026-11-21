@@ -70,6 +70,15 @@ lands on `main` so each merged build has a distinct version in performance logs.
   may change refs, and only add a command to `READ_ONLY_COMMANDS` if it never
   does. The stale-trunk-base check reuses results from the check cache when
   its commit IDs describe an unmodified history graph.
+- `StackCore.restack_all` rebases branches that follow one another (`chain_to_restack`) with one
+  `git rebase --update-refs` of the last (`restack_chain`): git moves none of them until the rebase
+  finishes, so an abort changes nothing and one rebase resolves every conflict. Each records
+  `stackPendingRestackBatch`, "<its tip before> <its parent>", since a parent's new tip isn't known
+  until the rebase has made it; `settle_batch` records the base once the tip has changed and has the
+  parent's tip in its history. A branch git-stack can't put in a chain (merge commits, another
+  worktree, a base that isn't the previous branch's tip, integrations) goes through `restack_branch`
+  one at a time, which also reports why. git leaves a *checked out* branch alone, so `restack_chain`
+  leaves it first.
 - Progress and warnings are events (`git_stack/events.py`), passed to the
   client's `on_event`. `git_stack/output.py` turns them into text, or into JSON
   lines.

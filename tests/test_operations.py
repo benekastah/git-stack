@@ -199,12 +199,12 @@ def test_only_what_git_stack_starts_is_counted_not_what_git_starts_for_it(repo: 
     repo.git("switch", "--quiet", "pr1")
     repo.commit("a", "pr1 third\n", "pr1 c3")
 
-    with expect_operations(git=40) as operations:
+    with expect_operations(git=35) as operations:
         repo.stack_process("restack")
 
-    # Each branch is rebased by a `git rebase`, which runs `git notes copy` itself.
+    # pr2 and pr3 are rebased by one `git rebase`, which runs `git notes copy` itself.
     ran = [subcommand(command)[0] for command in operations.git]
-    assert [name for name in ran if name in ("rebase", "notes")] == ["rebase", "rebase"]
+    assert [name for name in ran if name in ("rebase", "notes")] == ["rebase"]
 
 
 def test_the_tests_own_git_is_not_counted_in_a_block_with_a_git_stack_process(repo: Repo) -> None:
