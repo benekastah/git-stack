@@ -7,9 +7,8 @@ are declared per size, so a change in how they grow shows."""
 
 import pytest
 
-from tests.helpers import FakeGitHub, Repo
+from tests.helpers import FakeGitHub, Repo, assert_chain_stacked, chain_tips, mentions
 from tests.operations import expect_operations
-from tests.test_operations_local_rewriting import assert_stacked, tips
 
 # `gh` makes the repository look like a GitHub one, with tests/fake_gh.py as `gh` (in this process,
 # for the setup that uses the client, and as a command for the `git stack` processes the tests
@@ -29,7 +28,8 @@ PRS_ALL_OPEN = {1: (4, 2), 3: (5, 4), 10: (5, 4)}
 # Nothing to do: gh is asked once, and git 11 + branches.
 SYNC_NOTHING = {1: (12, 1), 3: (14, 1), 10: (21, 1)}
 # The bottom merged, as GitHub reports it (the merge commit and the head it had): the rest are
-# restacked onto main and pushed again.
+# restacked onto main and pushed again. A warning to lower the git count to 32, 72 or 205 means the
+# fake no longer gives `sync` what GitHub does, and it's finding the merge from git alone.
 SYNC_BOTTOM_MERGED = {1: (35, 1), 3: (75, 5), 10: (208, 6)}
 # gh is asked twice, however many pull requests there are.
 IMPORT = {1: (19, 2), 3: (36, 2), 10: (92, 2)}
@@ -41,9 +41,11 @@ INFO = {1: (4, 1), 3: (4, 1), 10: (4, 1)}
 # warns, so one that stopped doing its work would otherwise pass.
 
 
-def pull_request_bases(gh: FakeGitHub) -> dict[str, str]:
-    """The branch each pull request is for, and the one it's into."""
-    return {pr["headRefName"]: pr["baseRefName"] for pr in gh.load()["prs"]}
+def assert_pull_requests(gh: FakeGitHub, chain: list[str]) -> None:
+    """A pull request for each branch of the chain, into the one before it (the first into main),
+    and no other: a duplicate for a branch would be noticed here, and not by a mapping of branches."""
+    pull_requests = [(pr["headRefName"], pr["baseRefName"]) for pr in gh.load()["prs"]]
+    assert sorted(pull_requests) == sorted(zip(chain, ["main", *chain], strict=False))
 
 
 def open_pull_requests(repo: Repo) -> None:
@@ -59,7 +61,7 @@ def test_push_a_stack_that_was_never_pushed(repo: Repo, chain: list[str]) -> Non
         repo.stack_process("push")
 
     # Every branch is on the remote, as it is here.
-    assert {b: repo.git("rev-parse", f"refs/remotes/origin/{b}") for b in chain} == tips(repo, chain)
+    assert {b: repo.git("rev-parse", f"refs/remotes/origin/{b}") for b in chain} == chain_tips(repo, chain)
 
 
 def test_push_opening_a_pull_request_for_each_branch(repo: Repo, gh: FakeGitHub, chain: list[str]) -> None:
@@ -69,19 +71,20 @@ def test_push_opening_a_pull_request_for_each_branch(repo: Repo, gh: FakeGitHub,
         repo.stack_process("push", "--prs")
 
     # A pull request for each branch, into the one before it (the first into main).
-    assert pull_request_bases(gh) == dict(zip(chain, ["main", *chain], strict=False))
+    assert_pull_requests(gh, chain)
 
 
 def test_push_when_every_branch_has_a_pull_request(repo: Repo, gh: FakeGitHub, chain: list[str]) -> None:
     open_pull_requests(repo)
+    created = len(gh.calls("pr", "create"))
     git, gh_commands = PUSH_WITH_PRS_OPEN[len(chain)]
 
     with expect_operations(git=git, gh=gh_commands):
         repo.stack_process("push", "--prs")
 
     # No new pull request: each branch has the one it had.
-    assert pull_request_bases(gh) == dict(zip(chain, ["main", *chain], strict=False))
-    assert gh.calls("pr", "create") == gh.calls("pr", "create")[: len(chain)]
+    assert_pull_requests(gh, chain)
+    assert len(gh.calls("pr", "create")) == created
 
 
 def test_prs_when_every_branch_has_a_pull_request(repo: Repo, gh: FakeGitHub, chain: list[str]) -> None:
@@ -93,19 +96,19 @@ def test_prs_when_every_branch_has_a_pull_request(repo: Repo, gh: FakeGitHub, ch
         repo.stack_process("prs")
 
     assert len(gh.calls("pr", "create")) == created
-    assert pull_request_bases(gh) == dict(zip(chain, ["main", *chain], strict=False))
+    assert_pull_requests(gh, chain)
 
 
 def test_sync_with_nothing_to_do(repo: Repo, chain: list[str]) -> None:
     open_pull_requests(repo)
-    before = tips(repo, chain)
+    before = chain_tips(repo, chain)
     git, gh = SYNC_NOTHING[len(chain)]
 
     with expect_operations(git=git, gh=gh):
         repo.stack_process("sync")
 
-    assert tips(repo, chain) == before
-    assert_stacked(repo, chain)
+    assert chain_tips(repo, chain) == before
+    assert_chain_stacked(repo, chain)
 
 
 def test_sync_after_the_bottom_pull_request_was_merged(repo: Repo, gh: FakeGitHub, chain: list[str]) -> None:
@@ -130,7 +133,7 @@ def test_sync_after_the_bottom_pull_request_was_merged(repo: Repo, gh: FakeGitHu
 
     # The merged branch isn't tracked, and the rest are on main now.
     assert not repo.config_exists("chain1", "stackParent")
-    assert_stacked(repo, chain[1:])
+    assert_chain_stacked(repo, chain[1:])
 
 
 def test_import_tracks_each_open_pull_request(repo: Repo, chain: list[str]) -> None:
@@ -143,7 +146,7 @@ def test_import_tracks_each_open_pull_request(repo: Repo, chain: list[str]) -> N
     with expect_operations(git=git, gh=gh):
         repo.stack_process("import")
 
-    assert_stacked(repo, chain)
+    assert_chain_stacked(repo, chain)
 
 
 def test_info_asks_github_about_each_branch(repo: Repo, chain: list[str]) -> None:
@@ -154,6 +157,6 @@ def test_info_asks_github_about_each_branch(repo: Repo, chain: list[str]) -> Non
     with expect_operations(git=git, gh=gh):
         result = repo.stack_process("info")
 
-    assert all(branch in result.stdout for branch in chain)
-    # With the links of the pull requests, which is what asking GitHub is for.
+    assert all(mentions(result.stdout, branch) for branch in chain)
+    # With the links of the pull requests, which is what asking GitHub is for: one for each.
     assert result.stdout.count("/pull/") == len(chain)
