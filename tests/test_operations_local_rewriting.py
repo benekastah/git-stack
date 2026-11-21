@@ -1,0 +1,82 @@
+"""How many git processes the commands that rewrite branches locally run, at several stack sizes.
+
+Each command is a `git stack` process of its own, in a repository of its own, so nothing is
+cached in Python, or left by another test, to skew a count. The counts that grow with the stack
+are declared per size, so a change in how they grow shows."""
+
+import pytest
+
+from tests.helpers import Repo
+from tests.operations import expect_operations
+
+pytestmark = pytest.mark.usefixtures("separate_processes")
+
+# Restacking replays each branch above the one that changed, and each replay costs 12: a stack
+# of 1 has nothing above it to replay, so it costs 12 less (16 + 12 * (branches - 1)).
+RESTACK_BEHIND = {1: 8, 3: 40, 10: 124}
+# Even an up to date stack is checked a branch at a time: 6 + 2 * branches.
+RESTACK_UP_TO_DATE = {1: 8, 3: 12, 10: 26}
+# Nothing to pull: 11 + branches.
+PULL_NOTHING = {1: 12, 3: 14, 10: 21}
+# Nothing merged, and nothing pushed: 10 + branches.
+CLEAN_NOTHING = {1: 11, 3: 13, 10: 20}
+# Renaming moves what's recorded for the branch, and for the branches stacked on it.
+RENAME_BOTTOM = {1: 9, 3: 10, 10: 10}
+RENAME_TOP = {1: 9, 3: 9, 10: 9}
+UNTRACK_TOP = {1: 6, 3: 6, 10: 6}
+# Untracking every branch: 3 + 3 * branches.
+UNTRACK_ALL = {1: 6, 3: 12, 10: 33}
+
+
+def commit_to_bottom(repo: Repo) -> None:
+    """A commit on the lowest branch, which the ones above it have to be restacked onto."""
+    repo.git("switch", "--quiet", "chain1")
+    repo.write("extra.txt", "extra\n")
+    repo.git("add", "extra.txt")
+    repo.git("commit", "--quiet", "-m", "extra")
+
+
+def test_restack_replays_each_branch_above_a_change(repo: Repo, chain: list[str]) -> None:
+    commit_to_bottom(repo)
+
+    with expect_operations(git=RESTACK_BEHIND[len(chain)]):
+        repo.stack_process("restack")
+
+
+def test_restack_checks_each_branch_of_an_up_to_date_stack(repo: Repo, chain: list[str]) -> None:
+    with expect_operations(git=RESTACK_UP_TO_DATE[len(chain)]):
+        repo.stack_process("restack")
+
+
+def test_pull_with_nothing_to_pull(repo: Repo, chain: list[str]) -> None:
+    repo.client.push()
+
+    with expect_operations(git=PULL_NOTHING[len(chain)]):
+        repo.stack_process("pull")
+
+
+def test_clean_with_nothing_merged(repo: Repo, chain: list[str]) -> None:
+    with expect_operations(git=CLEAN_NOTHING[len(chain)]):
+        repo.stack_process("clean")
+
+
+def test_rename_the_bottom_branch(repo: Repo, chain: list[str]) -> None:
+    repo.git("switch", "--quiet", "chain1")
+
+    with expect_operations(git=RENAME_BOTTOM[len(chain)]):
+        repo.stack_process("rename", "renamed")
+
+
+def test_rename_the_top_branch(repo: Repo, chain: list[str]) -> None:
+    with expect_operations(git=RENAME_TOP[len(chain)]):
+        repo.stack_process("rename", "renamed")
+
+
+def test_untrack_the_top_branch(repo: Repo, chain: list[str]) -> None:
+    with expect_operations(git=UNTRACK_TOP[len(chain)]):
+        repo.stack_process("untrack")
+
+
+def test_untrack_every_branch(repo: Repo, chain: list[str]) -> None:
+    with expect_operations(git=UNTRACK_ALL[len(chain)]):
+        repo.stack_process("untrack", "chain*")
