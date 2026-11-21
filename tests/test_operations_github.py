@@ -43,7 +43,7 @@ INFO = {1: (4, 1), 3: (4, 1), 10: (4, 1)}
 
 def assert_pull_requests(gh: FakeGitHub, chain: list[str]) -> None:
     """A pull request for each branch of the chain, into the one before it (the first into main),
-    and no other: a duplicate for a branch would be noticed here, and not by a mapping of branches."""
+    and no other, so a duplicate for a branch fails."""
     pull_requests = [(pr["headRefName"], pr["baseRefName"]) for pr in gh.load()["prs"]]
     assert sorted(pull_requests) == sorted(zip(chain, ["main", *chain], strict=False))
 
