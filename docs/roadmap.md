@@ -70,3 +70,40 @@ in a table for each command, by stack size, because today's counts are irregular
 stack in ways that fit no one equation. Once the commands are made to run a flat number (a few, with
 one rebase for a chain), each table becomes a constant, or an equation where growth is inherent (a
 rebase for each branch replayed), and the tables go.
+
+## Run each command in a fixed number of git and gh processes
+
+A command should start the same number of git processes however long the stack or large the
+repository, and no more `gh` commands than one query and one mutation for any number of pull
+requests (GraphQL takes many aliased mutations in one request). The performance tests allot what each
+command may run at 1, 3 and 10 branches (`tests/test_operations_*.py`, and `tests/large/` in a
+repository of 500,000 commits and 5,000 branches), and warn when one runs fewer, so each change
+lowers a number there; the tables are the measure of where a command is, and the ones that still grow
+with the stack are what's left to do. (`sync`, `import`, `push --prs`, `pull`, `clean` and `untrack`
+grow at the time of writing; `sync` and `import` also ask `gh` once per call, and `push --prs` several
+times per pull request.)
+
+What a command runs that isn't its own work comes from a few things that repeat across commands:
+
+1. **What's read once stays read.** `config --list` is read again after each write, and the refs after
+   each command that may change them, because the snapshot is dropped when anything changes. A write
+   of ours can update what it holds instead.
+2. **Answer from what's read.** `git remote`, a remote's URL and `rev-parse <branch>@{upstream}` are in
+   the config and the refs already read.
+3. **Checks in bulk.** `merge-base --is-ancestor` and `merge-tree` run once per branch in `restack`,
+   `push --prs`, `pull`, `sync` and a cold `info`. `merge-tree --stdin` does every landed check in one
+   process, and ancestry questions can be asked together.
+4. **Writes in bulk.** `git config` sets one key per process, so recording a stack's branches costs
+   processes in proportion to its length. Writing many keys in one process means editing the config file
+   under git's own lock (`config.lock`, then a rename) in py-git-client, which git-recommit and
+   move-forward share. It's the riskiest piece here, since it replaces git as the writer of
+   `.git/config`: it should only edit what it can parse with certainty (`branch.<name>.<key>`), fall
+   back to `git config` for anything else, and be tested against `git config` itself over many
+   generated files and values. Writing less is the other lever, and should come first where it's enough.
+5. **Don't read what a command doesn't use.** `parent` and `base` have no need of the refs.
+
+A chain of branches is one `git rebase --update-refs`: branches follow one another when each is stacked
+on the one before and based on its tip, and the rest are rebased on their own, so a restack costs a
+rebase for the chain, not for each branch. `sync` restacks branch by branch, interleaved with merging
+and pulling each, so it needs to be split into passes (classify, restack together through the same
+code `restack` uses, pull) before it can follow.
