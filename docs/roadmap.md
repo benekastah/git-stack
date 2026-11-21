@@ -70,3 +70,56 @@ in a table for each command, by stack size, because today's counts are irregular
 stack in ways that fit no one equation. Once the commands are made to run a flat number (a few, with
 one rebase for a chain), each table becomes a constant, or an equation where growth is inherent (a
 rebase for each branch replayed), and the tables go.
+
+## Run each command in as few git and gh processes as it can
+
+A command should start a handful of git processes however long the stack or large the repository (the
+performance tests in `tests/test_operations_*.py` and `tests/large/` allot what each may run, and warn
+when one runs fewer, so each fix below lowers a number there). What each runs today is mostly not the
+command's own work. Measured for a stack of 3 branches (cold, as a user runs it):
+
+| Command | Now | Planned minimum | What it needs, and what goes |
+| --- | ---: | ---: | --- |
+| `parent`, `show-stack` | 3 | 2 | the config, and one `rev-parse` for HEAD and the stopped-operation check; no refs |
+| `base` | 5 | 3 | those two, and one `merge-base --is-ancestor`; no refs, no `cat-file` |
+| `next`, `prev` | 4 | 3 | those two, and the `switch` |
+| `info` (offline), warm | 4 | 3 | config, refs (with HEAD), and nothing else: the color setting is in the config |
+| `info`, cold | 8 (+1 per branch) | 4 | the landed checks (a `merge-tree` per branch) in one process |
+| `create` | 9 | 4 | config, `rev-parse`, `switch`, and one write for the parent and the base |
+| `rename` | 11 | 5 | config, refs, `branch --move`, and one write for every branch it moves |
+| `untrack` | 13 (2 branches) | 3 | config, refs, and one write that removes every key |
+| `restack` | 8 up to date, 37 behind (+12 per branch) | 4, 6 | config, refs, status, one check that every base is in its branch's history, one `rebase` for a chain (see below), one write |
+| `push` | 15 | 5 | config, refs, the ancestry check, one `git push --set-upstream`, one write of what it recorded |
+| `push --prs` | 19 git, 9 gh | 6 git, 3 gh | those, and one `gh` to find the pull requests that exist and one to open and describe all that don't |
+| `prs` | 5 git, 4 gh | 3 git, 2 gh | config, refs, and one `gh` query and one batched update |
+| `pull` | 13 | 5 | config, `rev-parse`, status, `fetch`, refs once more, one ancestry check |
+| `clean` | 8 | 5 | config, `rev-parse`, refs, `fetch`, refs again; the upstream is in the refs |
+| `sync` (nothing to do) | 14 | 7 | `pull`'s, and the default branch |
+| `import` | 19 (+8 per branch) | 8 | |
+
+These come from five things that repeat across commands, which is why they're fixed first, as their
+own changes, and each command follows with the numbers it makes possible:
+
+1. **What's read once stays read.** `config --list` runs 3 times in `push` and 4 in `restack` and
+   `untrack`, and the refs again after each write, because the snapshot is dropped when anything
+   changes. A write updates it instead.
+2. **Answer from what's read.** `config --get-colorbool` (the color setting), `git remote` (in the
+   config) and `rev-parse main@{upstream}` (in the refs' `%(upstream)`) need no process.
+3. **Checks in bulk.** `merge-base --is-ancestor` runs once per branch in `push --prs`, `pull`, `sync`
+   and `restack`, and `merge-tree` once per branch in a cold `info`. One `rev-list --boundary` says
+   whether every base is in its branch's history, and `merge-tree --stdin` (check the git versions
+   that have it) does the landed checks.
+4. **Writes in bulk.** `git config` sets one key per process, so `untrack` is a process per key and
+   `push` six. A writer that follows git's own lock protocol (`config.lock`, then a rename) sets any
+   number in one: it belongs in py-git-client, which git-recommit and move-forward share.
+5. **Don't read what a command doesn't use.** `parent` reads the refs and starts `cat-file` to print
+   one config value.
+
+A chain of branches is one `git rebase --update-refs` (see `restack_chain`: branches follow one
+another when each is stacked on the one before and based on its tip; others are rebased on their own),
+so a restack costs a rebase for the chain, not one for each branch. `gh` is never more than one query
+and one mutation for any number of pull requests, since GraphQL takes many aliased mutations in one
+request.
+
+The numbers are the minimum for the work each does, from the traces above, and are checked as each
+change lands: the tests warn when a command runs fewer than allotted, and the number is lowered.
