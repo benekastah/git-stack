@@ -5,6 +5,7 @@ import pathlib
 import shutil
 
 import pytest
+from git_client import ConfigSet, ConfigUnset
 from git_client.testing import GitCall
 
 from git_stack import cli
@@ -2093,10 +2094,23 @@ def test_selecting_grouped_integration_traverses_group_once(repo: Repo, monkeypa
     assert len(expanded) == count + 1
 
 
-def test_integration_writes_full_journal_only_at_build_boundaries(repo: Repo, git_calls: list[GitCall]) -> None:
+def test_integration_writes_full_journal_only_at_build_boundaries(
+    repo: Repo, git_calls: list[GitCall], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Config writes don't start a git process, so they're seen as they're made.
+    writes: list[ConfigSet] = []
+    apply_config = GitClient.apply_config
+
+    def recording(self: GitClient, *changes: ConfigSet | ConfigUnset, check: bool = True) -> None:
+        writes.extend(
+            c for c in changes if isinstance(c, ConfigSet) and c.key == "branch.combined.stackIntegrationBuild"
+        )
+        apply_config(self, *changes, check=check)
+
+    monkeypatch.setattr(GitClient, "apply_config", recording)
+
     integration(repo)
 
-    writes = [c for c in git_calls if "branch.combined.stackIntegrationBuild" in c and "--unset" not in c]
     assert len(writes) == 2
     assert len([c for c in git_calls if c[:1] == ["check-ref-format"]]) == 2
 

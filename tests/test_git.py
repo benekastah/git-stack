@@ -180,7 +180,9 @@ def test_snapshot_outlives_stack_metadata_writes_but_not_upstream_changes(repo: 
         assert git.rev("new@{upstream}") is None
         git.config_set("new", "stackParent", "main")
         assert git.rev("new@{upstream}") is None
-        assert [call[0] for call in git_calls] == ["for-each-ref", "config"]
+        # The refs were read once, and the write found where the config is (it makes no git process of
+        # its own, and keeps the snapshot).
+        assert [call[0] for call in git_calls] == ["for-each-ref", "rev-parse"]
 
         git.config_set("new", "remote", "origin")
         git.config_set("new", "merge", "refs/heads/main")
@@ -759,7 +761,7 @@ def test_git_runs_in_the_users_locale_with_its_messages_in_english(
     monkeypatch.setenv("LC_ALL", "C.UTF-8")
     git = GitClient(repo.path)
 
-    git.config_set("main", "stackParent", "trunk")
+    git.run("config", "--get", "branch.main.stackParent", check=False)
     with git.snapshot():
         assert git.tree(git.tip("main")) is not None
     git.passthrough("status")
@@ -768,7 +770,7 @@ def test_git_runs_in_the_users_locale_with_its_messages_in_english(
     # By the command and its first argument, after `-C <directory>`.
     by_command = {" ".join(call["args"][2:4]): call for call in calls}
     assert {call["LC_ALL"] for call in calls} == {"C.UTF-8"}
-    assert by_command["config branch.main.stackParent"]["GIT_TEXTDOMAINDIR"] is not None
+    assert by_command["config --get"]["GIT_TEXTDOMAINDIR"] is not None
     assert by_command["cat-file --batch-command"]["GIT_TEXTDOMAINDIR"] is not None
     assert by_command["status"]["GIT_TEXTDOMAINDIR"] is None
 
