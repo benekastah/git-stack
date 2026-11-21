@@ -128,7 +128,12 @@ class Repo:
         return self._check_result(args, subprocess.CompletedProcess(argv, status, *output), expect_success)
 
     def stack_process(self, *args: str, expect_success: bool = True) -> subprocess.CompletedProcess[str]:
-        """stack, but as a separate process, the way users run it."""
+        """stack, but as a separate process, the way users run it: nothing Python caches in this
+        process (what a GitClient has learned, say) carries over from one run to the next.
+
+        In an `expect_operations` block, the git and gh commands it runs are counted from outside
+        (see tests/operations.py), by tracing git in the new process only; without one, the
+        process gets this process's environment as it is."""
         with operations.traced_subprocess() as extra_environment:
             result = subprocess.run(
                 [sys.executable, "-m", "git_stack", "-C", str(self.path), *args],

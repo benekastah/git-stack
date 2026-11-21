@@ -87,6 +87,7 @@ def test_nested_blocks_each_count_what_ran_inside_them(repo: Repo) -> None:
 
 
 def test_it_counts_git_processes_started_in_other_threads(repo: Repo) -> None:
+    # git-stack checks each branch's status from worker threads.
     with expect_operations(git=2):
         threads = [threading.Thread(target=run_git, args=(repo, "rev-parse", "HEAD")) for _ in range(2)]
         for thread in threads:
@@ -95,6 +96,8 @@ def test_it_counts_git_processes_started_in_other_threads(repo: Repo) -> None:
             thread.join()
 
 
+# As the performance tests use it: on the test itself, which pytest still gives its fixtures and
+# parameters, and runs once for each.
 @pytest.mark.parametrize("name", ["first", "second"])
 @expect_operations(git=1)
 def test_the_decorator_leaves_a_tests_fixtures_and_parameters_alone(repo: Repo, name: str) -> None:
@@ -102,6 +105,7 @@ def test_the_decorator_leaves_a_tests_fixtures_and_parameters_alone(repo: Repo, 
 
 
 def test_the_decorator_checks_each_call_afresh(repo: Repo) -> None:
+    # Calling it twice must count one each time, not two the second time.
     @expect_operations(git=1)
     def once() -> None:
         run_git(repo, "rev-parse", "HEAD")
@@ -121,6 +125,7 @@ def test_the_decorator_fails_the_test_that_runs_a_different_number(repo: Repo) -
 
 
 def test_a_with_block_counts_the_git_processes_of_a_git_stack_process(repo: Repo) -> None:
+    # The stack is made before the block, so that what it takes isn't counted.
     repo.make_stack()
 
     with expect_operations(git=3) as operations:
@@ -130,6 +135,8 @@ def test_a_with_block_counts_the_git_processes_of_a_git_stack_process(repo: Repo
 
 
 def test_a_git_stack_process_runs_the_same_git_processes_as_one_in_this_process(repo: Repo) -> None:
+    # The two ways of counting must agree, or the counts in tests that use one mean nothing for
+    # the others.
     repo.make_stack()
     with expect_operations(git=3) as here:
         repo.stack("parent")
@@ -163,6 +170,8 @@ def test_only_what_git_stack_starts_is_counted_not_what_git_starts_for_it(repo: 
 
 def test_the_tests_own_git_is_not_counted_in_a_block_with_a_git_stack_process(repo: Repo) -> None:
     repo.make_stack()
+
+    # Only the new process is traced, so this status isn't one of the 3.
 
     with expect_operations(git=3):
         repo.git("status", "--porcelain")
