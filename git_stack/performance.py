@@ -262,12 +262,12 @@ class TimedCatFile(CatFile):
     # These hooks in the pinned py-git-client cover the full exchange for the
     # info/verify requests GitClient uses, including lazy startup and retries.
     @override
-    def _request(self, command: bytes, name: str) -> tuple[bytes, str]:
+    def _request(self, command: bytes, name: str, deadline: float | None) -> tuple[bytes, str]:
         timeline = active_timeline.get()
         if timeline is None:
-            return super()._request(command, name)
+            return super()._request(command, name, deadline)
         with timeline.record("git", "cat-file", "--batch-command", "request"):
-            return super()._request(command, name)
+            return super()._request(command, name, deadline)
 
     @override
     def _stop(self) -> None:

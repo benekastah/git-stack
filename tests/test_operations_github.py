@@ -30,7 +30,7 @@ SYNC_NOTHING = {1: (12, 1), 3: (14, 1), 10: (21, 1)}
 # The bottom merged, as GitHub reports it (the merge commit and the head it had): the rest are
 # restacked onto main and pushed again. A warning to lower the git count to 32, 72 or 205 means the
 # fake no longer gives `sync` what GitHub does, and it's finding the merge from git alone.
-SYNC_BOTTOM_MERGED = {1: (35, 1), 3: (75, 5), 10: (208, 6)}
+SYNC_BOTTOM_MERGED = {1: (34, 1), 3: (74, 5), 10: (207, 6)}
 # gh is asked twice, however many pull requests there are.
 IMPORT = {1: (19, 2), 3: (36, 2), 10: (92, 2)}
 # info asks GitHub about all the branches in one request.

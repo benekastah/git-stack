@@ -18,7 +18,7 @@ pytestmark = pytest.mark.usefixtures("separate_processes")
 # Restacking replays each branch above the one that changed, and each replay costs 12 (16 + 12 *
 # (branches - 1), measured at 3 and 10). A stack of 1 has nothing above it to replay, so it's only
 # the check of whether it needs it, the same as an up to date stack's (8).
-RESTACK_BEHIND = {1: 8, 3: 40, 10: 124}
+RESTACK_BEHIND = {1: 8, 3: 39, 10: 123}
 # Even an up to date stack is checked a branch at a time: 6 + 2 * branches.
 RESTACK_UP_TO_DATE = {1: 8, 3: 12, 10: 26}
 # Nothing to pull: 11 + branches.
