@@ -67,7 +67,7 @@ rebase.
 
 ## Commands start processes for every branch, many of them one at a time
 
-`tests/test_operations_local_rewriting.py` pins what each costs at 1, 3 and 10 branches, and
+`tests/test_operations_local_rewriting.py` allots what each may cost at 1, 3 and 10 branches, and
 several grow with the stack even when there's no work: `restack` of an up to date stack starts
 6 + 2 * branches git processes (26 for 10 branches), `pull` with nothing to pull 11 + branches,
 and `clean` with nothing merged 10 + branches. `untrack`ing a whole stack, 3 + 3 * branches, has
