@@ -11,6 +11,10 @@ from tests.operations import expect_operations
 
 pytestmark = pytest.mark.usefixtures("separate_processes")
 
+# Each count below is for a stack of 1, 3 and 10 branches (the `chain` fixture), keyed by its
+# size and with the formula that fits all three. A formula is how the count grows, so a change
+# to it, not just to the number, shows up in review.
+#
 # Restacking replays each branch above the one that changed, and each replay costs 12: a stack
 # of 1 has nothing above it to replay, so it costs 12 less (16 + 12 * (branches - 1)).
 RESTACK_BEHIND = {1: 8, 3: 40, 10: 124}
@@ -29,7 +33,9 @@ UNTRACK_ALL = {1: 6, 3: 12, 10: 33}
 
 
 def commit_to_bottom(repo: Repo) -> None:
-    """A commit on the lowest branch, which the ones above it have to be restacked onto."""
+    """A commit on the lowest branch, which the ones above it have to be restacked onto: every
+    other branch in the stack is then behind its parent."""
+    # `switch` rather than a stack command, since the point is a change git-stack didn't make.
     repo.git("switch", "--quiet", "chain1")
     repo.write("extra.txt", "extra\n")
     repo.git("add", "extra.txt")
@@ -44,11 +50,13 @@ def test_restack_replays_each_branch_above_a_change(repo: Repo, chain: list[str]
 
 
 def test_restack_checks_each_branch_of_an_up_to_date_stack(repo: Repo, chain: list[str]) -> None:
+    # Nothing is changed after the chain's made, so no branch needs replaying: this is only the checking.
     with expect_operations(git=RESTACK_UP_TO_DATE[len(chain)]):
         repo.stack_process("restack")
 
 
 def test_pull_with_nothing_to_pull(repo: Repo, chain: list[str]) -> None:
+    # Pushed, so each branch has an upstream to compare with (the origin has nothing new for it).
     repo.client.push()
 
     with expect_operations(git=PULL_NOTHING[len(chain)]):
@@ -61,6 +69,8 @@ def test_clean_with_nothing_merged(repo: Repo, chain: list[str]) -> None:
 
 
 def test_rename_the_bottom_branch(repo: Repo, chain: list[str]) -> None:
+    # `rename` renames the branch you're on, and the bottom one has the others stacked on it, which
+    # is recorded by name, so they have to be updated too.
     repo.git("switch", "--quiet", "chain1")
 
     with expect_operations(git=RENAME_BOTTOM[len(chain)]):
@@ -78,5 +88,6 @@ def test_untrack_the_top_branch(repo: Repo, chain: list[str]) -> None:
 
 
 def test_untrack_every_branch(repo: Repo, chain: list[str]) -> None:
+    # A glob (git-stack expands it, not the shell: it's quoted for that), like `untrack 'fix-*'`.
     with expect_operations(git=UNTRACK_ALL[len(chain)]):
         repo.stack_process("untrack", "chain*")
