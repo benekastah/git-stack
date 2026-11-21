@@ -4,6 +4,16 @@ What's wrong with what's built: bugs, and gaps against the rules in `AGENTS.md` 
 `PROJECT_AGENTS.md`, most severe first. New work is in [roadmap.md](roadmap.md). When a change
 fixes one, remove it in the same change; when a change leaves something wrong, add it.
 
+## Commands with nothing to do still start processes for every branch
+
+`tests/test_operations_local_rewriting.py` pins what each costs at 1, 3 and 10 branches, and
+several grow with the stack even when there's no work: `restack` of an up to date stack starts
+6 + 2 * branches git processes (26 for 10 branches), `pull` with nothing to pull 11 + branches,
+`clean` with nothing merged 10 + branches, and `untrack`ing a whole stack 3 + 3 * branches.
+Restacking replays a branch for 12 processes each (the rebase, and the checks around it). In a
+repository with thousands of branches and a stack of a dozen, these are the ones to batch (one
+`for-each-ref` or `config` read in place of one per branch), which the tests would then show.
+
 ## The scripting commands run more than the README says
 
 The README says `parent`, `base` and `show-stack` "only read git config, so they're fast".
