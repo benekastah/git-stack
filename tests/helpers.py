@@ -20,7 +20,7 @@ from git_client.testing import real_git
 from git_stack import cli, events
 from git_stack.git import GitClient
 from git_stack.stack import BranchInfo, StackClient
-from tests import fake_gh
+from tests import fake_gh, operations
 
 
 @contextmanager
@@ -128,15 +128,22 @@ class Repo:
         return self._check_result(args, subprocess.CompletedProcess(argv, status, *output), expect_success)
 
     def stack_process(self, *args: str, expect_success: bool = True) -> subprocess.CompletedProcess[str]:
-        """stack, but as a separate process, the way users run it."""
-        result = subprocess.run(
-            [sys.executable, "-m", "git_stack", "-C", str(self.path), *args],
-            cwd=self.tmp,
-            capture_output=True,
-            encoding="utf-8",
-            timeout=60,
-            check=False,
-        )
+        """stack, but as a separate process, the way users run it: nothing Python caches in this
+        process (what a GitClient has learned, say) carries over from one run to the next.
+
+        In an `expect_operations` block, the git and gh commands it runs are counted from outside
+        (see tests/operations.py), by tracing git in the new process only; without one, the
+        process gets this process's environment as it is."""
+        with operations.traced_subprocess() as extra_environment:
+            result = subprocess.run(
+                [sys.executable, "-m", "git_stack", "-C", str(self.path), *args],
+                cwd=self.tmp,
+                capture_output=True,
+                encoding="utf-8",
+                env={**os.environ, **extra_environment} if extra_environment else None,
+                timeout=60,
+                check=False,
+            )
         return self._check_result(args, result, expect_success)
 
     def _check_result(
