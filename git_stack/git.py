@@ -434,7 +434,9 @@ class GitClient:
             self._git.write_configs(*changes, wait=CONFIG_LOCK_TIMEOUT)
         except GitError as e:
             if check:
-                raise StackError(f"git config failed:\n{e.stderr.strip()}") from e
+                raise StackError(
+                    f"git config {', '.join(change.key for change in changes)} failed:\n{e.stderr.strip()}"
+                ) from e
         finally:
             if any(not change.key.rpartition(".")[2].lower().startswith("stack") for change in changes):
                 # A config write can't move a worktree's HEAD.

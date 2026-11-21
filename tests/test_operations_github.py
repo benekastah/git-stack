@@ -17,7 +17,7 @@ from tests.operations import expect_operations
 pytestmark = [pytest.mark.usefixtures("separate_processes", "gh")]
 
 # Each is (git processes, gh commands) at 1, 3 and 10 branches.
-# Pushing starts a few processes for each branch (a stack of 10 pushes in 39 against 12 for 1)...
+# Pushing starts a few processes for each branch (a stack of 10 pushes in 20 against 11 for 1)...
 PUSH = {1: (11, 0), 3: (13, 0), 10: (20, 0)}
 # ...and opening a pull request for each costs more of both.
 PUSH_OPENING_PRS = {1: (13, 2), 3: (20, 8), 10: (41, 15)}
@@ -28,7 +28,7 @@ PRS_ALL_OPEN = {1: (4, 2), 3: (5, 4), 10: (5, 4)}
 # Nothing to do: gh is asked once, and git 11 + branches.
 SYNC_NOTHING = {1: (12, 1), 3: (14, 1), 10: (21, 1)}
 # The bottom merged, as GitHub reports it (the merge commit and the head it had): the rest are
-# restacked onto main and pushed again. A warning to lower the git count to 32, 72 or 205 means the
+# restacked onto main and pushed again. A drop in the git count that no change made on purpose means the
 # fake no longer gives `sync` what GitHub does, and it's finding the merge from git alone.
 SYNC_BOTTOM_MERGED = {1: (31, 1), 3: (61, 5), 10: (166, 6)}
 # gh is asked twice, however many pull requests there are.

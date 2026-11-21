@@ -472,7 +472,7 @@ def test_apply_config_reports_a_set_git_rejects(repo: Repo) -> None:
     repo.git("config", "--add", "branch.main.stackTwo", "2")
     git = GitClient(repo.path)
 
-    with pytest.raises(StackError, match="git config failed"):
+    with pytest.raises(StackError, match="git config branch.main.stackTwo failed"):
         git.apply_config(ConfigSet("branch.main.stackTwo", "3"))
 
 
