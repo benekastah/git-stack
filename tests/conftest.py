@@ -1,6 +1,5 @@
 import os
 import pathlib
-import sys
 
 import pytest
 
@@ -29,19 +28,6 @@ CI_WORKERS = 8
 """pytest -n auto's workers in CI, rather than one per CPU (3 or 4 on its runners): the tests
 spend most of their time waiting for the git processes they start, and the files they write,
 so more keep the CPUs busy."""
-
-
-def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
-    """Run the performance tests (tests/test_operations_*.py) on Linux only. They count the git and
-    gh processes a command starts, which is the same on every system (a command doesn't run something
-    else on another system: see PROJECT_AGENTS.md), so one system says it for all, and starting a
-    process is slow enough on Windows and macOS that running them there only makes CI slower."""
-    if sys.platform == "linux":
-        return
-    skip = pytest.mark.skip(reason="the performance tests count processes, the same everywhere: they run on Linux")
-    for item in items:
-        if item.path.name.startswith("test_operations_"):
-            item.add_marker(skip)
 
 
 def pytest_xdist_auto_num_workers(config: pytest.Config) -> int | None:

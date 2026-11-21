@@ -30,6 +30,28 @@ permissions:
   contents: read
 
 jobs:
+  # The performance tests count the git and gh processes each command starts, which are the same on
+  # every system (see PROJECT_AGENTS.md), and starting a process is slow on Windows and macOS, so
+  # only Linux runs them in CI. pyproject.toml's addopts leaves them out of the default run (even a
+  # path named on the command line), so this replaces addopts. They work on any system the same way.
+  performance-tests:
+    if: fromJSON(inputs.context).code
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          python-version: ${{ fromJSON(inputs.context).newest_python }}
+      - run: >-
+          uv run --no-project python dev.py tests
+          -o addopts="--numprocesses auto"
+          tests/test_operations_read_only.py
+          tests/test_operations_local_rewriting.py
+          tests/test_operations_github.py
+
   # Type checks as if on Windows and macOS. ci.yml's static job checks as if on Linux
   # (pyproject.toml's pythonPlatform), which misses a call another system lacks.
   types-other-platforms:

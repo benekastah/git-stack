@@ -51,7 +51,10 @@ git_stack = ["skills/*/*.md"]
 [tool.pytest]
 testpaths = ["tests"]
 # One worker per CPU (pytest-xdist); `-n 0` runs them one at a time, e.g. to debug.
-addopts = ["--numprocesses", "auto"]
+# The performance tests (tests/test_operations_*.py) are left out, since CI runs this on three
+# systems. project.yml runs them on Linux with an addopts of its own (this ignore holds even for a
+# path on the command line); on any system: `dev.py tests -o addopts="-n auto" tests/test_operations_*.py`.
+addopts = ["--numprocesses", "auto", "--ignore-glob=tests/test_operations_*.py"]
 
 [tool.ruff]
 line-length = 120
