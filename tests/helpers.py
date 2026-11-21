@@ -4,6 +4,7 @@ import io
 import json
 import os
 import pathlib
+import re
 import subprocess
 import sys
 import tempfile
@@ -178,6 +179,22 @@ class Repo:
         self.commit("b", "pr2\n", "pr2 c1")
         self.client.branch("pr3")
         self.commit("c", "pr3\n", "pr3 c1")
+
+    def make_chain(self, size: int) -> list[str]:
+        """main <- chain1 <- chain2 <- ... <- chain<size>, each with a commit of its own file, and the
+        last checked out. Returns the branches, bottom first.
+
+        Each branch's commit is a new file of its own, so restacking one onto a changed parent
+        never conflicts, which a performance test's count shouldn't depend on. (`commit` changes
+        a file that's already there, which is what makes a conflict.)"""
+        names = [f"chain{i}" for i in range(1, size + 1)]
+        for name in names:
+            # In this process, as the test's setup: it isn't what the test counts.
+            self.client.branch(name)
+            self.write(f"{name}.txt", f"{name}\n")
+            self.git("add", f"{name}.txt")
+            self.git("commit", "--quiet", "-m", f"{name} c1")
+        return names
 
     def squash_merge_on_forge(self, branch: str, delete_branch: bool = True) -> None:
         """Squash-merge origin/<branch> into origin/main and (by default) delete the branch."""
@@ -388,3 +405,8 @@ class FakeGitHub:
         state = self.load()
         state["fail_heads"] = list(heads)
         self.save(state)
+
+
+def mentions(output: str, branch: str) -> bool:
+    """Whether output names branch, as a whole name: `chain1` isn't in a line about `chain10`."""
+    return re.search(rf"(?<![\w-]){re.escape(branch)}(?![\w-])", output) is not None
