@@ -179,6 +179,17 @@ class Repo:
         self.client.branch("pr3")
         self.commit("c", "pr3\n", "pr3 c1")
 
+    def make_chain(self, size: int) -> list[str]:
+        """main <- chain1 <- chain2 <- ... <- chain<size>, each with a commit of its own file, and the
+        last checked out. Returns the branches, bottom first."""
+        names = [f"chain{i}" for i in range(1, size + 1)]
+        for name in names:
+            self.client.branch(name)
+            self.write(f"{name}.txt", f"{name}\n")
+            self.git("add", f"{name}.txt")
+            self.git("commit", "--quiet", "-m", f"{name} c1")
+        return names
+
     def squash_merge_on_forge(self, branch: str, delete_branch: bool = True) -> None:
         """Squash-merge origin/<branch> into origin/main and (by default) delete the branch."""
         self.git("pull", "--quiet", cwd=self.forge)
