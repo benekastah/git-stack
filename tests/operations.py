@@ -181,7 +181,8 @@ def _plural(count: int, singular: str, plural: str) -> str:
 
 
 def _listing(program: str, commands: list[list[str]]) -> str:
-    # Without the directory, which is the same for all of them and a long path in each line.
+    # Without the directory, which is usually the same for all of them (not always: git-stack runs
+    # git in other directories too, for an integration's worktree) and a long path in each line.
     lines = [f"  {program} {shlex.join(subcommand(command))}" for command in commands]
     return "\n".join(line if len(line) <= _SHOWN else line[: _SHOWN - 1] + "…" for line in lines)
 

@@ -9,7 +9,13 @@ from typing import Any
 import pytest
 
 from tests.helpers import FakeGitHub, InProcessGh, Repo
-from tests.operations import TRACE_VARIABLE, UnderBudget, expect_operations, subcommand
+from tests.operations import (
+    TRACE_PARENT_VARIABLE,
+    TRACE_VARIABLE,
+    UnderBudget,
+    expect_operations,
+    subcommand,
+)
 
 
 def run_git(repo: Repo, *args: str) -> None:
@@ -179,9 +185,8 @@ def test_a_git_stack_process_runs_the_same_git_processes_as_one_in_this_process(
     with expect_operations(git=3) as separate:
         repo.stack_process("parent")
 
-    # The same commands. Only the directory differs: git-stack is given the repository as `-C <path>`,
-    # which one process had as a path and the other as ".".
-    assert [subcommand(command) for command in separate.git] == [subcommand(command) for command in here.git]
+    # The same commands, whole: both are given the repository as the same `-C <path>`.
+    assert separate.git == here.git
 
 
 def test_a_with_block_counts_the_gh_commands_of_a_git_stack_process(repo: Repo, gh: FakeGitHub) -> None:
@@ -247,16 +252,16 @@ def test_only_the_git_stack_process_gets_the_trace_variable(repo: Repo, monkeypa
     run: Any = subprocess.run
 
     def spy(*args: Any, **kwargs: Any) -> Any:
+        # As the process starts, when it would inherit this process's environment: a variable set
+        # here for the length of the call and restored after would be caught by nothing later.
+        assert TRACE_VARIABLE not in os.environ
         environments.append(kwargs.get("env"))
         return run(*args, **kwargs)
 
     monkeypatch.setattr(subprocess, "run", spy)
 
     with expect_operations(git=3):
-        # In this process, so that its own git (and git-stack's, in it) would inherit and double count it.
-        assert TRACE_VARIABLE not in os.environ
         repo.stack_process("parent")
-        assert TRACE_VARIABLE not in os.environ
 
     (child,) = environments
     assert child is not None
@@ -269,7 +274,7 @@ def test_a_trace_session_inherited_from_the_test_run_doesnt_hide_git_stacks_proc
     repo.make_stack()
     # As if the tests were run by a git with trace2 on: every process then has a parent session, and
     # so a `/` in its own, which is what marks one that git started for git-stack.
-    monkeypatch.setenv("GIT_TRACE2_PARENT_SID", "20260101T000000Z-H0-P0")
+    monkeypatch.setenv(TRACE_PARENT_VARIABLE, "20260101T000000Z-H0-P0")
 
     # Counted, not just allotted: counting none would only warn.
     with expect_operations(git=3) as ran:
