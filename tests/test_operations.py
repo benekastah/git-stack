@@ -263,6 +263,8 @@ def test_only_the_git_stack_process_gets_the_trace_variable(repo: Repo, monkeypa
     with expect_operations(git=3):
         repo.stack_process("parent")
 
+    # And not left in it after, for every later process this one starts to inherit.
+    assert TRACE_VARIABLE not in os.environ
     (child,) = environments
     assert child is not None
     assert TRACE_VARIABLE in child
