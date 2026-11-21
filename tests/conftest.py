@@ -12,6 +12,7 @@ from git_stack import events
 from git_stack.adapters import github
 from git_stack.git import GIT_VARIABLE
 from git_stack.stack import StackClient
+from tests import operations
 from tests.helpers import FakeGitHub, InProcessGh, Repo, install_command
 
 # py-git-client's plugin gives every test (session fixtures included) a git
@@ -74,6 +75,12 @@ def make_repositories(directory: pathlib.Path) -> None:
     repo.git("commit", "--quiet", "-m", "init")
     repo.git("push", "--quiet", "--set-upstream", "origin", "main")
     repo.git("clone", "--quiet", str(repo.origin), str(repo.forge), cwd=directory)
+
+
+@pytest.fixture(autouse=True)
+def count_operations(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Record the git processes and gh commands a test runs, for tests.operations.expect_operations."""
+    operations.install(monkeypatch)
 
 
 @pytest.fixture
