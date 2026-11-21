@@ -13,6 +13,10 @@ from tests.operations import expect_operations
 pytestmark = pytest.mark.usefixtures("separate_processes")
 
 
+# `chain` makes the stack before the decorator starts counting, and is used by name, not as an
+# argument, since the test doesn't need what it returns. The same count at 1, 3 and 10 branches
+# is the point: nothing here depends on the stack's length.
+#
 # Each of these reads the config, checks for a stopped rebase or cherry-pick, and reads the refs.
 @pytest.mark.usefixtures("chain")
 @expect_operations(git=3)
@@ -40,6 +44,7 @@ def test_prev_runs_the_same_for_any_stack_size(repo: Repo) -> None:
 
 
 def test_next_runs_the_same_for_any_stack_size(repo: Repo, chain: list[str]) -> None:
+    # The chain's last branch is checked out and has no next one: step back first, outside the block.
     repo.stack_process("prev")
 
     with expect_operations(git=4):
@@ -48,7 +53,9 @@ def test_next_runs_the_same_for_any_stack_size(repo: Repo, chain: list[str]) -> 
 
 def test_the_first_info_checks_each_branch_against_its_parent(repo: Repo, chain: list[str]) -> None:
     # The config, a check for a stopped operation, the refs, a long-lived `cat-file`, and the
-    # colors, and one `merge-tree` for each branch.
+    # colors, and one `merge-tree` for each branch: whether it conflicts with its parent. That
+    # is the one count here that grows with the stack. Each test has a repository of its own, with
+    # no cache of those checks on disk yet, so this first `info` always has them all to do.
     with expect_operations(git=5 + len(chain)):
         repo.stack_process("info", "--offline")
 
@@ -61,6 +68,8 @@ def test_the_first_info_checks_each_branch_against_its_parent(repo: Repo, chain:
 def test_info_runs_the_same_for_any_stack_size_once_its_branches_are_checked(
     repo: Repo, chain: list[str], args: list[str], git: int
 ) -> None:
+    # Once, outside the block, to fill the on-disk cache of those checks: a second process reads
+    # them, with no `merge-tree` for any branch, so it's the same for any stack size.
     repo.stack_process("info", "--offline")
 
     with expect_operations(git=git):
