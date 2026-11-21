@@ -10,7 +10,7 @@ from contextlib import contextmanager
 from typing import TextIO
 
 import git_client
-from git_client import ConfigSet, ConfigUnset, GitError, Ref, git_common_dir, git_paths
+from git_client import ConfigSet, ConfigUnset, GitError, Ref, git_common_dir, git_paths, git_paths_and_head
 
 from git_stack.errors import StackError
 from git_stack.performance import TimedCatFile, TimedGit
@@ -185,6 +185,11 @@ class GitClient:
         self._refs_config: dict[str, list[str | None]] = {}
         self._listed_upstreams: frozenset[str] = frozenset()
         self._head: str | None = None
+        # The checked-out branch, as operation_in_progress read it with the paths it asks for (a
+        # 1-tuple, to tell None, detached, from not read); within a snapshot only.
+        self._probed_head: tuple[str | None] | None = None
+        # The same, read before a snapshot started (see common_dir): the first one to start takes it.
+        self._early_head: tuple[str | None] | None = None
         self._worktrees: str | None = None
         self._rebasing: dict[pathlib.Path, str | None] = {}
         self._reflogs: dict[str, tuple[str, ...]] = {}
@@ -209,6 +214,8 @@ class GitClient:
         this hasn't replaced their dict meanwhile (see reflog_tips)."""
         with self._refs_lock:
             self._refs = None
+            self._probed_head = None
+            self._early_head = None
             self._reflogs = {}
             if worktrees:
                 self._worktrees = None
@@ -282,6 +289,8 @@ class GitClient:
         case-insensitive filesystem (as macOS's and Windows' usually are) can
         find it under a name that differs in case.
         """
+        if not self._snapshot_depth and self._early_head is not None:
+            self._probed_head, self._early_head = self._early_head, None
         self._snapshot_depth += 1
         try:
             yield
@@ -350,9 +359,9 @@ class GitClient:
         asks git for with the other answers of where things are (see git_client.git_common_dir)."""
         if self._common_dir is None:
             with git_errors():
-                # Asked with the paths a command is about to ask for (see operation_in_progress), so one
-                # rev-parse says all of it.
-                git_paths(self._git, *OPERATION_PATHS)
+                # Asked with the paths and HEAD a command is about to ask for (see operation_in_progress),
+                # so one rev-parse says all of it.
+                self._paths_and_head()
                 self._common_dir = git_common_dir(self._git)
         return self._common_dir
 
@@ -539,6 +548,8 @@ class GitClient:
         """The branch checked out in this worktree, or None if HEAD is
         detached. Read from the snapshot if there is one and HEAD is on a
         branch that has a commit; an unborn one isn't a ref yet."""
+        if self._snapshot_depth and self._probed_head is not None:
+            return self._probed_head[0]
         if self._snapshot_refs() is not None and self._head is not None:
             return self._head
         return self.run("branch", "--show-current") or None
@@ -565,7 +576,32 @@ class GitClient:
         only its sequencer state behind, not CHERRY_PICK_HEAD.
         """
         with git_errors():
-            return any(path.exists() for path in git_paths(self._git, *OPERATION_PATHS))
+            if self._snapshot_depth and self._probed_head is not None:
+                # common_dir asked for these with HEAD already: remembered, no process.
+                paths = git_paths(self._git, *OPERATION_PATHS)
+            else:
+                paths = self._paths_and_head()
+        return any(path.exists() for path in paths)
+
+    def _paths_and_head(self) -> list[pathlib.Path]:
+        """Where a stopped operation would leave its files (see OPERATION_PATHS), in the same
+        `rev-parse` that says which branch is checked out, so a command that only needs the branch
+        (e.g. `parent`) needn't read the refs for it. The branch is kept for the snapshot."""
+        paths, head = git_paths_and_head(self._git, *OPERATION_PATHS)
+        # Unknown (unborn, say) is left to be asked (see current_branch).
+        if head.detached or head.branch is not None:
+            branch = head.branch
+            read = (branch.removeprefix("refs/heads/") if branch and branch.startswith("refs/heads/") else None,)
+            if self._snapshot_depth:
+                self._probed_head = read
+            else:
+                self._early_head = read
+        return paths
+
+    def forget_early_head(self) -> None:
+        """Forget the branch read before a snapshot started, which waiting (for the lock) may have
+        made out of date."""
+        self._early_head = None
 
     def has_conflicts(self) -> bool:
         """Whether the index has unmerged paths, i.e. a merge stopped on a

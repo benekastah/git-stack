@@ -24,9 +24,9 @@ def below_the_last(chain: list[str]) -> str:
 # `chain` makes the stack before the decorator starts counting. The same count at 1, 3 and 10
 # branches is the point: nothing here depends on the stack's length.
 #
-# Each of these reads the config, checks for a stopped rebase, cherry-pick, revert or merge, and
-# reads the refs.
-@expect_operations(git=3)
+# `parent` reads the config, and in one `rev-parse` asks where git keeps its stopped-operation
+# files and which branch is checked out: no refs. The others read the refs too.
+@expect_operations(git=2)
 def test_parent_runs_the_same_for_any_stack_size(repo: Repo, chain: list[str]) -> None:
     assert repo.stack_process("parent").stdout == f"{below_the_last(chain)}\n"
 

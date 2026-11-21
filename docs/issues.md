@@ -50,9 +50,9 @@ stacks that still need to sync.
 ## The scripting commands run more than the README says, and can write config
 
 The README says `parent`, `base` and `show-stack` "only read git config, so they're fast, and
-they're safe to run while another git-stack command is running". They start 3 git processes
-(`config --list`, a check for a stopped rebase, cherry-pick, revert or merge, and a `for-each-ref`),
-and `base`
+they're safe to run while another git-stack command is running". `parent` starts 2 git processes
+(`config --list`, and one `rev-parse` for the stopped rebase, cherry-pick, revert or merge check and
+the branch checked out), `show-stack` 3 (also a `for-each-ref`), and `base`
 5 (also the batch `cat-file` and a `merge-base --is-ancestor`), however long the stack is
 (`tests/test_operations_read_only.py` allots them). A shell prompt or editor running one on every
 keystroke pays for them.
@@ -81,7 +81,7 @@ repository with thousands of branches and a stack of a dozen, these are the ones
 `tests/test_operations_github.py` allots them at 1, 3 and 10 branches. Pushing a stack that was
 never pushed starts 12, 18 and 39 git processes; `push --prs` 14, 25 and 60 git and 2, 8 and 15
 `gh` (more than one `gh` call for each of 10 pull requests); `sync` after the bottom pull request
-merged 34, 74 and 207 git and up to 6 `gh`; and `import` 19, 36 and 92 git for 1, 3 and 10 pull
+merged 34, 74 and 207 git and up to 6 `gh`; and `import` 18, 35 and 91 git for 1, 3 and 10 pull
 requests (its `gh` stays at 2). On a stack of a dozen, `sync` is over 200 processes, of which the
 restacks are most (see the issue above). `info` and a `sync` with nothing to do keep `gh` at 1.
 

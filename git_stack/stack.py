@@ -1037,14 +1037,14 @@ class StackClient(StackCore):
 
         return sorted(dict.fromkeys(commits), key=functools.cmp_to_key(newest_first))
 
-    def settled_stacks(self) -> Stacks:
-        """Like stacks, but first picks up the result of a restack or
-        pull the user finished by hand. One that hasn't finished is left alone,
+    def settled_stacks(self, *, check_existence: bool = True) -> Stacks:
+        """Like stacks (see there for check_existence), but first picks up the result of a
+        restack or pull the user finished by hand. One that hasn't finished is left alone,
         even if it looks aborted, since it may be about to start in another
         git-stack process, so this is safe to call at any time."""
         if not self.git.operation_in_progress():
             self.settle_all(forget_unfinished=False)
-        return self.stacks()
+        return self.stacks(check_existence=check_existence)
 
     def stacked_branch(self, branch: str | None, stacks: Stacks) -> str:
         """Return branch, or the current branch if it's None, refusing unless it's
@@ -1058,7 +1058,8 @@ class StackClient(StackCore):
     @snapshot
     def parent(self, branch: str | None = None) -> str:
         """The branch that branch (default: the current branch) is stacked on."""
-        stacks = self.settled_stacks()
+        # The branch checked out exists, so the refs needn't be read to know it does.
+        stacks = self.settled_stacks(check_existence=branch is not None)
         return stacks.parent(self.stacked_branch(branch, stacks))
 
     @snapshot

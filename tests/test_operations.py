@@ -169,10 +169,10 @@ def test_a_with_block_counts_the_git_processes_of_a_git_stack_process(repo: Repo
     # The stack is made before the block, so that what it takes isn't counted.
     repo.make_stack()
 
-    with expect_operations(git=3) as operations:
+    with expect_operations(git=2) as operations:
         repo.stack_process("parent")
 
-    assert [subcommand(command)[0] for command in operations.git] == ["rev-parse", "config", "for-each-ref"]
+    assert [subcommand(command)[0] for command in operations.git] == ["rev-parse", "config"]
     assert all(command[0] == "-C" for command in operations.git)
 
 
@@ -180,10 +180,10 @@ def test_a_git_stack_process_runs_the_same_git_processes_as_one_in_this_process(
     # The two ways of counting must agree, or the counts in tests that use one mean nothing for
     # the others.
     repo.make_stack()
-    with expect_operations(git=3) as here:
+    with expect_operations(git=2) as here:
         repo.stack("parent")
 
-    with expect_operations(git=3) as separate:
+    with expect_operations(git=2) as separate:
         repo.stack_process("parent")
 
     # The same commands, whole: both are given the repository as the same `-C <path>`.
@@ -215,9 +215,9 @@ def test_only_what_git_stack_starts_is_counted_not_what_git_starts_for_it(repo: 
 def test_the_tests_own_git_is_not_counted_in_a_block_with_a_git_stack_process(repo: Repo) -> None:
     repo.make_stack()
 
-    # Only the new process is traced, so this status isn't one of the 3.
+    # Only the new process is traced, so this status isn't one of the 2.
 
-    with expect_operations(git=3):
+    with expect_operations(git=2):
         repo.git("status", "--porcelain")
         repo.stack_process("parent")
 
@@ -225,7 +225,7 @@ def test_the_tests_own_git_is_not_counted_in_a_block_with_a_git_stack_process(re
 def test_nested_blocks_each_count_a_git_stack_process(repo: Repo) -> None:
     repo.make_stack()
 
-    with expect_operations(git=3), expect_operations(git=3):
+    with expect_operations(git=2), expect_operations(git=2):
         repo.stack_process("parent")
 
 
@@ -261,7 +261,7 @@ def test_only_the_git_stack_process_gets_the_trace_variable(repo: Repo, monkeypa
 
     monkeypatch.setattr(subprocess, "run", spy)
 
-    with expect_operations(git=3):
+    with expect_operations(git=2):
         repo.stack_process("parent")
 
     # And not left in it after, for every later process this one starts to inherit.
@@ -280,9 +280,9 @@ def test_a_trace_session_inherited_from_the_test_run_doesnt_hide_git_stacks_proc
     monkeypatch.setenv(TRACE_PARENT_VARIABLE, "20260101T000000Z-H0-P0")
 
     # Counted, not just allotted: counting none would only warn.
-    with expect_operations(git=3) as ran:
+    with expect_operations(git=2) as ran:
         repo.stack_process("parent")
-    assert len(ran.git) == 3
+    assert len(ran.git) == 2
 
 
 def test_a_block_records_how_long_it_took_and_is_reported_once_it_finishes(repo: Repo) -> None:

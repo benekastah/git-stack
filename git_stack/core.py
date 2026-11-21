@@ -48,6 +48,9 @@ PENDING_PULLED_KEY = "stackPendingPulled"
 PENDING_PULL_UPSTREAM_KEY = "stackPendingPullUpstream"
 LEGACY_PULL_IDENTITIES_KEY = "stackPendingPullIdentities"
 PENDING_PULL_IDENTITIES_KEY = "stackPendingPullIdentityCounts"
+# What settle_restack and settle_pull each look for first (in lower case, as branch_config has
+# them): a branch with none of these has nothing to settle.
+PENDING_KEYS = frozenset(key.lower() for key in (PENDING_RESTACK_KEY, LEGACY_PENDING_PARENT_KEY, PENDING_PULLED_KEY))
 # The last answers to whether the branch conflicts with its parent, whether its
 # changes landed in its parent, and whether its parent then reverted them (see
 # StackCore.remembered), kept in CHECK_CACHE_FILE. Each can take a second or
@@ -192,7 +195,17 @@ class StackCore:
             finally:
                 self._exclusive_depth -= 1
             return
-        with file_lock(self.git.common_dir() / LOCK_FILE, lambda: self.emit(events.WaitingForLock())):
+        waited = False
+
+        def waiting() -> None:
+            nonlocal waited
+            waited = True
+            self.emit(events.WaitingForLock())
+
+        with file_lock(self.git.common_dir() / LOCK_FILE, waiting):
+            if waited:
+                # Which branch is checked out may have changed while we waited.
+                self.git.forget_early_head()
             self._exclusive_depth = 1
             try:
                 yield
@@ -210,9 +223,12 @@ class StackCore:
         if self.on_event is not None:
             self.on_event(event)
 
-    def stacks(self) -> Stacks:
-        """Every tracked branch that still exists, read from git config."""
-        existing = self.git.local_branches()
+    def stacks(self, *, check_existence: bool = True) -> Stacks:
+        """Every tracked branch that still exists, read from git config. Unless
+        check_existence is set, which asks git for the branches (the refs), every one
+        the config has, including one deleted without git-stack: for a caller that
+        only looks up a branch it knows exists, e.g. the one checked out."""
+        existing = self.git.local_branches() if check_existence else None
         config = self.git.branch_config()
         return Stacks(
             StackNode(
@@ -222,7 +238,7 @@ class StackCore:
                 read_ownership(branch, config.get((branch, OWNERSHIP_KEY.lower()))),
             )
             for (branch, key), parent in config.items()
-            if key == PARENT_KEY.lower() and branch in existing
+            if key == PARENT_KEY.lower() and (existing is None or branch in existing)
         )
 
     def save(self, stacks: Stacks) -> None:
@@ -431,8 +447,14 @@ class StackCore:
         git.config_unset(branch, LEGACY_PULL_IDENTITIES_KEY)
 
     def settle_all(self, forget_unfinished: bool = True) -> None:
+        # Only a branch with a pending record has anything to settle, so most commands, which
+        # have none, needn't ask git which branches exist.
+        pending = {branch for branch, key in self.git.branch_config() if key in PENDING_KEYS}
+        if not pending:
+            return
         for branch in self.stacks():
-            self.settle(branch, forget_unfinished)
+            if branch in pending:
+                self.settle(branch, forget_unfinished)
 
     def recorded_base(self, branch: str, parent: str) -> str:
         """Return branch's base, checking that it is still in the branch's history."""

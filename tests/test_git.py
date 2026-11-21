@@ -407,13 +407,16 @@ def test_switching_forgets_the_worktrees(repo: Repo) -> None:
 
 def test_snapshot_reads_the_current_branch_with_the_refs(repo: Repo, git_calls: list[GitCall]) -> None:
     git = GitClient(repo.path)
-    # As a command has, to know which upstreams to read.
+    # As a command has, to know which upstreams to read: this also says which branch is checked out.
     git.branch_config()
     git_calls.clear()
     with git.snapshot():
         assert [git.current_branch() for _ in range(3)] == ["main"] * 3
+        # Once the branch may have changed it's read with the refs, once.
+        git.run("update-ref", "refs/heads/other", "refs/heads/main")
+        assert [git.current_branch() for _ in range(3)] == ["main"] * 3
 
-    assert [call[0] for call in git_calls] == ["for-each-ref"]
+    assert [call[0] for call in git_calls] == ["update-ref", "for-each-ref"]
 
 
 def test_snapshot_sees_the_current_branch_change(repo: Repo) -> None:
@@ -474,6 +477,97 @@ def test_apply_config_reports_a_set_git_rejects(repo: Repo) -> None:
 
     with pytest.raises(StackError, match="git config branch.main.stackTwo failed"):
         git.apply_config(ConfigSet("branch.main.stackTwo", "3"))
+
+
+def test_the_stopped_operation_check_reads_the_current_branch_too(repo: Repo, git_calls: list[GitCall]) -> None:
+    git = GitClient(repo.path)
+    with git.snapshot():
+        assert not git.operation_in_progress()
+        assert git.current_branch() == "main"
+
+    # One `rev-parse` for both, and the refs weren't read.
+    assert [call[0] for call in git_calls] == ["rev-parse"]
+
+
+def test_the_branch_it_read_with_the_stopped_operation_check_follows_a_switch(repo: Repo) -> None:
+    repo.git("branch", "other")
+    git = GitClient(repo.path)
+    with git.snapshot():
+        assert not git.operation_in_progress()
+        git.switch("other")
+        assert git.current_branch() == "other"
+        git.run("switch", "--quiet", "--detach")
+        assert git.current_branch() is None
+
+
+def test_the_stopped_operation_check_reads_a_detached_head(repo: Repo) -> None:
+    repo.git("switch", "--quiet", "--detach")
+    git = GitClient(repo.path)
+    with git.snapshot():
+        assert not git.operation_in_progress()
+        assert git.current_branch() is None
+
+
+def test_the_stopped_operation_check_leaves_an_unborn_branch_to_be_asked(repo: Repo) -> None:
+    repo.git("switch", "--quiet", "--orphan", "new")
+    git = GitClient(repo.path)
+    with git.snapshot():
+        assert not git.operation_in_progress()
+        assert git.current_branch() == "new"
+
+
+def test_the_stopped_operation_check_reads_the_branch_of_its_own_worktree(repo: Repo) -> None:
+    repo.git("worktree", "add", "--quiet", "-b", "elsewhere", str(repo.tmp / "elsewhere"))
+    git = GitClient(repo.tmp / "elsewhere")
+    with git.snapshot():
+        assert not git.operation_in_progress()
+        assert git.current_branch() == "elsewhere"
+
+
+def test_the_branch_read_with_the_stopped_operation_check_isnt_kept_past_the_snapshot(repo: Repo) -> None:
+    repo.git("branch", "other")
+    git = GitClient(repo.path)
+    with git.snapshot():
+        git.operation_in_progress()
+    repo.git("switch", "--quiet", "other")
+
+    with git.snapshot():
+        assert git.current_branch() == "other"
+
+
+def test_the_branch_read_before_a_snapshot_is_used_by_its_first_command(repo: Repo, git_calls: list[GitCall]) -> None:
+    git = GitClient(repo.path)
+    git.common_dir()  # as the command line does, to read the config, before the command's snapshot starts
+    git_calls.clear()
+
+    with git.snapshot():
+        assert not git.operation_in_progress()
+        assert git.current_branch() == "main"
+
+    assert git_calls == []
+
+
+def test_the_branch_read_before_a_snapshot_is_dropped_by_anything_that_may_change_it(repo: Repo) -> None:
+    repo.git("branch", "other")
+    git = GitClient(repo.path)
+    git.common_dir()
+    git.switch("other")
+
+    with git.snapshot():
+        assert git.operation_in_progress() is False
+        assert git.current_branch() == "other"
+
+
+def test_the_branch_read_before_a_snapshot_is_dropped_when_the_lock_was_waited_for(repo: Repo) -> None:
+    repo.git("branch", "other")
+    git = GitClient(repo.path)
+    git.common_dir()
+    repo.git("switch", "--quiet", "other")  # while we waited for the lock
+    git.forget_early_head()
+
+    with git.snapshot():
+        assert git.operation_in_progress() is False
+        assert git.current_branch() == "other"
 
 
 def separate_patch_ids(repo: Repo, *command: str) -> list[tuple[str, str]]:
