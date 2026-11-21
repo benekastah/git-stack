@@ -13,6 +13,7 @@ commits on main to be restacked onto.
 import hashlib
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 from collections.abc import Callable, Iterator
@@ -152,25 +153,59 @@ def build(directory: pathlib.Path, recipe: Recipe, progress: Callable[[str], Non
     _git("commit-graph", "write", "--reachable", "--changed-paths", cwd=local)
 
 
-def link_or_copy(source: str, destination: str) -> str:
-    """Hard-link a git object (a pack, or a loose object: neither is ever changed once written),
-    and copy everything else (a working tree file, the config, the refs), which a test changes in
-    place. A link that can't be made is an error, not a copy: the cache and where the test's
-    copy goes must be on one filesystem, or each test would write the whole repository (and
-    fill a RAM-backed temporary directory)."""
-    if f"{os.sep}objects{os.sep}" not in source:
-        shutil.copy2(source, destination)
-        return destination
-    try:
-        os.link(source, destination)
-    except OSError as error:
-        raise RuntimeError(
-            f"can't link {source} to {destination} ({error}): the cached repository and its copy "
-            "have to be on the same filesystem"
-        ) from error
-    return destination
+def is_git_object(relative: pathlib.PurePath) -> bool:
+    """Whether the file at relative, a path in the git directory (see `copy`), is a pack or a loose
+    object, which git never changes once it's written."""
+    parts = relative.parts
+    return parts[:2] == ("objects", "pack") or (
+        len(parts) == 3 and parts[0] == "objects" and re.fullmatch("[0-9a-f]{2}", parts[1]) is not None
+    )
 
 
 def copy(built: pathlib.Path, destination: pathlib.Path) -> None:
-    """A copy of a repository `build` made, quick because its objects are linked, not copied."""
+    """A copy of a repository `build` made, quick because its objects are linked, not copied.
+
+    The objects are hard-linked: a pack, or a loose object, is never changed once written. Everything
+    else (a working tree file, the config, the refs, the index) is copied, since a test changes
+    those in place, and a link would change the cached repository too. Which files are objects is
+    judged by their path in the git directory (`.git`, or the repository itself if it's bare), not
+    wherever the repository is: a checkout under a directory called `objects` is no different.
+
+    A link that can't be made is an error, not a copy: the cached repository and its copy must be
+    on one filesystem, or each test would write the whole repository (and fill a RAM-backed
+    temporary directory)."""
+    git_directory = built / ".git" if (built / ".git").is_dir() else built
+
+    def link_or_copy(source: str, target: str) -> str:
+        path = pathlib.Path(source)
+        if not path.is_relative_to(git_directory) or not is_git_object(path.relative_to(git_directory)):
+            shutil.copy2(source, target)
+            return target
+        try:
+            os.link(source, target)
+        except OSError as error:
+            raise RuntimeError(
+                f"can't link {source} to {target} ({error}): the cached repository and its copy "
+                "have to be on the same filesystem"
+            ) from error
+        return target
+
     shutil.copytree(built, destination, copy_function=link_or_copy, symlinks=True)
+
+
+def ensure_one_process() -> None:
+    """Fail in a pytest-xdist worker: workers would each build the repository, and delete one
+    another's half-built one. (`dev.py tests -m large` gets here with pyproject's `--numprocesses
+    auto`; `dev.py large-tests` runs one.)"""
+    if os.environ.get("PYTEST_XDIST_WORKER"):
+        raise RuntimeError("the large repository tests run in one process: use `dev.py large-tests`, or `-n 0`")
+
+
+def prune(parent: pathlib.Path, keep: str) -> None:
+    """Remove what's in parent, where repositories are built, besides the one named keep: builds
+    made by an older recipe or version of this file, and the copies (`keep/work`) that a run
+    which was killed left (the repository's other files are kept for the next)."""
+    for entry in parent.iterdir():
+        if entry.name != keep:
+            shutil.rmtree(entry, ignore_errors=True)
+    shutil.rmtree(parent / keep / "work", ignore_errors=True)

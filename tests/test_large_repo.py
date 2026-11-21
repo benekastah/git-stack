@@ -13,13 +13,14 @@ SMALL = large_repo.Recipe(history=30, branches=4, commits_per_day=10, branch_win
 
 def git(directory: pathlib.Path, *args: str) -> str:
     return subprocess.run(
-        ["git", "-C", str(directory), *args], capture_output=True, text=True, check=True
+        ["git", "-C", str(directory), *args], capture_output=True, encoding="utf-8", check=True
     ).stdout.strip()
 
 
-@pytest.fixture
-def built(tmp_path: pathlib.Path) -> pathlib.Path:
-    directory = tmp_path / "built"
+@pytest.fixture(scope="session")
+def built(tmp_path_factory: pytest.TempPathFactory) -> pathlib.Path:
+    """One build for the tests, which don't change it."""
+    directory = tmp_path_factory.mktemp("large") / "built"
     large_repo.build(directory, SMALL)
     return directory
 
@@ -35,13 +36,11 @@ def test_each_branch_forks_from_main_within_the_window_and_has_one_to_three_comm
     for branch in git(built / "local", "for-each-ref", "--format=%(refname)", "refs/heads/feature").splitlines():
         own = int(git(built / "local", "rev-list", "--count", f"main..{branch}"))
         assert 1 <= own <= 3
-        fork = int(
-            git(built / "local", "rev-list", "--count", f"main..{git(built / 'local', 'merge-base', 'main', branch)}")
+        fork = git(built / "local", "merge-base", "main", branch)
+        # How far back on main it forked: within the window.
+        assert int(git(built / "local", "rev-list", "--count", f"{fork}..main")) <= (
+            SMALL.branch_window_days * SMALL.commits_per_day
         )
-        assert fork == 0
-        assert int(
-            git(built / "local", "rev-list", "--count", f"{git(built / 'local', 'merge-base', 'main', branch)}..main")
-        ) <= (SMALL.branch_window_days * SMALL.commits_per_day)
 
 
 def test_main_gets_the_recipes_commits_a_day(built: pathlib.Path) -> None:
@@ -95,3 +94,43 @@ def test_a_copy_refuses_to_copy_what_it_cant_link(
     assert not (tmp_path / "copy" / ".git" / "objects" / "pack").exists() or not list(
         (tmp_path / "copy" / ".git" / "objects" / "pack").glob("*.pack")
     )
+
+
+def test_a_copy_links_only_git_objects_even_under_a_directory_named_objects(tmp_path: pathlib.Path) -> None:
+    # Where the repository is says nothing of which of its files are git objects.
+    built = tmp_path / "objects" / "built"
+    large_repo.build(built, SMALL)
+    large_repo.copy(built / "local", tmp_path / "copy")
+    tracked = next((tmp_path / "copy" / "src").rglob("*.py"))
+    original = built / "local" / tracked.relative_to(tmp_path / "copy")
+
+    tracked.write_text("changed in place\n", encoding="utf-8")
+
+    assert original.read_text(encoding="utf-8") != "changed in place\n"
+    assert os.stat(tmp_path / "copy" / ".git" / "config").st_ino != os.stat(built / "local" / ".git" / "config").st_ino
+
+
+def test_it_refuses_to_build_in_a_pytest_worker(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Workers would each build the repository, and delete one another's half-built one.
+    monkeypatch.setenv("PYTEST_XDIST_WORKER", "gw0")
+
+    with pytest.raises(RuntimeError, match="-n 0"):
+        large_repo.ensure_one_process()
+
+
+def test_it_builds_in_a_single_process(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("PYTEST_XDIST_WORKER", raising=False)
+
+    large_repo.ensure_one_process()
+
+
+def test_pruning_keeps_the_current_build_and_removes_old_ones_and_leftover_copies(tmp_path: pathlib.Path) -> None:
+    (tmp_path / "old-key").mkdir()
+    (tmp_path / "old-key" / "file").write_text("x", encoding="utf-8")
+    (tmp_path / "current" / "work" / "killed-run").mkdir(parents=True)
+    (tmp_path / "current" / "built").touch()
+
+    large_repo.prune(tmp_path, "current")
+
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["current"]
+    assert sorted(path.name for path in (tmp_path / "current").iterdir()) == ["built"]

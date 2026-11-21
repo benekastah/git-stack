@@ -1,8 +1,10 @@
 # The tests of a large repository (500,000 commits, 5,000 branches, a main that gets 500 commits a
 # day): the same scenarios as the small tests, with the same declared git and gh counts, which
 # `dev.py large-tests` runs. It builds the repository (about a minute), and the tests take a few
-# minutes, so it's not part of CI: it runs by hand, weekly, and when what it runs changes. Each
-# block's time is in the job's summary. It's for reading, not checking: only the counts can fail.
+# minutes, so it's not part of CI: it runs by hand, weekly, and when the tests it runs (or the
+# repository they build) change. A change to the code they measure is picked up by the weekly run,
+# not by a pull request's. Each block's time is in the job's summary. It's for reading, not
+# checking: only a count that's too high can fail.
 name: Large repository
 
 on:
@@ -12,6 +14,14 @@ on:
       - tests/large/**
       - tests/large_repo.py
       - tests/operations.py
+      # The scenarios of tests/large, and what they run on.
+      - tests/test_operations_*.py
+      - tests/helpers.py
+      - tests/conftest.py
+      - tests/fake_gh.py
+      - dev_project.py
+      - pyproject.toml
+      - uv.lock
   schedule:
     - cron: "23 5 * * 1"
   workflow_dispatch:
@@ -26,6 +36,7 @@ concurrency:
 jobs:
   large:
     runs-on: ubuntu-latest
+    # A guess, since it hasn't run on GitHub: about 6 minutes on a laptop, plus building the repository.
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

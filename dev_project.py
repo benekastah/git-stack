@@ -2,7 +2,7 @@
 blame.
 
     python dev.py types-other-platforms  # basedpyright as if on Windows and macOS too
-    python dev.py large-tests            # the tests of a 500,000-commit repository (minutes, GBs)
+    python dev.py large-tests            # the tests of a 500,000-commit repository (minutes, a few hundred MB)
 
 `install` also makes `git blame` skip the commits in .git-blame-ignore-revs, and links the agent
 skills into the directories of the coding agents it finds (`git stack install-skills`).

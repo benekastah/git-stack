@@ -53,7 +53,7 @@ def pytest_configure(config: pytest.Config) -> None:
 
 def pytest_ignore_collect(collection_path: pathlib.Path, config: pytest.Config) -> bool | None:
     """Collect tests/large only when `-m large` asks for it: building and copying the repository
-    takes minutes and gigabytes, so it's never part of `dev.py tests` or CI's test jobs."""
+    takes minutes and a few hundred MB, so it's never part of `dev.py tests` or CI's test jobs."""
     if collection_path == ROOT / "tests" / "large" and "large" not in (config.getoption("markexpr") or ""):
         return True
     return None

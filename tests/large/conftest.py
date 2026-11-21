@@ -28,11 +28,13 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
 
 @pytest.fixture(scope="session")
 def large_repository(request: pytest.FixtureRequest) -> pathlib.Path:
-    """The repository, built once and kept in pytest's cache (so the next run, and CI's cache
-    of it, reuse it) until its recipe, or how it's built, changes. Run with `-n 0`: workers
-    would each build it."""
+    """The repository, built once and kept in pytest's cache (so the next run reuses it) until its
+    recipe, or how it's built, changes, when the old one is removed. It can only be built in one
+    process (see large_repo.ensure_one_process)."""
+    large_repo.ensure_one_process()
     parent = pathlib.Path(request.config.cache.mkdir("large-repositories"))
     directory = parent / RECIPE.key()
+    large_repo.prune(parent, RECIPE.key())
     # `built` is made last: a build that was interrupted, or failed, has no such file, and is
     # thrown away and done again rather than used half-made.
     if not (directory / "built").exists():
