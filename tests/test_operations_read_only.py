@@ -36,9 +36,9 @@ def test_show_stack_runs_the_same_for_any_stack_size(repo: Repo, chain: list[str
     assert repo.stack_process("show-stack").stdout == "".join(f"{branch}\n" for branch in chain)
 
 
-# ...and base also asks git for the commit and checks that it's in the branch's history: the
-# batch `cat-file` (which counts once however much it's asked) and a `merge-base --is-ancestor`.
-@expect_operations(git=5)
+# ...and base also checks that the base is in the branch's history, with one `merge-base --is-ancestor`
+# on the names it has: no refs, and no `cat-file` to find the commits first.
+@expect_operations(git=3)
 def test_base_runs_the_same_for_any_stack_size(repo: Repo, chain: list[str]) -> None:
     assert repo.stack_process("base").stdout.strip() == repo.git("rev-parse", below_the_last(chain))
 

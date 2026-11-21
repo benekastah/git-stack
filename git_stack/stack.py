@@ -1069,9 +1069,9 @@ class StackClient(StackCore):
     @snapshot
     def base(self, branch: str | None = None) -> str:
         """The commit branch (default: the current branch) was last rebased onto."""
-        stacks = self.settled_stacks()
+        stacks = self.settled_stacks(check_existence=branch is not None)
         branch = self.stacked_branch(branch, stacks)
-        return self.recorded_base(branch, stacks.parent(branch))
+        return self.recorded_base(branch, stacks.parent(branch), lookup=False)
 
     @snapshot
     def show_stack(self, branch: str | None = None) -> list[str]:

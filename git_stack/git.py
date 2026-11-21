@@ -492,11 +492,13 @@ class GitClient:
                 return self._cat_file.verify(f"refs/heads/{branch}")
         return self.run("rev-parse", "--verify", f"refs/heads/{branch}")
 
-    def is_ancestor(self, ancestor: str, descendant: str) -> bool:
+    def is_ancestor(self, ancestor: str, descendant: str, *, lookup: bool = True) -> bool:
         """Whether ancestor is descendant or one of its ancestors. Within a
         snapshot, where finding the commits they name costs nothing for a
-        branch, asked once for the same two commits, which don't change."""
-        if not self._snapshot_depth:
+        branch, asked once for the same two commits, which don't change.
+        Unless lookup is set, it's one `merge-base` on the names as given, for
+        a command that asks once and would pay to find the commits first."""
+        if not self._snapshot_depth or not lookup:
             return self.ok("merge-base", "--is-ancestor", ancestor, descendant)
         a, d = self.rev(ancestor), self.rev(descendant)
         if a is None or d is None:

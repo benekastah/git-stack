@@ -578,6 +578,18 @@ def test_the_branch_read_before_a_snapshot_is_dropped_when_the_lock_was_waited_f
         assert git.current_branch() == "other"
 
 
+def test_is_ancestor_without_lookup_is_one_merge_base_even_in_a_snapshot(repo: Repo, git_calls: list[GitCall]) -> None:
+    git = GitClient(repo.path)
+    git.branch_config()
+    git_calls.clear()
+    with git.snapshot():
+        assert git.is_ancestor("refs/heads/main", "refs/heads/main", lookup=False)
+        assert not git.is_ancestor("0" * 40, "refs/heads/main", lookup=False)
+        assert not git.is_ancestor("refs/heads/main", "refs/heads/missing", lookup=False)
+
+    assert [call[0] for call in git_calls] == ["merge-base"] * 3
+
+
 def separate_patch_ids(repo: Repo, *command: str) -> list[tuple[str, str]]:
     """`git patch-id --stable` of what `git <command>` prints, run on its own."""
     output = repo.git(command[0], "--no-color", *command[1:])

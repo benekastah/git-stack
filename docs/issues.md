@@ -52,8 +52,8 @@ stacks that still need to sync.
 The README says `parent`, `base` and `show-stack` "only read git config, so they're fast, and
 they're safe to run while another git-stack command is running". `parent` starts 2 git processes
 (`config --list`, and one `rev-parse` for the stopped rebase, cherry-pick, revert or merge check and
-the branch checked out), `show-stack` 3 (also a `for-each-ref`), and `base`
-5 (also the batch `cat-file` and a `merge-base --is-ancestor`), however long the stack is
+the branch checked out), `show-stack` 3 (also a `for-each-ref`), and `base` 3
+(also a `merge-base --is-ancestor`), however long the stack is
 (`tests/test_operations_read_only.py` allots them). A shell prompt or editor running one on every
 keystroke pays for them.
 

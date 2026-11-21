@@ -456,10 +456,11 @@ class StackCore:
             if branch in pending:
                 self.settle(branch, forget_unfinished)
 
-    def recorded_base(self, branch: str, parent: str) -> str:
-        """Return branch's base, checking that it is still in the branch's history."""
+    def recorded_base(self, branch: str, parent: str, *, lookup: bool = True) -> str:
+        """Return branch's base, checking that it is still in the branch's history
+        (see GitClient.is_ancestor for lookup)."""
         base = self.git.config_get(branch, BASE_KEY)
-        if base is None or not self.git.is_ancestor(base, f"refs/heads/{branch}"):
+        if base is None or not self.git.is_ancestor(base, f"refs/heads/{branch}", lookup=lookup):
             raise BrokenStackError(
                 f"{branch}'s recorded base isn't in its history (was it rebased by hand?); "
                 f"fix it with `git stack track {parent} --base <sha>`"
