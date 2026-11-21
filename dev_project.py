@@ -2,6 +2,7 @@
 blame.
 
     python dev.py types-other-platforms  # basedpyright as if on Windows and macOS too
+    python dev.py large-tests            # the tests of a 500,000-commit repository (minutes, GBs)
 
 `install` also makes `git blame` skip the commits in .git-blame-ignore-revs, and links the agent
 skills into the directories of the coding agents it finds (`git stack install-skills`).
@@ -69,6 +70,19 @@ def _git_has_optional_paths() -> bool:
     return probe.returncode == 0
 
 
+def large_tests(pytest_args: list[str]) -> None:
+    """The tests of a large repository (tests/large): the same scenarios as the small tests, with
+    the same declared counts, in a repository of 500,000 commits and 5,000 branches that the first
+    run builds (about a minute) and pytest's cache keeps. One process at a time, so they don't
+    compete, and their times, which are reported and never asserted, mean something. Any
+    arguments go to pytest."""
+    venv()
+    code = run_code(tool("python"), "-m", "pytest", "-m", "large", "--numprocesses", "0", *pytest_args)
+    if code:
+        sys.exit(code)
+
+
 COMMANDS: dict[str, Callable[[list[str]], None]] = {
     "types-other-platforms": types_other_platforms,
+    "large-tests": large_tests,
 }

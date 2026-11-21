@@ -122,6 +122,25 @@ def test_the_man_page_has_a_synopsis() -> None:
     assert ".SH SYNOPSIS" in (ROOT / "man" / "git-stack.1").read_text(encoding="utf-8")
 
 
+@pytest.mark.parametrize("code", [0, 3])
+def test_large_tests_runs_only_the_large_tests_one_at_a_time(
+    monkeypatch: pytest.MonkeyPatch, dev: ModuleType, dev_project: ModuleType, code: int
+) -> None:
+    commands: list[tuple[str, ...]] = []
+    monkeypatch.setattr(dev_project, "venv", lambda: None)
+    monkeypatch.setattr(dev_project, "run_code", lambda *args: commands.append(args) or code)
+
+    if code:
+        with pytest.raises(SystemExit) as exited:
+            dev_project.large_tests(["-k", "sync"])
+        assert exited.value.code == code
+    else:
+        dev_project.large_tests(["-k", "sync"])
+
+    assert commands == [(dev.tool("python"), "-m", "pytest", "-m", "large", "--numprocesses", "0", "-k", "sync")]
+    assert "large-tests" in dev_project.COMMANDS
+
+
 def git_version() -> tuple[int, int]:
     version = subprocess.run(["git", "version"], capture_output=True, encoding="utf-8", check=True).stdout
     match = re.search(r"(\d+)\.(\d+)", version)
