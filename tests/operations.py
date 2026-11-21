@@ -8,7 +8,11 @@
 
 It counts the git processes git-stack starts (each launch of the batch `git cat-file`
 once, as the `git_calls` fixture does; not the tests' own `Repo.git`), and the gh commands
-it runs (against tests/fake_gh.py). The count has to be exact: a test that runs fewer
+it runs (against tests/fake_gh.py), in this process, or in a git-stack process the test
+starts with `Repo.stack_process`: that one is counted from outside, with git's own trace of
+the processes it starts (GIT_TRACE2_EVENT, keeping those git-stack starts, not the ones git
+starts for them, e.g. under `git rebase`) and the calls fake gh keeps, so it's counted
+as a user's would run, with nothing cached in Python between runs. The count has to be exact: a test that runs fewer
 should have its number lowered, so an improvement is kept. A mismatch lists what ran.
 
 Work a test needs before the block (its repositories and stacks) belongs in fixtures or
@@ -16,9 +20,13 @@ before the `with`, since what the block runs counts.
 """
 
 import contextlib
+import json
 import os
+import pathlib
 import shlex
+import tempfile
 import threading
+from collections.abc import Generator
 from dataclasses import dataclass, field
 from types import TracebackType
 from typing import Any, Self
@@ -71,6 +79,49 @@ def install(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ReadOnlyGit, "process", recording_process)
     monkeypatch.setattr(ReadOnlyGit, "popen", recording_popen)
     monkeypatch.setattr(fake_gh, "run", recording_gh)
+
+
+def _fake_gh_calls() -> list[list[str]]:
+    """The calls fake gh has kept so far, if the test has one."""
+    state = os.environ.get("FAKE_GH_STATE")
+    if state is None or not pathlib.Path(state).exists():
+        return []
+    calls: list[list[str]] = json.loads(pathlib.Path(state).read_text(encoding="utf-8"))["calls"]
+    return calls
+
+
+def _traced_git_processes(trace: pathlib.Path) -> list[list[str]]:
+    """The arguments of each git process the process traced in trace started itself: git
+    numbers the ones started by those (and so on) after a `/` in the session ID."""
+    commands: list[list[str]] = []
+    for line in trace.read_text(encoding="utf-8").splitlines() if trace.exists() else []:
+        event = json.loads(line)
+        if event["event"] == "start" and "/" not in event["sid"]:
+            args: list[str] = event["argv"][1:]
+            if args[:1] == ["-C"]:
+                args = args[2:]
+            commands.append(args)
+    return commands
+
+
+@contextlib.contextmanager
+def traced_subprocess() -> Generator[dict[str, str]]:
+    """Around a git-stack process a test starts: gives the environment to start it with, and
+    afterwards counts the git processes it started and the gh commands it ran in the blocks
+    that are active. Nothing is traced, and nothing added, without one."""
+    with _LOCK:
+        active = bool(_ACTIVE)
+    if not active:
+        yield {}
+        return
+    gh_before = len(_fake_gh_calls())
+    with tempfile.TemporaryDirectory() as directory:
+        trace = pathlib.Path(directory) / "trace2.json"
+        yield {"GIT_TRACE2_EVENT": str(trace)}
+        for command in _traced_git_processes(trace):
+            _record("git", command)
+        for command in _fake_gh_calls()[gh_before:]:
+            _record("gh", command)
 
 
 def _plural(count: int, singular: str, plural: str) -> str:

@@ -20,7 +20,7 @@ from git_client.testing import real_git
 from git_stack import cli, events
 from git_stack.git import GitClient
 from git_stack.stack import BranchInfo, StackClient
-from tests import fake_gh
+from tests import fake_gh, operations
 
 
 @contextmanager
@@ -129,14 +129,16 @@ class Repo:
 
     def stack_process(self, *args: str, expect_success: bool = True) -> subprocess.CompletedProcess[str]:
         """stack, but as a separate process, the way users run it."""
-        result = subprocess.run(
-            [sys.executable, "-m", "git_stack", "-C", str(self.path), *args],
-            cwd=self.tmp,
-            capture_output=True,
-            encoding="utf-8",
-            timeout=60,
-            check=False,
-        )
+        with operations.traced_subprocess() as extra_environment:
+            result = subprocess.run(
+                [sys.executable, "-m", "git_stack", "-C", str(self.path), *args],
+                cwd=self.tmp,
+                capture_output=True,
+                encoding="utf-8",
+                env={**os.environ, **extra_environment} if extra_environment else None,
+                timeout=60,
+                check=False,
+            )
         return self._check_result(args, result, expect_success)
 
     def _check_result(

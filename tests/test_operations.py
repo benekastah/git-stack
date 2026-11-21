@@ -118,3 +118,59 @@ def test_the_decorator_fails_the_test_that_runs_a_different_number(repo: Repo) -
 
     with pytest.raises(AssertionError, match="expected 1 git process, ran 2"):
         twice()
+
+
+def test_a_with_block_counts_the_git_processes_of_a_git_stack_process(repo: Repo) -> None:
+    repo.make_stack()
+
+    with expect_operations(git=3) as operations:
+        repo.stack_process("parent")
+
+    assert [command[0] for command in operations.git] == ["config", "rev-parse", "for-each-ref"]
+
+
+def test_a_git_stack_process_runs_the_same_git_processes_as_one_in_this_process(repo: Repo) -> None:
+    repo.make_stack()
+    with expect_operations(git=3) as here:
+        repo.stack("parent")
+
+    with expect_operations(git=3) as separate:
+        repo.stack_process("parent")
+
+    assert separate.git == here.git
+
+
+def test_a_with_block_counts_the_gh_commands_of_a_git_stack_process(repo: Repo, gh: FakeGitHub) -> None:
+    repo.make_stack()
+
+    with expect_operations(git=25, gh=8) as operations:
+        repo.stack_process("push", "--prs")
+
+    assert [command[:2] for command in operations.gh].count(["pr", "create"]) == 3
+
+
+def test_only_what_git_stack_starts_is_counted_not_what_git_starts_for_it(repo: Repo) -> None:
+    repo.make_stack()
+    repo.git("switch", "--quiet", "pr1")
+    repo.commit("a", "pr1 third\n", "pr1 c3")
+
+    with expect_operations(git=40) as operations:
+        repo.stack_process("restack")
+
+    # Each branch is rebased by a `git rebase`, which runs `git notes copy` itself.
+    assert [command[0] for command in operations.git if command[0] in ("rebase", "notes")] == ["rebase", "rebase"]
+
+
+def test_the_tests_own_git_is_not_counted_in_a_block_with_a_git_stack_process(repo: Repo) -> None:
+    repo.make_stack()
+
+    with expect_operations(git=3):
+        repo.git("status", "--porcelain")
+        repo.stack_process("parent")
+
+
+def test_nested_blocks_each_count_a_git_stack_process(repo: Repo) -> None:
+    repo.make_stack()
+
+    with expect_operations(git=3), expect_operations(git=3):
+        repo.stack_process("parent")
