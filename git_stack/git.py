@@ -496,8 +496,8 @@ class GitClient:
         """Whether ancestor is descendant or one of its ancestors. Within a
         snapshot, where finding the commits they name costs nothing for a
         branch, asked once for the same two commits, which don't change.
-        Unless lookup is set, it's one `merge-base` on the names as given, for
-        a command that asks once and would pay to find the commits first."""
+        With lookup false it's one `merge-base` on the names as given, and nothing is
+        remembered: for a command that asks once, and would pay to find the commits first."""
         if not self._snapshot_depth or not lookup:
             return self.ok("merge-base", "--is-ancestor", ancestor, descendant)
         a, d = self.rev(ancestor), self.rev(descendant)

@@ -1070,6 +1070,9 @@ class StackClient(StackCore):
     def base(self, branch: str | None = None) -> str:
         """The commit branch (default: the current branch) was last rebased onto."""
         stacks = self.settled_stacks(check_existence=branch is not None)
+        if branch is None and not self.git.head_is_known():
+            # An unborn branch isn't a ref (see parent).
+            stacks = self.stacks()
         branch = self.stacked_branch(branch, stacks)
         return self.recorded_base(branch, stacks.parent(branch), lookup=False)
 
