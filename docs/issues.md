@@ -4,6 +4,15 @@ What's wrong with what's built: bugs, and gaps against the rules in `AGENTS.md` 
 `PROJECT_AGENTS.md`, most severe first. New work is in [roadmap.md](roadmap.md). When a change
 fixes one, remove it in the same change; when a change leaves something wrong, add it.
 
+## The scripting commands run more than the README says
+
+The README says `parent`, `base` and `show-stack` "only read git config, so they're fast".
+They start 3 git processes (`config --list`, a check for a stopped rebase or cherry-pick, and a
+`for-each-ref`), and `base` 5 (also the batch `cat-file` and a `merge-base --is-ancestor`), however
+long the stack is (`tests/test_operations_read_only.py` pins these). A shell prompt or editor
+running one on every keystroke pays for them. Either the README's claim goes, or the commands
+read only what they need (the stopped-operation check isn't needed to print a parent).
+
 ## A change undone some other way can look like a revert
 
 Revert detection compares patch-ids without context lines, so a revert still
