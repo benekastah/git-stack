@@ -64,6 +64,16 @@ README's claims go, or these commands settle only under the lock, or not at all.
 stopped operation has to stay: it's what keeps `settled_stacks` from settling in the middle of a
 rebase.
 
+## Commands with nothing to do still start processes for every branch
+
+`tests/test_operations_local_rewriting.py` pins what each costs at 1, 3 and 10 branches, and
+several grow with the stack even when there's no work: `restack` of an up to date stack starts
+6 + 2 * branches git processes (26 for 10 branches), `pull` with nothing to pull 11 + branches,
+`clean` with nothing merged 10 + branches, and `untrack`ing a whole stack 3 + 3 * branches.
+Restacking replays a branch for 12 processes each (the rebase, and the checks around it). In a
+repository with thousands of branches and a stack of a dozen, these are the ones to batch (one
+`for-each-ref` or `config` read in place of one per branch), which the tests would then show.
+
 ## An older git-stack can't finish a restack this one stopped
 
 A restack that stops on a conflict is recorded in one setting,
