@@ -82,11 +82,10 @@ def test_install_fails_when_the_skills_cant_be_linked(monkeypatch: pytest.Monkey
     with pytest.raises(SystemExit) as exited:
         dev_project.after_install()
 
-    # --replace helps when a link is to another clone's skills, so that's said, with what the
-    # command itself printed about why.
+    # --replace helps when a link is to another copy's skills, so that's said.
     assert str(exited.value.code) == (
         "install: couldn't link the agent skills; `git stack install-skills --replace` "
-        "takes over a link to another clone's"
+        "takes over a link to another copy's skills"
     )
 
 
