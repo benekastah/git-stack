@@ -39,14 +39,14 @@ def after_install(replace: bool = False) -> None:
 def install_skills(replace: bool) -> None:
     """Link this clone's agent skills into the skills directory of each coding agent found, as
     `git stack install-skills` does (with --replace if replace), failing the install if it
-    refuses a link, e.g. one to another clone's skills. That command makes the links (a
+    refuses a link, e.g. one to another copy's skills. That command makes the links (a
     symlink, or a junction on Windows), so they aren't `install_links()`, which makes plain
     symlinks Windows usually can't. It's no failure to find no agent."""
     if run_code(tool("git-stack"), "install-skills", *(["--replace"] if replace else [])) != 0:
-        sys.exit(
-            "install: couldn't link the agent skills (see above); `git stack install-skills"
-            " --replace` takes over a link to another clone's"
-        )
+        # --replace only helps with a link to another copy's skills, not a real directory in the way or
+        # an I/O error, which the command says itself; so it's offered, as one thing to try, unless it was given.
+        hint = "" if replace else "; `git stack install-skills --replace` takes over a link to another copy's skills"
+        sys.exit(f"install: couldn't link the agent skills{hint}")
 
 
 def _git_has_optional_paths() -> bool:
