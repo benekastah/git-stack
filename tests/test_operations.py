@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+from tests import operations
 from tests.helpers import FakeGitHub, InProcessGh, Repo
 from tests.operations import TRACE_VARIABLE, UnderBudget, expect_operations, subcommand
 
@@ -275,3 +276,22 @@ def test_a_trace_session_inherited_from_the_test_run_doesnt_hide_git_stacks_proc
     with expect_operations(git=3) as ran:
         repo.stack_process("parent")
     assert len(ran.git) == 3
+
+
+def test_a_block_records_how_long_it_took_and_is_reported_once_it_finishes(repo: Repo) -> None:
+    operations.FINISHED.clear()
+
+    with expect_operations(git=1) as ran:
+        run_git(repo, "rev-parse", "HEAD")
+
+    assert ran.seconds > 0
+    assert [ran] == operations.FINISHED
+
+
+def test_a_block_that_failed_is_not_reported(repo: Repo) -> None:
+    operations.FINISHED.clear()
+
+    with pytest.raises(AssertionError), expect_operations(git=2):
+        run_git(repo, "rev-parse", "HEAD")
+
+    assert operations.FINISHED == []
