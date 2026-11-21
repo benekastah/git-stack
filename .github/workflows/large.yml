@@ -1,0 +1,44 @@
+# The tests of a large repository (500,000 commits, 5,000 branches, a main that gets 500 commits a
+# day): the same scenarios as the small tests, with the same declared git and gh counts, which
+# `dev.py large-tests` runs. It builds the repository (about a minute), and the tests take a few
+# minutes, so it's not part of CI: it runs by hand, weekly, and when what it runs changes. Each
+# block's time is in the job's summary. It's for reading, not checking: only the counts can fail.
+name: Large repository
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/large.yml
+      - tests/large/**
+      - tests/large_repo.py
+      - tests/operations.py
+  schedule:
+    - cron: "23 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: large-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  large:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.15"
+      # Installs from uv.lock, so it uses the versions CI uses.
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: false
+          python-version: "3.15"
+          activate-environment: true
+      - name: Install the dev dependencies
+        run: uv sync --locked
+      - name: Run the large repository tests
+        run: python dev.py large-tests
