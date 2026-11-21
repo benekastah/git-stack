@@ -160,6 +160,14 @@ Text meant for people (messages, `info`'s tree) can change.
   process). A test's setup goes in fixtures or before the `with`. Running more fails and lists the
   commands that ran; running fewer warns (`UnderBudget`) to lower the number to what ran, so an
   improvement is kept and the next is looked for.
+- `tests/test_operations_*.py` allot the operations of each command at 1, 3 and 10 branches. `tests/large/`
+  re-runs those scenarios, with their allotted counts, in a repository of 500,000 commits and 5,000
+  branches (`tests/large_repo.py` builds it with `git fast-import`; pytest's cache keeps it, and each
+  test gets a copy whose git objects are hard links, so it must be on the cache's filesystem, never a
+  RAM-backed `/tmp`), and `test_distance.py` adds stacks forked 1, 7 and 30 days before a main that gets
+  500 commits a day. They're marked `large`, collected only with `-m large` (`dev.py large-tests`) and
+  never by `dev.py tests`; they report each block's time and never assert it. `tests/test_large_repo.py`
+  builds a tiny one in the default run.
 - The man page, `man/git-stack.1`, is generated from the README by
   `dev.py man` (the template's), and `dev.py static` fails if it's out of
   date: the pre-commit hook regenerates it (or run `python3 dev.py man`).
@@ -201,5 +209,5 @@ Keep these when resolving a `copier update`'s conflicts:
   and macOS. `ci.yml` has two edits of git-stack's, each commented: the tests
   job sets up the Windows Dev Drive (`.github/actions/fast-temp`), and the
   time limits. `tests/conftest.py`
-  gives CI 8 test workers. `.github/workflows/measure.yml` is git-stack's own.
+  gives CI 8 test workers. `.github/workflows/measure.yml` and `large.yml` are git-stack's own.
 - The extra lines in `.gitattributes` and `.gitignore`.

@@ -1727,6 +1727,15 @@ The tests run in parallel, with one worker per CPU (pytest-xdist's
 number of workers, e.g. `PYTEST_XDIST_AUTO_NUM_WORKERS=4 python3 dev.py tests`,
 or pass `-n 0` to run them one at a time, e.g. to debug a failing test.
 
+`python3 dev.py large-tests` runs the performance tests of a large repository
+(500,000 commits, 5,000 branches, and a main that gets 500 commits a day), which
+the other commands and CI never do. Its first run builds the repository in about
+a minute, and pytest's cache (`.pytest_cache`, a few hundred MB) keeps it for the
+next; the tests take a few minutes. Each runs a `git stack` command as a process of
+its own and checks how many git and `gh` operations it ran, which has to be what
+the same scenario in the small repository declares. How long each took is printed,
+and never checked. `.github/workflows/large.yml` runs it weekly and by hand.
+
 CI (`.github/workflows/ci.yml`, with git-stack's own jobs in `project.yml`)
 runs `dev.py static`, `dev.py types-other-platforms` and `dev.py coverage`
 once, on Linux, and `dev.py tests` on Linux, macOS and Windows with the oldest
