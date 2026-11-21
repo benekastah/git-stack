@@ -9,6 +9,7 @@ import pytest
 
 from tests.helpers import FakeGitHub, Repo
 from tests.operations import expect_operations
+from tests.test_operations_local_rewriting import assert_stacked, tips
 
 # `gh` makes the repository look like a GitHub one, with tests/fake_gh.py as `gh` (in this process,
 # for the setup that uses the client, and as a command for the `git stack` processes the tests
@@ -21,17 +22,28 @@ pytestmark = [pytest.mark.usefixtures("separate_processes", "gh")]
 PUSH = {1: (12, 0), 3: (18, 0), 10: (39, 0)}
 # ...and opening a pull request for each costs more of both.
 PUSH_OPENING_PRS = {1: (14, 2), 3: (25, 8), 10: (60, 15)}
-# With every pull request open, git doesn't grow with the stack, and gh stays at 4.
+# With every pull request open, git doesn't grow with the stack from 3 branches up, and gh stays at 4
+# (2 for a stack of 1).
 PUSH_WITH_PRS_OPEN = {1: (8, 2), 3: (9, 4), 10: (9, 4)}
 PRS_ALL_OPEN = {1: (4, 2), 3: (5, 4), 10: (5, 4)}
 # Nothing to do: gh is asked once, and git 11 + branches.
 SYNC_NOTHING = {1: (12, 1), 3: (14, 1), 10: (21, 1)}
-# The bottom merged: the rest are restacked onto main and pushed again.
-SYNC_BOTTOM_MERGED = {1: (32, 1), 3: (72, 5), 10: (205, 6)}
+# The bottom merged, as GitHub reports it (the merge commit and the head it had): the rest are
+# restacked onto main and pushed again.
+SYNC_BOTTOM_MERGED = {1: (35, 1), 3: (75, 5), 10: (208, 6)}
 # gh is asked twice, however many pull requests there are.
 IMPORT = {1: (19, 2), 3: (36, 2), 10: (92, 2)}
-# info asks GitHub once for every branch.
+# info asks GitHub about all the branches in one request.
 INFO = {1: (4, 1), 3: (4, 1), 10: (4, 1)}
+
+
+# The tests also check what the command did, since running fewer operations than allotted only
+# warns, so one that stopped doing its work would otherwise pass.
+
+
+def pull_request_bases(gh: FakeGitHub) -> dict[str, str]:
+    """The branch each pull request is for, and the one it's into."""
+    return {pr["headRefName"]: pr["baseRefName"] for pr in gh.load()["prs"]}
 
 
 def open_pull_requests(repo: Repo) -> None:
@@ -46,36 +58,54 @@ def test_push_a_stack_that_was_never_pushed(repo: Repo, chain: list[str]) -> Non
     with expect_operations(git=git, gh=gh):
         repo.stack_process("push")
 
+    # Every branch is on the remote, as it is here.
+    assert {b: repo.git("rev-parse", f"refs/remotes/origin/{b}") for b in chain} == tips(repo, chain)
 
-def test_push_opening_a_pull_request_for_each_branch(repo: Repo, chain: list[str]) -> None:
-    git, gh = PUSH_OPENING_PRS[len(chain)]
 
-    with expect_operations(git=git, gh=gh):
+def test_push_opening_a_pull_request_for_each_branch(repo: Repo, gh: FakeGitHub, chain: list[str]) -> None:
+    git, gh_commands = PUSH_OPENING_PRS[len(chain)]
+
+    with expect_operations(git=git, gh=gh_commands):
         repo.stack_process("push", "--prs")
 
+    # A pull request for each branch, into the one before it (the first into main).
+    assert pull_request_bases(gh) == dict(zip(chain, ["main", *chain], strict=False))
 
-def test_push_when_every_branch_has_a_pull_request(repo: Repo, chain: list[str]) -> None:
+
+def test_push_when_every_branch_has_a_pull_request(repo: Repo, gh: FakeGitHub, chain: list[str]) -> None:
     open_pull_requests(repo)
-    git, gh = PUSH_WITH_PRS_OPEN[len(chain)]
+    git, gh_commands = PUSH_WITH_PRS_OPEN[len(chain)]
 
-    with expect_operations(git=git, gh=gh):
+    with expect_operations(git=git, gh=gh_commands):
         repo.stack_process("push", "--prs")
 
+    # No new pull request: each branch has the one it had.
+    assert pull_request_bases(gh) == dict(zip(chain, ["main", *chain], strict=False))
+    assert gh.calls("pr", "create") == gh.calls("pr", "create")[: len(chain)]
 
-def test_prs_when_every_branch_has_a_pull_request(repo: Repo, chain: list[str]) -> None:
+
+def test_prs_when_every_branch_has_a_pull_request(repo: Repo, gh: FakeGitHub, chain: list[str]) -> None:
     open_pull_requests(repo)
-    git, gh = PRS_ALL_OPEN[len(chain)]
+    created = len(gh.calls("pr", "create"))
+    git, gh_commands = PRS_ALL_OPEN[len(chain)]
 
-    with expect_operations(git=git, gh=gh):
+    with expect_operations(git=git, gh=gh_commands):
         repo.stack_process("prs")
+
+    assert len(gh.calls("pr", "create")) == created
+    assert pull_request_bases(gh) == dict(zip(chain, ["main", *chain], strict=False))
 
 
 def test_sync_with_nothing_to_do(repo: Repo, chain: list[str]) -> None:
     open_pull_requests(repo)
+    before = tips(repo, chain)
     git, gh = SYNC_NOTHING[len(chain)]
 
     with expect_operations(git=git, gh=gh):
         repo.stack_process("sync")
+
+    assert tips(repo, chain) == before
+    assert_stacked(repo, chain)
 
 
 def test_sync_after_the_bottom_pull_request_was_merged(repo: Repo, gh: FakeGitHub, chain: list[str]) -> None:
@@ -83,14 +113,24 @@ def test_sync_after_the_bottom_pull_request_was_merged(repo: Repo, gh: FakeGitHu
     # What GitHub's "Squash and merge" does: main gets one new commit with the pull request's
     # changes, which no branch above it has, and the pull request is marked merged. `sync` then
     # moves the branches above onto main, which is most of what it costs.
+    head = repo.git("rev-parse", "chain1")
     repo.squash_merge_on_forge("chain1")
+    merge = repo.git("rev-parse", "HEAD", cwd=repo.forge)
+    # As GitHub reports it: merged, by that commit, with the commit the pull request had. Without
+    # them `sync` doesn't trust GitHub's word and finds the merge from git alone, which isn't what
+    # a user's sync does. The pull request is found by its branch, not by its place in the list.
     state = gh.load()
-    state["prs"][0]["state"] = "MERGED"
+    pull_request = next(pr for pr in state["prs"] if pr["headRefName"] == "chain1")
+    pull_request.update(state="MERGED", headRefOid=head, mergeCommit={"oid": merge})
     gh.save(state)
     git, gh_commands = SYNC_BOTTOM_MERGED[len(chain)]
 
     with expect_operations(git=git, gh=gh_commands):
         repo.stack_process("sync")
+
+    # The merged branch isn't tracked, and the rest are on main now.
+    assert not repo.config_exists("chain1", "stackParent")
+    assert_stacked(repo, chain[1:])
 
 
 def test_import_tracks_each_open_pull_request(repo: Repo, chain: list[str]) -> None:
@@ -103,6 +143,8 @@ def test_import_tracks_each_open_pull_request(repo: Repo, chain: list[str]) -> N
     with expect_operations(git=git, gh=gh):
         repo.stack_process("import")
 
+    assert_stacked(repo, chain)
+
 
 def test_info_asks_github_about_each_branch(repo: Repo, chain: list[str]) -> None:
     # Without --offline, so GitHub is asked, for every branch at once: the gh count stays at 1.
@@ -110,4 +152,8 @@ def test_info_asks_github_about_each_branch(repo: Repo, chain: list[str]) -> Non
     git, gh = INFO[len(chain)]
 
     with expect_operations(git=git, gh=gh):
-        repo.stack_process("info")
+        result = repo.stack_process("info")
+
+    assert all(branch in result.stdout for branch in chain)
+    # With the links of the pull requests, which is what asking GitHub is for.
+    assert result.stdout.count("/pull/") == len(chain)
