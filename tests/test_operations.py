@@ -291,7 +291,17 @@ def test_a_block_records_how_long_it_took_and_is_reported_once_it_finishes(repo:
 def test_a_block_that_failed_is_not_reported(repo: Repo) -> None:
     operations.FINISHED.clear()
 
-    with pytest.raises(AssertionError), expect_operations(git=2):
+    # One more process than allotted.
+    with pytest.raises(AssertionError), expect_operations(git=0):
         run_git(repo, "rev-parse", "HEAD")
 
     assert operations.FINISHED == []
+
+
+def test_a_block_that_ran_fewer_than_allotted_is_reported(repo: Repo) -> None:
+    operations.FINISHED.clear()
+
+    with pytest.warns(operations.UnderBudget), expect_operations(git=2) as ran:
+        run_git(repo, "rev-parse", "HEAD")
+
+    assert [ran] == operations.FINISHED
