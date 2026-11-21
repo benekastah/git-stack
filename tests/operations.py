@@ -29,6 +29,7 @@ import pathlib
 import shlex
 import tempfile
 import threading
+import time
 import warnings
 from collections.abc import Generator
 from dataclasses import dataclass, field
@@ -61,6 +62,14 @@ class Operations:
 
     git: list[list[str]] = field(default_factory=list)
     gh: list[list[str]] = field(default_factory=list)
+    seconds: float = 0.0
+    """How long the block took, once it has."""
+
+
+FINISHED: list[Operations] = []
+"""The Operations of each block that finished within the count it declared, for reporting how long
+they took (see tests/large). A block that ran more isn't in it: that's a failure, whose time says
+nothing about the scenario."""
 
 
 def _running() -> list[Operations]:
@@ -180,6 +189,7 @@ class expect_operations(contextlib.ContextDecorator):
         self.git = git
         self.gh = gh
         self.operations = Operations()
+        self._started = 0.0
 
     def _recreate_cm(self) -> Self:
         """A fresh one for each call of a decorated function. ContextDecorator would reuse this
@@ -190,11 +200,14 @@ class expect_operations(contextlib.ContextDecorator):
     def __enter__(self) -> Operations:
         with _LOCK:
             _ACTIVE.append(self.operations)
+        # perf_counter, not time(): a clock that only goes forward, with the best resolution there is.
+        self._started = time.perf_counter()
         return self.operations
 
     def __exit__(
         self, exc_type: type[BaseException] | None, exc: BaseException | None, traceback: TracebackType | None
     ) -> None:
+        self.operations.seconds = time.perf_counter() - self._started
         with _LOCK:
             _ACTIVE.remove(self.operations)
         # An error in the block is the failure to show; the counts are likely off because of it.
@@ -222,3 +235,4 @@ class expect_operations(contextlib.ContextDecorator):
             raise AssertionError("\n".join(problems))
         for message in under:
             warnings.warn(message, UnderBudget, stacklevel=2)
+        FINISHED.append(self.operations)

@@ -5,6 +5,7 @@ import warnings
 
 import pytest
 
+from tests import operations
 from tests.helpers import FakeGitHub, InProcessGh, Repo
 from tests.operations import UnderBudget, expect_operations
 
@@ -220,3 +221,22 @@ def test_a_performance_test_cant_run_git_stack_in_this_process(repo: Repo) -> No
         repo.stack("parent")
 
     assert repo.stack_process("parent").stdout == "pr2\n"
+
+
+def test_a_block_records_how_long_it_took_and_is_reported_once_it_finishes(repo: Repo) -> None:
+    operations.FINISHED.clear()
+
+    with expect_operations(git=1) as ran:
+        run_git(repo, "rev-parse", "HEAD")
+
+    assert ran.seconds > 0
+    assert [ran] == operations.FINISHED
+
+
+def test_a_block_that_failed_is_not_reported(repo: Repo) -> None:
+    operations.FINISHED.clear()
+
+    with pytest.raises(AssertionError), expect_operations(git=2):
+        run_git(repo, "rev-parse", "HEAD")
+
+    assert operations.FINISHED == []
