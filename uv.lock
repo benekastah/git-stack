@@ -111,7 +111,7 @@ template-dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "py-git-client", git = "https://github.com/benekastah/py-git-client?rev=c8bb537732242919a29d430dc4ab52c393137073" }]
+requires-dist = [{ name = "py-git-client", git = "https://github.com/benekastah/py-git-client?rev=9735a8bad62d953cb24900e62cbd0a5a5c9c50da" }]
 
 [package.metadata.requires-dev]
 dev = [
@@ -178,7 +178,7 @@ wheels = [
 [[package]]
 name = "py-git-client"
 version = "0.0.3"
-source = { git = "https://github.com/benekastah/py-git-client?rev=c8bb537732242919a29d430dc4ab52c393137073#c8bb537732242919a29d430dc4ab52c393137073" }
+source = { git = "https://github.com/benekastah/py-git-client?rev=9735a8bad62d953cb24900e62cbd0a5a5c9c50da#9735a8bad62d953cb24900e62cbd0a5a5c9c50da" }
 
 [[package]]
 name = "pygments"

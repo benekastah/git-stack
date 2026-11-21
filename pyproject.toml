@@ -8,8 +8,8 @@ license-files = ["LICENSE"]
 authors = [{ name = "Paul Harper", email = "benekastah@gmail.com" }]
 requires-python = ">=3.15"
 dependencies = [
-    # Unreleased v0.0.3 (to be re-pinned to its tag's commit when it's released), by its commit: a tag can move, and pip, pipx and `uv tool install` don't read uv.lock.
-    "py-git-client @ git+https://github.com/benekastah/py-git-client@c8bb537732242919a29d430dc4ab52c393137073",
+    # Unreleased v0.0.3 (with merge_trees) (to be re-pinned to its tag's commit when it's released), by its commit: a tag can move, and pip, pipx and `uv tool install` don't read uv.lock.
+    "py-git-client @ git+https://github.com/benekastah/py-git-client@9735a8bad62d953cb24900e62cbd0a5a5c9c50da",
 ]
 
 [project.scripts]
