@@ -85,7 +85,7 @@ def test_config_write_gives_up_once_config_stays_locked(
     repo: Repo, client: StackClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """As a StackError, which the command line reports as its own. git_client
-    tries it again while the lock is held (see Git.write_config)."""
+    tries it again while the lock is held (see Git.write_configs)."""
     monkeypatch.setattr(git, "CONFIG_LOCK_TIMEOUT", 0)
     repo.git("config", "core.configLockTimeout", "0")
     (repo.path / ".git" / "config.lock").touch()

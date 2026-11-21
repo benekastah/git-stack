@@ -421,7 +421,7 @@ class GitClient:
         self.apply_config(ConfigUnset(f"branch.{branch}.{key}", value), check=False)
 
     def apply_config(self, *changes: ConfigSet | ConfigUnset, check: bool = True) -> None:
-        """Make changes to the config together (see git_client's Git.write_config), trying again
+        """Make changes to the config together (see git_client's Git.write_configs), trying again
         for up to CONFIG_LOCK_TIMEOUT seconds while another process has the config file locked.
         An unset of a key that isn't there, or that has several values, is no error; any other
         failure is one unless check is false.
@@ -431,7 +431,7 @@ class GitClient:
         it may change a branch's upstream.
         """
         try:
-            self._git.write_config(*changes, wait=CONFIG_LOCK_TIMEOUT)
+            self._git.write_configs(*changes, wait=CONFIG_LOCK_TIMEOUT)
         except GitError as e:
             if check:
                 raise StackError(f"git config failed:\n{e.stderr.strip()}") from e
