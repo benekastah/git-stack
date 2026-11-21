@@ -168,6 +168,12 @@ Text meant for people (messages, `info`'s tree) can change.
   500 commits a day. They're marked `large`, collected only with `-m large` (`dev.py large-tests`) and
   never by `dev.py tests`; they report each block's time and never assert it. `tests/test_large_repo.py`
   builds a tiny one in the default run.
+- The performance tests (`tests/test_operations_read_only.py`, `tests/test_operations_local_rewriting.py`
+  and `tests/test_operations_github.py`) are left out of `dev.py tests` (pyproject.toml's `addopts`
+  ignores them, even when named as a path: `dev.py tests PATH` for one of them runs nothing and
+  fails), and run in CI as the Linux-only `performance-tests` job in `project.yml`. By hand, on any
+  system: `python3 dev.py tests -o addopts="-n auto" <those three files>`. `tests/test_operations.py`,
+  which tests the counter itself, is in the default run.
 - The man page, `man/git-stack.1`, is generated from the README by
   `dev.py man` (the template's), and `dev.py static` fails if it's out of
   date: the pre-commit hook regenerates it (or run `python3 dev.py man`).

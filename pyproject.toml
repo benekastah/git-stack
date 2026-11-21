@@ -53,7 +53,9 @@ testpaths = ["tests"]
 # One worker per CPU (pytest-xdist); `-n 0` runs them one at a time, e.g. to debug.
 # The performance tests (tests/test_operations_*.py) are left out, since CI runs this on three
 # systems. project.yml runs them on Linux with an addopts of its own (this ignore holds even for a
-# path on the command line); on any system: `dev.py tests -o addopts="-n auto" tests/test_operations_*.py`.
+# path on the command line). On any system, naming the files, since Windows' shells don't expand a glob:
+# `dev.py tests -o addopts="-n auto" tests/test_operations_read_only.py tests/test_operations_local_rewriting.py
+# tests/test_operations_github.py`.
 addopts = ["--numprocesses", "auto", "--ignore-glob=tests/test_operations_*.py"]
 
 [tool.ruff]

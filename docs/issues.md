@@ -85,17 +85,19 @@ merged 35, 75 and 208 git and up to 6 `gh`; and `import` 19, 36 and 92 git for 1
 requests (its `gh` stays at 2). On a stack of a dozen, `sync` is over 200 processes, of which the
 restacks are most (see the issue above). `info` and a `sync` with nothing to do keep `gh` at 1.
 
-## An ssh remote is checked by running ssh on Linux and macOS, and never on Windows
+## `sync` and `push` run different processes on Windows than on Linux and macOS
 
-`GitHubAdapter.matches_direct_ssh` decides whether an ssh remote (`git@github.com:owner/repo`) is the
-repository by running `ssh` itself against it. `uses_openssh` returns False on Windows, because Git for
-Windows adjusts PATH inside its bundled runtime, so the `ssh` Python finds may not be the one git runs.
-That's a question about which ssh git uses, not about the system: people do use OpenSSH on Windows
-(Windows has one, and Git for Windows bundles its own), and they get no check at all, while on any
-system `GIT_SSH`, `core.sshCommand` and `ssh.variant` can already point git at something else, which the
-other conditions handle. A command must run the same processes on every system (see "Linux, macOS and
-Windows" in `PROJECT_AGENTS.md`), so the system test should go: either find out which ssh git runs, or
-don't run ssh at all and ask git, whose own ssh it is (`git ls-remote`).
+For an ssh remote (`git@github.com:owner/repo`), `GitHubAdapter.matches_direct_ssh` works out from the
+effective ssh settings (`ssh -G`, twice, which prints the configuration and connects to nothing), plus
+`git --exec-path` and `git rev-parse --local-env-vars`, whether git would reach GitHub's own endpoint,
+and if so takes the API's default branch as the remote's, skipping the `git ls-remote --symref` probe
+of the server's HEAD. `uses_openssh` returns False on Windows (Git for Windows adjusts PATH inside its
+bundled runtime, so the `ssh` Python finds may not be the one git runs), so there it runs none of that
+and always probes. A command must run the same processes on every system (see "Linux, macOS and
+Windows" in `PROJECT_AGENTS.md`), and the system test is a crude stand-in for "which ssh does git
+run": people do use OpenSSH on Windows (it ships with it, and Git for Windows bundles one). The fix is
+to run the same on all three: always probe (one more network round trip for an ssh remote on Linux and
+macOS, and no `ssh -G`) or find out which ssh git runs without asking the system.
 
 ## An older git-stack can't finish a restack this one stopped
 
