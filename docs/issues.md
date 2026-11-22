@@ -16,9 +16,10 @@ different.
 Workaround, never skipping the hook: set `PYPANDOC_PANDOC` to the bundled binary, as in
 `PYPANDOC_PANDOC=<repo>/.venv/lib/python3.15/site-packages/pypandoc/files/pandoc git push`.
 
-The fix belongs in python-template's `dev.py` (python-template has no issues file), not in
-each project: make `man` point pypandoc at its own bundled pandoc, or fail naming both
-versions, so a newer system pandoc can't change the page.
+The fix belongs in python-template's `dev.py` (python-template has no issues file), and this
+repo shouldn't patch it locally: make `dev.py man` use pypandoc's bundled pandoc, or fail with
+a message naming both versions, so a newer system pandoc can't change the page, and every
+project gets the fix through `copier update`.
 
 ## A change undone some other way can look like a revert
 
