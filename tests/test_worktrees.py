@@ -158,6 +158,21 @@ def test_restack_stopped_in_other_worktree_is_left_to_finish_there(
     repo.assert_stacked("pr2", "pr1", ["pr2 c1"])
 
 
+def test_every_branch_of_a_chain_rebase_stopped_in_another_worktree_is_found_there(repo: Repo) -> None:
+    repo.make_stack()
+    repo.git("switch", "--quiet", "pr1")
+    repo.commit("b", "pr1 b\n", "pr1 c3")  # conflicts with pr2 c1
+    repo.git("switch", "--quiet", "main")
+    worktree = add_worktree(repo, "pr1")
+    with pytest.raises(StackError, match="conflict"):
+        StackClient(GitClient(worktree)).restack()
+
+    # One `git rebase --update-refs` of pr3 is stopped there, which has pr2 to update as it passes.
+    git = GitClient(repo.path)
+    assert git.worktree_of("pr3", fresh=True) == worktree
+    assert git.worktree_of("pr2", fresh=True) == worktree
+
+
 def test_sync_pushes_the_rest_then_fails_for_branch_in_other_worktree(repo: Repo, client: StackClient) -> None:
     repo.make_stack()
     client.push()

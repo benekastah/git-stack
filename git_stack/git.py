@@ -5,12 +5,21 @@ import tempfile
 import threading
 import uuid
 from collections import Counter
-from collections.abc import Generator, Mapping, Sequence
+from collections.abc import Generator, Iterable, Mapping, Sequence
 from contextlib import contextmanager
 from typing import TextIO
 
 import git_client
-from git_client import ConfigSet, ConfigUnset, GitError, Ref, git_common_dir, git_paths
+from git_client import (
+    ConfigResult,
+    ConfigSet,
+    ConfigUnset,
+    GitError,
+    Ref,
+    git_common_dir,
+    git_paths,
+    merge_trees,
+)
 
 from git_stack.errors import StackError
 from git_stack.performance import TimedCatFile, TimedGit
@@ -50,6 +59,9 @@ GIT_OPTIONS_WITH_VALUES = frozenset({"-c", "-C", "--git-dir", "--work-tree", "--
 SWITCH = ("-c", "core.warnAmbiguousRefs=false", "switch", "--quiet")
 # How long the upstreams' refnames can be, together, for the ref snapshot to
 # name them to git (see GitClient._snapshot_refs).
+BULK_MERGE_TREES_ABOVE = 1
+"""One `merge-tree --stdin` for any number of merges costs the same as asking one, so it's for more
+than this many (see GitClient.prefetch_merged_trees)."""
 MAX_UPSTREAM_PATTERNS_LENGTH = 16384
 # The environment variable that names the git to run, if not the one on PATH.
 GIT_VARIABLE = "GIT_STACK_GIT"
@@ -186,7 +198,7 @@ class GitClient:
         self._listed_upstreams: frozenset[str] = frozenset()
         self._head: str | None = None
         self._worktrees: str | None = None
-        self._rebasing: dict[pathlib.Path, str | None] = {}
+        self._rebasing: dict[pathlib.Path, frozenset[str]] = {}
         self._reflogs: dict[str, tuple[str, ...]] = {}
         self._remote_defaults: dict[str, str | None] = {}
         self._push_defaults: dict[str, frozenset[str] | None] = {}
@@ -368,13 +380,7 @@ class GitClient:
         matter.
         """
         # Before reading, so a write that lands in between is read again next time.
-        stat: tuple[int, int, int] | None
-        try:
-            st = (self.common_dir() / "config").stat()
-            stat = (st.st_ino, st.st_mtime_ns, st.st_size)
-        except FileNotFoundError:
-            # git works without one, as if it were empty.
-            stat = None
+        stat = self._config_file_stat()
         if fresh or not self._config_read or stat != self._config_stat:
             branches: dict[tuple[str, str], str] = {}
             with git_errors():
@@ -440,17 +446,54 @@ class GitClient:
         the rest, which all start with "stack") forgets the ref snapshot, since
         it may change a branch's upstream.
         """
+        cache_was_current = self._config_read and self._config_file_stat() == self._config_stat
         try:
-            self._git.write_configs(*changes, wait=CONFIG_LOCK_TIMEOUT)
+            results = self._git.write_configs(*changes, wait=CONFIG_LOCK_TIMEOUT)
         except GitError as e:
             if check:
                 raise StackError(
                     f"git config {', '.join(change.key for change in changes)} failed:\n{e.stderr.strip()}"
                 ) from e
+        else:
+            if cache_was_current:
+                # What we wrote is known, so keep the config we have in step with it instead of reading
+                # it all again: the file's stat is how branch_config knows it's current.
+                self._apply_to_config_cache(changes, results)
+                self._config_stat = self._config_file_stat()
         finally:
             if any(not change.key.rpartition(".")[2].lower().startswith("stack") for change in changes):
                 # A config write can't move a worktree's HEAD.
                 self._forget_refs(worktrees=False)
+
+    def _apply_to_config_cache(
+        self, changes: Sequence[ConfigSet | ConfigUnset], results: Sequence[ConfigResult]
+    ) -> None:
+        """Make the config branch_config has read what it is after changes, which got results."""
+        for change, result in zip(changes, results, strict=True):
+            key = canonical_config_key(change.key)
+            if isinstance(change, ConfigSet):
+                self._config[key] = [change.value]
+            elif result is ConfigResult.CHANGED:
+                kept = [] if change.value is None else [v for v in self._config.get(key, []) if v != change.value]
+                if kept:
+                    self._config[key] = kept
+                else:
+                    self._config.pop(key, None)
+            if key.startswith("branch."):
+                branch, _, name = key.removeprefix("branch.").rpartition(".")
+                if values := self._config.get(key):
+                    self._branch_config[branch, name] = values[-1] or ""
+                else:
+                    self._branch_config.pop((branch, name), None)
+
+    def _config_file_stat(self) -> tuple[int, int, int] | None:
+        """What identifies the repository's config file as it is now, or None if it has none (git
+        works without one, as if it were empty)."""
+        try:
+            st = (self.common_dir() / "config").stat()
+        except FileNotFoundError:
+            return None
+        return st.st_ino, st.st_mtime_ns, st.st_size
 
     def rev(self, ref: str) -> str | None:
         """The commit ref names, or None if it names none. A local or
@@ -495,6 +538,34 @@ class GitClient:
         if (a, d) not in self._ancestry:
             self._ancestry[a, d] = self.ok("merge-base", "--is-ancestor", a, d)
         return self._ancestry[a, d]
+
+    def _commit_id(self, ref: str) -> str | None:
+        """The commit ref names, taking an object ID as it is: it's one (from the refs, or a base
+        recorded for a branch), and finding out would start the cat-file for nothing if it isn't
+        asked of. Asked of git, a name that isn't a commit just makes a pair that answers no."""
+        return ref if is_object_id(ref) else self.rev(ref)
+
+    def prefetch_merged_trees(self, pairs: Iterable[tuple[str, str]]) -> None:
+        """Within a snapshot, answer merged_tree for every (ours, theirs) in pairs at once, with
+        one `git merge-tree` process however many there are."""
+        asked = list(pairs)
+        if not self._snapshot_depth or len(asked) <= BULK_MERGE_TREES_ABOVE:
+            return
+        todo: dict[tuple[str, str], None] = {}
+        for ours, theirs in asked:
+            a, b = self._commit_id(ours), self._commit_id(theirs)
+            if a is not None and b is not None and (a, b) not in self._merged_trees:
+                todo[a, b] = None
+        if len(todo) > BULK_MERGE_TREES_ABOVE:
+            try:
+                with git_errors():
+                    results = merge_trees(self._git, list(todo))
+            except StackError:
+                # Not asked after all: each is asked for on its own, as it was, and says what's wrong.
+                return
+            # A merge that conflicts, or git can't make, has no tree (see _merge_tree).
+            for pair, result in zip(todo, results, strict=True):
+                self._merged_trees[pair] = result.tree if result.clean else None
 
     def check_ancestry(self, ancestor: str, descendant: str, *, env: Mapping[str, str] | None = None) -> bool:
         """Check ancestry without memoization. Git errors are not a negative answer."""
@@ -581,7 +652,7 @@ class GitClient:
             if line.startswith("worktree "):
                 path = pathlib.Path(line.removeprefix("worktree "))
             elif path is not None and (
-                line == f"branch refs/heads/{branch}" or (line == "detached" and self.rebasing_in(path) == branch)
+                line == f"branch refs/heads/{branch}" or (line == "detached" and branch in self.rebasing_in(path))
             ):
                 return path
         return None
@@ -595,9 +666,9 @@ class GitClient:
                 self._worktrees = self.run("worktree", "list", "--porcelain")
             return self._worktrees
 
-    def rebasing_in(self, worktree: pathlib.Path) -> str | None:
-        """The branch a rebase in progress in worktree is rebasing, if any,
-        found once per snapshot."""
+    def rebasing_in(self, worktree: pathlib.Path) -> frozenset[str]:
+        """The branches a rebase in progress in worktree is rebasing, or will
+        move as it passes them (`--update-refs`), if any, found once per snapshot."""
         rebasing = self._rebasing
         if self._snapshot_depth and worktree in rebasing:
             return rebasing[worktree]
@@ -608,17 +679,26 @@ class GitClient:
                 rebasing[worktree] = branch
         return branch
 
-    def _read_rebasing(self, worktree: pathlib.Path) -> str | None:
+    def _read_rebasing(self, worktree: pathlib.Path) -> frozenset[str]:
         git_dir = GitClient(worktree).run("rev-parse", "--absolute-git-dir", check=False)
         if not git_dir:  # e.g. the worktree was deleted without `git worktree remove`
-            return None
+            return frozenset()
         for name in ("rebase-merge", "rebase-apply"):
+            directory = pathlib.Path(git_dir) / name
             try:
-                head = (pathlib.Path(git_dir) / name / "head-name").read_text(encoding="utf-8").strip()
+                head = (directory / "head-name").read_text(encoding="utf-8").strip()
             except OSError:
                 continue
-            return head.removeprefix("refs/heads/") if head.startswith("refs/heads/") else None
-        return None
+            branches: set[str] = {head} if head.startswith("refs/heads/") else set()
+            try:
+                # With --update-refs, three lines for each branch it moves as it passes: the ref,
+                # the commit it was at, and (once moved) where it is now.
+                lines = (directory / "update-refs").read_text(encoding="utf-8").splitlines()
+            except OSError:
+                lines = []
+            branches.update(line for line in lines if line.startswith("refs/heads/"))
+            return frozenset(branch.removeprefix("refs/heads/") for branch in branches)
+        return frozenset()
 
     def other_worktree_of(self, branch: str, *, fresh: bool = False) -> pathlib.Path | None:
         """The path of the worktree branch is checked out (or being rebased) in,

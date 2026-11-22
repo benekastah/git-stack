@@ -1,5 +1,5 @@
 import enum
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
 from git_stack.adapters.merge_state import MergeState
@@ -77,6 +77,11 @@ class GitAdapter:
         merged pull request's branch). Only then is it safe to delete."""
         git = self.git
         return git.upstream_gone(branch) or git.is_ancestor(f"refs/heads/{branch}", f"refs/heads/{parent}")
+
+    def prefetch_landed(self, branches: Iterable[str], stacks: Stacks) -> None:
+        """Ask whether every one of branches landed in its parent at once, before merge_state asks
+        for each (see StackCore.prefetch_landed_checks)."""
+        self.core.prefetch_landed_checks(branches, stacks)
 
     def landed(self, branch: str, parent: str) -> bool:
         """Whether parent has branch's changes, as a merge or as patches."""

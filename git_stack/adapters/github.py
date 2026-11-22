@@ -926,6 +926,22 @@ class GitHubAdapter(GitAdapter):
             return name
         return None
 
+    def prefetch_landed(self, branches: Iterable[str], stacks: Stacks) -> None:
+        """As GitAdapter's, but not for the branches merge_state answers without a check: those with
+        an open pull request into the default branch."""
+        pulls = self.pull_requests()
+
+        def open_into_default(branch: str) -> bool:
+            pr = pulls.get(branch)
+            parent = stacks.parent(branch)
+            return (
+                pr is not None
+                and pr.state is GitHubState.OPEN
+                and self.git.remote_branch_name(parent, self.remote) == self._default_branch
+            )
+
+        super().prefetch_landed([branch for branch in branches if not open_into_default(branch)], stacks)
+
     def merge_state(self, branch: str, parent: str, ignore_revert: bool = False) -> MergeState:
         git = self.git
         pr = self.pull_requests().get(branch)

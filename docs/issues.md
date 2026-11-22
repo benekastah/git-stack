@@ -27,6 +27,14 @@ leave the file the same size (e.g. overwriting a commit ID with another) would
 then look like no change, and git-stack would keep using the old values. Not
 reproduced; on btrfs, where inode numbers aren't reused, it can't happen.
 
+After a write of its own, git-stack keeps the config it has in step with what it wrote and takes the
+file's new stat as current (see `GitClient.apply_config`), instead of reading it all again. That
+trusts that nothing else wrote between its last check of the stat and its own write. That window
+includes the wait for `config.lock` when another process holds it (say a `git push -u` in another
+terminal), which is exactly when a concurrent write happens: what that process wrote is missed for the
+rest of the command, and the next command, which reads the file again, sees it. Closing it needs the
+check made under the lock, which py-git-client's `write_configs` would have to offer.
+
 It also only watches the common `.git/config`, so settings changed in another
 config file (`git config --worktree` with `extensions.worktreeConfig`, an
 included file, or, for `GitClient.config_value`'s `stack.adapter`,
@@ -69,19 +77,20 @@ rebase.
 
 `tests/test_operations_local_rewriting.py` allots what each may cost at 1, 3 and 10 branches, and
 several grow with the stack even when there's no work: `restack` of an up to date stack starts
-6 + 2 * branches git processes (26 for 10 branches), `pull` with nothing to pull 11 + branches,
+7 + branches git processes (17 for 10 branches), `pull` with nothing to pull 11 + branches,
 and `clean` with nothing merged 10 + branches. `untrack`ing a whole stack starts 6, 12 and 33
 (3 + 3 * branches): each branch's config is removed in a write of its own, and the config is read again
-after each. Restacking replays a branch for 12 processes each (the rebase, and the checks around it). In a
+after each. A restack that's behind is one rebase for a chain, and about 4 processes for each branch in it (a
+`git config` for each change, and a `merge-base`: 56 for 10 branches). In a
 repository with thousands of branches and a stack of a dozen, these are the ones to batch (one
 `for-each-ref` or `config` read in place of one per branch), which the tests would then show.
 
 ## Syncing, importing and opening pull requests start many processes for a long stack
 
 `tests/test_operations_github.py` allots them at 1, 3 and 10 branches. Pushing a stack that was
-never pushed starts 12, 18 and 39 git processes; `push --prs` 14, 25 and 60 git and 2, 8 and 15
+never pushed starts 11, 15 and 29 git processes; `push --prs` 13, 22 and 50 git and 2, 8 and 15
 `gh` (more than one `gh` call for each of 10 pull requests); `sync` after the bottom pull request
-merged 34, 74 and 207 git and up to 6 `gh`; and `import` 19, 36 and 92 git for 1, 3 and 10 pull
+merged 34, 68 and 187 git and up to 6 `gh`; and `import` 18, 33 and 82 git for 1, 3 and 10 pull
 requests (its `gh` stays at 2). On a stack of a dozen, `sync` is over 200 processes, of which the
 restacks are most (see the issue above). `info` and a `sync` with nothing to do keep `gh` at 1.
 
@@ -102,7 +111,8 @@ macOS, and no `ssh -G`) or find out which ssh git runs without asking the system
 ## An older git-stack can't finish a restack this one stopped
 
 A restack that stops on a conflict is recorded in one setting,
-`stackPendingRestack`, which versions before it don't read. Finishing the
+`stackPendingRestack` (or, for a chain of branches rebased together,
+`stackPendingRestackBatch`), which versions before it don't read. Finishing the
 rebase with an older git-stack leaves that record behind, and the next run
 of a newer one may then apply it over what the older one did since (e.g. a
 `track` onto another parent). Finish a stopped restack with the version

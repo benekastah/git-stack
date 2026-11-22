@@ -1300,6 +1300,8 @@ class StackClient(StackCore):
         out too, with the branches stacked on them, as sync does."""
         remaining: list[str] = []
         skipped: set[str] = set()
+        branches = list(branches)
+        adapter.prefetch_landed(branches, stacks)
         for branch in branches:
             parent = stacks.parent(branch)
             if parent in skipped:

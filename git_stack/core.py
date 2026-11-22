@@ -6,6 +6,8 @@ from collections.abc import Callable, Generator, Iterable, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 
+from git_client import ConfigSet, ConfigUnset
+
 from git_stack import events
 from git_stack.check_cache import CheckCache
 from git_stack.errors import BrokenStackError, StackError
@@ -35,6 +37,14 @@ TRACK_UPSTREAM_KEY = "stackTrackUpstream"
 # don't read it, so a restack this version stopped is finished with this
 # version or a later one.
 PENDING_RESTACK_KEY = "stackPendingRestack"
+# A restack of a chain of branches in one `git rebase --update-refs` (see restack_chain)
+# can't say, when it starts, which commit each branch will be rebased onto: that's its
+# parent's new tip, which the rebase makes. So each branch records "<its tip before>
+# <its parent>", and once the rebase is known to have finished (the tip has changed, and
+# has the parent's tip in its history) the parent's tip is the new base (see settle_batch).
+# Older versions don't read it, so a restack this version stopped is finished with this
+# version or a later one.
+PENDING_BATCH_KEY = "stackPendingRestackBatch"
 # How older versions recorded it, in three settings, which a restack they
 # started and didn't finish may have left.
 LEGACY_PENDING_PARENT_KEY = "stackPendingParent"
@@ -361,6 +371,7 @@ class StackCore:
         branch hasn't been updated yet.
         """
         self.settle_restack(branch, forget_unfinished, restack_completed)
+        self.settle_batch(branch, forget_unfinished)
         self.settle_pull(branch, forget_unfinished)
 
     def settle_restack(self, branch: str, forget_unfinished: bool, completed: bool = False) -> None:
@@ -400,6 +411,29 @@ class StackCore:
         # restack since we read it.
         for key, value in recorded.items():
             git.config_unset(branch, key, value)
+
+    def settle_batch(self, branch: str, forget_unfinished: bool) -> None:
+        """Record the result of a restack of a chain of branches (see restack_chain), if one
+        was interrupted: the branch was rebased if its tip changed since the rebase started,
+        and it has its parent's tip in its history, which is then its base.
+
+        It wasn't if the rebase was aborted: the tip is where it was. The rest is as for
+        settle_restack, which it follows."""
+        git = self.git
+        if (pending := git.config_get(branch, PENDING_BATCH_KEY)) is None:
+            return
+        before, parent = pending.split(" ", 1)
+        # Where the branch now forks from its parent, which is the tip its parent was rebased to
+        # even if the parent has moved on since (a commit on it, a pull) before this ran.
+        forks = git.run("merge-base", "--all", f"refs/heads/{branch}", f"refs/heads/{parent}", check=False).split()
+        if len(forks) == 1 and git.tip(branch) != before and forks[0] != git.config_get(branch, BASE_KEY):
+            self.set_parent(branch, parent)
+            git.config_set(branch, BASE_KEY, forks[0])
+        elif not forget_unfinished or git.other_worktree_of(branch) is not None:
+            # Not started yet in another git-stack process, or stopped in another worktree.
+            return
+        # Only if it's unchanged, in case another process has started a new restack since.
+        git.config_unset(branch, PENDING_BATCH_KEY, pending)
 
     def settle_pull(self, branch: str, forget_unfinished: bool) -> None:
         git = self.git
@@ -477,12 +511,33 @@ class StackCore:
         "<inputs...> true|false", so it isn't run again until one of them
         changes. Failing to remember it only means checking again next time.
         """
-        cached = (self.checks.get(branch, key) or "").split()
-        if cached[:-1] == inputs and cached[-1:] in (["true"], ["false"]):
-            return cached[-1] == "true"
+        if (cached := self.cached_check(branch, key, inputs)) is not None:
+            return cached
         result = check()
         self.remember_check_result(branch, key, inputs, str(result).lower())
         return result
+
+    def cached_check(self, branch: str, key: str, inputs: list[str]) -> bool | None:
+        """What remembered has for these inputs, or None."""
+        cached = (self.checks.get(branch, key) or "").split()
+        if cached[:-1] == inputs and cached[-1:] in (["true"], ["false"]):
+            return cached[-1] == "true"
+        return None
+
+    def prefetch_landed_checks(self, branches: Iterable[str], stacks: Stacks) -> None:
+        """Ask for the landed check of every branch at once (see GitClient.prefetch_merged_trees),
+        so that checking one at a time (see GitAdapter.landed) costs no process of its own, however
+        many branches there are. What the check cache already has isn't asked for."""
+        git = self.git
+        merges: list[tuple[str, str]] = []
+        for branch in branches:
+            parent_tip = git.rev(f"refs/heads/{stacks.parent(branch)}")
+            tip = git.rev(f"refs/heads/{branch}")
+            if parent_tip is not None and tip is not None:
+                base = git.config_get(branch, BASE_KEY)
+                if self.cached_check(branch, LANDED_CHECK_KEY, [tip, parent_tip, base or "-"]) is None:
+                    merges.append((parent_tip, tip))
+        git.prefetch_merged_trees(merges)
 
     def remember_check_result(self, branch: str, key: str, inputs: list[str], result: str) -> None:
         tracked = {b for (b, k) in self.git.branch_config() if k == PARENT_KEY.lower()}
@@ -605,15 +660,153 @@ class StackCore:
                 f"If {fork} is the intended fork, run `{repair}` and retry"
             )
 
+    def can_restack_in_a_chain(self, branch: str, parent: str, before: str | None, latest: bool) -> bool:
+        """Whether branch can be rebased with the chain of branches it follows, whose last
+        is before (None if it starts the chain), by one `git rebase --onto`: it's stacked on
+        before, and has a base (so one rebase replays what's after it) that is before's tip,
+        which before's rebase moves. The first needs restacking, as restack_branch checks.
+
+        Anything that makes restack_branch stop or skip a branch (a merge commit, another
+        worktree) is left to it, which tells the user: that's no chain."""
+        git = self.git
+        parent_tip = git.rev(f"refs/heads/{parent}")
+        if parent_tip is None or any(git.config_get(b, INTEGRATION_KEY) is not None for b in (branch, parent)):
+            return False
+        try:
+            base = self.recorded_base(branch, parent)
+        except BrokenStackError:
+            return False
+        if before is None:
+            # A branch with no commits of its own is outside what the rebase replays, so git would
+            # leave it where it is: that's for restack_branch.
+            if git.tip(branch) == base or not self.needs_restack(branch, parent, base, parent_tip, latest):
+                return False
+        elif base != parent_tip:
+            return False
+        return git.other_worktree_of(branch) is None
+
+    def chain_to_restack(self, first: str, candidates: set[str], stacks: Stacks, latest: bool) -> list[str]:
+        """The longest chain of branches, from first, that one `git rebase --update-refs` can
+        replay (see can_restack_in_a_chain), each one of candidates stacked on the one
+        before; or none, if it isn't at least two, or any has merge commits in it. Where a
+        branch has more than one branch stacked on it, the chain follows the first that fits:
+        the others are restacked after, on the branch once it's moved."""
+        chain: list[str] = []
+        branch: str | None = first
+        while branch is not None and self.can_restack_in_a_chain(
+            branch, stacks.parent(branch), chain[-1] if chain else None, latest
+        ):
+            chain.append(branch)
+            branch = next(
+                (
+                    child
+                    for child in stacks.children(branch)
+                    if child in candidates and self.can_restack_in_a_chain(child, branch, branch, latest)
+                ),
+                None,
+            )
+        if len(chain) < 2:
+            return []
+        # One rebase replays everything after the first's base, and restack_branch refuses a
+        # branch with merge commits, which that would flatten.
+        base = self.git.config_get(chain[0], BASE_KEY)
+        if self.git.run("rev-list", "--max-count=1", "--merges", f"{base}..refs/heads/{chain[-1]}"):
+            return []
+        # `--update-refs` also moves every other branch that points at a commit it replays (a backup
+        # of one of these, say), which is not ours to move: leave the chain to restack_branch.
+        inside = self.git.run(
+            "for-each-ref",
+            "--format=%(refname:short) %(objectname)",
+            "--contains",
+            f"{base}",
+            "--merged",
+            f"refs/heads/{chain[-1]}",
+            "refs/heads/",
+        ).splitlines()
+        if any(name not in chain and oid != base for name, _, oid in (line.partition(" ") for line in inside)):
+            return []
+        return chain
+
+    def restack_chain(self, chain: list[str], stacks: Stacks) -> None:
+        """Rebase a chain of branches (see chain_to_restack) with one `git rebase --update-refs`
+        of the last, which moves each of the others as it passes them, once it has finished:
+        until then no branch has moved, so an abort leaves every one as it was, and a conflict
+        is resolved in the one rebase, however many branches it's in.
+
+        Each branch records what settle_batch needs to record the result, if the rebase stops
+        on a conflict and is finished with `git rebase --continue`."""
+        git = self.git
+        first, last = chain[0], chain[-1]
+        parent = stacks.parent(first)
+        parent_tip = git.tip(parent)
+        base = git.config_get(first, BASE_KEY)
+        before = {branch: git.tip(branch) for branch in chain}
+        pending = {branch: f"{before[branch]} {stacks.parent(branch)}" for branch in chain}
+        for branch in chain:
+            self.emit(events.Restacking(branch, stacks.parent(branch)))
+        git.apply_config(*(ConfigSet(f"branch.{b}.{PENDING_BATCH_KEY}", value) for b, value in pending.items()))
+        # git leaves a branch that's checked out alone when it updates the others a rebase passes,
+        # so, before it starts, we can't be on one: the rebase moves to `last` anyway.
+        if git.current_branch() in chain[:-1]:
+            git.switch(last)
+        if git.passthrough("rebase", "--update-refs", "--onto", parent_tip, base or "", last):
+            if unmoved := [branch for branch in chain if git.tip(branch) == before[branch]]:
+                raise StackError(
+                    f"git rebased {last} but left {', '.join(unmoved)} where it was, so they're out of step: "
+                    f"restore them with `git branch -f <branch> <commit>` from `git reflog` before restacking"
+                )
+            # The rebase finished, so each branch has its parent's new tip in its history: record
+            # that as its base, with one write for the whole chain (settle_batch does the same, for
+            # a rebase that was stopped and then finished by hand, checking each).
+            changes: list[ConfigSet | ConfigUnset] = []
+            for position, branch in enumerate(chain):
+                new_parent = stacks.parent(branch)
+                if git.config_get(branch, PARENT_KEY) != new_parent:
+                    self.set_parent(branch, new_parent)
+                new_parent_tip = parent_tip if position == 0 else git.tip(chain[position - 1])
+                changes += [
+                    ConfigSet(f"branch.{branch}.{BASE_KEY}", new_parent_tip),
+                    ConfigUnset(f"branch.{branch}.{PENDING_BATCH_KEY}", pending[branch]),
+                ]
+            git.apply_config(*changes)
+            return
+        if git.operation_in_progress():
+            raise self.stopped(
+                f"restacking {self.conflicting_branch(chain, before)}",
+                "rebase",
+                "rerun this command to finish the stack",
+            )
+        git.apply_config(*(ConfigUnset(f"branch.{b}.{PENDING_BATCH_KEY}") for b in chain), check=False)
+        raise StackError(f"restacking {first} onto {parent} failed; see git's output above")
+
+    def conflicting_branch(self, chain: list[str], before: dict[str, str]) -> str:
+        """The branch of chain whose commit the stopped rebase of it couldn't apply, or the first
+        if git doesn't say (REBASE_HEAD is the commit it was applying)."""
+        git = self.git
+        applying = git.rev("REBASE_HEAD")
+        if applying is None:
+            return chain[0]
+        return next((branch for branch in chain if git.is_ancestor(applying, before[branch])), chain[0])
+
     def restack_all(self, branches: Iterable[str], stacks: Stacks, latest: bool = False) -> list[str]:
-        """Restack branches, parent-before-child, returning the ones blocked by another worktree."""
+        """Restack branches, parent-before-child, returning the ones blocked by another worktree.
+
+        Branches that follow one another are rebased together (see restack_chain)."""
         original = self.git.current_branch()
         skipped: set[str] = set()
+        branches = list(branches)
+        wanted = set(branches)
+        done: set[str] = set()
         for branch in branches:
             parent = stacks.parent(branch)
+            if branch in done:
+                continue
             if parent in skipped:
                 self.emit(events.ParentSkipped(branch, parent))
                 skipped.add(branch)
+            elif chain := self.chain_to_restack(branch, wanted, stacks, latest):
+                self.restack_chain(chain, stacks)
+                done.update(chain)
             elif not self.restack_branch(branch, parent, latest):
                 skipped.add(branch)
         if original and self.git.current_branch() != original:

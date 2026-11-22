@@ -17,10 +17,10 @@ from tests.operations import expect_operations
 pytestmark = [pytest.mark.usefixtures("separate_processes", "gh")]
 
 # Each is (git processes, gh commands) at 1, 3 and 10 branches.
-# Pushing starts a few processes for each branch (a stack of 10 pushes in 39 against 12 for 1)...
-PUSH = {1: (12, 0), 3: (18, 0), 10: (39, 0)}
+# Pushing starts a few processes for each branch (a stack of 10 pushes in 29 against 11 for 1)...
+PUSH = {1: (11, 0), 3: (15, 0), 10: (29, 0)}
 # ...and opening a pull request for each costs more of both.
-PUSH_OPENING_PRS = {1: (14, 2), 3: (25, 8), 10: (60, 15)}
+PUSH_OPENING_PRS = {1: (13, 2), 3: (22, 8), 10: (50, 15)}
 # With every pull request open, git doesn't grow with the stack from 3 branches up, and gh stays at 4
 # (2 for a stack of 1).
 PUSH_WITH_PRS_OPEN = {1: (8, 2), 3: (9, 4), 10: (9, 4)}
@@ -30,9 +30,9 @@ SYNC_NOTHING = {1: (12, 1), 3: (14, 1), 10: (21, 1)}
 # The bottom merged, as GitHub reports it (the merge commit and the head it had): the rest are
 # restacked onto main and pushed again. A drop in the git count that no change made on purpose means the
 # fake no longer gives `sync` what GitHub does, and it's finding the merge from git alone.
-SYNC_BOTTOM_MERGED = {1: (34, 1), 3: (74, 5), 10: (207, 6)}
+SYNC_BOTTOM_MERGED = {1: (34, 1), 3: (68, 5), 10: (187, 6)}
 # gh is asked twice, however many pull requests there are.
-IMPORT = {1: (19, 2), 3: (36, 2), 10: (92, 2)}
+IMPORT = {1: (18, 2), 3: (33, 2), 10: (82, 2)}
 # info asks GitHub about all the branches in one request.
 INFO = {1: (4, 1), 3: (4, 1), 10: (4, 1)}
 

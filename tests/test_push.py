@@ -49,7 +49,7 @@ def test_push_records_changed_tips_together(repo: Repo, client: StackClient, git
 
     assert not any(call[:2] in (["log", "--walk-reflogs"], ["rev-list", "--parents"]) for call in git_calls)
     publication = next(i for i, call in enumerate(git_calls) if call[0] == "push" and "--set-upstream" in call)
-    assert sum(call[:2] == ["config", "--list"] for call in git_calls[publication + 1 :]) == 2
+    assert sum(call[:2] == ["config", "--list"] for call in git_calls[publication + 1 :]) == 1
     for branch in ("pr1", "pr2", "pr3"):
         assert repo.config(branch, "stackPulled") == repo.git("rev-parse", f"refs/heads/{branch}")
         assert repo.config(branch, "stackPulledUpstream") == f"origin refs/heads/{branch}"

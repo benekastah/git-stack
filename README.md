@@ -679,8 +679,8 @@ git stack restack --latest              # also move the stack onto main's latest
 ```
 
 - Only the branches' own commits are replayed (from their recorded base), so a
-  parent that was squash-merged doesn't cause conflicts. See
-  [How it works](#how-it-works).
+  parent that was squash-merged doesn't cause conflicts. Branches that follow
+  one another are replayed by one rebase. See [How it works](#how-it-works).
 - A branch with merge commits must be restacked manually while preserving
   those merges; git-stack refuses to replay it as a linear history.
 - `--onto` retargets one branch, onto another local branch: the one branch
@@ -1287,7 +1287,12 @@ What each command's result has, besides `type` and `events`:
 If a rebase, cherry-pick or revert stops on a conflict, resolve it and run
 `git rebase --continue` / `git cherry-pick --continue` /
 `git revert --continue` (or `--abort`) as usual,
-then rerun the git-stack command to finish the rest of the stack. The new
+then rerun the git-stack command to finish the rest of the stack. A chain of
+branches is one rebase (see [How it works](#how-it-works)), so no branch in it
+has moved while it's stopped: `--abort` leaves every one as it was, and
+`--continue` goes on through the rest of the chain, which can stop on another
+conflict, so resolve each as it comes. Where `--abort` or the rebase leaves you is
+the chain's last branch, not the one that conflicted. The new
 parent and base (and the pulled upstream commits) are recorded only if the
 operation actually completed. To recognize a manually completed restack,
 git-stack uses the branch's reflog. If that entry is unavailable, inspect the
@@ -1388,6 +1393,17 @@ branch.<name>.stackBase     the pr1 commit pr2 was last rebased onto
 Restacking runs `git rebase --onto <parent> <stackBase> <branch>`, which
 replays only the branch's own commits, so PR 1's original commits never
 collide with the squashed version in `main`.
+
+Branches that follow one another, each stacked on the one before and based on
+its tip, are restacked with one `git rebase --update-refs --onto <parent>
+<stackBase of the first> <the last>`, which moves each of them as it passes
+(so a stack of ten is one rebase, not ten). Git moves them only when the rebase
+finishes. Where several branches are stacked on one, the chain follows the
+first, and the others are restacked after it, on the branch once it has moved.
+A branch that's checked out in another worktree, has merge commits, or whose base
+isn't where the one before it was, isn't part of a chain, and is restacked on its
+own, one at a time. A branch with other branches pointing at commits of a chain (say, a
+backup of one of them) isn't chained either, since `--update-refs` would move those too.
 
 A branch stacked directly on a stack's root (e.g. `main`) is only restacked
 when it conflicts with the root's latest commit (or with `--latest`), not

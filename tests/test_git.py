@@ -476,6 +476,58 @@ def test_apply_config_reports_a_set_git_rejects(repo: Repo) -> None:
         git.apply_config(ConfigSet("branch.main.stackTwo", "3"))
 
 
+def test_prefetched_merged_trees_are_what_merge_tree_gives_for_each_pair(repo: Repo, git_calls: list[GitCall]) -> None:
+    repo.git("switch", "--quiet", "-c", "clean")
+    repo.commit("b", "b\n", "clean change")
+    repo.git("switch", "--quiet", "main")
+    repo.git("switch", "--quiet", "-c", "conflicting")
+    repo.commit("a", "other\n", "conflicting change")
+    repo.git("switch", "--quiet", "main")
+    repo.commit("a", "main's\n", "main's change")
+    main, clean, conflicting = (repo.git("rev-parse", name) for name in ("main", "clean", "conflicting"))
+    git = GitClient(repo.path)
+    git.branch_config()
+
+    with git.snapshot():
+        git.prefetch_merged_trees([(main, clean), (main, conflicting)])
+        git_calls.clear()
+        trees = [git.merged_tree(main, clean), git.merged_tree(main, conflicting)]
+
+    assert trees == [repo.git("merge-tree", "--write-tree", main, clean), None]
+    assert not [call for call in git_calls if call[0] == "merge-tree"]
+
+
+def test_the_config_it_wrote_is_in_the_cache_without_reading_it_again(repo: Repo, git_calls: list[GitCall]) -> None:
+    repo.git("config", "branch.main.stackOld", "1")
+    repo.git("config", "--add", "branch.main.stackMany", "a")
+    repo.git("config", "--add", "branch.main.stackMany", "b")
+    git = GitClient(repo.path)
+    git.branch_config()
+    git_calls.clear()
+
+    git.apply_config(
+        ConfigSet("branch.main.stackA", "a"),
+        ConfigSet("branch.main.stackOld", "2"),
+        ConfigUnset("branch.main.stackMany", "a"),
+        ConfigUnset("branch.new.stackGone"),
+    )
+    cached = dict(git.branch_config())
+
+    assert not [call for call in git_calls if call[:2] == ["config", "--list"]]
+    assert cached == git.branch_config(fresh=True)
+    assert cached[("main", "stackmany")] == "b"
+
+
+def test_a_write_by_another_process_is_still_seen_after_ours(repo: Repo) -> None:
+    git = GitClient(repo.path)
+    git.branch_config()
+    git.apply_config(ConfigSet("branch.main.stackA", "a"))
+
+    repo.git("config", "branch.main.stackB", "b")
+
+    assert git.branch_config()[("main", "stackb")] == "b"
+
+
 def separate_patch_ids(repo: Repo, *command: str) -> list[tuple[str, str]]:
     """`git patch-id --stable` of what `git <command>` prints, run on its own."""
     output = repo.git(command[0], "--no-color", *command[1:])
@@ -628,7 +680,7 @@ def test_snapshot_doesnt_keep_a_rebase_read_while_it_was_forgotten(repo: Repo, m
     read = git._read_rebasing  # pyright: ignore[reportPrivateUsage]
     reads: list[pathlib.Path] = []
 
-    def forgetting_meanwhile(worktree: pathlib.Path) -> str | None:
+    def forgetting_meanwhile(worktree: pathlib.Path) -> frozenset[str]:
         """As if another thread moved a branch while it was read."""
         reads.append(worktree)
         git._forget_refs()  # pyright: ignore[reportPrivateUsage]

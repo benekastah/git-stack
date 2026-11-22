@@ -15,12 +15,13 @@ pytestmark = pytest.mark.usefixtures("separate_processes")
 # size and with the formula that fits all three. A formula is how the count grows, so a change
 # to it, not just to the number, shows up in review.
 #
-# Restacking replays each branch above the one that changed, and each replay costs 12 (15 + 12 *
-# (branches - 1), measured at 3 and 10). A stack of 1 has nothing above it to replay, so it's only
-# the check of whether it needs it, the same as an up to date stack's (8).
-RESTACK_BEHIND = {1: 8, 3: 39, 10: 123}
-# Even an up to date stack is checked a branch at a time: 6 + 2 * branches.
-RESTACK_UP_TO_DATE = {1: 8, 3: 12, 10: 26}
+# Restacking replays the branches above the one that changed in one `git rebase` of the last of
+# them, asking about all of them at once (the landed checks) and updating the config it holds as it
+# writes: what grows with the stack is a `git config` for each change and a `merge-base` for each
+# branch, 4 for each (16 + 4 * branches from 3 up). A stack of 1 has nothing above it to replay.
+RESTACK_BEHIND = {1: 8, 3: 28, 10: 56}
+# An up to date stack is checked a branch at a time, with the landed checks together: 7 + branches.
+RESTACK_UP_TO_DATE = {1: 8, 3: 10, 10: 17}
 # Nothing to pull: 11 + branches.
 PULL_NOTHING = {1: 12, 3: 14, 10: 21}
 # Nothing merged, and nothing pushed: 10 + branches.

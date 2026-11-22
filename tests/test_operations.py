@@ -193,7 +193,7 @@ def test_a_git_stack_process_runs_the_same_git_processes_as_one_in_this_process(
 def test_a_with_block_counts_the_gh_commands_of_a_git_stack_process(repo: Repo, gh: FakeGitHub) -> None:
     repo.make_stack()
 
-    with expect_operations(git=25, gh=8) as operations:
+    with expect_operations(git=22, gh=8) as operations:
         repo.stack_process("push", "--prs")
 
     assert [command[:2] for command in operations.gh].count(["pr", "create"]) == 3
@@ -204,12 +204,12 @@ def test_only_what_git_stack_starts_is_counted_not_what_git_starts_for_it(repo: 
     repo.git("switch", "--quiet", "pr1")
     repo.commit("a", "pr1 third\n", "pr1 c3")
 
-    with expect_operations(git=39) as operations:
+    with expect_operations(git=28) as operations:
         repo.stack_process("restack")
 
-    # Each branch is rebased by a `git rebase`, which runs `git notes copy` itself.
+    # pr2 and pr3 are rebased by one `git rebase`, which runs `git notes copy` itself.
     ran = [subcommand(command)[0] for command in operations.git]
-    assert [name for name in ran if name in ("rebase", "notes")] == ["rebase", "rebase"]
+    assert [name for name in ran if name in ("rebase", "notes")] == ["rebase"]
 
 
 def test_the_tests_own_git_is_not_counted_in_a_block_with_a_git_stack_process(repo: Repo) -> None:
