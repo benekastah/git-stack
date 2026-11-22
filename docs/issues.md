@@ -19,7 +19,8 @@ Workaround, never skipping the hook: set `PYPANDOC_PANDOC` to the bundled binary
 The fix belongs in python-template's `dev.py` (it has no issues file of its own, only
 `template/docs/issues.md`, the copy projects get), and this repo shouldn't patch it locally:
 make `dev.py man` use pypandoc's bundled pandoc, or fail with a message naming both versions, so
-a newer system pandoc can't change the page, and every project gets the fix through `copier update`.
+a newer system pandoc can't change the page, and every project gets the fix through
+`copier update`.
 
 ## A change undone some other way can look like a revert
 
