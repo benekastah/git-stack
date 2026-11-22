@@ -19,7 +19,8 @@ def test_github_repo_needs_no_git_process_for_a_configured_url(
     repo: Repo, gh: FakeGitHub, git_calls: list[GitCall]
 ) -> None:
     assert github_repo(GitClient(repo.path), "origin") == ("github.com", "acme", "widgets")
-    assert [call[0] for call in git_calls] == ["config"]
+    # The URL is in the config: no `git remote get-url`. (The rev-parse says where the config is.)
+    assert [call[0] for call in git_calls] == ["rev-parse", "config"]
 
 
 @pytest.mark.parametrize("endpoint", ["direct", "rewritten", "pushurl", "push-rewritten", "multiple"])

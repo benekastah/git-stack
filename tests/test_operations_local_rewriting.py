@@ -15,10 +15,10 @@ pytestmark = pytest.mark.usefixtures("separate_processes")
 # size and with the formula that fits all three. A formula is how the count grows, so a change
 # to it, not just to the number, shows up in review.
 #
-# Restacking replays each branch above the one that changed, and each replay costs 9 (16 + 9 *
+# Restacking replays each branch above the one that changed, and each replay costs 12 (15 + 12 *
 # (branches - 1), measured at 3 and 10). A stack of 1 has nothing above it to replay, so it's only
 # the check of whether it needs it, the same as an up to date stack's (8).
-RESTACK_BEHIND = {1: 8, 3: 34, 10: 97}
+RESTACK_BEHIND = {1: 8, 3: 39, 10: 123}
 # Even an up to date stack is checked a branch at a time: 6 + 2 * branches.
 RESTACK_UP_TO_DATE = {1: 8, 3: 12, 10: 26}
 # Nothing to pull: 11 + branches.
@@ -30,9 +30,9 @@ CLEAN_NOTHING = {1: 11, 3: 13, 10: 20}
 # not after.
 RENAME_BOTTOM = {1: 9, 3: 10, 10: 10}
 RENAME_TOP = {1: 9, 3: 9, 10: 9}
-UNTRACK_TOP = {1: 5, 3: 5, 10: 5}
-# Untracking every branch: 4 + branches (a write for each, and the config read again after it).
-UNTRACK_ALL = {1: 5, 3: 7, 10: 14}
+UNTRACK_TOP = {1: 6, 3: 6, 10: 6}
+# Untracking every branch: 3 + 3 * branches.
+UNTRACK_ALL = {1: 6, 3: 12, 10: 33}
 
 
 def commit_to_bottom(repo: Repo) -> None:

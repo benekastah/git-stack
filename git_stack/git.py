@@ -10,7 +10,7 @@ from contextlib import contextmanager
 from typing import TextIO
 
 import git_client
-from git_client import ConfigSet, ConfigUnset, GitError, Ref, config_key, git_common_dir, git_paths
+from git_client import ConfigSet, ConfigUnset, GitError, Ref, git_common_dir, git_paths
 
 from git_stack.errors import StackError
 from git_stack.performance import TimedCatFile, TimedGit
@@ -54,8 +54,10 @@ MAX_UPSTREAM_PATTERNS_LENGTH = 16384
 # The environment variable that names the git to run, if not the one on PATH.
 GIT_VARIABLE = "GIT_STACK_GIT"
 # git's variables that can make the git directory another than the one at the
-# top of the worktree, which git_common_dir doesn't read.
+# top of the worktree (see _version._checkout_revision).
 GIT_DIR_VARIABLES = frozenset({"GIT_DIR", "GIT_COMMON_DIR"})
+# What a rebase, cherry-pick, revert or merge that has stopped leaves in the git directory.
+OPERATION_PATHS = ("rebase-merge", "rebase-apply", "CHERRY_PICK_HEAD", "REVERT_HEAD", "sequencer", "MERGE_HEAD")
 # Characters a branch name can't have, but a revision (e.g. main~1) can.
 REVISION_SYNTAX = frozenset("~^:?*[\\ ")
 
@@ -68,6 +70,14 @@ def split_command(args: tuple[str, ...]) -> tuple[str, list[str]]:
     while start < len(args) and args[start].startswith("-"):
         start += 2 if args[start] in GIT_OPTIONS_WITH_VALUES else 1
     return (args[start], list(args[start + 1 :])) if start < len(args) else ("", [])
+
+
+def canonical_config_key(key: str) -> str:
+    """key as `git config --list` prints it: the section and the name in lower case, and the
+    subsection (the middle of a three-part key, e.g. a branch's name) as written."""
+    section, _, rest = key.partition(".")
+    subsection, _, name = rest.rpartition(".")
+    return f"{section.lower()}.{subsection}.{name.lower()}" if subsection else f"{section.lower()}.{name.lower()}"
 
 
 def changes_refs(args: tuple[str, ...]) -> bool:
@@ -336,14 +346,14 @@ class GitClient:
         )
 
     def common_dir(self) -> pathlib.Path:
-        """The absolute path of the git directory every worktree shares: read
-        from the files at the top of a worktree, without git, unless git's
-        variables may name another (see git_client.git_common_dir)."""
+        """The absolute path of the git directory every worktree shares, which git_client
+        asks git for with the other answers of where things are (see git_client.git_common_dir)."""
         if self._common_dir is None:
-            found = None if GIT_DIR_VARIABLES & os.environ.keys() else git_common_dir(self.directory)
-            self._common_dir = found or pathlib.Path(
-                self.run("rev-parse", "--path-format=absolute", "--git-common-dir")
-            )
+            with git_errors():
+                # Asked with the paths a command is about to ask for (see operation_in_progress), so one
+                # rev-parse says all of it.
+                git_paths(self._git, *OPERATION_PATHS)
+                self._common_dir = git_common_dir(self._git)
         return self._common_dir
 
     def branch_config(self, fresh: bool = False) -> dict[tuple[str, str], str]:
@@ -385,7 +395,7 @@ class GitClient:
         (see branch_config), so it's no git call of its own, and read again
         when it is: once .git/config changes."""
         self.branch_config()
-        values = self._config.get(config_key(key))
+        values = self._config.get(canonical_config_key(key))
         return None if values is None else values[-1] or ""
 
     def direct_remote_url(self, remote: str) -> str | None:
@@ -396,8 +406,8 @@ class GitClient:
     def _shared_remote_url(self, remote: str) -> str | None:
         """A single configured URL that both fetch and push resolve the same way."""
         self.branch_config()
-        urls = self._config.get(config_key(f"remote.{remote}.url"), [])
-        if len(urls) != 1 or not urls[0] or config_key(f"remote.{remote}.pushurl") in self._config:
+        urls = self._config.get(canonical_config_key(f"remote.{remote}.url"), [])
+        if len(urls) != 1 or not urls[0] or canonical_config_key(f"remote.{remote}.pushurl") in self._config:
             return None
         url = urls[0]
         return None if self._url_is_rewritten(url, "pushinsteadof") else url
@@ -554,9 +564,8 @@ class GitClient:
         changing anything (e.g. because of an untracked file in the way) leaves
         only its sequencer state behind, not CHERRY_PICK_HEAD.
         """
-        names = ("rebase-merge", "rebase-apply", "CHERRY_PICK_HEAD", "REVERT_HEAD", "sequencer", "MERGE_HEAD")
         with git_errors():
-            return any(path.exists() for path in git_paths(self._git, *names))
+            return any(path.exists() for path in git_paths(self._git, *OPERATION_PATHS))
 
     def has_conflicts(self) -> bool:
         """Whether the index has unmerged paths, i.e. a merge stopped on a
@@ -656,7 +665,7 @@ class GitClient:
             upstream = refs.get(expected)
             # rev-parse dereferences symbolic refs and fails if the upstream is missing.
             # A fetch-refspec edit can change the mapping without moving any refs.
-            fetch_key = config_key(f"remote.{remote}.fetch")
+            fetch_key = canonical_config_key(f"remote.{remote}.fetch")
             if (
                 local is not None
                 and local.upstream == expected
@@ -768,7 +777,7 @@ class GitClient:
     def _configured_remote_urls(self, remote: str, setting: str) -> list[str]:
         """Configured URLs after the last empty value clears the list."""
         urls: list[str] = []
-        for url in self._config.get(config_key(f"remote.{remote}.{setting}"), []):
+        for url in self._config.get(canonical_config_key(f"remote.{remote}.{setting}"), []):
             if url:
                 urls.append(url)
             else:

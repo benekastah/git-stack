@@ -172,7 +172,7 @@ def test_a_with_block_counts_the_git_processes_of_a_git_stack_process(repo: Repo
     with expect_operations(git=3) as operations:
         repo.stack_process("parent")
 
-    assert [subcommand(command)[0] for command in operations.git] == ["config", "rev-parse", "for-each-ref"]
+    assert [subcommand(command)[0] for command in operations.git] == ["rev-parse", "config", "for-each-ref"]
     assert all(command[0] == "-C" for command in operations.git)
 
 
@@ -193,7 +193,7 @@ def test_a_git_stack_process_runs_the_same_git_processes_as_one_in_this_process(
 def test_a_with_block_counts_the_gh_commands_of_a_git_stack_process(repo: Repo, gh: FakeGitHub) -> None:
     repo.make_stack()
 
-    with expect_operations(git=20, gh=8) as operations:
+    with expect_operations(git=25, gh=8) as operations:
         repo.stack_process("push", "--prs")
 
     assert [command[:2] for command in operations.gh].count(["pr", "create"]) == 3
@@ -204,7 +204,7 @@ def test_only_what_git_stack_starts_is_counted_not_what_git_starts_for_it(repo: 
     repo.git("switch", "--quiet", "pr1")
     repo.commit("a", "pr1 third\n", "pr1 c3")
 
-    with expect_operations(git=34) as operations:
+    with expect_operations(git=39) as operations:
         repo.stack_process("restack")
 
     # Each branch is rebased by a `git rebase`, which runs `git notes copy` itself.

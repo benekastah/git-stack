@@ -127,7 +127,7 @@ class GitAdapter:
             for patches in git.commit_patch_ids(
                 # Only the parent's commits that touch the same files can match.
                 ("log", "-p", "--no-merges", "--full-diff", parent_tip, "--not", f"refs/heads/{branch}", "--", *files),
-                ("diff", base, f"refs/heads/{branch}"),
+                ("diff-tree", "-p", base, f"refs/heads/{branch}"),
                 ("log", "-p", "--no-merges", f"{base}..refs/heads/{branch}"),
             )
         )
@@ -194,7 +194,7 @@ class GitAdapter:
         own_done, own_undone, *landing_patches, since = git.commit_patch_ids(
             ("log", "-p", "--no-merges", *diff, own),
             ("log", "-p", "--no-merges", "-R", *diff, own),
-            *(("diff", *reverse, *diff, old, new) for old, new in landings for reverse in ((), ("-R",))),
+            *(("diff-tree", "-p", *reverse, *diff, old, new) for old, new in landings for reverse in ((), ("-R",))),
             # The parent's commits since, which may do or undo those changes.
             ("log", "-p", "--no-merges", "--full-diff", *diff, parent_tip, "--not", tip, "--", *files),
         )

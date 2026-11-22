@@ -153,7 +153,7 @@ def test_snapshot_asks_its_cat_file_for_a_branch_it_doesnt_have(repo: Repo, git_
             git.tip("nope")
 
     # The config, for the upstreams the snapshot lists, then the refs.
-    assert [call[0] for call in git_calls] == ["config", "for-each-ref", "cat-file"]
+    assert [call[0] for call in git_calls] == ["rev-parse", "config", "for-each-ref", "cat-file"]
 
 
 def test_snapshot_reads_refs_again_after_git_changes_them(repo: Repo) -> None:
@@ -180,9 +180,8 @@ def test_snapshot_outlives_stack_metadata_writes_but_not_upstream_changes(repo: 
         assert git.rev("new@{upstream}") is None
         git.config_set("new", "stackParent", "main")
         assert git.rev("new@{upstream}") is None
-        # The refs were read once, and the write found where the config is (it makes no git process of
-        # its own, and keeps the snapshot).
-        assert [call[0] for call in git_calls] == ["for-each-ref", "rev-parse"]
+        # The refs were read once, and the write (a `git config`) kept the snapshot.
+        assert [call[0] for call in git_calls] == ["for-each-ref", "config"]
 
         git.config_set("new", "remote", "origin")
         git.config_set("new", "merge", "refs/heads/main")
@@ -314,7 +313,8 @@ def test_snapshot_can_validate_a_branch_upstream(repo: Repo, git_calls: list[Git
     git = GitClient(repo.path)
     with git.snapshot():
         assert git.has_branch_upstream("main", "origin")
-    assert [call[0] for call in git_calls] == ["config", "for-each-ref"]
+    # The rev-parse says where the config is.
+    assert [call[0] for call in git_calls] == ["rev-parse", "config", "for-each-ref"]
 
 
 def test_snapshot_does_not_validate_an_upstream_after_the_fetch_refspec_changes(repo: Repo) -> None:
@@ -775,11 +775,13 @@ def test_git_runs_in_the_users_locale_with_its_messages_in_english(
     assert by_command["status"]["GIT_TEXTDOMAINDIR"] is None
 
 
-def test_common_dir_at_the_top_of_a_worktree_starts_no_git(repo: Repo, git_calls: list[GitCall]) -> None:
+def test_common_dir_of_a_worktree_is_asked_of_git_once(repo: Repo, git_calls: list[GitCall]) -> None:
     repo.git("worktree", "add", "--quiet", "-b", "elsewhere", str(repo.tmp / "elsewhere"))
+    git = GitClient(repo.tmp / "elsewhere")
 
-    assert same_file(GitClient(repo.tmp / "elsewhere").common_dir(), repo.path / ".git")
-    assert git_calls == []
+    assert same_file(git.common_dir(), repo.path / ".git")
+    assert same_file(git.common_dir(), repo.path / ".git")
+    assert [call[0] for call in git_calls] == ["rev-parse"]
 
 
 def test_common_dir_from_a_subdirectory_asks_git(repo: Repo) -> None:

@@ -313,9 +313,11 @@ def timed_commands(report: str) -> list[list[str]]:
 
 def assert_git_processes_recorded(report: str, git_calls: list[GitCall]) -> None:
     calls = [call[1:] for call in timed_commands(report) if call[0] == "git" and call[1] != "cat-file"]
-    # The initial config read decides whether to start the recorder.
-    assert git_calls[0][:2] == ["config", "--list"]
-    assert sorted(calls) == sorted(call for call in git_calls[1:] if call[0] != "cat-file")
+    # The initial config read decides whether to start the recorder, after the rev-parse that says
+    # where the config is.
+    assert git_calls[0][0] == "rev-parse"
+    assert git_calls[1][:2] == ["config", "--list"]
+    assert sorted(calls) == sorted(call for call in git_calls[2:] if call[0] != "cat-file")
 
 
 @pytest.mark.usefixtures("performance_enabled")
