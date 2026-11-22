@@ -4,6 +4,22 @@ What's wrong with what's built: bugs, and gaps against the rules in `AGENTS.md` 
 `PROJECT_AGENTS.md`, most severe first. New work is in [roadmap.md](roadmap.md). When a change
 fixes one, remove it in the same change; when a change leaves something wrong, add it.
 
+## A newer system pandoc fails the pre-push hook
+
+`dev.py man --check` (run by `dev.py static`, so by the pre-push hook) fails with
+"man: man/git-stack.1 is out of date with README.md" when the committed page is right. It makes
+the page with pypandoc, which uses the highest-versioned pandoc it finds: one on PATH (or
+`PYPANDOC_PANDOC`, which overrides the search) before the one `pypandoc_binary` bundles.
+Here the system pandoc is 3.11 and the pinned binary bundles 3.9, so the page comes out
+different.
+
+Workaround, never skipping the hook: set `PYPANDOC_PANDOC` to the bundled binary, as in
+`PYPANDOC_PANDOC=<repo>/.venv/lib/python3.15/site-packages/pypandoc/files/pandoc git push`.
+
+The fix belongs in python-template's `dev.py` (python-template has no issues file), not in
+each project: make `man` point pypandoc at its own bundled pandoc, or fail naming both
+versions, so a newer system pandoc can't change the page.
+
 ## A change undone some other way can look like a revert
 
 Revert detection compares patch-ids without context lines, so a revert still
