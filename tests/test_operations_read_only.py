@@ -24,27 +24,25 @@ def below_the_last(chain: list[str]) -> str:
 # `chain` makes the stack before the decorator starts counting. The same count at 1, 3 and 10
 # branches is the point: nothing here depends on the stack's length.
 #
-# Each of these reads the config, checks for a stopped rebase, cherry-pick, revert or merge, and
-# reads the refs.
-@expect_operations(git=3)
+# Each of these starts Git to read config and refs. Stopped worktree operations and
+# the ancestry check for base are handled in-process.
+@expect_operations(git=2)
 def test_parent_runs_the_same_for_any_stack_size(repo: Repo, chain: list[str]) -> None:
     assert repo.stack_process("parent").stdout == f"{below_the_last(chain)}\n"
 
 
-@expect_operations(git=3)
+@expect_operations(git=2)
 def test_show_stack_runs_the_same_for_any_stack_size(repo: Repo, chain: list[str]) -> None:
     assert repo.stack_process("show-stack").stdout == "".join(f"{branch}\n" for branch in chain)
 
 
-# ...and base also asks git for the commit and checks that it's in the branch's history: the
-# batch `cat-file` (which counts once however much it's asked) and a `merge-base --is-ancestor`.
-@expect_operations(git=5)
+@expect_operations(git=2)
 def test_base_runs_the_same_for_any_stack_size(repo: Repo, chain: list[str]) -> None:
     assert repo.stack_process("base").stdout.strip() == repo.git("rev-parse", below_the_last(chain))
 
 
 # ...and prev and next also `git switch` to the branch.
-@expect_operations(git=4)
+@expect_operations(git=3)
 def test_prev_runs_the_same_for_any_stack_size(repo: Repo, chain: list[str]) -> None:
     repo.stack_process("prev")
 
@@ -55,19 +53,18 @@ def test_next_runs_the_same_for_any_stack_size(repo: Repo, chain: list[str]) -> 
     # The chain's last branch is checked out and has no next one: step back first, outside the block.
     repo.stack_process("prev")
 
-    with expect_operations(git=4):
+    with expect_operations(git=3):
         repo.stack_process("next")
 
     assert repo.git("branch", "--show-current") == chain[-1]
 
 
 def test_the_first_info_checks_each_branch_for_having_landed_in_its_parent(repo: Repo, chain: list[str]) -> None:
-    # The config, a check for a stopped operation, the refs, a long-lived `cat-file`, and the
-    # colors, and one `merge-tree` for each branch: merging it into its parent, to see whether
+    # Config, refs, color, and one `merge-tree` for each branch: merging it into its parent, to see whether
     # that changes nothing, which is how a branch whose changes landed (a merged one) is found.
     # That is the one count here that grows with the stack. Each test has a repository of its own,
     # with no cache of those checks on disk yet, so this first `info` always has them all to do.
-    with expect_operations(git=5 + len(chain)):
+    with expect_operations(git=3 + len(chain)):
         result = repo.stack_process("info", "--offline")
 
     assert all(mentions(result.stdout, branch) for branch in chain)
@@ -75,7 +72,7 @@ def test_the_first_info_checks_each_branch_for_having_landed_in_its_parent(repo:
 
 @pytest.mark.parametrize(
     ("args", "git"),
-    [(["info", "--offline"], 4), (["info", "--all", "--offline"], 4), (["info", "--offline", "--json"], 3)],
+    [(["info", "--offline"], 3), (["info", "--all", "--offline"], 3), (["info", "--offline", "--json"], 2)],
     ids=["info", "info-all", "info-json"],
 )
 def test_info_runs_the_same_for_any_stack_size_once_its_branches_are_checked(

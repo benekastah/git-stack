@@ -6,8 +6,8 @@
     with expect_operations(git=3, gh=1):        # or one block of it, e.g. per size in a loop
         client.info()
 
-It counts the git processes git-stack starts (each launch of the batch `git cat-file`
-once, as the `git_calls` fixture does; not the tests' own `Repo.git`), and the gh commands
+It counts the git processes git-stack starts (excluding the tests' own `Repo.git`),
+and the gh commands
 it runs (against tests/fake_gh.py), in this process, or in a git-stack process the test
 starts with `Repo.stack_process`: that one is counted from outside, with git's own trace of
 the processes it starts (TRACE_VARIABLE, keeping those git-stack starts, not the ones git
@@ -37,8 +37,8 @@ from types import TracebackType
 from typing import Any, Self
 
 import pytest
-from git_client import Arg, ReadOnlyGit
 
+from git_stack.git_command import GitCommand
 from tests import fake_gh
 
 TRACE_VARIABLE = "GIT_TRACE2_EVENT"
@@ -102,33 +102,21 @@ def install(monkeypatch: pytest.MonkeyPatch) -> None:
     It wraps the places every command goes through, the ones the `git_calls` fixture wraps
     too, rather than use that fixture: a decorator can't ask for a fixture without changing
     the test's signature, and a `with` block inside a test has no way to reach one."""
-    # Every git process git-stack starts is one of these two (`Git` inherits them from
-    # ReadOnlyGit): `process` runs it to the end, `popen` leaves it running, as for the batch
-    # `cat-file`, which counts once however many requests it answers.
-    process, popen = ReadOnlyGit.process, ReadOnlyGit.popen
-    # With the `gh` fixture, the GitHub adapter's `subprocess` is replaced by InProcessGh, which
-    # answers each gh command by calling this.
+    process = GitCommand.process
     gh_run = fake_gh.run
 
-    def recording_process(self: ReadOnlyGit, *args: Arg, **kwargs: Any) -> Any:
-        command = ["-C", self.directory, *(os.fsdecode(arg) for arg in args)]
+    def recording_process(self: GitCommand, *args: str, **kwargs: Any) -> Any:
+        command = ["-C", self.directory, *args]
         for ran in _running():
             ran.git.append(command)
         return process(self, *args, **kwargs)
-
-    def recording_popen(self: ReadOnlyGit, *args: Arg, **kwargs: Any) -> Any:
-        command = ["-C", self.directory, *(os.fsdecode(arg) for arg in args)]
-        for ran in _running():
-            ran.git.append(command)
-        return popen(self, *args, **kwargs)
 
     def recording_gh(args: list[str], *rest: Any, **kwargs: Any) -> Any:
         for ran in _running():
             ran.gh.append(list(args))
         return gh_run(args, *rest, **kwargs)
 
-    monkeypatch.setattr(ReadOnlyGit, "process", recording_process)
-    monkeypatch.setattr(ReadOnlyGit, "popen", recording_popen)
+    monkeypatch.setattr(GitCommand, "process", recording_process)
     monkeypatch.setattr(fake_gh, "run", recording_gh)
 
 

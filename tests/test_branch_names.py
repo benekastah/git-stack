@@ -2,16 +2,15 @@
 have too: git takes a bare name for a tag before a branch, warning that it's
 ambiguous. Each test tags every branch name, then fails on that warning."""
 
-import os
 import pathlib
 import subprocess
 from collections.abc import Iterator
 from typing import Any
 
 import pytest
-from git_client import Arg, CatFile, Git, decode
 
 from git_stack.core import Delete
+from git_stack.git_command import GitCommand, decode
 from git_stack.stack import BranchStatus, StackClient
 from tests.helpers import FakeGitHub, Repo
 
@@ -22,29 +21,17 @@ def no_ambiguous_names(monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFix
     ambiguous, in the output it captures or in what it lets through to the
     terminal (e.g. a rebase's)."""
     warnings: list[str] = []
-    process = Git.process
+    process = GitCommand.process
 
-    def checked(self: Git, *args: Arg, **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
+    def checked(self: GitCommand, *args: str, **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
         result = process(self, *args, **kwargs)
         # What it captured, and what it let through to the terminal, e.g. a rebase's.
         text = decode(result.stderr or b"") + capfd.readouterr().err
-        command = " ".join(map(os.fsdecode, args))
+        command = " ".join(args)
         warnings.extend(f"{line} (git {command})" for line in text.splitlines() if "is ambiguous" in line)
         return result
 
-    def asked_of_rev_parse(method: Any) -> Any:
-        def ask(self: CatFile, name: str, *args: Any, **kwargs: Any) -> Any:
-            # cat-file keeps its warnings to itself, so ask rev-parse too, which says them.
-            assert isinstance(self.git, Git)
-            checked(self.git, "rev-parse", "--verify", "--quiet", name)
-            return method(self, name, *args, **kwargs)
-
-        return ask
-
-    # Every git process GitClient starts, and every name it asks its cat-file.
-    monkeypatch.setattr(Git, "process", checked)
-    monkeypatch.setattr(CatFile, "resolve", asked_of_rev_parse(CatFile.resolve))
-    monkeypatch.setattr(CatFile, "verify", asked_of_rev_parse(CatFile.verify))
+    monkeypatch.setattr(GitCommand, "process", checked)
     yield
     assert warnings == []
 

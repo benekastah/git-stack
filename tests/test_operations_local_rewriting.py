@@ -15,24 +15,24 @@ pytestmark = pytest.mark.usefixtures("separate_processes")
 # size and with the formula that fits all three. A formula is how the count grows, so a change
 # to it, not just to the number, shows up in review.
 #
-# Restacking replays each branch above the one that changed, and each replay costs 12 (16 + 12 *
+# Restacking replays each branch above the one that changed, and each replay costs 10 (12 + 10 *
 # (branches - 1), measured at 3 and 10). A stack of 1 has nothing above it to replay, so it's only
-# the check of whether it needs it, the same as an up to date stack's (8).
-RESTACK_BEHIND = {1: 8, 3: 40, 10: 124}
-# Even an up to date stack is checked a branch at a time: 6 + 2 * branches.
-RESTACK_UP_TO_DATE = {1: 8, 3: 12, 10: 26}
-# Nothing to pull: 11 + branches.
-PULL_NOTHING = {1: 12, 3: 14, 10: 21}
-# Nothing merged, and nothing pushed: 10 + branches.
-CLEAN_NOTHING = {1: 11, 3: 13, 10: 20}
+# the check of whether it needs it, the same as an up to date stack's (5).
+RESTACK_BEHIND = {1: 5, 3: 32, 10: 102}
+# Even an up to date stack is checked a branch at a time: 4 + branches.
+RESTACK_UP_TO_DATE = {1: 5, 3: 7, 10: 14}
+# Nothing to pull: 9 calls across all three sizes.
+PULL_NOTHING = {1: 9, 3: 9, 10: 9}
+# Nothing merged, and nothing pushed: 8 + branches.
+CLEAN_NOTHING = {1: 9, 3: 11, 10: 18}
 # Renaming moves what's recorded for the branch, and rewrites the parent (recorded by name) of the
 # branch stacked directly on it, but not that of the ones above that: so it grows from 1 branch to 2,
 # not after.
-RENAME_BOTTOM = {1: 9, 3: 10, 10: 10}
-RENAME_TOP = {1: 9, 3: 9, 10: 9}
-UNTRACK_TOP = {1: 6, 3: 6, 10: 6}
-# Untracking every branch: 3 + 3 * branches.
-UNTRACK_ALL = {1: 6, 3: 12, 10: 33}
+RENAME_BOTTOM = {1: 7, 3: 8, 10: 8}
+RENAME_TOP = {1: 7, 3: 7, 10: 7}
+UNTRACK_TOP = {1: 5, 3: 5, 10: 5}
+# Untracking every branch: 2 + 3 * branches.
+UNTRACK_ALL = {1: 5, 3: 11, 10: 32}
 
 
 def commit_to_bottom(repo: Repo) -> None:

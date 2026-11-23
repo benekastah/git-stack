@@ -248,8 +248,7 @@ Use a regular file dedicated to performance reports.
 .PP
 The timeline lists calls in start order with their start offsets and
 elapsed times.
-Batch \f[CR]git cat\-file\f[R] requests and shutdown are timed
-separately, excluding idle time between requests.
+In\-process Git reads are included in the remaining wall time.
 Inline GraphQL query bodies are abbreviated.
 Reports show total wall time, time in Git and \f[CR]gh\f[R], time spent
 elsewhere, and any overlap between the two tools.

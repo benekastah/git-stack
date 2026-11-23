@@ -312,10 +312,10 @@ def timed_commands(report: str) -> list[list[str]]:
 
 
 def assert_git_processes_recorded(report: str, git_calls: list[GitCall]) -> None:
-    calls = [call[1:] for call in timed_commands(report) if call[0] == "git" and call[1] != "cat-file"]
+    calls = [call[1:] for call in timed_commands(report) if call[0] == "git"]
     # The initial config read decides whether to start the recorder.
     assert git_calls[0][:2] == ["config", "--list"]
-    assert sorted(calls) == sorted(call for call in git_calls[1:] if call[0] != "cat-file")
+    assert sorted(calls) == sorted(git_calls[1:])
 
 
 @pytest.mark.usefixtures("performance_enabled")
@@ -336,8 +336,6 @@ def test_info_records_workers_and_keeps_json_parseable(
     assert report.count("Performance timeline") == 1
     assert_git_processes_recorded(report, git_calls)
     calls = timed_commands(report)
-    assert ["git", "cat-file", "--batch-command", "request"] in calls
-    assert ["git", "cat-file", "--batch-command", "shutdown"] in calls
     assert any(call[:3] == ["gh", "api", "graphql"] for call in calls)
     assert any(call[:2] == ["git", "merge-tree"] for call in calls)
     assert "query=<omitted>" in report
@@ -400,21 +398,9 @@ def test_failed_git_call_keeps_the_command_error(repo: Repo, performance_log: pa
     assert any(call[:2] == ["git", "push"] for call in timed_commands(report))
 
 
-def test_batch_clock_excludes_idle_time(repo: Repo) -> None:
-    now = 0.0
-    timeline = Timeline(clock=lambda: now)
+def test_native_reads_add_no_subprocess_timing(repo: Repo) -> None:
+    timeline = Timeline()
     git = GitClient(repo.path)
     with timeline.activate(), git.snapshot():
-        now = 1.0
         assert git.rev("HEAD")
-        now = 8.0
-        assert git.rev("HEAD")
-        now = 9.0
-    now = 10.0
-
-    assert [line.split()[0] for line in timeline.render().splitlines() if line.startswith("  +")] == [
-        "+1.000s",
-        "+8.000s",
-        "+9.000s",
-    ]
-    assert "Git          0.000s (0.0%)" in timeline.render()
+    assert timed_commands(timeline.render()) == []

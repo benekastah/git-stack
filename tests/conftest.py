@@ -1,16 +1,19 @@
 import os
 import pathlib
+import subprocess
+from typing import Any
 
 import pytest
 
 # Before anything imports it, so pytest rewrites its asserts, as a plugin's.
 pytest.register_assert_rewrite("git_client.testing")
 
-from git_client.testing import RepoTemplates, real_git
+from git_client.testing import GitCall, RepoTemplates, real_git
 
 from git_stack import events
 from git_stack.adapters import github
 from git_stack.git import GIT_VARIABLE
+from git_stack.git_command import GitCommand
 from git_stack.stack import StackClient
 from tests import operations
 from tests.helpers import FakeGitHub, InProcessGh, Repo, install_command
@@ -40,7 +43,7 @@ def pytest_xdist_auto_num_workers(config: pytest.Config) -> int | None:
 
 # git itself, rather than a wrapper (such as git-ai) or shim on PATH, which can
 # make each of the tests' many git processes several times slower. git-stack,
-# which reads $GIT_STACK_GIT once (see git_client.find_git), runs it too.
+# which reads $GIT_STACK_GIT, runs it too.
 os.environ[GIT_VARIABLE] = real_git()
 GIT_EXEC_PATH = pathlib.Path(real_git()).parent
 
@@ -104,7 +107,7 @@ def separate_processes(monkeypatch: pytest.MonkeyPatch) -> None:
     """For performance tests: git stack runs only as a process of its own (`Repo.stack_process`),
     as a user runs it, so nothing Python caches in this process between runs skews a count."""
 
-    def refuse(self: Repo, *args: str, **kwargs: object) -> None:
+    def refuse(self: Repo, *args: str, **kwargs: Any) -> None:
         pytest.fail(
             "a performance test runs git stack with stack_process: in this process, Python caches what it learns"
         )
@@ -116,6 +119,19 @@ def separate_processes(monkeypatch: pytest.MonkeyPatch) -> None:
 def count_operations(monkeypatch: pytest.MonkeyPatch) -> None:
     """Record the git processes and gh commands a test runs, for tests.operations.expect_operations."""
     operations.install(monkeypatch)
+
+
+@pytest.fixture
+def git_calls(monkeypatch: pytest.MonkeyPatch) -> list[GitCall]:
+    calls: list[GitCall] = []
+    process = GitCommand.process
+
+    def recording(self: GitCommand, *args: str, **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
+        calls.append(GitCall(args, self.program))
+        return process(self, *args, **kwargs)
+
+    monkeypatch.setattr(GitCommand, "process", recording)
+    return calls
 
 
 @pytest.fixture

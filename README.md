@@ -143,9 +143,8 @@ Git's integer suffixes, such as `1k`. Relative paths use the command directory
 selected by `-C`. Use a regular file dedicated to performance reports.
 
 The timeline lists calls in start order with their start offsets and elapsed
-times. Batch `git cat-file` requests and shutdown are timed separately,
-excluding idle time between requests. Inline GraphQL query bodies are
-abbreviated. Reports show total wall time, time in Git and `gh`, time spent
+times. In-process Git reads are included in the remaining wall time.
+Inline GraphQL query bodies are abbreviated. Reports show total wall time, time in Git and `gh`, time spent
 elsewhere, and any overlap between the two tools.
 
 ### Groups
@@ -1718,9 +1717,9 @@ if you change the dependencies in `pyproject.toml`, it updates `uv.lock` too;
 commit both. CI installs from `uv.lock` and fails if it's out of date.
 Dependabot proposes new versions weekly. Arguments are passed to pytest, so
 `python3 dev.py check -k sync` runs only the tests whose names contain `sync`.
-git-stack's only runtime dependency is
-[py-git-client](https://github.com/benekastah/py-git-client), which has none of
-its own.
+git-stack uses [pygit2](https://www.pygit2.org/) for local object and
+ancestry queries. It uses the installed Git for repository changes, network
+operations, and reads that depend on Git's configuration or revision syntax.
 
 The tests run in parallel, with one worker per CPU (pytest-xdist's
 `--numprocesses auto`; in CI, 8). Set `PYTEST_XDIST_AUTO_NUM_WORKERS` to use another

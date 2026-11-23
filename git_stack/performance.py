@@ -4,16 +4,13 @@ import os
 import pathlib
 import shlex
 import stat
-import subprocess
-from collections.abc import Callable, Generator, Iterable, Mapping
+from collections.abc import Callable, Generator, Iterable
 from contextlib import AbstractContextManager, contextmanager, nullcontext
 from contextvars import ContextVar
 from dataclasses import dataclass
 from threading import Lock
 from time import monotonic
-from typing import IO, TYPE_CHECKING, BinaryIO, Literal, override
-
-from git_client import CLIENT_TIMEOUT, Arg, CatFile, EnvValue, Git, Timeout
+from typing import TYPE_CHECKING, BinaryIO, Literal
 
 from git_stack.errors import StackError
 from git_stack.file_lock import file_lock
@@ -236,44 +233,6 @@ def measure_gh(args: tuple[str, ...]) -> AbstractContextManager[None]:
     return timeline.record("gh", *args) if timeline is not None else nullcontext()
 
 
-class TimedGit(Git):
-    """Capture every ordinary py-git-client process, including its batched helpers."""
-
-    @override
-    def process(
-        self,
-        *args: Arg,
-        capture_output: bool = False,
-        input: bytes | None = None,
-        stdout: int | IO[bytes] | IO[str] | None = None,
-        env: Mapping[str, EnvValue] | None = None,
-        timeout: Timeout = CLIENT_TIMEOUT,
-    ) -> subprocess.CompletedProcess[bytes]:
-        timeline = active_timeline.get()
-        with timeline.record("git", *map(os.fsdecode, args)) if timeline is not None else nullcontext():
-            return super().process(
-                *args, capture_output=capture_output, input=input, stdout=stdout, env=env, timeout=timeout
-            )
-
-
-class TimedCatFile(CatFile):
-    """Measure each batch exchange and process shutdown with the batch lock already held."""
-
-    # These hooks in the pinned py-git-client cover the full exchange for the
-    # info/verify requests GitClient uses, including lazy startup and retries.
-    @override
-    def _request(self, command: bytes, name: str) -> tuple[bytes, str]:
-        timeline = active_timeline.get()
-        if timeline is None:
-            return super()._request(command, name)
-        with timeline.record("git", "cat-file", "--batch-command", "request"):
-            return super()._request(command, name)
-
-    @override
-    def _stop(self) -> None:
-        timeline = active_timeline.get()
-        if timeline is None or self._process is None:
-            super()._stop()
-        else:
-            with timeline.record("git", "cat-file", "--batch-command", "shutdown"):
-                super()._stop()
+def measure_git(args: tuple[str, ...]) -> AbstractContextManager[None]:
+    timeline = active_timeline.get()
+    return timeline.record("git", *args) if timeline is not None else nullcontext()
