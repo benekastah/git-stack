@@ -50,12 +50,9 @@ stacks that still need to sync.
 ## The scripting commands run more than the README says, and can write config
 
 The README says `parent`, `base` and `show-stack` "only read git config, so they're fast, and
-they're safe to run while another git-stack command is running". They start 3 git processes
-(`config --list`, a check for a stopped rebase, cherry-pick, revert or merge, and a `for-each-ref`),
-and `base`
-5 (also the batch `cat-file` and a `merge-base --is-ancestor`), however long the stack is
-(`tests/test_operations_read_only.py` allots them). A shell prompt or editor running one on every
-keystroke pays for them.
+they're safe to run while another git-stack command is running". Each starts two Git
+processes on a typical repository (`config --list` and `for-each-ref`), however long the
+stack is. A shell prompt or editor running one on every keystroke pays for them.
 
 Each also begins with `settled_stacks`, which records a restack or a pull the user finished by hand, so
 one of them can write branch config, without the lock that the commands that change metadata
@@ -67,23 +64,18 @@ rebase.
 
 ## Commands start processes for every branch, many of them one at a time
 
-`tests/test_operations_local_rewriting.py` allots what each may cost at 1, 3 and 10 branches, and
-several grow with the stack even when there's no work: `restack` of an up to date stack starts
-6 + 2 * branches git processes (26 for 10 branches), `pull` with nothing to pull 11 + branches,
-and `clean` with nothing merged 10 + branches. `untrack`ing a whole stack, 3 + 3 * branches, has
-work for each branch (removing its config), done one `git config` process at a time.
-Restacking replays a branch for 12 processes each (the rebase, and the checks around it). In a
-repository with thousands of branches and a stack of a dozen, these are the ones to batch (one
-`for-each-ref` or `config` read in place of one per branch), which the tests would then show.
+The operation tests exercise stacks of 1, 3 and 10 branches. On the largest,
+an up-to-date `restack` starts 14 Git processes, `untrack` starts 32, and replaying
+the branches above a change takes 102. The replay and metadata writes still run
+one branch at a time.
 
 ## Syncing, importing and opening pull requests start many processes for a long stack
 
-`tests/test_operations_github.py` allots them at 1, 3 and 10 branches. Pushing a stack that was
-never pushed starts 12, 18 and 39 git processes; `push --prs` 14, 25 and 60 git and 2, 8 and 15
-`gh` (more than one `gh` call for each of 10 pull requests); `sync` after the bottom pull request
-merged 35, 75 and 208 git and up to 6 `gh`; and `import` 19, 36 and 92 git for 1, 3 and 10 pull
-requests (its `gh` stays at 2). On a stack of a dozen, `sync` is over 200 processes, of which the
-restacks are most (see the issue above). `info` and a `sync` with nothing to do keep `gh` at 1.
+On a 10-branch stack, opening PRs takes 48 Git processes and 15 `gh` calls.
+Syncing after the bottom PR merges takes 185 Git processes and up to six
+`gh` calls. Importing 10 PRs takes 90 Git processes and two `gh` calls.
+With no work to do, `sync` takes nine Git processes and one `gh` call at
+all three tested stack sizes.
 
 ## `sync` and `push` run different processes on Windows than on Linux and macOS
 

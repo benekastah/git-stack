@@ -9,11 +9,12 @@ from collections.abc import Generator, Mapping, Sequence
 from contextlib import contextmanager
 from typing import TextIO
 
-import git_client
-from git_client import GitError, Ref, config_key, git_common_dir, git_paths
+import pygit2
 
+from git_stack import git_read
 from git_stack.errors import StackError
-from git_stack.performance import TimedCatFile, TimedGit
+from git_stack.git_command import GitCommand, GitError, decode
+from git_stack.git_read import Ref, config_key
 
 DEFAULT_REMOTE = "origin"
 # How long to keep retrying a git config write that finds the config file locked
@@ -53,9 +54,6 @@ SWITCH = ("-c", "core.warnAmbiguousRefs=false", "switch", "--quiet")
 MAX_UPSTREAM_PATTERNS_LENGTH = 16384
 # The environment variable that names the git to run, if not the one on PATH.
 GIT_VARIABLE = "GIT_STACK_GIT"
-# git's variables that can make the git directory another than the one at the
-# top of the worktree, which git_common_dir doesn't read.
-GIT_DIR_VARIABLES = frozenset({"GIT_DIR", "GIT_COMMON_DIR"})
 # Characters a branch name can't have, but a revision (e.g. main~1) can.
 REVISION_SYNTAX = frozenset("~^:?*[\\ ")
 
@@ -136,27 +134,32 @@ def git_errors() -> Generator[None]:
         raise StackError(str(e)) from e
 
 
+class _NativeReads(threading.local):
+    # Each worker owns its libgit2 repository handle, including its caches.
+    repository: pygit2.Repository | None = None
+    graph_usable: bool | None = None
+
+
 class GitClient:
     """Runs git in directory, as `git -C <directory>` does: $GIT_STACK_GIT if
-    set, otherwise the git on PATH (see git_client.find_git), started through
-    py-git-client's Git. A StackError if there's no such git."""
+    set, otherwise the git on PATH. Local object and graph lookups use pygit2
+    where it can read the graph Git uses."""
 
     def __init__(self, directory: str | os.PathLike[str] = ".") -> None:
         self.directory = pathlib.Path(directory)
         try:
-            self._git = TimedGit(self.directory, env_var=GIT_VARIABLE)
+            self._git = GitCommand(self.directory, env_var=GIT_VARIABLE)
         except (FileNotFoundError, ValueError) as e:
-            # find_git's: no git on PATH, or on Windows, a batch file.
+            # No git on PATH, or on Windows, a batch file.
             raise StackError(str(e)) from e
         self._common_dir: pathlib.Path | None = None
         self._toplevel: pathlib.Path | None = None
         # See _object, is_ancestor and merged_tree: what they've found, for the
-        # commits they were asked about, and the cat-file _object asks within a
-        # snapshot, which starts its process when first asked.
+        # commits they were asked about.
         self._objects: dict[tuple[str, str], str] = {}
         self._ancestry: dict[tuple[str, str], bool] = {}
         self._merged_trees: dict[tuple[str, str], str | None] = {}
-        self._cat_file = TimedCatFile(self._git)
+        self._native = _NativeReads()
         # See branch_config: whether it has read the config file, and the
         # file's stat when it did (None if there was no file).
         self._config_read = False
@@ -199,6 +202,8 @@ class GitClient:
         this hasn't replaced their dict meanwhile (see reflog_tips)."""
         with self._refs_lock:
             self._refs = None
+            self._native = _NativeReads()
+            self._objects = {}
             self._reflogs = {}
             if worktrees:
                 self._worktrees = None
@@ -219,8 +224,7 @@ class GitClient:
             self._ran(args)
 
     def ok(self, *args: str) -> bool:
-        """Run git and report whether it succeeded: any failure is a no (see
-        git_client's succeeds)."""
+        """Run git and report whether it succeeded."""
         try:
             return self._git.succeeds(*args)
         finally:
@@ -283,7 +287,6 @@ class GitClient:
                 self._push_defaults = {}
                 self._refs_config = {}
                 self._ancestry.clear()
-                self._cat_file.close()
 
     def _snapshot_refs(self) -> dict[str, Ref] | None:
         """The refs (see snapshot), reading them if they haven't been, or None
@@ -303,7 +306,7 @@ class GitClient:
                     else ["refs/remotes/"]
                 )
                 with git_errors():
-                    listed = git_client.refs(self._git, "refs/heads/", "refs/replace/", *patterns)
+                    listed = git_read.refs(self._git, "refs/heads/", "refs/replace/", *patterns)
                 head = next((ref.name.removeprefix("refs/heads/") for ref in listed.values() if ref.head), None)
                 self._has_replacements = any(ref.startswith("refs/replace/") for ref in listed)
                 self._refs = listed
@@ -335,14 +338,50 @@ class GitClient:
             }
         )
 
+    def _open_repository(self) -> pygit2.Repository | None:
+        if not self._snapshot_depth:
+            return git_read.open_repository(self.directory)
+        if self._native.repository is None:
+            self._native.repository = git_read.open_repository(self.directory)
+        return self._native.repository
+
+    def _graph_repository(self) -> pygit2.Repository | None:
+        repo = self._open_repository()
+        if repo is None:
+            return None
+        usable = self._native.graph_usable if self._snapshot_depth else None
+        if usable is None:
+            try:
+                common = git_read.common_directory(repo)
+                has_replacements = (
+                    self._has_replacements
+                    if self._refs is not None
+                    else any(ref.startswith("refs/replace/") for ref in repo.listall_references())
+                )
+                config = repo.config
+                usable = (
+                    not repo.is_shallow
+                    and not has_replacements
+                    and not (common / "info" / "grafts").exists()
+                    and "extensions.partialclone" not in config
+                    and not any(
+                        entry.name.endswith(".promisor") for entry in config if entry.name.startswith("remote.")
+                    )
+                )
+            except pygit2.GitError, ValueError, OSError:
+                usable = False
+            if self._snapshot_depth:
+                self._native.graph_usable = usable
+        return repo if usable else None
+
     def common_dir(self) -> pathlib.Path:
-        """The absolute path of the git directory every worktree shares: read
-        from the files at the top of a worktree, without git, unless git's
-        variables may name another (see git_client.git_common_dir)."""
+        """Where all worktrees share Git metadata."""
         if self._common_dir is None:
-            found = None if GIT_DIR_VARIABLES & os.environ.keys() else git_common_dir(self.directory)
-            self._common_dir = found or pathlib.Path(
-                self.run("rev-parse", "--path-format=absolute", "--git-common-dir")
+            repo = self._open_repository()
+            self._common_dir = (
+                git_read.common_directory(repo)
+                if repo is not None
+                else pathlib.Path(self.run("rev-parse", "--path-format=absolute", "--git-common-dir"))
             )
         return self._common_dir
 
@@ -368,7 +407,7 @@ class GitClient:
         if fresh or not self._config_read or stat != self._config_stat:
             branches: dict[tuple[str, str], str] = {}
             with git_errors():
-                entries = git_client.config(self._git)
+                entries = git_read.config(self._git)
             for key, values in entries.items():
                 if key.startswith("branch."):
                     # Branch names can contain dots, but keys can't. The last
@@ -429,7 +468,7 @@ class GitClient:
     def write_config(self, *args: str, check: bool = True) -> None:
         """Run `git config <args>`, trying it again for up to
         CONFIG_LOCK_TIMEOUT seconds while another process has the config file
-        locked (see git_client's Git.write_config).
+        locked.
 
         Writing anything but git-stack's own settings (see core.PARENT_KEY and
         the rest, which all start with "stack") forgets the ref snapshot, since
@@ -468,27 +507,30 @@ class GitClient:
         return self._resolve(f"{ref}^{{commit}}")
 
     def tip(self, branch: str) -> str:
-        """The commit local branch points at. Fails if branch doesn't exist.
-        Within a snapshot that doesn't have it, asked of the snapshot's cat-file."""
-        if (refs := self._snapshot_refs()) is not None and (entry := refs.get(f"refs/heads/{branch}")):
-            return entry.object
-        if self._snapshot_depth:
-            with git_errors():
-                return self._cat_file.verify(f"refs/heads/{branch}")
+        """The commit a local branch points at. Fail if the branch does not exist."""
+        if (tip := self.rev(f"refs/heads/{branch}")) is not None:
+            return tip
         return self.run("rev-parse", "--verify", f"refs/heads/{branch}")
 
     def is_ancestor(self, ancestor: str, descendant: str) -> bool:
-        """Whether ancestor is descendant or one of its ancestors. Within a
-        snapshot, where finding the commits they name costs nothing for a
-        branch, asked once for the same two commits, which don't change."""
-        if not self._snapshot_depth:
+        """Whether the two revisions resolve to commits and one is an ancestor of the other."""
+        if not self._snapshot_depth and self._graph_repository() is None:
             return self.ok("merge-base", "--is-ancestor", ancestor, descendant)
         a, d = self.rev(ancestor), self.rev(descendant)
         if a is None or d is None:
             return False
-        if (a, d) not in self._ancestry:
-            self._ancestry[a, d] = self.ok("merge-base", "--is-ancestor", a, d)
-        return self._ancestry[a, d]
+        if (a, d) in self._ancestry and self._snapshot_depth:
+            return self._ancestry[a, d]
+        repo = self._graph_repository()
+        try:
+            answer = (
+                a == d or repo.descendant_of(d, a) if repo is not None else self.ok("merge-base", "--is-ancestor", a, d)
+            )
+        except pygit2.GitError, ValueError:
+            answer = self.ok("merge-base", "--is-ancestor", a, d)
+        if self._snapshot_depth:
+            self._ancestry[a, d] = answer
+        return answer
 
     def check_ancestry(self, ancestor: str, descendant: str, *, env: Mapping[str, str] | None = None) -> bool:
         """Check ancestry without memoization. Git errors are not a negative answer."""
@@ -501,10 +543,7 @@ class GitClient:
         return self._object(commit, "tree") if commit is not None else None
 
     def _object(self, object_id: str, kind: str) -> str | None:
-        """The kind object (e.g. a commit's tree) that object_id names, as
-        `object_id^{kind}`, or None if there's none. Objects don't change, so
-        each is looked up once; within a snapshot, by a `git cat-file` that
-        runs until it ends, rather than a process each."""
+        """Resolve an object by type, caching results until the next ref change."""
         if (known := self._objects.get((object_id, kind))) is not None:
             return known
         found = self._resolve(f"{object_id}^{{{kind}}}")
@@ -513,13 +552,31 @@ class GitClient:
         return found
 
     def _resolve(self, name: str) -> str | None:
-        """The object name names, or None if it names none: within a snapshot,
-        asked of a `git cat-file` that runs until it ends, rather than a
-        process each."""
-        if not self._snapshot_depth:
-            return self.run("rev-parse", "--verify", "--quiet", name, check=False) or None
-        with git_errors():
-            return self._cat_file.resolve(name)
+        """Resolve simple names in pygit2 and leave Git's revision syntax to Git."""
+        base, _, suffix = name.partition("^{")
+        simple = (
+            is_object_id(base)
+            or base == "HEAD"
+            or (base.startswith(("refs/heads/", "refs/remotes/")) and is_branch_name(base))
+        )
+        if simple and suffix in {"commit}", "tree}"} and (repo := self._graph_repository()) is not None:
+            kind = pygit2.Commit if suffix == "commit}" else pygit2.Tree
+            try:
+                if is_object_id(base):
+                    return str(repo[base].peel(kind).id)
+                try:
+                    reference = repo.lookup_reference(base)
+                except KeyError:
+                    return None
+                return str(reference.peel(kind).id)
+            except KeyError, pygit2.GitError, ValueError, TypeError:
+                # Git can resolve objects that need a lazy fetch from a promisor remote.
+                pass
+        args = ("rev-parse", "--verify", "--quiet", "--end-of-options", name)
+        result = self._git.process(*args, capture_output=True)
+        if self._snapshot_depth and result.returncode not in (0, 1):
+            raise StackError(str(GitError(args, result)))
+        return decode(result.stdout).strip() or None
 
     def author_email(self) -> str | None:
         """The email address git authors commits with, or None if it has none."""
@@ -535,6 +592,17 @@ class GitClient:
         branch that has a commit; an unborn one isn't a ref yet."""
         if self._snapshot_refs() is not None and self._head is not None:
             return self._head
+        repo = self._open_repository()
+        if repo is not None:
+            try:
+                target = repo.lookup_reference("HEAD").target
+                if isinstance(target, pygit2.Oid):
+                    return None
+                # Git resolves chained aliases with its own traversal limit.
+                if target.startswith("refs/heads/") and isinstance(repo.lookup_reference(target).target, pygit2.Oid):
+                    return target.removeprefix("refs/heads/")
+            except KeyError, pygit2.GitError, ValueError:
+                pass
         return self.run("branch", "--show-current") or None
 
     def local_branch_exists(self, name: str) -> bool:
@@ -559,8 +627,12 @@ class GitClient:
         only its sequencer state behind, not CHERRY_PICK_HEAD.
         """
         names = ("rebase-merge", "rebase-apply", "CHERRY_PICK_HEAD", "REVERT_HEAD", "sequencer", "MERGE_HEAD")
+        if (repo := self._open_repository()) is not None:
+            return any((pathlib.Path(repo.path) / name).exists() for name in names)
+        args = [arg for name in names for arg in ("--git-path", name)]
         with git_errors():
-            return any(path.exists() for path in git_paths(self._git, *names))
+            paths = self._git.run_bytes("rev-parse", "--path-format=absolute", *args)
+        return any(pathlib.Path(os.fsdecode(path)).exists() for path in paths.splitlines())
 
     def has_conflicts(self) -> bool:
         """Whether the index has unmerged paths, i.e. a merge stopped on a
@@ -682,7 +754,16 @@ class GitClient:
     def toplevel(self) -> pathlib.Path:
         """The top directory of the worktree directory is in."""
         if self._toplevel is None:
-            self._toplevel = pathlib.Path(self.run("rev-parse", "--show-toplevel"))
+            repo = self._open_repository()
+            if repo is not None and not repo.is_bare:
+                gitdir = pathlib.Path(repo.path)
+                # Git detects inside-git-dir calls and honors worktree-specific core.worktree.
+                if not (gitdir / "config.worktree").exists() and not self.directory.resolve().is_relative_to(
+                    gitdir.resolve()
+                ):
+                    self._toplevel = pathlib.Path(repo.workdir)
+            if self._toplevel is None:
+                self._toplevel = pathlib.Path(self.run("rev-parse", "--show-toplevel"))
         return self._toplevel
 
     def remote_default_branch(self, remote: str, *, known: str | None = None) -> str | None:
@@ -918,12 +999,18 @@ class GitClient:
     def commit_patch_ids(self, *commands: Sequence[str]) -> list[list[tuple[str, str]]]:
         """For each of commands, (patch-id, commit) for each commit that
         `git <command>` prints, in the order it prints them, with one `git
-        patch-id` for them all (see git_client.patch_ids). For a diff, the
+        patch-id` for them all. For a diff, the
         commit is all zeros. Paths after `--` are files as git lists them
         (e.g. `git diff --name-only`): from the top of the worktree, and
         taken literally."""
+        if not commands:
+            return []
+        if self._open_repository() is not None:
+            oid_length = 40
+        else:
+            oid_length = 64 if self.run("rev-parse", "--show-object-format") == "sha256" else 40
         with git_errors():
-            return git_client.patch_ids(self._git, *commands, paths_from_top=True)
+            return git_read.patch_ids(self._git, commands, oid_length)
 
     def identity_counts(self, *args: str) -> Counter[str]:
         """Count commit identities, including repeated author, date and subject."""

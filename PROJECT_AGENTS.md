@@ -27,17 +27,11 @@ lands on `main` so each merged build has a distinct version in performance logs.
   reached over direct HTTPS or verified SSH. SSH verification uses the
   effective OpenSSH configuration for both Git services. Other remotes use
   live HEAD probes for the fetch remote and any separate push destinations.
-- `GitClient` runs git through [py-git-client](https://github.com/benekastah/py-git-client)
-  (`git_client`), which git-stack shares with git-recommit and move-forward:
-  its `Git` starts each process, the quickest way each system allows (and
-  finds git, `$GIT_STACK_GIT` or the one on PATH), in the user's locale but
-  with git's own messages in English, so it can read them; its `CatFile` is the
-  snapshot's long-lived `git cat-file`, and its batched reads (`refs`,
-  `config`, `patch_ids`) and error classes (e.g. `ConfigLockedError`) are
-  git-stack's. What git-stack adds stays in `GitClient`: the snapshot and its
-  caches, `check=False`, and turning a `GitError` into a `StackError` (see
-  `git_errors`), which the command line reports as its own. Change how git is
-  started or read in py-git-client, not here.
+- `GitClient` uses pygit2 for local object and ancestry queries, repository
+  discovery and worktree state. `git_stack/git_command.py` runs the Git CLI
+  for mutations, network operations, and reads that need Git's exact semantics.
+  It honors `$GIT_STACK_GIT`, preserves the user's locale for hooks, and captures
+  Git's diagnostic messages in English where the app parses them.
 - `git_stack/stacks.py` (`Stacks`) holds the tracked branches as trees, with
   the rules for groups and ownership, without touching the repository.
   `StackCore.stacks()` reads it, a command changes it in memory, and
@@ -73,8 +67,9 @@ lands on `main` so each merged build has a distinct version in performance logs.
 - Progress and warnings are events (`git_stack/events.py`), passed to the
   client's `on_event`. `git_stack/output.py` turns them into text, or into JSON
   lines.
-- When `stack.perfLog` is set, `git_stack/performance.py` records one timeline at py-git-client's
-  `Git.process` boundary, in the snapshot's `CatFile`, and at both `gh` launches.
+- When `stack.perfLog` is set, `git_stack/performance.py` records one timeline at
+  `GitCommand.process` and at both `gh` launches. In-process reads are part
+  of the remaining wall time.
   Branch-status workers inherit the same recorder. Keep subprocess input,
   output and environment out of the timeline.
   The CLI writes the command line, version and timeline to `stack.perfLog`,
@@ -86,14 +81,7 @@ lands on `main` so each merged build has a distinct version in performance logs.
   the code compares members rather than strings, and adding a value happens in
   one place. Give it the values the outside world uses, so JSON output, which
   prints an enum as its value, doesn't change.
-- git-stack's only runtime dependency is py-git-client, which has none of its
-  own. Add no other: use the standard library, and add dev dependencies to
-  `pyproject.toml`'s `dev` group. py-git-client isn't on PyPI, so
-  `dependencies` names it by its git URL and a release's full commit, with
-  the release's tag in a comment (`uv add --raw-sources`): pip and pipx read
-  that, unlike uv's `[tool.uv.sources]`, and don't read `uv.lock`, so a tag,
-  which can move, could install code CI never ran. To take a new release,
-  change the commit and the comment, and run `uv lock`.
+- pygit2 is the runtime Git library. Integration fixtures use the installed Git.
 
 - `git_stack/skills/<name>/SKILL.md` are agent skills for people's agents, kept short and pointing at
   `git stack --help` and the README for detail. `tests/test_skills.py` checks that every
@@ -134,7 +122,7 @@ Text meant for people (messages, `info`'s tree) can change.
   result, with a mock `StackClient` (made once, as `create_autospec` is slow,
   and reset for each test); the other tests run git-stack against real
   repositories (see `tests/helpers.py`), copied for each test from ones
-  `repo_templates` builds once. `Repo.stack` runs the command line in
+  `repo_template` builds once per worker. `Repo.stack` runs the command line in
   the test process, which is much quicker than starting one; only
   `tests/test_end_to_end.py` runs it as a separate process (`Repo.stack_process`),
   for what only that checks, like the entry point. A new command or `--json`
@@ -143,17 +131,15 @@ Text meant for people (messages, `info`'s tree) can change.
   fixture's fake GitHub (`tests/fake_gh.py`) answers git-stack's `gh`
   commands in the test's process too (`InProcessGh`), and as a command for
   `Repo.stack_process`.
-- The tests load py-git-client's pytest plugin (`git_client.testing`, in
-  `tests/conftest.py`): each test's git has a config of its own, none of the
-  user's config or git's variables (e.g. a hook's `GIT_DIR`), and runs from a
-  directory outside any repository, so a git run without naming its
-  repository fails rather than reach the clone the tests were started in.
-  Code that names `ROOT` (`dev.py`, `dev_project.py`) still runs there. `git_calls` lists the git processes
-  git-stack starts; the tests' own (`Repo.git`) aren't in it.
+- `tests/conftest.py` isolates Git and libgit2 from the developer's configuration.
+  Each test gets its own global config and runs from a directory outside any
+  repository. `tests.stack_entry` installs that config for libgit2 in child processes.
+  Code that names `ROOT` (`dev.py`, `dev_project.py`) still runs there.
+  `git_calls` records git-stack's subprocesses. Fixture setup uses `Repo.git`.
 - Performance tests declare how many git processes and `gh` commands they may run, with
   `tests/operations.py`'s `expect_operations(git=N, gh=M)`: as a decorator for the whole test
   body, or as a `with` target for a block (e.g. one stack size in a loop). It counts what git-stack
-  starts (the batch `cat-file` once, like `git_calls`) and what it runs against `tests/fake_gh.py`,
+  starts (like `git_calls`) and what it runs against `tests/fake_gh.py`,
   in this process or in a `Repo.stack_process` one, which it counts from outside (git's own
   `GIT_TRACE2_EVENT`, and the calls fake gh keeps), so nothing cached in Python skews it; use that
   for performance tests, with the `separate_processes` fixture, which refuses `Repo.stack` (in this

@@ -1,25 +1,21 @@
 import os
 import pathlib
+import shutil
+import subprocess
+import tempfile
+from collections.abc import Iterator
+from typing import Any
 
 import pytest
-
-# Before anything imports it, so pytest rewrites its asserts, as a plugin's.
-pytest.register_assert_rewrite("git_client.testing")
-
-from git_client.testing import RepoTemplates, real_git
 
 from git_stack import events
 from git_stack.adapters import github
 from git_stack.git import GIT_VARIABLE
+from git_stack.git_command import GitCommand
 from git_stack.stack import StackClient
 from tests import operations
+from tests.git_support import GitCall, isolate_libgit2_config, real_git
 from tests.helpers import FakeGitHub, InProcessGh, Repo, install_command
-
-# py-git-client's plugin gives every test (session fixtures included) a git
-# config of its own, and keeps the user's config and git's variables (e.g. a
-# hook's GIT_DIR) from reaching it; and its fixtures (repo_templates,
-# git_calls, outside_any_repository) are the tests'.
-pytest_plugins = ["git_client.testing"]
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
@@ -40,7 +36,7 @@ def pytest_xdist_auto_num_workers(config: pytest.Config) -> int | None:
 
 # git itself, rather than a wrapper (such as git-ai) or shim on PATH, which can
 # make each of the tests' many git processes several times slower. git-stack,
-# which reads $GIT_STACK_GIT once (see git_client.find_git), runs it too.
+# which reads $GIT_STACK_GIT, runs it too.
 os.environ[GIT_VARIABLE] = real_git()
 GIT_EXEC_PATH = pathlib.Path(real_git()).parent
 
@@ -59,11 +55,59 @@ def pytest_ignore_collect(collection_path: pathlib.Path, config: pytest.Config) 
     return None
 
 
+TEST_GIT_CONFIG = """\
+[user]
+    name = Test
+    email = test@example.com
+[init]
+    defaultBranch = main
+[maintenance]
+    auto = false
+[gc]
+    auto = 0
+[core]
+    excludesFile =
+    attributesFile =
+"""
+
+
+@pytest.fixture(scope="session", autouse=True)
+def git_environment(tmp_path_factory: pytest.TempPathFactory) -> Iterator[pathlib.Path]:
+    """Isolate Git and libgit2 before constructing session-scoped repositories."""
+    directory = tmp_path_factory.mktemp("git-environment")
+    global_config = directory / ".gitconfig"
+    global_config.write_text(TEST_GIT_CONFIG, encoding="utf-8")
+    ceilings = (tmp_path_factory.getbasetemp().resolve(), pathlib.Path(tempfile.gettempdir()).resolve())
+
+    with pytest.MonkeyPatch.context() as patch, isolate_libgit2_config(directory):
+        for name in tuple(os.environ):
+            if (name.startswith("GIT_") and name != GIT_VARIABLE) or name == "SSH_ASKPASS":
+                patch.delenv(name)
+        patch.setenv("GIT_CONFIG_GLOBAL", str(global_config))
+        patch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+        patch.setenv("GIT_ATTR_NOSYSTEM", "1")
+        patch.setenv("GIT_CEILING_DIRECTORIES", os.pathsep.join(map(str, ceilings)))
+        patch.setenv("GIT_ALLOW_PROTOCOL", "file")
+        patch.setenv("GIT_TERMINAL_PROMPT", "0")
+        patch.setenv("GIT_EDITOR", "true")
+
+        yield global_config
+
+
 @pytest.fixture(autouse=True)
-def _outside_any_repository(outside_any_repository: pathlib.Path) -> None:  # pyright: ignore[reportUnusedFunction]
-    """Run every test from a directory where git finds no repository, so
-    anything that doesn't name its repository fails, rather than change the
-    one the tests were started in (its config, say)."""
+def git_config(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, git_environment: pathlib.Path
+) -> Iterator[pathlib.Path]:
+    """Give each test its own global config and a working directory outside any repository."""
+    directory = tmp_path / "git-environment"
+    directory.mkdir()
+    config = directory / ".gitconfig"
+    shutil.copyfile(git_environment, config)
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config))
+    monkeypatch.chdir(directory)
+
+    with isolate_libgit2_config(directory):
+        yield config
 
 
 @pytest.fixture
@@ -91,6 +135,18 @@ def make_repositories(directory: pathlib.Path) -> None:
     repo.git("clone", "--quiet", str(repo.origin), str(repo.forge), cwd=directory)
 
 
+@pytest.fixture(scope="session")
+def repo_template(tmp_path_factory: pytest.TempPathFactory, git_environment: pathlib.Path) -> pathlib.Path:
+    """Build a repository and its two clones once per test worker."""
+    directory = tmp_path_factory.mktemp("repo-template")
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setenv("GIT_CONFIG_GLOBAL", str(git_environment))
+        make_repositories(directory)
+    for sample in directory.glob("**/hooks/*.sample"):
+        sample.unlink()
+    return directory
+
+
 @pytest.fixture(params=[1, 3, 10], ids=lambda size: f"{size}-branches")
 def chain(repo: Repo, request: pytest.FixtureRequest) -> list[str]:
     """A stack of 1, 3 and 10 branches, the last checked out: the sizes the performance tests
@@ -104,7 +160,7 @@ def separate_processes(monkeypatch: pytest.MonkeyPatch) -> None:
     """For performance tests: git stack runs only as a process of its own (`Repo.stack_process`),
     as a user runs it, so nothing Python caches in this process between runs skews a count."""
 
-    def refuse(self: Repo, *args: str, **kwargs: object) -> None:
+    def refuse(self: Repo, *args: str, **kwargs: Any) -> None:
         pytest.fail(
             "a performance test runs git stack with stack_process: in this process, Python caches what it learns"
         )
@@ -119,7 +175,20 @@ def count_operations(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture
-def repo(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, repo_templates: RepoTemplates) -> Repo:
+def git_calls(monkeypatch: pytest.MonkeyPatch) -> list[GitCall]:
+    calls: list[GitCall] = []
+    process = GitCommand.process
+
+    def recording(self: GitCommand, *args: str, **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
+        calls.append(GitCall(args, self.program))
+        return process(self, *args, **kwargs)
+
+    monkeypatch.setattr(GitCommand, "process", recording)
+    return calls
+
+
+@pytest.fixture
+def repo(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, repo_template: pathlib.Path) -> Repo:
     """A repository with a, b and c committed to main and pushed to origin,
     made once per test worker and copied for each test, which is much quicker
     than making them with git each time.
@@ -132,9 +201,12 @@ def repo(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, repo_templates
     bin_dir.mkdir()
     monkeypatch.setenv("PATH", os.pathsep.join([str(bin_dir), str(GIT_EXEC_PATH), os.environ["PATH"]]))
     monkeypatch.setenv("PYTHONPATH", str(ROOT))
-    repo_templates.build("repo", make_repositories)
-    repos = repo_templates.copy("repo", tmp_path / "repos")
-    return Repo(path=repos / "local", origin=repos / "origin.git", forge=repos / "forge", tmp=repos)
+    repos = tmp_path / "repos"
+    shutil.copytree(repo_template, repos, symlinks=True)
+    repo = Repo(path=repos / "local", origin=repos / "origin.git", forge=repos / "forge", tmp=repos)
+    for clone in (repo.path, repo.forge):
+        repo.git("remote", "set-url", "origin", str(repo.origin), cwd=clone)
+    return repo
 
 
 @pytest.fixture

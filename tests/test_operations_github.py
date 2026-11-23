@@ -17,24 +17,23 @@ from tests.operations import expect_operations
 pytestmark = [pytest.mark.usefixtures("separate_processes", "gh")]
 
 # Each is (git processes, gh commands) at 1, 3 and 10 branches.
-# Pushing starts a few processes for each branch (a stack of 10 pushes in 39 against 12 for 1)...
-PUSH = {1: (12, 0), 3: (18, 0), 10: (39, 0)}
+# Pushing starts a few processes for each branch (a stack of 10 pushes in 37 against 10 for 1)...
+PUSH = {1: (10, 0), 3: (16, 0), 10: (37, 0)}
 # ...and opening a pull request for each costs more of both.
-PUSH_OPENING_PRS = {1: (14, 2), 3: (25, 8), 10: (60, 15)}
+PUSH_OPENING_PRS = {1: (11, 2), 3: (20, 8), 10: (48, 15)}
 # With every pull request open, git doesn't grow with the stack from 3 branches up, and gh stays at 4
 # (2 for a stack of 1).
-PUSH_WITH_PRS_OPEN = {1: (8, 2), 3: (9, 4), 10: (9, 4)}
-PRS_ALL_OPEN = {1: (4, 2), 3: (5, 4), 10: (5, 4)}
-# Nothing to do: gh is asked once, and git 11 + branches.
-SYNC_NOTHING = {1: (12, 1), 3: (14, 1), 10: (21, 1)}
+PUSH_WITH_PRS_OPEN = {1: (7, 2), 3: (8, 4), 10: (8, 4)}
+PRS_ALL_OPEN = {1: (3, 2), 3: (4, 4), 10: (4, 4)}
+# Nothing to do: gh is asked once, and git 9 times.
+SYNC_NOTHING = {1: (9, 1), 3: (9, 1), 10: (9, 1)}
 # The bottom merged, as GitHub reports it (the merge commit and the head it had): the rest are
-# restacked onto main and pushed again. A warning to lower the git count to 32, 72 or 205 means the
-# fake no longer gives `sync` what GitHub does, and it's finding the merge from git alone.
-SYNC_BOTTOM_MERGED = {1: (35, 1), 3: (75, 5), 10: (208, 6)}
+# restacked onto main and pushed again. The fake supplies the GitHub merge evidence.
+SYNC_BOTTOM_MERGED = {1: (31, 1), 3: (66, 5), 10: (185, 6)}
 # gh is asked twice, however many pull requests there are.
-IMPORT = {1: (19, 2), 3: (36, 2), 10: (92, 2)}
+IMPORT = {1: (18, 2), 3: (34, 2), 10: (90, 2)}
 # info asks GitHub about all the branches in one request.
-INFO = {1: (4, 1), 3: (4, 1), 10: (4, 1)}
+INFO = {1: (3, 1), 3: (3, 1), 10: (3, 1)}
 
 
 # The tests also check what the command did, since running fewer operations than allotted only

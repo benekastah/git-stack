@@ -4,7 +4,6 @@ import pathlib
 import subprocess
 
 import pytest
-from git_client.testing import GitCall, real_git
 
 from git_stack import events
 from git_stack.adapters.git import PullRequestLink, PullRequestState
@@ -12,6 +11,7 @@ from git_stack.adapters.github import PullRequest, github_repo
 from git_stack.errors import StackError
 from git_stack.git import GitClient
 from git_stack.stack import BranchStatus, StackClient
+from tests.git_support import GitCall, real_git
 from tests.helpers import FakeGitHub, Repo, install_command
 
 

@@ -1058,7 +1058,6 @@ def test_show_stack_takes_quiet_or_json_but_not_both(
     assert "argument -q/--quiet: not allowed with argument --json" in capsys.readouterr().err
 
 
-@pytest.mark.usefixtures("fresh_find_git")
 def test_no_git_is_an_error_not_a_traceback(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Any, capsys: pytest.CaptureFixture[str]
 ) -> None:

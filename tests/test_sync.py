@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from git_client.testing import GitCall
 
 from git_stack import events
 from git_stack.core import Delete
@@ -14,6 +13,7 @@ from git_stack.errors import StackError
 from git_stack.git import GitClient
 from git_stack.stack import BranchStatus, StackClient
 from git_stack.stacks import Ownership
+from tests.git_support import GitCall
 from tests.helpers import FakeGitHub, Repo, install_command
 
 

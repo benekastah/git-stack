@@ -5,13 +5,13 @@ import re
 from threading import Event, get_ident
 
 import pytest
-from git_client.testing import GitCall
 
 from git_stack import events
 from git_stack.adapters.github import GitHubAdapter
 from git_stack.core import CURRENT_GROUP
 from git_stack.errors import StackError
 from git_stack.stack import BranchInfo, BranchStatus, StackClient
+from tests.git_support import GitCall
 from tests.helpers import FakeGitHub, Repo
 
 

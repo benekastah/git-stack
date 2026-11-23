@@ -104,7 +104,7 @@ def test_each_directory_is_relative_to_the_one_before(repo: Repo) -> None:
     repo.git("switch", "--quiet", "-c", "pr1")
 
     result = subprocess.run(
-        [sys.executable, "-m", "git_stack", "-C", "elsewhere", "-C", "../local", "track", "main"],
+        [sys.executable, "-m", "tests.stack_entry", "-C", "elsewhere", "-C", "../local", "track", "main"],
         cwd=repo.tmp,
         capture_output=True,
         encoding="utf-8",

@@ -6,12 +6,11 @@ from importlib.metadata import PackageNotFoundError, distribution
 from pathlib import Path
 from typing import cast
 
-from git_client import GitError
+from git_stack.errors import StackError
+from git_stack.git import GitClient, is_object_id
+from git_stack.git_read import GIT_REPOSITORY_ENV
 
-from git_stack.git import GIT_DIR_VARIABLES, GIT_VARIABLE, is_object_id
-from git_stack.performance import TimedGit
-
-__version__ = "0.1.15"
+__version__ = "0.1.16"
 
 
 def build_version() -> str:
@@ -22,16 +21,16 @@ def build_version() -> str:
 
 
 def _checkout_revision(checkout: Path) -> str | None:
-    if GIT_DIR_VARIABLES & os.environ.keys():
+    if GIT_REPOSITORY_ENV & os.environ.keys():
         return None
     # Require this package's source checkout, including linked worktrees.
     if not (checkout / ".git").exists() or not (checkout / "pyproject.toml").is_file():
         return None
     try:
-        revision = TimedGit(checkout, env_var=GIT_VARIABLE).run("rev-parse", "--verify", "HEAD")
-    except GitError, OSError:
+        revision = GitClient(checkout).rev("HEAD")
+    except StackError, OSError:
         return None
-    return revision if is_object_id(revision) else None
+    return revision if revision is not None and is_object_id(revision) else None
 
 
 def _installed_revision() -> str | None:
