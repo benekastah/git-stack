@@ -780,6 +780,10 @@ With the GitHub adapter, each branch\(aqs pull request (open or merged)
 is linked in a column at the end of its line: blue if it\(aqs open, grey
 if it\(aqs a draft, and magenta if it was merged.
 Rows with links determine the column position.
+On a narrow terminal, each link sits directly below its branch name at
+the same indent.
+If the URL is too wide for that line, the tree shows the pull request
+number instead.
 .IP \(bu 2
 On a terminal, \f[CR]info\f[R] and commands that show stacks use these
 colors: yellow branches marked \f[CR]!\f[R] need restacking; the current

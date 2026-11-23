@@ -2,7 +2,9 @@ import argparse
 import enum
 import json
 import os
+import shutil
 import sys
+import unicodedata
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
@@ -111,6 +113,30 @@ def painter(color: bool) -> Paint:
     return lambda text, code: f"\033[{code}m{text}\033[m" if color and text else text
 
 
+def display_width(text: str) -> int:
+    """Estimate the terminal cells used by uncolored text."""
+    if text.isascii():
+        return len(text)
+    return sum(
+        2 if unicodedata.east_asian_width(char) in {"F", "W"} else 1
+        for char in text
+        if unicodedata.category(char) not in {"Mn", "Me", "Cf"}
+    )
+
+
+def link_continuation(tree: str) -> str:
+    """Carry the tree guides onto the link line and align it with the branch name."""
+    guide = "│   " if tree.endswith(("├── ", "┌── ")) else "    "
+    return tree[:-4] + guide if tree else ""
+
+
+def compact_link(row: BranchInfo | GroupHeader, text: str) -> str:
+    """Shorten a PR URL to its number while keeping other annotations in full."""
+    if isinstance(row, BranchInfo) and (pr := row.pull_request) is not None and pr.url == text:
+        return f"#{pr.number}"
+    return text
+
+
 @dataclass(frozen=True)
 class GroupHeader:
     """The line info draws above the stacks in a group, on their root."""
@@ -200,7 +226,7 @@ def print_tree(
     new_links: Mapping[str, str] = {},
 ) -> None:
     """Print branches, which isn't empty, as a tree for each stack, with each
-    branch's pull request linked at the end of its line. new_links is
+    branch's pull request linked beside or below its label. new_links is
     {branch: text}, shown in NEW_LINK's color in place of its link, for pull
     requests that were just opened, or would be."""
     color = use_color(stack)
@@ -224,7 +250,7 @@ def print_tree(
             add(branch, "", drawn)
             # Upside down, the tree reads the same, mirrored.
             rows.extend(reversed(drawn) if flip else drawn)
-    # Pull request links go in a right-aligned column sized by the rows with links.
+    # The link column is sized by the rows with links.
     integrations = Integrations(stack)
     sources_by_root = {
         b.name: ", ".join(source["name"] for source in integration["sources"])
@@ -232,15 +258,22 @@ def print_tree(
         if b.parent is None and (integration := integrations.read(b.name)) is not None
     }
     plain = painter(False)
-    widths = [len(tree) + len(label(row, plain, color, sources_by_root)) for tree, row in rows]
+    widths = [len(tree) + display_width(label(row, plain, color, sources_by_root)) for tree, row in rows]
     links = [link_of(row, new_links) for _, row in rows]
+    link_widths = [display_width(link[0]) if link else 0 for link in links]
     label_width = max((width for width, link in zip(widths, links, strict=True) if link), default=0)
-    link_width = max((len(link[0]) for link in links if link), default=0)
-    for (tree, row), width, link in zip(rows, widths, links, strict=True):
+    link_width = max(link_widths, default=0)
+    columns = shutil.get_terminal_size().columns if sys.stdout.isatty() else None
+    for (tree, row), width, link, link_cells in zip(rows, widths, links, link_widths, strict=True):
         line = paint(tree, TREE) + label(row, paint, color, sources_by_root)
         if link:
             text, link_color = link
-            line += " " * (label_width - width + 2) + paint(text.rjust(link_width), link_color)
+            if columns is None or label_width + 2 + link_width <= columns:
+                line += " " * (label_width - width + 2) + paint(" " * (link_width - link_cells) + text, link_color)
+            else:
+                if len(tree) + link_cells > columns:
+                    text = compact_link(row, text)
+                line += "\n" + paint(link_continuation(tree), TREE) + paint(text, link_color)
         print(line)
 
 

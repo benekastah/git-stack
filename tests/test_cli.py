@@ -404,6 +404,29 @@ def test_prs_shows_the_stack_with_new_pull_requests_in_green(
     ]
 
 
+def test_prs_fits_colored_dry_run_text_by_display_width(
+    stack: Any, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    monkeypatch.setenv("COLUMNS", "28")
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    stack.git.run.side_effect = lambda *args, check=True: "true" if "--get-colorbool" in args else ""
+    stack.prs.return_value = PrsResult(
+        [PullRequestStep("feature", "main", PullRequestAction.OPEN, "機能")],
+        [
+            BranchInfo("main", None, None, current=False),
+            BranchInfo("feature", "main", BranchStatus.UP_TO_DATE, current=False),
+        ],
+    )
+
+    assert main(["prs", "--dry-run"], stack=stack) == 0
+    assert capsys.readouterr().out.splitlines() == [
+        "\033[1mmain\033[m",
+        "\033[2m└── \033[mfeature",
+        "\033[2m    \033[m\033[32mwould open: 機能\033[m",
+    ]
+
+
 @pytest.mark.parametrize(
     ("argv", "where"), [([], "pr1's stack"), (["pr2"], "those stacks"), (["-g", "api"], "those stacks")]
 )
@@ -487,6 +510,75 @@ def test_info_draws_each_stack_as_a_tree(stack: Any, capsys: pytest.CaptureFixtu
         "release\n"
         "└── hotfix (parent release missing)\n"
     )
+
+
+@pytest.mark.parametrize(
+    ("columns", "tty", "expected"),
+    [
+        (80, True, ["├── short               URL1", "│   ├── longer-feature  URL2"]),
+        (50, False, ["├── short               URL1", "│   ├── longer-feature  URL2"]),
+        (50, True, ["├── short", "│   URL1", "│   ├── longer-feature", "│   │   URL2"]),
+        (45, True, ["├── short", "│   URL1", "│   ├── longer-feature", "│   │   #2"]),
+        (41, True, ["├── short", "│   #1", "│   ├── longer-feature", "│   │   #2"]),
+    ],
+)
+def test_info_fits_full_pr_links_to_terminal_width(
+    stack: Any,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    columns: int,
+    tty: bool,
+    expected: list[str],
+) -> None:
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: tty)
+    monkeypatch.setenv("COLUMNS", str(columns))
+    urls = [f"https://github.com/acme/widgets/pull/{number}" for number in (1, 2)]
+    stack.info.return_value = [
+        BranchInfo("main", None, None, current=False),
+        BranchInfo(
+            "short",
+            "main",
+            BranchStatus.UP_TO_DATE,
+            current=False,
+            pull_request=PullRequestLink(1, urls[0], PullRequestState.OPEN),
+        ),
+        BranchInfo(
+            "longer-feature",
+            "short",
+            BranchStatus.UP_TO_DATE,
+            current=False,
+            pull_request=PullRequestLink(2, urls[1], PullRequestState.DRAFT),
+        ),
+        BranchInfo("sibling", "short", BranchStatus.UP_TO_DATE, current=False),
+        BranchInfo("other", "main", BranchStatus.UP_TO_DATE, current=False),
+    ]
+
+    assert main(["info"], stack=stack) == 0
+
+    lines = [line.replace("URL1", urls[0]).replace("URL2", urls[1]) for line in expected]
+    assert capsys.readouterr().out.splitlines() == ["main", *lines, "│   └── sibling", "└── other"]
+
+
+def test_narrow_info_keeps_the_root_at_bottom_tree_connected(
+    stack: Any, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    monkeypatch.setenv("COLUMNS", "40")
+    stack.git.config_value.side_effect = lambda key: "root-at-bottom" if key == "stack.orientation" else None
+    stack.info.return_value = [
+        BranchInfo("main", None, None, current=False),
+        BranchInfo("first", "main", BranchStatus.UP_TO_DATE, current=False),
+        BranchInfo(
+            "second",
+            "main",
+            BranchStatus.UP_TO_DATE,
+            current=False,
+            pull_request=PullRequestLink(2, "https://github.com/acme/widgets/pull/2", PullRequestState.OPEN),
+        ),
+    ]
+
+    assert main(["info"], stack=stack) == 0
+    assert capsys.readouterr().out.splitlines() == ["┌── second", "│   #2", "├── first", "main"]
 
 
 def test_info_integration_heading_does_not_pad_pr_links(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
