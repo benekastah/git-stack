@@ -131,7 +131,6 @@ dev = [
     { name = "basedpyright" },
     { name = "coverage" },
     { name = "distlib" },
-    { name = "py-git-client" },
     { name = "pypandoc-binary" },
     { name = "pytest" },
     { name = "pytest-xdist" },
@@ -154,7 +153,6 @@ dev = [
     { name = "basedpyright", specifier = ">=1.40.2" },
     { name = "coverage", specifier = ">=7.17.3" },
     { name = "distlib", specifier = ">=0.4.4" },
-    { name = "py-git-client", git = "https://github.com/benekastah/py-git-client?rev=a1b4b0f15ae740c17db2d5fca4684aeaae6a8d54" },
     { name = "pypandoc-binary", specifier = "==1.17" },
     { name = "pytest", specifier = ">=9.2.0" },
     { name = "pytest-xdist", specifier = ">=3.8.0" },
@@ -211,11 +209,6 @@ sdist = { url = "https://files.pythonhosted.org/packages/bf/db/7fc19e6f2dc92a966
 wheels = [
     { url = "https://files.pythonhosted.org/packages/40/9e/2b38731e0fc536806f16490e1a12d7f0dc2a1235aa8cc07bcc75416a7daa/pluggy-1.7.0-py3-none-any.whl", hash = "sha256:7dd7b0d8832ba3cb632c306926ded123429211b83641b35dc5c41ad2d34f9bec", size = 27082, upload-time = "2026-10-15T09:50:56.808Z" },
 ]
-
-[[package]]
-name = "py-git-client"
-version = "0.0.2"
-source = { git = "https://github.com/benekastah/py-git-client?rev=a1b4b0f15ae740c17db2d5fca4684aeaae6a8d54#a1b4b0f15ae740c17db2d5fca4684aeaae6a8d54" }
 
 [[package]]
 name = "pycparser"

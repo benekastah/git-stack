@@ -3,12 +3,12 @@
 from collections.abc import Callable
 
 import pytest
-from git_client.testing import GitCall
 
 from git_stack import events, stack_section
 from git_stack.errors import StackError
 from git_stack.stack import BranchStatus, PullRequestAction, PullRequestStep, StackClient
 from tests import fake_gh
+from tests.git_support import GitCall
 from tests.helpers import FakeGitHub, Repo
 
 # Without a trailing newline, which git-stack strips like the rest of git's output.

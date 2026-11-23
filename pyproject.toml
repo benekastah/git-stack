@@ -26,11 +26,7 @@ template-dev = [
     "ruff>=0.17.5",
 ]
 # distlib makes the tests' commands on Windows (tests/helpers.py's install_command).
-dev = [
-    { include-group = "template-dev" },
-    "distlib>=0.4.4",
-    "py-git-client @ git+https://github.com/benekastah/py-git-client@a1b4b0f15ae740c17db2d5fca4684aeaae6a8d54",  # pytest fixtures only
-]
+dev = [{ include-group = "template-dev" }, "distlib>=0.4.4"]
 
 # setuptools rather than the template's hatchling, for data-files: a wheel installs the man page.
 [build-system]

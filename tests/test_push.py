@@ -3,11 +3,11 @@
 import sys
 
 import pytest
-from git_client.testing import GitCall
 
 from git_stack import events
 from git_stack.errors import StackError
 from git_stack.stack import StackClient
+from tests.git_support import GitCall
 from tests.helpers import FakeGitHub, Repo
 
 

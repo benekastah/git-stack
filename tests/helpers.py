@@ -15,13 +15,12 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import pytest
-from git_client import CLOSE_FDS
-from git_client.testing import real_git
 
 from git_stack import cli, events
 from git_stack.git import GitClient
 from git_stack.stack import BranchInfo, StackClient
 from tests import fake_gh, operations
+from tests.git_support import CLOSE_FDS, real_git
 
 
 @contextmanager
@@ -88,7 +87,7 @@ class Repo:
 
     git, git stack and client run in path, with the isolated environment the
     repo fixture sets. emitted collects client's events. The tests' own git
-    commands (git) start no git_client.Git, so git_calls leaves them out.
+    commands run directly, outside the git_calls recorder.
     """
 
     path: pathlib.Path
@@ -101,8 +100,7 @@ class Repo:
         self.client = StackClient(GitClient(self.path), on_event=self.emitted.append)
 
     def git(self, *args: str, cwd: pathlib.Path | None = None) -> str:
-        # With -C rather than cwd, which would keep Python from using posix_spawn
-        # (see git_client.CLOSE_FDS).
+        # With -C rather than cwd, which would keep Python from using posix_spawn.
         result = subprocess.run(
             [real_git(), "-C", str(cwd or self.path), *args],
             capture_output=True,

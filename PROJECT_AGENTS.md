@@ -81,8 +81,7 @@ lands on `main` so each merged build has a distinct version in performance logs.
   the code compares members rather than strings, and adding a value happens in
   one place. Give it the values the outside world uses, so JSON output, which
   prints an enum as its value, doesn't change.
-- pygit2 is the runtime Git library. py-git-client is a development-only
-  dependency that provides isolated test repositories and Git fixtures.
+- pygit2 is the runtime Git library. Integration fixtures use the installed Git.
 
 - `git_stack/skills/<name>/SKILL.md` are agent skills for people's agents, kept short and pointing at
   `git stack --help` and the README for detail. `tests/test_skills.py` checks that every
@@ -123,7 +122,7 @@ Text meant for people (messages, `info`'s tree) can change.
   result, with a mock `StackClient` (made once, as `create_autospec` is slow,
   and reset for each test); the other tests run git-stack against real
   repositories (see `tests/helpers.py`), copied for each test from ones
-  `repo_templates` builds once. `Repo.stack` runs the command line in
+  `repo_template` builds once per worker. `Repo.stack` runs the command line in
   the test process, which is much quicker than starting one; only
   `tests/test_end_to_end.py` runs it as a separate process (`Repo.stack_process`),
   for what only that checks, like the entry point. A new command or `--json`
@@ -132,13 +131,10 @@ Text meant for people (messages, `info`'s tree) can change.
   fixture's fake GitHub (`tests/fake_gh.py`) answers git-stack's `gh`
   commands in the test's process too (`InProcessGh`), and as a command for
   `Repo.stack_process`.
-- The tests load py-git-client's pytest plugin (`git_client.testing`, in
-  `tests/conftest.py`): each test's git has a config of its own, none of the
-  user's config or git's variables (e.g. a hook's `GIT_DIR`), and runs from a
-  directory outside any repository, so a git run without naming its
-  repository fails rather than reach the clone the tests were started in.
-  Code that names `ROOT` (`dev.py`, `dev_project.py`) still runs there. `git_calls` lists the git processes
-  git-stack starts; the tests' own (`Repo.git`) aren't in it.
+- `tests/conftest.py` isolates Git and libgit2 from the developer's configuration.
+  Each test gets its own global config and runs from a directory outside any
+  repository. Code that names `ROOT` (`dev.py`, `dev_project.py`) still runs there.
+  `git_calls` records git-stack's subprocesses. Fixture setup uses `Repo.git`.
 - Performance tests declare how many git processes and `gh` commands they may run, with
   `tests/operations.py`'s `expect_operations(git=N, gh=M)`: as a decorator for the whole test
   body, or as a `with` target for a block (e.g. one stack size in a loop). It counts what git-stack

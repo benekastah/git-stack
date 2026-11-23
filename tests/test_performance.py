@@ -7,13 +7,13 @@ import shlex
 import sys
 
 import pytest
-from git_client.testing import GitCall
 
 from git_stack import _version, performance
 from git_stack.cli import build_parser
 from git_stack.git import GitClient
 from git_stack.performance import Timeline
 from tests.conftest import ROOT
+from tests.git_support import GitCall
 from tests.helpers import FakeGitHub, Repo
 from tests.test_integrate import source
 

@@ -8,7 +8,6 @@ import sys
 from typing import Any
 
 import pytest
-from git_client.testing import GitCall, real_git
 
 from git_stack import git_read
 from git_stack.adapters.git import GitAdapter
@@ -16,11 +15,12 @@ from git_stack.core import StackCore
 from git_stack.errors import StackError
 from git_stack.git import GIT_VARIABLE, GitClient, changes_refs, changes_worktrees, same_file
 from git_stack.git_command import GitError
+from tests.git_support import GitCall, real_git
 from tests.helpers import Repo, install_command
 
 
-def test_git_client_runs_git_stack_git(
-    repo: Repo, fresh_find_git: None, monkeypatch: pytest.MonkeyPatch, git_calls: list[GitCall]
+def test_cli_runner_uses_configured_git_executable(
+    repo: Repo, monkeypatch: pytest.MonkeyPatch, git_calls: list[GitCall]
 ) -> None:
     # After repo, whose client has found git already. The tests' git, spelled
     # as nothing else names it.
@@ -678,7 +678,7 @@ def test_commit_patch_ids_marks_paths_even_with_git_literal_pathspecs(
 
 
 def test_git_runs_in_the_users_locale_with_its_messages_in_english(
-    repo: Repo, fresh_find_git: None, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+    repo: Repo, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Every command keeps the user's locale, which the hooks, credential
     helpers and ssh git runs inherit (in C, Ruby's default encoding is

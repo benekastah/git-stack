@@ -5,7 +5,6 @@ import pathlib
 import shutil
 
 import pytest
-from git_client.testing import GitCall
 
 from git_stack import cli
 from git_stack import integrations as integration_module
@@ -15,6 +14,7 @@ from git_stack.git import GitClient
 from git_stack.integrations import Integration, Integrations
 from git_stack.stack import StackClient
 from git_stack.stacks import StackNode, Stacks
+from tests.git_support import GitCall
 from tests.helpers import FakeGitHub, Repo, captured_output
 
 

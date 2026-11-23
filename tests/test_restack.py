@@ -1,13 +1,13 @@
 """git stack restack."""
 
 import pytest
-from git_client.testing import GitCall
 
 from git_stack import events
 from git_stack.errors import StackError
 from git_stack.git import GitClient
 from git_stack.stack import BranchInfo, BranchStatus, StackClient
 from git_stack.stacks import Ownership
+from tests.git_support import GitCall
 from tests.helpers import Repo
 
 
