@@ -562,15 +562,19 @@ class GitClient:
         if simple and suffix in {"commit}", "tree}"} and (repo := self._graph_repository()) is not None:
             kind = pygit2.Commit if suffix == "commit}" else pygit2.Tree
             try:
-                obj = repo[base].peel(kind) if is_object_id(base) else repo.lookup_reference(base).peel(kind)
-                return str(obj.id)
-            except KeyError:
-                return None
-            except pygit2.GitError, ValueError, TypeError:
+                if is_object_id(base):
+                    return str(repo[base].peel(kind).id)
+                try:
+                    reference = repo.lookup_reference(base)
+                except KeyError:
+                    return None
+                return str(reference.peel(kind).id)
+            except KeyError, pygit2.GitError, ValueError, TypeError:
+                # Git can resolve objects that need a lazy fetch from a promisor remote.
                 pass
         args = ("rev-parse", "--verify", "--quiet", "--end-of-options", name)
         result = self._git.process(*args, capture_output=True)
-        if result.returncode not in (0, 1):
+        if self._snapshot_depth and result.returncode not in (0, 1):
             raise StackError(str(GitError(args, result)))
         return decode(result.stdout).strip() or None
 
@@ -591,8 +595,12 @@ class GitClient:
         repo = self._open_repository()
         if repo is not None:
             try:
-                head = repo.lookup_reference("HEAD").target
-                return head.removeprefix("refs/heads/") if isinstance(head, str) else None
+                head = repo.lookup_reference("HEAD")
+                if isinstance(head.target, pygit2.Oid):
+                    return None
+                name = head.resolve().name
+                if name.startswith("refs/heads/"):
+                    return name.removeprefix("refs/heads/")
             except KeyError, pygit2.GitError, ValueError:
                 pass
         return self.run("branch", "--show-current") or None
@@ -623,8 +631,8 @@ class GitClient:
             return any((pathlib.Path(repo.path) / name).exists() for name in names)
         args = [arg for name in names for arg in ("--git-path", name)]
         with git_errors():
-            paths = decode(self._git.run_bytes("rev-parse", "--path-format=absolute", *args))
-        return any(pathlib.Path(path).exists() for path in paths.splitlines())
+            paths = self._git.run_bytes("rev-parse", "--path-format=absolute", *args)
+        return any(pathlib.Path(os.fsdecode(path)).exists() for path in paths.splitlines())
 
     def has_conflicts(self) -> bool:
         """Whether the index has unmerged paths, i.e. a merge stopped on a
@@ -747,11 +755,15 @@ class GitClient:
         """The top directory of the worktree directory is in."""
         if self._toplevel is None:
             repo = self._open_repository()
-            self._toplevel = (
-                pathlib.Path(repo.workdir)
-                if repo is not None and not repo.is_bare
-                else pathlib.Path(self.run("rev-parse", "--show-toplevel"))
-            )
+            if repo is not None and not repo.is_bare:
+                gitdir = pathlib.Path(repo.path)
+                # Git detects inside-git-dir calls and honors worktree-specific core.worktree.
+                if not (gitdir / "config.worktree").exists() and not self.directory.resolve().is_relative_to(
+                    gitdir.resolve()
+                ):
+                    self._toplevel = pathlib.Path(repo.workdir)
+            if self._toplevel is None:
+                self._toplevel = pathlib.Path(self.run("rev-parse", "--show-toplevel"))
         return self._toplevel
 
     def remote_default_branch(self, remote: str, *, known: str | None = None) -> str | None:

@@ -135,7 +135,7 @@ class Repo:
         process gets this process's environment as it is."""
         with operations.traced_subprocess() as environment:
             result = subprocess.run(
-                [sys.executable, "-m", "git_stack", "-C", str(self.path), *args],
+                [sys.executable, "-m", "tests.stack_entry", "-C", str(self.path), *args],
                 cwd=self.tmp,
                 capture_output=True,
                 encoding="utf-8",

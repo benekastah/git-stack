@@ -780,3 +780,55 @@ def test_replacement_commits_leave_ancestry_to_git(repo: Repo, git_calls: list[G
     with git.snapshot():
         assert not git.is_ancestor(before, after)
     assert any(call[:2] == ["merge-base", "--is-ancestor"] for call in git_calls)
+
+
+def test_current_branch_resolves_a_symbolic_branch_alias(repo: Repo) -> None:
+    repo.git("symbolic-ref", "refs/heads/alias", "refs/heads/main")
+    repo.git("symbolic-ref", "HEAD", "refs/heads/alias")
+
+    assert GitClient(repo.path).current_branch() == "main"
+
+
+def test_an_out_of_range_reflog_revision_without_a_snapshot_is_missing(repo: Repo) -> None:
+    assert GitClient(repo.path).rev("HEAD@{99999}") is None
+
+
+def test_missing_object_can_be_fetched_from_a_promisor_in_git_config(
+    repo: Repo, git_config: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # libgit2 does not read Git's overridden global configuration.
+    repo.commit_on_forge("main", "a", "new content\n", "remote only")
+    commit = repo.git("rev-parse", "HEAD", cwd=repo.forge)
+    override = git_config.with_name("git-only")
+    override.write_text(
+        git_config.read_text(encoding="utf-8") + '[remote "origin"]\n    promisor = true\n', encoding="utf-8"
+    )
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(override))
+
+    assert GitClient(repo.path).rev(commit) == commit
+
+
+def test_operation_in_progress_cli_fallback_handles_unicode_path(repo: Repo, monkeypatch: pytest.MonkeyPatch) -> None:
+    unusual = repo.path.with_name("local\u2028repo")
+    repo.path.rename(unusual)
+    git_dir = unusual / ".git"
+    (git_dir / "MERGE_HEAD").touch()
+    monkeypatch.setenv("GIT_DIR", str(git_dir))
+
+    assert GitClient(unusual).operation_in_progress()
+
+
+def test_toplevel_respects_a_linked_worktree_config(repo: Repo) -> None:
+    linked = repo.tmp / "linked"
+    directory = repo.tmp / "configured"
+    directory.mkdir()
+    repo.git("worktree", "add", "--quiet", "-b", "linked", str(linked))
+    repo.git("config", "extensions.worktreeConfig", "true")
+    repo.git("config", "--worktree", "core.worktree", str(directory), cwd=linked)
+
+    assert same_file(GitClient(linked).toplevel(), directory)
+
+
+def test_toplevel_requires_a_working_tree(repo: Repo) -> None:
+    with pytest.raises(StackError, match="must be run in a work tree"):
+        GitClient(repo.path / ".git").toplevel()

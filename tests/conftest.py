@@ -6,9 +6,7 @@ import tempfile
 from collections.abc import Iterator
 from typing import Any
 
-import pygit2
 import pytest
-from pygit2.enums import ConfigLevel
 
 from git_stack import events
 from git_stack.adapters import github
@@ -16,7 +14,7 @@ from git_stack.git import GIT_VARIABLE
 from git_stack.git_command import GitCommand
 from git_stack.stack import StackClient
 from tests import operations
-from tests.git_support import GitCall, real_git
+from tests.git_support import GitCall, isolate_libgit2_config, real_git
 from tests.helpers import FakeGitHub, InProcessGh, Repo, install_command
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -81,10 +79,7 @@ def git_environment(tmp_path_factory: pytest.TempPathFactory) -> Iterator[pathli
     global_config.write_text(TEST_GIT_CONFIG, encoding="utf-8")
     ceilings = (tmp_path_factory.getbasetemp().resolve(), pathlib.Path(tempfile.gettempdir()).resolve())
 
-    search_paths = pygit2.settings.search_path
-    levels = (ConfigLevel.PROGRAMDATA, ConfigLevel.SYSTEM, ConfigLevel.XDG, ConfigLevel.GLOBAL)
-    original_paths = {level: search_paths[level] for level in levels}
-    with pytest.MonkeyPatch.context() as patch:
+    with pytest.MonkeyPatch.context() as patch, isolate_libgit2_config(directory):
         for name in tuple(os.environ):
             if (name.startswith("GIT_") and name != GIT_VARIABLE) or name == "SSH_ASKPASS":
                 patch.delenv(name)
@@ -96,13 +91,7 @@ def git_environment(tmp_path_factory: pytest.TempPathFactory) -> Iterator[pathli
         patch.setenv("GIT_TERMINAL_PROMPT", "0")
         patch.setenv("GIT_EDITOR", "true")
 
-        try:
-            for level in levels:
-                search_paths[level] = str(directory)
-            yield global_config
-        finally:
-            for level, path in original_paths.items():
-                search_paths[level] = path
+        yield global_config
 
 
 @pytest.fixture(autouse=True)
@@ -117,13 +106,8 @@ def git_config(
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config))
     monkeypatch.chdir(directory)
 
-    search_paths = pygit2.settings.search_path
-    original = search_paths[ConfigLevel.GLOBAL]
-    search_paths[ConfigLevel.GLOBAL] = str(directory)
-    try:
+    with isolate_libgit2_config(directory):
         yield config
-    finally:
-        search_paths[ConfigLevel.GLOBAL] = original
 
 
 @pytest.fixture

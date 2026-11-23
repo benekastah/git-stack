@@ -28,7 +28,7 @@ def test_command_waits_for_another_holding_the_lock(repo: Repo, client: StackCli
     main_moves_on(repo)
     with client.exclusive():
         restack = subprocess.Popen(
-            [sys.executable, "-m", "git_stack", "-C", str(repo.path), "restack", "--latest"],
+            [sys.executable, "-m", "tests.stack_entry", "-C", str(repo.path), "restack", "--latest"],
             cwd=repo.tmp,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,

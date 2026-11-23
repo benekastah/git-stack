@@ -133,7 +133,8 @@ Text meant for people (messages, `info`'s tree) can change.
   `Repo.stack_process`.
 - `tests/conftest.py` isolates Git and libgit2 from the developer's configuration.
   Each test gets its own global config and runs from a directory outside any
-  repository. Code that names `ROOT` (`dev.py`, `dev_project.py`) still runs there.
+  repository. `tests.stack_entry` installs that config for libgit2 in child processes.
+  Code that names `ROOT` (`dev.py`, `dev_project.py`) still runs there.
   `git_calls` records git-stack's subprocesses. Fixture setup uses `Repo.git`.
 - Performance tests declare how many git processes and `gh` commands they may run, with
   `tests/operations.py`'s `expect_operations(git=N, gh=M)`: as a decorator for the whole test

@@ -3,9 +3,13 @@
 import os
 import subprocess
 import sys
-from collections.abc import Sequence
+from collections.abc import Generator, Sequence
+from contextlib import contextmanager
 from functools import cache
 from pathlib import Path
+
+import pygit2
+from pygit2.enums import ConfigLevel
 
 from git_stack.git_command import find_git
 
@@ -28,3 +32,18 @@ class GitCall(list[str]):
     def __init__(self, args: Sequence[str], program: str) -> None:
         super().__init__(args)
         self.program = program
+
+
+@contextmanager
+def isolate_libgit2_config(directory: Path) -> Generator[None]:
+    """Read config only from the test's directory and repository."""
+    search_paths = pygit2.settings.search_path
+    levels = (ConfigLevel.PROGRAMDATA, ConfigLevel.SYSTEM, ConfigLevel.XDG, ConfigLevel.GLOBAL)
+    originals = {level: search_paths[level] for level in levels}
+    try:
+        for level in levels:
+            search_paths[level] = str(directory)
+        yield
+    finally:
+        for level, path in originals.items():
+            search_paths[level] = path
