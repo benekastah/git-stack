@@ -12,13 +12,15 @@ from threading import Lock
 from time import monotonic
 from typing import TYPE_CHECKING, BinaryIO, Literal
 
+from git_client import PerformanceRecorder
+
 from git_stack.errors import StackError
 from git_stack.file_lock import file_lock
 
 if TYPE_CHECKING:
     from git_stack.git import GitClient
 
-Tool = Literal["git", "gh"]
+Tool = Literal["git", "gh", "native", "cat-file"]
 MAX_PERFORMANCE_LOG_BYTES = 1_000_000
 LOG_PATH_SETTING = "stack.perfLog"
 LOG_LIMIT_SETTING = "stack.perfLogMaxBytes"
@@ -175,6 +177,7 @@ class Timeline:
         self._start = clock()
         self._lock = Lock()
         self._calls: list[_Call] = []
+        self.git = PerformanceRecorder()
 
     @contextmanager
     def activate(self) -> Generator[None]:
@@ -185,7 +188,7 @@ class Timeline:
             active_timeline.reset(token)
 
     @contextmanager
-    def record(self, tool: Tool, *args: str) -> Generator[None]:
+    def record(self, tool: Literal["gh", "native"], *args: str) -> Generator[None]:
         if tool == "gh" and args[:2] == ("api", "graphql"):
             args = tuple("query=<omitted>" if arg.startswith("query=") else arg for arg in args)
         with self._lock:
@@ -201,16 +204,17 @@ class Timeline:
     def render(self, *, version: str | None = None) -> str:
         """Format the timeline after the command and its workers have finished."""
         total = self._clock() - self._start
+        calls = sorted((*self._calls, *self._git_calls(total)), key=lambda call: call.start)
         lines = [REPORT_HEADING]
         if version is not None:
             lines.append(f"{VERSION_PREFIX}{version}")
-        for call in self._calls:
+        for call in calls:
             command = _command_line((call.tool, *call.args))
             lines.append(f"  +{call.start:.3f}s  {call.end - call.start:6.3f}s  {command}")
 
-        git = _occupied_time([call for call in self._calls if call.tool == "git"])
-        gh = _occupied_time([call for call in self._calls if call.tool == "gh"])
-        busy = _occupied_time(self._calls)
+        git = _occupied_time([call for call in calls if call.tool in {"git", "cat-file"}])
+        gh = _occupied_time([call for call in calls if call.tool == "gh"])
+        busy = _occupied_time([call for call in calls if call.tool != "native"])
 
         def percent(seconds: float) -> str:
             return f"{(seconds / total if total else 0):.1%}"
@@ -224,6 +228,17 @@ class Timeline:
             lines.append(f"  {'Git and gh':<10} {overlap:7.3f}s ({percent(overlap)} overlap)")
         return "\n".join(lines)
 
+    def _git_calls(self, total: float) -> Generator[_Call]:
+        # With a Git client, typed read events already include the subprocess intervals.
+        for event in self.git.events:
+            start = event.start - self._start
+            end = total if event.end is None else event.end - self._start
+            if event.kind == "process" and event.pid is not None:
+                # CatFile's launch counts once. Its separate work intervals exclude idle time.
+                yield _Call("git", event.args, start, start if event.persistent else end)
+            elif event.kind == "process_work":
+                yield _Call("cat-file", (event.name.removeprefix("CatFile."),), start, end)
+
 
 active_timeline: ContextVar[Timeline | None] = ContextVar("active_timeline", default=None)
 
@@ -233,6 +248,6 @@ def measure_gh(args: tuple[str, ...]) -> AbstractContextManager[None]:
     return timeline.record("gh", *args) if timeline is not None else nullcontext()
 
 
-def measure_git(args: tuple[str, ...]) -> AbstractContextManager[None]:
+def measure_native(name: str) -> AbstractContextManager[None]:
     timeline = active_timeline.get()
-    return timeline.record("git", *args) if timeline is not None else nullcontext()
+    return timeline.record("native", name) if timeline is not None else nullcontext()

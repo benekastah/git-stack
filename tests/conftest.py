@@ -7,11 +7,11 @@ from collections.abc import Iterator
 from typing import Any
 
 import pytest
+from git_client import Git
 
 from git_stack import events
 from git_stack.adapters import github
 from git_stack.git import GIT_VARIABLE
-from git_stack.git_command import GitCommand
 from git_stack.stack import StackClient
 from tests import operations
 from tests.git_support import GitCall, isolate_libgit2_config, real_git
@@ -96,11 +96,10 @@ def git_environment(tmp_path_factory: pytest.TempPathFactory) -> Iterator[pathli
 
 @pytest.fixture(autouse=True)
 def git_config(
-    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, git_environment: pathlib.Path
+    tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch, git_environment: pathlib.Path
 ) -> Iterator[pathlib.Path]:
     """Give each test its own global config and a working directory outside any repository."""
-    directory = tmp_path / "git-environment"
-    directory.mkdir()
+    directory = tmp_path_factory.mktemp("git-environment")
     config = directory / ".gitconfig"
     shutil.copyfile(git_environment, config)
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config))
@@ -177,13 +176,19 @@ def count_operations(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture
 def git_calls(monkeypatch: pytest.MonkeyPatch) -> list[GitCall]:
     calls: list[GitCall] = []
-    process = GitCommand.process
+    process = Git.process
+    popen = Git.popen
 
-    def recording(self: GitCommand, *args: str, **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
+    def recording(self: Git, *args: str, **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
         calls.append(GitCall(args, self.program))
         return process(self, *args, **kwargs)
 
-    monkeypatch.setattr(GitCommand, "process", recording)
+    def recording_popen(self: Git, *args: str, **kwargs: Any) -> subprocess.Popen[bytes]:
+        calls.append(GitCall(args, self.program))
+        return popen(self, *args, **kwargs)
+
+    monkeypatch.setattr(Git, "process", recording)
+    monkeypatch.setattr(Git, "popen", recording_popen)
     return calls
 
 

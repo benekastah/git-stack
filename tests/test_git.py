@@ -7,16 +7,30 @@ import subprocess
 import sys
 from typing import Any
 
+import git_client
 import pytest
+from git_client import Git, GitError, GitTimeoutError
 
-from git_stack import git_read
 from git_stack.adapters.git import GitAdapter
 from git_stack.core import StackCore
 from git_stack.errors import StackError
 from git_stack.git import GIT_VARIABLE, GitClient, changes_refs, changes_worktrees, same_file
-from git_stack.git_command import GitError
 from tests.git_support import GitCall, real_git
 from tests.helpers import Repo, install_command
+
+
+def test_git_stack_runs_git_through_the_shared_client(repo: Repo, monkeypatch: pytest.MonkeyPatch) -> None:
+    commands: list[tuple[object, ...]] = []
+    process = Git.process
+
+    def record(self: Git, *args: Any, **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
+        commands.append(args)
+        return process(self, *args, **kwargs)
+
+    monkeypatch.setattr(Git, "process", record)
+
+    assert GitClient(repo.path).run("branch", "--show-current") == "main"
+    assert commands == [("branch", "--show-current")]
 
 
 def test_cli_runner_uses_configured_git_executable(
@@ -46,12 +60,39 @@ def test_resolving_an_object_outside_a_repository_is_a_stack_error(tmp_path: pat
 def test_failing_to_read_the_refs_is_a_stack_error(repo: Repo, monkeypatch: pytest.MonkeyPatch) -> None:
     def failing(*args: Any, **kwargs: Any) -> None:
         command = ("for-each-ref",)
-        raise GitError(command, subprocess.CompletedProcess(command, 128, b"", b"fatal: refs broke"))
+        raise GitError(command, 128, "fatal: refs broke")
 
-    monkeypatch.setattr(git_read, "refs", failing)
+    monkeypatch.setattr(git_client, "refs", failing)
     git = GitClient(repo.path)
     with pytest.raises(StackError, match="refs broke"), git.snapshot():
         git.local_branches()
+
+
+def test_missing_git_answer_is_a_stack_error(repo: Repo, monkeypatch: pytest.MonkeyPatch) -> None:
+    def timed_out(*args: Any, **kwargs: Any) -> None:
+        raise GitTimeoutError(("for-each-ref",), None, "")
+
+    monkeypatch.setattr(git_client, "refs", timed_out)
+    git = GitClient(repo.path)
+    with pytest.raises(StackError, match="timed out"), git.snapshot():
+        git.local_branches()
+
+
+def test_operation_paths_are_cached_only_inside_a_snapshot(
+    repo: Repo, git_calls: list[GitCall], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    git_dir = repo.path / ".git"
+    monkeypatch.setenv("GIT_DIR", str(git_dir))
+    git = GitClient(repo.path)
+
+    with git.snapshot():
+        assert not git.operation_in_progress()
+        (git_dir / "MERGE_HEAD").touch()
+        assert git.operation_in_progress()
+        assert len(git_calls) == 1
+
+    assert git.operation_in_progress()
+    assert len(git_calls) == 2
 
 
 def test_a_broken_config_is_a_stack_error(repo: Repo) -> None:
@@ -490,6 +531,27 @@ def sha256_repo(tmp_path: pathlib.Path, repo: Repo) -> Repo:
     sha256.git("commit", "--quiet", "-m", "one")
     sha256.commit("a", "two\n", "two")
     return sha256
+
+
+def test_commit_patch_ids_ignore_log_show_root_config(repo: Repo) -> None:
+    root = repo.git("rev-list", "--max-parents=0", "HEAD")
+    command = ("show", "-p", root)
+    expected = separate_patch_ids(repo, *command)
+    assert len(expected) == 1
+    repo.git("config", "log.showRoot", "false")
+
+    assert GitClient(repo.path).commit_patch_ids(command) == [expected]
+
+
+def test_commit_patch_ids_preserve_unicode_at_end_of_patch(repo: Repo) -> None:
+    repo.write("a", "new\u00a0\n")
+    command = [real_git(), "-C", str(repo.path)]
+    patch = subprocess.check_output([*command, "diff", "HEAD"])
+    expected = subprocess.run([*command, "patch-id", "--stable"], input=patch, capture_output=True, check=True)
+
+    [[(patch_id, commit)]] = GitClient(repo.path).commit_patch_ids(("diff", "HEAD"))
+
+    assert f"{patch_id} {commit}\n".encode() == expected.stdout
 
 
 def test_commit_patch_ids_in_a_sha256_repository(tmp_path: pathlib.Path, repo: Repo) -> None:

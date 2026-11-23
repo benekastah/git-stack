@@ -8,9 +8,9 @@ from collections.abc import Iterator
 from typing import Any
 
 import pytest
+from git_client import Git, decode
 
 from git_stack.core import Delete
-from git_stack.git_command import GitCommand, decode
 from git_stack.stack import BranchStatus, StackClient
 from tests.helpers import FakeGitHub, Repo
 
@@ -21,9 +21,9 @@ def no_ambiguous_names(monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFix
     ambiguous, in the output it captures or in what it lets through to the
     terminal (e.g. a rebase's)."""
     warnings: list[str] = []
-    process = GitCommand.process
+    process = Git.process
 
-    def checked(self: GitCommand, *args: str, **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
+    def checked(self: Git, *args: str, **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
         result = process(self, *args, **kwargs)
         # What it captured, and what it let through to the terminal, e.g. a rebase's.
         text = decode(result.stderr or b"") + capfd.readouterr().err
@@ -31,7 +31,7 @@ def no_ambiguous_names(monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFix
         warnings.extend(f"{line} (git {command})" for line in text.splitlines() if "is ambiguous" in line)
         return result
 
-    monkeypatch.setattr(GitCommand, "process", checked)
+    monkeypatch.setattr(Git, "process", checked)
     yield
     assert warnings == []
 

@@ -37,8 +37,8 @@ from types import TracebackType
 from typing import Any, Self
 
 import pytest
+from git_client import Git
 
-from git_stack.git_command import GitCommand
 from tests import fake_gh
 
 TRACE_VARIABLE = "GIT_TRACE2_EVENT"
@@ -102,21 +102,30 @@ def install(monkeypatch: pytest.MonkeyPatch) -> None:
     It wraps the places every command goes through, the ones the `git_calls` fixture wraps
     too, rather than use that fixture: a decorator can't ask for a fixture without changing
     the test's signature, and a `with` block inside a test has no way to reach one."""
-    process = GitCommand.process
+    process = Git.process
+    popen = Git.popen
     gh_run = fake_gh.run
 
-    def recording_process(self: GitCommand, *args: str, **kwargs: Any) -> Any:
-        command = ["-C", self.directory, *args]
+    def record_git(git: Git, args: tuple[str, ...]) -> None:
+        command = ["-C", git.directory, *args]
         for ran in _running():
             ran.git.append(command)
+
+    def recording_process(self: Git, *args: str, **kwargs: Any) -> Any:
+        record_git(self, args)
         return process(self, *args, **kwargs)
+
+    def recording_popen(self: Git, *args: str, **kwargs: Any) -> Any:
+        record_git(self, args)
+        return popen(self, *args, **kwargs)
 
     def recording_gh(args: list[str], *rest: Any, **kwargs: Any) -> Any:
         for ran in _running():
             ran.gh.append(list(args))
         return gh_run(args, *rest, **kwargs)
 
-    monkeypatch.setattr(GitCommand, "process", recording_process)
+    monkeypatch.setattr(Git, "process", recording_process)
+    monkeypatch.setattr(Git, "popen", recording_popen)
     monkeypatch.setattr(fake_gh, "run", recording_gh)
 
 

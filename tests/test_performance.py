@@ -6,14 +6,16 @@ import pathlib
 import shlex
 import sys
 
+import git_client.performance as git_performance
 import pytest
+from git_client import CatFile, Git, PerformanceEvent, PerformanceRecorder
 
 from git_stack import _version, performance
 from git_stack.cli import build_parser
 from git_stack.git import GitClient
 from git_stack.performance import Timeline
 from tests.conftest import ROOT
-from tests.git_support import GitCall
+from tests.git_support import GitCall, real_git
 from tests.helpers import FakeGitHub, Repo
 from tests.test_integrate import source
 
@@ -262,18 +264,24 @@ def test_old_performance_flags_are_rejected(flag: str) -> None:
     assert error.value.code == 2
 
 
-def test_timeline_uses_start_order_and_unions_concurrent_intervals() -> None:
+def test_timeline_uses_start_order_and_unions_concurrent_intervals(monkeypatch: pytest.MonkeyPatch) -> None:
     now = 0.0
     timeline = Timeline(clock=lambda: now)
-    now = 1.0
-    with timeline.record("git", "fetch"):
-        now = 2.0
-        with timeline.record("gh", "api", "graphql", "-f", "query=private query"):
-            now = 3.0
-            with timeline.record("git", "status"):
-                now = 4.0
-            now = 6.0
-        now = 7.0
+    monkeypatch.setattr(
+        PerformanceRecorder,
+        "events",
+        (
+            PerformanceEvent("process", "git", 1.0, 7.0, ("fetch",), pid=1),
+            PerformanceEvent("process", "git", 3.0, 4.0, ("status",), pid=2),
+            PerformanceEvent("process", "git", 4.0, 4.0, ("failed-to-launch",)),
+        ),
+    )
+    now = 2.0
+    with timeline.record("gh", "api", "graphql", "-f", "query=private query"):
+        now = 6.0
+    now = 7.25
+    with timeline.record("native", "resolve"):
+        now = 7.75
     now = 8.0
     with pytest.raises(RuntimeError, match="failed"), timeline.record("gh", "pr", "view"):
         now = 9.0
@@ -285,6 +293,7 @@ def test_timeline_uses_start_order_and_unions_concurrent_intervals() -> None:
         "  +1.000s   6.000s  git fetch",
         "  +2.000s   4.000s  gh api graphql -f 'query=<omitted>'",
         "  +3.000s   1.000s  git status",
+        "  +7.250s   0.500s  native resolve",
         "  +8.000s   1.000s  gh pr view",
         "  Total       10.000s",
         "  Git          6.000s (60.0%)",
@@ -398,9 +407,57 @@ def test_failed_git_call_keeps_the_command_error(repo: Repo, performance_log: pa
     assert any(call[:2] == ["git", "push"] for call in timed_commands(report))
 
 
-def test_native_reads_add_no_subprocess_timing(repo: Repo) -> None:
+def test_native_reads_are_timed_without_counting_cache_hits(repo: Repo) -> None:
+    tip = repo.git("rev-parse", "HEAD")
     timeline = Timeline()
-    git = GitClient(repo.path)
-    with timeline.activate(), git.snapshot():
-        assert git.rev("HEAD")
-    assert timed_commands(timeline.render()) == []
+    with timeline.activate():
+        git = GitClient(repo.path)
+        with git.snapshot():
+            assert git.rev(tip) == tip
+            assert git.rev(tip) == tip
+
+    calls = timed_commands(timeline.render())
+    assert calls.count(["native", "resolve"]) == 1
+    assert all(call[0] != "git" for call in calls)
+
+
+def test_cat_file_counts_a_single_launch_and_excludes_idle_time(repo: Repo, monkeypatch: pytest.MonkeyPatch) -> None:
+    now = 0.0
+    monkeypatch.setattr(git_performance, "monotonic", lambda: now)
+    timeline = Timeline(clock=lambda: now)
+    git = Git(repo.path, program=real_git(), performance=timeline.git)
+    now = 1.0
+    with CatFile(git) as batch:
+        assert batch.resolve("HEAD")
+        now = 8.0
+        assert batch.resolve("HEAD^{tree}")
+    now = 10.0
+
+    report = timeline.render()
+    assert [call for call in timed_commands(report) if call[0] == "git"] == [["git", "cat-file", "--batch-command"]]
+    assert [call for call in timed_commands(report) if call[0] == "cat-file"] == [
+        ["cat-file", "request"],
+        ["cat-file", "request"],
+        ["cat-file", "shutdown"],
+    ]
+    assert "  Git          0.000s (0.0%)" in report
+    assert "  Other       10.000s (100.0%)" in report
+
+
+def test_cat_file_work_counts_toward_git_time(monkeypatch: pytest.MonkeyPatch) -> None:
+    clock = iter([0.0, 8.0])
+    timeline = Timeline(clock=lambda: next(clock))
+    monkeypatch.setattr(
+        PerformanceRecorder,
+        "events",
+        (
+            PerformanceEvent("process", "git", 1.0, 8.0, ("cat-file", "--batch-command"), pid=1, persistent=True),
+            PerformanceEvent("process_work", "CatFile.request", 1.0, 2.0),
+            PerformanceEvent("process_work", "CatFile.request", 5.0, 7.0),
+            PerformanceEvent("process_work", "CatFile.shutdown", 7.0, 8.0),
+        ),
+    )
+
+    report = timeline.render()
+    assert "  Git          4.000s (50.0%)" in report
+    assert "  Other        4.000s (50.0%)" in report

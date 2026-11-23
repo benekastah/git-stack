@@ -27,11 +27,11 @@ lands on `main` so each merged build has a distinct version in performance logs.
   reached over direct HTTPS or verified SSH. SSH verification uses the
   effective OpenSSH configuration for both Git services. Other remotes use
   live HEAD probes for the fetch remote and any separate push destinations.
-- `GitClient` uses pygit2 for local object and ancestry queries, repository
-  discovery and worktree state. `git_stack/git_command.py` runs the Git CLI
-  for mutations, network operations, and reads that need Git's exact semantics.
-  It honors `$GIT_STACK_GIT`, preserves the user's locale for hooks, and captures
-  Git's diagnostic messages in English where the app parses them.
+- `GitClient` uses py-git-client for Git subprocesses and bulk ref and config
+  operations. `git_stack/git_command.py` selects `$GIT_STACK_GIT` or Git on PATH
+  for each invocation. Git-stack uses pygit2 for local object and ancestry queries,
+  discovery, and worktree state. The snapshot also owns the library's cache for
+  Git metadata queries. Per-command reference and graph caches live in `GitClient`.
 - `git_stack/stacks.py` (`Stacks`) holds the tracked branches as trees, with
   the rules for groups and ownership, without touching the repository.
   `StackCore.stacks()` reads it, a command changes it in memory, and
@@ -68,9 +68,10 @@ lands on `main` so each merged build has a distinct version in performance logs.
   client's `on_event`. `git_stack/output.py` turns them into text, or into JSON
   lines.
 - When `stack.perfLog` is set, `git_stack/performance.py` records one timeline at
-  `GitCommand.process` and at both `gh` launches. In-process reads are part
-  of the remaining wall time.
-  Branch-status workers inherit the same recorder. Keep subprocess input,
+  the library's `PerformanceRecorder`, both `gh` launch sites, and native
+  object and graph reads. CatFile work contributes active intervals to Git time.
+  Native reads are part of the remaining wall time. Branch-status workers and
+  linked-worktree clients share the command's recorder. Keep subprocess input,
   output and environment out of the timeline.
   The CLI writes the command line, version and timeline to `stack.perfLog`,
   capped by `stack.perfLogMaxBytes`. Tests configure their own log paths.
@@ -81,7 +82,8 @@ lands on `main` so each merged build has a distinct version in performance logs.
   the code compares members rather than strings, and adding a value happens in
   one place. Give it the values the outside world uses, so JSON output, which
   prints an enum as its value, doesn't change.
-- pygit2 is the runtime Git library. Integration fixtures use the installed Git.
+- The runtime dependency on py-git-client enables its pygit2 extra. Integration
+  fixtures use the installed Git.
 
 - `git_stack/skills/<name>/SKILL.md` are agent skills for people's agents, kept short and pointing at
   `git stack --help` and the README for detail. `tests/test_skills.py` checks that every

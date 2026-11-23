@@ -246,9 +246,12 @@ It accepts Git\(aqs integer suffixes, such as \f[CR]1k\f[R].
 Relative paths use the command directory selected by \f[CR]\-C\f[R].
 Use a regular file dedicated to performance reports.
 .PP
-The timeline lists calls in start order with their start offsets and
-elapsed times.
-In\-process Git reads are included in the remaining wall time.
+The timeline lists Git and \f[CR]gh\f[R] launches in start order with
+their offsets and elapsed times.
+A persistent \f[CR]git cat\-file\f[R] launch has a zero\-duration entry.
+Its active work appears separately and contributes to Git time.
+Native object and ancestry reads appear as \f[CR]native\f[R] entries and
+contribute to the remaining wall time.
 Inline GraphQL query bodies are abbreviated.
 Reports show total wall time, time in Git and \f[CR]gh\f[R], time spent
 elsewhere, and any overlap between the two tools.

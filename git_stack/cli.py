@@ -1,8 +1,9 @@
 import argparse
 import pathlib
 import sys
-from contextlib import nullcontext
 from typing import Any
+
+from git_client import NoAnswerError
 
 import git_stack
 from git_stack._version import build_version
@@ -125,11 +126,12 @@ def _run(args: argparse.Namespace, stack: StackClient | None, argv: list[str]) -
             stack = StackClient(GitClient(pathlib.Path(".", *args.directories)))
         log_settings = performance_log_settings(stack.git)
         timeline = Timeline() if log_settings is not None else None
-        with timeline.activate() if timeline is not None else nullcontext():
-            if timeline is not None:
-                version = build_version()
+        if timeline is None:
             return _run_command(args, stack, stream)
-    except StackError as e:
+        with timeline.activate(), stack.git.record_performance(timeline.git):
+            version = build_version()
+            return _run_command(args, stack, stream)
+    except (StackError, NoAnswerError) as e:
         if stream:
             stream.error(str(e))
         print(f"git stack: {e}", file=sys.stderr)

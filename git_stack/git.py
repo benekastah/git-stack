@@ -9,12 +9,15 @@ from collections.abc import Generator, Mapping, Sequence
 from contextlib import contextmanager
 from typing import TextIO
 
+import git_client
 import pygit2
+from git_client import ConfigSet, ConfigUnset, Git, GitCache, GitError, NoAnswerError, PerformanceRecorder, Ref, decode
 
 from git_stack import git_read
 from git_stack.errors import StackError
-from git_stack.git_command import GitCommand, GitError, decode
-from git_stack.git_read import Ref, config_key
+from git_stack.git_command import PatchGit, find_git
+from git_stack.git_read import config_key
+from git_stack.performance import active_timeline, measure_native
 
 DEFAULT_REMOTE = "origin"
 # How long to keep retrying a git config write that finds the config file locked
@@ -131,6 +134,8 @@ def git_errors() -> Generator[None]:
     try:
         yield
     except GitError as e:
+        raise StackError(f"git {' '.join(e.command)} failed:\n{e.stderr.strip()}") from e
+    except NoAnswerError as e:
         raise StackError(str(e)) from e
 
 
@@ -148,7 +153,10 @@ class GitClient:
     def __init__(self, directory: str | os.PathLike[str] = ".") -> None:
         self.directory = pathlib.Path(directory)
         try:
-            self._git = GitCommand(self.directory, env_var=GIT_VARIABLE)
+            timeline = active_timeline.get()
+            self._git = Git(
+                self.directory, program=find_git(GIT_VARIABLE), performance=timeline.git if timeline else None
+            )
         except (FileNotFoundError, ValueError) as e:
             # No git on PATH, or on Windows, a batch file.
             raise StackError(str(e)) from e
@@ -188,11 +196,35 @@ class GitClient:
         # our stdout is for --json output.
         self.passthrough_stdout: TextIO | None = None
 
+    @contextmanager
+    def record_performance(self, recorder: PerformanceRecorder) -> Generator[None]:
+        """Send Git events to the command's recorder while it runs."""
+        original = self._git.performance
+        self._git.performance = recorder
+        try:
+            yield
+        finally:
+            self._git.performance = original
+
+    def _git_with(
+        self, client_type: type[Git] = Git, *, cache: GitCache | None = None, object_id_length: int | None = None
+    ) -> Git:
+        return client_type(
+            self.directory,
+            program=self._git.program,
+            performance=self._git.performance,
+            cache=cache,
+            object_id_length=object_id_length,
+        )
+
     def _ran(self, args: tuple[str, ...]) -> None:
         """Forget the ref snapshot if `git <args>`, which just ran, may have
         changed it, whether or not it succeeded."""
         if changes_refs(args):
-            self._forget_refs(worktrees=changes_worktrees(args))
+            worktrees = changes_worktrees(args)
+            if worktrees:
+                self._git.forget()
+            self._forget_refs(worktrees=worktrees)
 
     def _forget_refs(self, worktrees: bool = True) -> None:
         """Forget the ref snapshot and the reflogs, and unless worktrees is
@@ -220,13 +252,16 @@ class GitClient:
             if check:
                 raise StackError(f"git {' '.join(args)} failed:\n{e.stderr.strip()}") from e
             return e.stdout.strip()
+        except NoAnswerError as e:
+            raise StackError(str(e)) from e
         finally:
             self._ran(args)
 
     def ok(self, *args: str) -> bool:
         """Run git and report whether it succeeded."""
         try:
-            return self._git.succeeds(*args)
+            with git_errors():
+                return self._git.succeeds(*args)
         finally:
             self._ran(args)
 
@@ -245,7 +280,8 @@ class GitClient:
         """Run git with output going straight to the terminal (stdout to
         passthrough_stdout)."""
         try:
-            return self._git.passthrough(*args, stdout=self.passthrough_stdout)
+            with git_errors():
+                return self._git.passthrough(*args, stdout=self.passthrough_stdout)
         finally:
             self._ran(args)
 
@@ -270,18 +306,22 @@ class GitClient:
         a test running git, aren't seen, so a snapshot is only for the length
         of one command, which holds the lock (see StackCore.exclusive) if it
         changes anything. Blocks can nest; the snapshot is forgotten when the
-        outermost one ends.
+        outermost one ends, along with the library's cache of Git metadata.
 
         A ref the snapshot doesn't have is still asked of git, which on a
         case-insensitive filesystem (as macOS's and Windows' usually are) can
         find it under a name that differs in case.
         """
+        original_git = self._git
+        if not self._snapshot_depth:
+            self._git = self._git_with(cache=GitCache())
         self._snapshot_depth += 1
         try:
             yield
         finally:
             self._snapshot_depth -= 1
             if not self._snapshot_depth:
+                self._git = original_git
                 self._forget_refs()
                 self._remote_defaults = {}
                 self._push_defaults = {}
@@ -306,7 +346,7 @@ class GitClient:
                     else ["refs/remotes/"]
                 )
                 with git_errors():
-                    listed = git_read.refs(self._git, "refs/heads/", "refs/replace/", *patterns)
+                    listed = git_client.refs(self._git, "refs/heads/", "refs/replace/", *patterns)
                 head = next((ref.name.removeprefix("refs/heads/") for ref in listed.values() if ref.head), None)
                 self._has_replacements = any(ref.startswith("refs/replace/") for ref in listed)
                 self._refs = listed
@@ -352,22 +392,23 @@ class GitClient:
         usable = self._native.graph_usable if self._snapshot_depth else None
         if usable is None:
             try:
-                common = git_read.common_directory(repo)
-                has_replacements = (
-                    self._has_replacements
-                    if self._refs is not None
-                    else any(ref.startswith("refs/replace/") for ref in repo.listall_references())
-                )
-                config = repo.config
-                usable = (
-                    not repo.is_shallow
-                    and not has_replacements
-                    and not (common / "info" / "grafts").exists()
-                    and "extensions.partialclone" not in config
-                    and not any(
-                        entry.name.endswith(".promisor") for entry in config if entry.name.startswith("remote.")
+                with measure_native("graph"):
+                    common = git_read.common_directory(repo)
+                    has_replacements = (
+                        self._has_replacements
+                        if self._refs is not None
+                        else any(ref.startswith("refs/replace/") for ref in repo.listall_references())
                     )
-                )
+                    config = repo.config
+                    usable = (
+                        not repo.is_shallow
+                        and not has_replacements
+                        and not (common / "info" / "grafts").exists()
+                        and "extensions.partialclone" not in config
+                        and not any(
+                            entry.name.endswith(".promisor") for entry in config if entry.name.startswith("remote.")
+                        )
+                    )
             except pygit2.GitError, ValueError, OSError:
                 usable = False
             if self._snapshot_depth:
@@ -378,11 +419,11 @@ class GitClient:
         """Where all worktrees share Git metadata."""
         if self._common_dir is None:
             repo = self._open_repository()
-            self._common_dir = (
-                git_read.common_directory(repo)
-                if repo is not None
-                else pathlib.Path(self.run("rev-parse", "--path-format=absolute", "--git-common-dir"))
-            )
+            if repo is not None:
+                self._common_dir = git_read.common_directory(repo)
+            else:
+                with git_errors():
+                    self._common_dir = git_client.git_common_dir(self._git)
         return self._common_dir
 
     def branch_config(self, fresh: bool = False) -> dict[tuple[str, str], str]:
@@ -407,7 +448,7 @@ class GitClient:
         if fresh or not self._config_read or stat != self._config_stat:
             branches: dict[tuple[str, str], str] = {}
             with git_errors():
-                entries = git_read.config(self._git)
+                entries = git_client.config(self._git)
             for key, values in entries.items():
                 if key.startswith("branch."):
                     # Branch names can contain dots, but keys can't. The last
@@ -453,35 +494,23 @@ class GitClient:
         return self.branch_config().get((branch, key.lower())) or None
 
     def config_set(self, branch: str, key: str, value: str) -> None:
-        self.write_config(f"branch.{branch}.{key}", value)
+        self._write_config(ConfigSet(f"branch.{branch}.{key}", value))
 
     def config_unset(self, branch: str, key: str, value: str | None = None) -> None:
-        """Unset branch's key, or, if value is given, only if it's still value."""
-        self.write_config(
-            "--unset",
-            *(("--fixed-value",) if value is not None else ()),
-            f"branch.{branch}.{key}",
-            *((value,) if value is not None else ()),
-            check=False,
-        )
+        """Unset a branch setting, optionally only if it still has the given value."""
+        self._write_config(ConfigUnset(f"branch.{branch}.{key}", value))
 
-    def write_config(self, *args: str, check: bool = True) -> None:
-        """Run `git config <args>`, trying it again for up to
-        CONFIG_LOCK_TIMEOUT seconds while another process has the config file
-        locked.
-
-        Writing anything but git-stack's own settings (see core.PARENT_KEY and
-        the rest, which all start with "stack") forgets the ref snapshot, since
-        it may change a branch's upstream.
-        """
+    def _write_config(self, change: ConfigSet | ConfigUnset) -> None:
+        """Write branch config, retrying while the config file is locked."""
         try:
-            self._git.write_config(*args, wait=CONFIG_LOCK_TIMEOUT)
-        except GitError as e:
-            if check:
-                raise StackError(f"git config {' '.join(args)} failed:\n{e.stderr.strip()}") from e
+            self._git.write_configs(change, wait=CONFIG_LOCK_TIMEOUT)
+        except GitError as error:
+            if isinstance(change, ConfigSet):
+                raise StackError(f"git config {change.key} {change.value} failed:\n{error.stderr.strip()}") from error
+        except NoAnswerError as error:
+            raise StackError(str(error)) from error
         finally:
-            key = next((a for a in args if not a.startswith("-")), "")
-            if not key.rpartition(".")[2].lower().startswith("stack"):
+            if not change.key.rpartition(".")[2].lower().startswith("stack"):
                 # A config write can't move a worktree's HEAD.
                 self._forget_refs(worktrees=False)
 
@@ -522,15 +551,21 @@ class GitClient:
         if (a, d) in self._ancestry and self._snapshot_depth:
             return self._ancestry[a, d]
         repo = self._graph_repository()
-        try:
-            answer = (
-                a == d or repo.descendant_of(d, a) if repo is not None else self.ok("merge-base", "--is-ancestor", a, d)
-            )
-        except pygit2.GitError, ValueError:
-            answer = self.ok("merge-base", "--is-ancestor", a, d)
+        answer = self._descendant_of(repo, d, a)
         if self._snapshot_depth:
             self._ancestry[a, d] = answer
         return answer
+
+    def _descendant_of(self, repo: pygit2.Repository | None, descendant: str, ancestor: str) -> bool:
+        if repo is not None:
+            if ancestor == descendant:
+                return True
+            try:
+                with measure_native("ancestry"):
+                    return repo.descendant_of(descendant, ancestor)
+            except pygit2.GitError, ValueError:
+                pass
+        return self.ok("merge-base", "--is-ancestor", ancestor, descendant)
 
     def check_ancestry(self, ancestor: str, descendant: str, *, env: Mapping[str, str] | None = None) -> bool:
         """Check ancestry without memoization. Git errors are not a negative answer."""
@@ -561,21 +596,23 @@ class GitClient:
         )
         if simple and suffix in {"commit}", "tree}"} and (repo := self._graph_repository()) is not None:
             kind = pygit2.Commit if suffix == "commit}" else pygit2.Tree
-            try:
-                if is_object_id(base):
-                    return str(repo[base].peel(kind).id)
+            with measure_native("resolve"):
                 try:
-                    reference = repo.lookup_reference(base)
-                except KeyError:
-                    return None
-                return str(reference.peel(kind).id)
-            except KeyError, pygit2.GitError, ValueError, TypeError:
-                # Git can resolve objects that need a lazy fetch from a promisor remote.
-                pass
+                    if is_object_id(base):
+                        return str(repo[base].peel(kind).id)
+                    try:
+                        reference = repo.lookup_reference(base)
+                    except KeyError:
+                        return None
+                    return str(reference.peel(kind).id)
+                except KeyError, pygit2.GitError, ValueError, TypeError:
+                    # Git can resolve objects that need a lazy fetch from a promisor remote.
+                    pass
         args = ("rev-parse", "--verify", "--quiet", "--end-of-options", name)
-        result = self._git.process(*args, capture_output=True)
+        with git_errors():
+            result = self._git.process(*args, capture_output=True)
         if self._snapshot_depth and result.returncode not in (0, 1):
-            raise StackError(str(GitError(args, result)))
+            raise StackError(f"git {' '.join(args)} failed:\n{decode(result.stderr).strip()}")
         return decode(result.stdout).strip() or None
 
     def author_email(self) -> str | None:
@@ -595,12 +632,15 @@ class GitClient:
         repo = self._open_repository()
         if repo is not None:
             try:
-                target = repo.lookup_reference("HEAD").target
-                if isinstance(target, pygit2.Oid):
-                    return None
-                # Git resolves chained aliases with its own traversal limit.
-                if target.startswith("refs/heads/") and isinstance(repo.lookup_reference(target).target, pygit2.Oid):
-                    return target.removeprefix("refs/heads/")
+                with measure_native("current-branch"):
+                    target = repo.lookup_reference("HEAD").target
+                    if isinstance(target, pygit2.Oid):
+                        return None
+                    # Git resolves chained aliases with its own traversal limit.
+                    if target.startswith("refs/heads/") and isinstance(
+                        repo.lookup_reference(target).target, pygit2.Oid
+                    ):
+                        return target.removeprefix("refs/heads/")
             except KeyError, pygit2.GitError, ValueError:
                 pass
         return self.run("branch", "--show-current") or None
@@ -629,10 +669,9 @@ class GitClient:
         names = ("rebase-merge", "rebase-apply", "CHERRY_PICK_HEAD", "REVERT_HEAD", "sequencer", "MERGE_HEAD")
         if (repo := self._open_repository()) is not None:
             return any((pathlib.Path(repo.path) / name).exists() for name in names)
-        args = [arg for name in names for arg in ("--git-path", name)]
         with git_errors():
-            paths = self._git.run_bytes("rev-parse", "--path-format=absolute", *args)
-        return any(pathlib.Path(os.fsdecode(path)).exists() for path in paths.splitlines())
+            paths = git_client.git_paths(self._git, *names)
+        return any(path.exists() for path in paths)
 
     def has_conflicts(self) -> bool:
         """Whether the index has unmerged paths, i.e. a merge stopped on a
@@ -1005,12 +1044,12 @@ class GitClient:
         taken literally."""
         if not commands:
             return []
-        if self._open_repository() is not None:
-            oid_length = 40
-        else:
-            oid_length = 64 if self.run("rev-parse", "--show-object-format") == "sha256" else 40
+        # libgit2 opens SHA-1 repositories. For other formats, let Git tell the library.
+        git = self._git_with(
+            PatchGit, cache=self._git.cache, object_id_length=40 if self._open_repository() is not None else None
+        )
         with git_errors():
-            return git_read.patch_ids(self._git, commands, oid_length)
+            return git_client.patch_ids(git, *commands, paths_from_top=True)
 
     def identity_counts(self, *args: str) -> Counter[str]:
         """Count commit identities, including repeated author, date and subject."""
