@@ -56,7 +56,7 @@ rebuild the commits first, choosing changes a hunk or a line at a time.
       git switch --quiet "$branch" && <the project's checks> || break
   done
   ```
-- The shape is what you planned: `git stack info --all --offline`.
+- The shape is what you planned: `git stack info --all`.
 
 If the split rearranges an existing stack, follow the approval rules in
 `git-stack` to confirm the user approved publication. Use `git stack push --protect-prs --prs`

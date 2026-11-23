@@ -53,20 +53,20 @@ def test_group_integration_refreshes_its_leaves_and_keeps_source_order(repo: Rep
 
     repo.stack("integrate", "combined", "-g")
 
-    assert "(of leaf, other)" in repo.stack("info", "combined", "--offline").stdout
+    assert "(of leaf, other)" in repo.stack("info", "combined").stdout
     client.branch("new-top")
     repo.commit("a", "new top\n", "new top")
     client.branch("added", group="topic", from_branch="main")
     repo.write("added.txt", "added\n")
     repo.git("add", "added.txt")
     repo.git("commit", "-m", "added")
-    assert "(of other, new-top, added) (needs restack)" in repo.stack("info", "combined", "--offline").stdout
+    assert "(of other, new-top, added) (needs restack)" in repo.stack("info", "combined").stdout
 
     repo.stack("restack", "combined")
 
     assert repo.git("show", "combined:a") == "new top"
     assert repo.git("show", "combined:added.txt") == "added"
-    assert "(of other, new-top, added) (needs restack)" not in repo.stack("info", "combined", "--offline").stdout
+    assert "(of other, new-top, added) (needs restack)" not in repo.stack("info", "combined").stdout
 
     previous = tip(repo, "combined")
     repo.stack("integrate", "combined", "-g")
@@ -261,7 +261,7 @@ def test_group_integration_can_refresh_with_no_remaining_leaves(repo: Repo, clie
     repo.stack("restack", "combined")
 
     assert tip(repo, "combined") == tip(repo, "main")
-    assert "combined (integration)" in repo.stack("info", "combined", "--offline").stdout
+    assert "combined (integration)" in repo.stack("info", "combined").stdout
     client.branch("new", group="topic", from_branch="main")
     repo.commit("b", "new\n", "new")
     repo.stack("restack", "combined")
@@ -295,7 +295,7 @@ def test_group_integration_uses_the_parent_after_sync_deletes_a_merged_leaf(repo
     repo.stack("pull", "combined", "-g", "topic", "-d", "local")
 
     assert not repo.git("branch", "--list", "leaf")
-    assert "(of bottom)" in repo.stack("info", "combined", "--offline").stdout
+    assert "(of bottom)" in repo.stack("info", "combined").stdout
     assert repo.git("show", "combined:b") == "leaf"
 
 
@@ -347,7 +347,7 @@ def test_group_rename_updates_an_interrupted_initial_integration(
     repo.stack("restack", "combined")
 
     assert repo.git("show", "combined:a") == "leaf"
-    assert "(of leaf)" in repo.stack("info", "combined", "--offline").stdout
+    assert "(of leaf)" in repo.stack("info", "combined").stdout
 
 
 def test_restack_refuses_to_move_a_new_group_leaf_onto_an_integration(repo: Repo, client: StackClient) -> None:
@@ -380,14 +380,14 @@ def test_group_integration_can_record_an_already_landed_leaf_in_a_linked_worktre
     repo.stack("restack", "combined")
 
     assert tip(repo, "combined") == previous
-    assert "(of first, empty)" in repo.stack("info", "combined", "--offline").stdout
+    assert "(of first, empty)" in repo.stack("info", "combined").stdout
 
     client.group_remove(["empty"])
     repo.commit("b", "not in the group\n", "not in the group")
     repo.stack("restack", "combined")
 
     assert tip(repo, "combined") == previous
-    assert "(of first)" in repo.stack("info", "combined", "--offline").stdout
+    assert "(of first)" in repo.stack("info", "combined").stdout
 
 
 @pytest.mark.parametrize("with_child", [False, True])
@@ -436,16 +436,16 @@ def test_info_marks_landed_integration_input_and_refresh(repo: Repo, gh: FakeGit
     repo.git("branch", "-f", "main", "origin/main")
     repo.git("config", "color.stack", "always")
 
-    result = repo.stack("info")
+    result = repo.stack("info", "--prs")
 
     assert "\033[36mone\033[m" in result.stdout
     assert "\033[33mcombined\033[m" in result.stdout and "!" in result.stdout
     assert "\033[33mcombined\033[m \033[33m!\033[m (of " in result.stdout
     repo.git("config", "color.stack", "never")
-    assert "combined (of one, two) (needs restack)" in repo.stack("info", "--offline").stdout
+    assert "combined (of one, two) (needs restack)" in repo.stack("info").stdout
     repo.git("config", "color.stack", "always")
     repo.stack("restack")
-    refreshed = repo.stack("info")
+    refreshed = repo.stack("info", "--prs")
     assert "\033[36mone\033[m" in refreshed.stdout
     assert "!" not in refreshed.stdout
 
@@ -463,14 +463,14 @@ def test_create_refresh_and_replace_ordered_sources(repo: Repo, git_calls: list[
     assert repo.git("rev-parse", "refs/heads/combined~2") == tip(repo, "main")
 
     repo.git("switch", "--quiet", "combined")
-    assert repo.stack("info", "--offline").stdout.splitlines()[0] == "combined (of one, two) *"
+    assert repo.stack("info").stdout.splitlines()[0] == "combined (of one, two) *"
     git_calls.clear()
     repo.stack("restack")
     assert tip(repo, "combined") == before
     assert not any(call[:2] == ["worktree", "add"] for call in git_calls)
 
     repo.stack("integrate", "combined", "two")
-    assert repo.stack("info", "--offline").stdout.splitlines()[0] == "combined (of two) *"
+    assert repo.stack("info").stdout.splitlines()[0] == "combined (of two) *"
     assert repo.git("show", "combined:b") == repo.git("show", "two:b")
     assert repo.git("rev-parse", "refs/heads/combined^1") == tip(repo, "main")
     assert repo.git("branch", "--show-current") == "combined"
@@ -1827,7 +1827,7 @@ def test_rename_updates_integration_inputs_and_root(repo: Repo) -> None:
     repo.stack("rename", "main", "renamed-root")
     repo.stack("restack", "combined")
 
-    assert "(of renamed-source, two)" in repo.stack("info", "--offline", "--all").stdout
+    assert "(of renamed-source, two)" in repo.stack("info", "--all").stdout
     assert tip(repo, "combined") == before
 
 

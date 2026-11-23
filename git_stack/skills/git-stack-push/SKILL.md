@@ -6,7 +6,7 @@ description: Publish local stacked branches and their pull requests with git sta
 # Publish a stack
 
 Read `git-stack` first for selection, ownership and timing. Check
-`git stack info --all --offline` and publish only the intended stack. Push
+`git stack info --all` and publish only the intended stack. Push
 uses leases, sets upstreams and updates pull request bases.
 
 Follow the open-PR checks in `git-stack` before pushing or running

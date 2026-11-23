@@ -41,7 +41,7 @@ def test_restack_suggests_recording_the_fork_when_only_trunk_has_merges(repo: Re
     repo.commit_on_forge("main", "c", "new trunk change\n", "new trunk change")
     new_trunk = repo.git("rev-parse", "main", cwd=repo.origin)
 
-    assert "stale recorded base" in repo.stack("info", "--offline").stdout
+    assert "stale recorded base" in repo.stack("info").stdout
 
     result = repo.stack(command, "--latest", expect_success=False)
 
@@ -95,22 +95,22 @@ def test_info_reuses_stale_base_check_until_trunk_moves(repo: Repo, git_calls: l
     repo.commit("b", "trunk\n", "trunk")
     git_calls.clear()
 
-    first = repo.stack("info", "feature", "--offline").stdout
+    first = repo.stack("info", "feature").stdout
     assert any(call[:2] == ["merge-base", "--all"] for call in git_calls)
     git_calls.clear()
 
-    assert repo.stack("info", "feature", "--offline").stdout == first
+    assert repo.stack("info", "feature").stdout == first
     assert not any(call[:2] == ["merge-base", "--all"] for call in git_calls)
 
     repo.git("replace", "main", "main^")
     git_calls.clear()
-    repo.stack("info", "feature", "--offline")
+    repo.stack("info", "feature")
     assert any(call[:2] == ["merge-base", "--all"] for call in git_calls)
     repo.git("replace", "-d", "main")
 
     repo.commit("b", "new trunk\n", "new trunk")
     git_calls.clear()
-    repo.stack("info", "feature", "--offline")
+    repo.stack("info", "feature")
     assert any(call[:2] == ["merge-base", "--all"] for call in git_calls)
 
 
@@ -131,7 +131,7 @@ def test_failed_stale_base_probe_does_not_cache_a_negative(repo: Repo, monkeypat
     with monkeypatch.context() as patch:
         patch.setattr(GitClient, "check_ancestry", unavailable)
         assert repo.client.stale_trunk_base("feature") is None
-        repo.stack("info", "feature", "--offline")
+        repo.stack("info", "feature")
 
     result = repo.stack("restack", "feature", expect_success=False)
 
@@ -185,7 +185,7 @@ def test_pull_checks_landing_against_the_projected_trunk(repo: Repo) -> None:
     repo.git("push", "-q", "origin", "main")
     repo.commit_on_forge("main", "a", "overlapping change\n", "overlapping change")
     repo.git("switch", "feature")
-    assert "(merged)" in repo.stack("info", "--offline").stdout
+    assert "(merged)" in repo.stack("info").stdout
 
     result = repo.stack("pull", "--latest", expect_success=False)
 
@@ -227,7 +227,7 @@ def test_restack_allows_a_squash_landed_branch_with_a_stale_base(repo: Repo) -> 
     repo.git("commit", "-m", "land feature")
     repo.git("switch", "feature")
 
-    assert "(merged)" in repo.stack("info", "--offline").stdout
+    assert "(merged)" in repo.stack("info").stdout
     repo.stack("restack", "--latest")
 
 

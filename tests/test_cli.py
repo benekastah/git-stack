@@ -125,18 +125,20 @@ def stack(autospec_stack: Any) -> Any:
         (["untrack", "pr1", "pr2"], "untrack", (["pr1", "pr2"],), {}),
         (["rename", "new"], "rename", ("new",), {"old": None}),
         (["rename", "old", "new"], "rename", ("new",), {"old": "old"}),
-        (["info"], "info", ([], []), {"offline": False, "current": True}),
+        (["info"], "info", ([], []), {"offline": True, "current": True}),
         (
-            ["info", "fix-*", "-g", "search", "--offline"],
+            ["info", "fix-*", "-g", "search"],
             "info",
             (["fix-*"], ["search"]),
             {"offline": True, "current": True},
         ),
-        (["info", "--json"], "info", ([], []), {"offline": False, "current": True}),
-        (["info", "--all", "--json"], "info", (), {"offline": False}),
-        (["info", "-a"], "info", (), {"offline": False}),
-        (["info", "-g", "--offline"], "info", ([], [CURRENT_GROUP]), {"offline": True, "current": True}),
-        (["info", "--group=", "--offline"], "info", ([], [""]), {"offline": True, "current": True}),
+        (["info", "--json"], "info", ([], []), {"offline": True, "current": True}),
+        (["info", "--all", "--json"], "info", (), {"offline": True}),
+        (["info", "-a"], "info", (), {"offline": True}),
+        (["info", "--prs"], "info", ([], []), {"offline": False, "current": True}),
+        (["info", "--all", "--prs"], "info", (), {"offline": False}),
+        (["info", "-g"], "info", ([], [CURRENT_GROUP]), {"offline": True, "current": True}),
+        (["info", "--group="], "info", ([], [""]), {"offline": True, "current": True}),
         (
             ["pull"],
             "sync",
@@ -498,7 +500,7 @@ def test_info_draws_each_stack_as_a_tree(stack: Any, capsys: pytest.CaptureFixtu
         BranchInfo("hotfix", "release", BranchStatus.PARENT_MISSING, current=False),
     ]
 
-    main(["info"], stack=stack)
+    main(["info", "--prs"], stack=stack)
 
     assert capsys.readouterr().out == (
         "main\n"
@@ -605,7 +607,7 @@ def test_info_integration_heading_does_not_pad_pr_links(stack: Any, capsys: pyte
         ),
     ]
 
-    main(["info"], stack=stack)
+    main(["info", "--prs"], stack=stack)
 
     assert capsys.readouterr().out.splitlines() == [
         "main",
@@ -642,7 +644,7 @@ def test_info_colors_each_part(stack: Any, capsys: pytest.CaptureFixture[str]) -
         ),
     ]
 
-    main(["info"], stack=stack)
+    main(["info", "--prs"], stack=stack)
 
     lines = capsys.readouterr().out.splitlines()
     assert lines[0] == "\033[1mmain\033[m"
@@ -1062,7 +1064,7 @@ def test_info_draws_a_group_header_on_each_root_it_has_stacks_on(
     assert capsys.readouterr().out == ("main\n└── group a\n    └── b\nrelease\n└── group a\n    └── c\n")
 
 
-@pytest.mark.parametrize("argv", [["--json", "info"], ["info", "--json"]])
+@pytest.mark.parametrize("argv", [["--json", "info", "--prs"], ["info", "--json", "--prs"]])
 def test_info_json_lists_every_branch(stack: Any, capsys: pytest.CaptureFixture[str], argv: list[str]) -> None:
     stack.info.return_value = [
         BranchInfo("main", None, None, current=False),

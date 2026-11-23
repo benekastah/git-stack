@@ -52,7 +52,7 @@ def stale_chain(repo: Repo, days: int, request: pytest.FixtureRequest) -> list[s
 
 def test_the_first_info_checks_each_branch_against_a_main_that_moved_on(repo: Repo, stale_chain: list[str]) -> None:
     with expect_operations(git=INFO_FIRST[len(stale_chain)]):
-        repo.stack_process("info", "--offline")
+        repo.stack_process("info")
 
 
 def test_restack_checks_a_stack_a_busy_main_has_left_behind(repo: Repo, stale_chain: list[str]) -> None:

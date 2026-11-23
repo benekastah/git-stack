@@ -19,7 +19,7 @@ Start with a clean worktree. `git stack restack <branch> --onto <parent>`
 moves the branch and its descendants. `git stack track <parent> <branch>`
 records a new parent and base. Naming the branch means you needn't switch to it.
 
-After rearranging, run `git stack info --all --offline` to verify the shape.
+After rearranging, run `git stack info --all` to verify the shape.
 Before publishing with `git stack push --protect-prs`, `git stack sync --protect-prs`, or `git stack prs --protect-prs`,
 recheck the queue and confirm the user's approval covers the resulting PR
 base changes.

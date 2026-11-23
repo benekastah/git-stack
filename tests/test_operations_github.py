@@ -149,12 +149,12 @@ def test_import_tracks_each_open_pull_request(repo: Repo, chain: list[str]) -> N
 
 
 def test_info_asks_github_about_each_branch(repo: Repo, chain: list[str]) -> None:
-    # Without --offline, so GitHub is asked, for every branch at once: the gh count stays at 1.
+    # Every branch is requested at once, so the gh count stays at 1.
     open_pull_requests(repo)
     git, gh = INFO[len(chain)]
 
     with expect_operations(git=git, gh=gh):
-        result = repo.stack_process("info")
+        result = repo.stack_process("info", "--prs")
 
     assert all(mentions(result.stdout, branch) for branch in chain)
     # With the links of the pull requests, which is what asking GitHub is for: one for each.

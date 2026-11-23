@@ -453,7 +453,7 @@ an integration.
 In color, sources proven to have landed on the configured root are cyan.
 An integration whose inputs or root have changed is marked as needing a
 restack.
-\f[CR]info \-\-offline\f[R] uses locally available landing evidence.
+By default, \f[CR]info\f[R] uses locally available landing evidence.
 .PP
 \f[CR]restack\f[R], \f[CR]pull\f[R], and \f[CR]sync\f[R] refresh the
 integration roots needed by the selected stacks.
@@ -693,7 +693,7 @@ The renamed branch\(aqs upstream is unset, so the next
 open its pull request again.
 Delete the old remote branch yourself
 (\f[CR]git push origin :add\-api\f[R]) if you no longer want it.
-.SS \f[CR]git stack info [<branch|glob>...] [\-g [<group>]] [\-a] [\-\-json] [\-\-offline]\f[R]
+.SS \f[CR]git stack info [<branch|glob>...] [\-g [<group>]] [\-a] [\-\-json] [\-\-prs]\f[R]
 Show the current stack (or the ones named, see Groups) as a tree, with
 its root (e.g.
 \f[CR]main\f[R]) on top and the branches built on it below.
@@ -715,9 +715,12 @@ needs doing: which branches depend on which, which need a restack, and
 which were merged.
 It\(aqs a good first step before \f[CR]restack\f[R], \f[CR]sync\f[R] or
 \f[CR]push\f[R].
+\f[CR]info\f[R] checks local history by default.
+Add \f[CR]\-\-prs\f[R] to look up pull request links and merge status
+with the GitHub adapter.
 .IP
 .EX
-git stack info
+git stack info \-\-prs
 \f[I]# main\f[R]
 \f[I]# └── add\-api *                   https://github.com/acme/widgets/pull/12\f[R]
 \f[I]#     ├── use\-api (needs restack) https://github.com/acme/widgets/pull/13\f[R]
@@ -751,9 +754,10 @@ marker makes its status visible without relying on color.
 merges in the branch\(aqs replay range.
 Run \f[CR]git stack restack\f[R] to see the suggested repair command.
 .IP \(bu 2
-\f[CR](merged)\f[R]: it was merged into its parent (see When does
-\f[CR]sync\f[R] consider a branch merged?); \f[CR]sync\f[R] or
-\f[CR]clean\f[R] will stop tracking it.
+\f[CR](merged)\f[R]: its changes landed in its parent.
+\f[CR]sync\f[R] and \f[CR]clean\f[R] use their own merge check before
+untracking a branch, including its PR status when using the GitHub
+adapter.
 .IP \(bu 2
 \f[CR](merged, with new commits)\f[R]: it was merged, but its remote
 branch got commits after the merge.
@@ -776,9 +780,10 @@ it onto the branch the parent was merged into.
 \f[CR]group <name>\f[R]: the stacks below it are in the group
 \f[CR]<name>\f[R] (see Groups).
 .IP \(bu 2
-With the GitHub adapter, each branch\(aqs pull request (open or merged)
-is linked in a column at the end of its line: blue if it\(aqs open, grey
-if it\(aqs a draft, and magenta if it was merged.
+With \f[CR]\-\-prs\f[R] and the GitHub adapter, each branch\(aqs pull
+request (open or merged) is linked in a column at the end of its line:
+blue if it\(aqs open, grey if it\(aqs a draft, and magenta if it was
+merged.
 Rows with links determine the column position.
 On a narrow terminal, each link sits directly below its branch name at
 the same indent.
@@ -825,12 +830,13 @@ other branches.
 refreshing.
 \f[CR]pr\f[R] is the branch\(aqs pull request\(aqs \f[CR]number\f[R],
 \f[CR]url\f[R] and \f[CR]state\f[R] (\f[CR]open\f[R], \f[CR]draft\f[R]
-or \f[CR]merged\f[R]), or \f[CR]null\f[R] if it has none (or for a root,
-or without the GitHub adapter).
+or \f[CR]merged\f[R]) when requested with \f[CR]\-\-prs\f[R].
+It is \f[CR]null\f[R] for roots and when no pull request information is
+available.
 .RS 2
 .IP
 .EX
-git stack info \-\-json
+git stack info \-\-json \-\-prs
 \f[I]# [\f[R]
 \f[I]#   {\f[R]
 \f[I]#     \(dqname\(dq: \(dqmain\(dq,\f[R]
@@ -855,12 +861,8 @@ git stack info \-\-json
 .EE
 .RE
 .IP \(bu 2
-With the GitHub adapter, \f[CR]info\f[R] asks GitHub about each
-branch\(aqs pull request, which takes about a second.
-\f[CR]\-\-offline\f[R] skips that: it checks for merges like the
-\f[CR]git\f[R] adapter does, and shows no links.
 For a shell prompt or an editor, the scripting commands below only read
-git config, and are fast.
+git config.
 .SS \f[CR]git stack next\f[R]
 Switch to the branch stacked on the current one.
 .PP
@@ -2106,27 +2108,34 @@ organization\(aqs SSO, or GitHub can\(aqt be reached), \f[CR]sync\f[R],
 \f[CR]clean\f[R], \f[CR]push\f[R] and \f[CR]prs\f[R] stop before
 changing anything, since checking for merges locally could untrack a
 branch whose pull request is still open, or restack one that was merged.
-\f[CR]info\f[R] and \f[CR]restack\f[R] warn and check for merges like
-the \f[CR]git\f[R] adapter does.
+\f[CR]info \-\-prs\f[R] and \f[CR]restack\f[R] warn and check for merges
+like the \f[CR]git\f[R] adapter does.
 To run a command with the \f[CR]git\f[R] adapter just this once, use
 \f[CR]git \-c stack.adapter=git stack <command>\f[R].
 .SH WHEN DOES SYNC CONSIDER A BRANCH MERGED?
 \f[CR]sync\f[R], \f[CR]clean\f[R], \f[CR]restack\f[R], \f[CR]push\f[R],
-\f[CR]prs\f[R] and \f[CR]info\f[R] all use this check.
+\f[CR]prs\f[R] and \f[CR]info\f[R] check whether a branch\(aqs changes
+landed.
+By default, \f[CR]info\f[R] uses the local checks below.
+\f[CR]info \-\-prs\f[R] uses the configured adapter, as the other
+commands do.
 .PP
-With the GitHub adapter, a branch whose pull request GitHub says was
-merged counts as merged once the merge is in its local parent, unless
-the branch or its remote branch has commits that weren\(aqt merged,
-including a merge commit with changes of its own (e.g.
-a resolved conflict), whose changes the parent doesn\(aqt have.
-Otherwise:
+With the GitHub adapter, a branch with an open pull request whose stack
+parent corresponds to the remote\(aqs default branch still counts as
+unmerged, even if the local parent contains its changes.
+A branch whose pull request GitHub says was merged counts as merged once
+the merge is in its local parent, unless the branch or its remote branch
+has commits that weren\(aqt merged.
+That includes a merge commit with changes of its own (e.g.
+a resolved conflict) whose changes the parent doesn\(aqt have.
 .PP
-Its changes must already be in its parent (\f[CR]main\f[R], or the
-parent PR\(aqs branch if it was merged into that): either merging it
-into the parent would change nothing, or the parent has a commit with
-the same changes as the whole branch (a squash merge) or commits with
-the same changes as each of its commits (a rebase merge), even if the
-parent edited the same lines again afterwards.
+For the local check, a branch\(aqs changes must already be in its parent
+(\f[CR]main\f[R], or the parent PR\(aqs branch if it was merged into
+that).
+Either merging it into the parent would change nothing, or the parent
+has a commit with the same changes as the whole branch (a squash merge)
+or commits with the same changes as each of its commits (a rebase
+merge), even if the parent edited the same lines again afterwards.
 Each of its commits only counts if it has no merge commits with changes
 of their own (e.g.
 a resolved conflict), which no commit of the parent can match.

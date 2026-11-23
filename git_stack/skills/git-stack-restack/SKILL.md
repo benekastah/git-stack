@@ -33,7 +33,7 @@ local rewrites, including with `--latest`, and follow the open-PR checks in
 2. Run `GIT_EDITOR=true git rebase --continue`. Repeat if another commit conflicts.
 3. Rerun the original git-stack command with the same selectors and options
    so it records the new bases and finishes the rest of the stack.
-4. Check `git stack info --all --offline`. If publication is requested, use
+4. Check `git stack info --all`. If publication is requested, use
    `git-stack-push`.
 
 If an untracked file stops the rebase, move it out of the way before

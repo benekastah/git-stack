@@ -14,7 +14,7 @@ Use an integration root when one stack needs several unmerged branch tips.
 It merges source tips and serves as the work stack's single parent. A refresh
 can cherry-pick appended commits when the source histories are independent.
 Check the selected stacks and source branches first with
-`git stack info --all --offline`.
+`git stack info --all`.
 
 - Create with `git stack integrate <name> <source-a> <source-b>`. Source
   names are local branches in application order. The build starts at `main` by

@@ -70,8 +70,8 @@ def test_info_defaults_to_current_and_all_shows_other_stacks(repo: Repo, client:
     client.branch("other")
     repo.git("switch", "--quiet", "pr2")
 
-    current = json.loads(repo.stack("info", "--offline", "--json").stdout)
-    all_stacks = json.loads(repo.stack("info", "--all", "--offline", "--json").stdout)
+    current = json.loads(repo.stack("info", "--json").stdout)
+    all_stacks = json.loads(repo.stack("info", "--all", "--json").stdout)
     assert {b["name"] for b in current} == {"main", "pr1", "pr2", "pr3"}
     assert {b["name"] for b in all_stacks} == {"main", "pr1", "pr2", "pr3", "other"}
 
@@ -89,6 +89,41 @@ def test_info_only_queries_prs_for_the_selected_stack(repo: Repo, gh: FakeGitHub
     assert [b.name for b in shown] == ["main", "pr1", "pr2", "pr3"]
     (call,) = gh.calls("api", "graphql")
     assert {arg.split("=", 1)[1] for arg in call if re.fullmatch(r"b\d+=.*", arg)} == {"pr1", "pr2", "pr3"}
+
+
+@pytest.mark.parametrize("json_output", [False, True])
+def test_info_only_shows_pull_requests_on_request(repo: Repo, gh: FakeGitHub, json_output: bool) -> None:
+    repo.make_stack()
+    repo.client.push(prs=True)
+    gh.clear_calls()
+    args = ("--json", "info") if json_output else ("info",)
+
+    local = repo.stack(*args).stdout
+    assert gh.calls() == []
+    with_prs = repo.stack(*args, "--prs").stdout
+    assert len(gh.calls("api", "graphql")) == 1
+
+    if json_output:
+        assert all(row["pr"] is None for row in json.loads(local))
+        assert [row["pr"]["number"] for row in json.loads(with_prs) if row["pr"]] == [1, 2, 3]
+    else:
+        assert "/pull/" not in local
+        assert "/pull/1" in with_prs
+
+
+@pytest.mark.usefixtures("gh")
+def test_info_uses_open_pull_request_as_merge_evidence_only_with_prs(repo: Repo) -> None:
+    repo.make_stack()
+    repo.client.push(prs=True)
+    repo.git("branch", "-f", "main", "pr1")
+
+    local = json.loads(repo.stack("info", "--json").stdout)
+    with_prs = json.loads(repo.stack("info", "--json", "--prs").stdout)
+
+    assert next(row for row in local if row["name"] == "pr1")["status"] == "merged"
+    branch = next(row for row in with_prs if row["name"] == "pr1")
+    assert branch["pr"]["state"] == "draft"
+    assert branch["status"] == "up-to-date"
 
 
 def test_info_overlaps_pr_and_integration_source_queries(
@@ -158,15 +193,15 @@ def test_info_from_an_untracked_branch_matches_all(repo: Repo, checkout: str, ou
     else:
         repo.git("switch", "--quiet", checkout)
 
-    explicit = repo.stack("info", "-a", "--offline", *output)
-    implicit = repo.stack("info", "--offline", *output)
+    explicit = repo.stack("info", "-a", *output)
+    implicit = repo.stack("info", *output)
 
     assert implicit.stdout == explicit.stdout
     assert implicit.stderr == explicit.stderr == ""
 
 
 def test_info_group_selector_still_requires_a_current_stack(repo: Repo) -> None:
-    result = repo.stack("info", "-g", "--offline", expect_success=False)
+    result = repo.stack("info", "-g", expect_success=False)
     assert "main isn't in a stack" in result.stderr
 
 
@@ -177,11 +212,11 @@ def test_bare_group_selects_all_current_group_stacks(repo: Repo, client: StackCl
     client.group_add("feature", ["pr1", "other"])
     repo.git("switch", "--quiet", "pr2")
 
-    current = repo.stack("info", "--offline").stdout
+    current = repo.stack("info").stdout
     assert "group feature" in current
     assert "other" not in current
-    assert "other" in repo.stack("info", "-g", "--offline").stdout
-    data = json.loads(repo.stack("info", "--offline", "--json").stdout)
+    assert "other" in repo.stack("info", "-g").stdout
+    data = json.loads(repo.stack("info", "--json").stdout)
     assert {b["name"]: b["group"] for b in data} == {"main": None, "pr1": "feature", "pr2": None, "pr3": None}
 
     assert set(client.selected_bottoms([], [CURRENT_GROUP], client.stacks(), "show")) == {"pr1", "other"}

@@ -65,14 +65,14 @@ def test_the_first_info_checks_each_branch_for_having_landed_in_its_parent(repo:
     # That is the one count here that grows with the stack. Each test has a repository of its own,
     # with no cache of those checks on disk yet, so this first `info` always has them all to do.
     with expect_operations(git=3 + len(chain)):
-        result = repo.stack_process("info", "--offline")
+        result = repo.stack_process("info")
 
     assert all(mentions(result.stdout, branch) for branch in chain)
 
 
 @pytest.mark.parametrize(
     ("args", "git"),
-    [(["info", "--offline"], 3), (["info", "--all", "--offline"], 3), (["info", "--offline", "--json"], 2)],
+    [(["info"], 3), (["info", "--all"], 3), (["info", "--json"], 2)],
     ids=["info", "info-all", "info-json"],
 )
 def test_info_runs_the_same_for_any_stack_size_once_its_branches_are_checked(
@@ -80,7 +80,7 @@ def test_info_runs_the_same_for_any_stack_size_once_its_branches_are_checked(
 ) -> None:
     # Once, outside the block, to fill the on-disk cache of those checks: a second process reads
     # them, with no `merge-tree` for any branch, so it's the same for any stack size.
-    repo.stack_process("info", "--offline")
+    repo.stack_process("info")
 
     with expect_operations(git=git):
         result = repo.stack_process(*args)

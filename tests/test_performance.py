@@ -66,7 +66,7 @@ def test_local_config_enables_reporting_and_controls_the_cap(repo: Repo, perform
 @pytest.mark.usefixtures("performance_enabled")
 def test_cli_appends_a_command_and_report_for_success_and_failure(repo: Repo, performance_log: pathlib.Path) -> None:
     repo.make_stack()
-    successful = repo.stack("info", "--offline")
+    successful = repo.stack("info")
     repo.git("switch", "--quiet", "main")
     failed = repo.stack("restack", expect_success=False)
 
@@ -75,7 +75,7 @@ def test_cli_appends_a_command_and_report_for_success_and_failure(repo: Repo, pe
     revision = repo.git("rev-parse", "HEAD", cwd=ROOT)
     version = f"{_version.__version__} (git {revision})"
     first, second = performance_log.read_text(encoding="utf-8").strip().split("\n\n")
-    for entry, args in ((first, ("info", "--offline")), (second, ("restack",))):
+    for entry, args in ((first, ("info",)), (second, ("restack",))):
         command, _, report = entry.partition("\n")
         assert shlex.split(command) == ["git", "stack", "-C", str(repo.path), *args]
         assert report.startswith(f"Performance timeline\n  Version    {version}\n")
@@ -249,7 +249,7 @@ def test_perf_log_does_not_create_a_dangling_symlink_target(
     performance_log.parent.mkdir()
     performance_log.symlink_to(target)
 
-    result = repo.stack("info", "--offline")
+    result = repo.stack("info")
 
     assert "couldn't write the performance log" in result.stderr
     assert not target.exists()
@@ -329,7 +329,7 @@ def test_info_records_workers_and_keeps_json_parseable(
     repo.commit("c", "main moved\n", "advance main")
     repo.git("switch", "--quiet", "pr3")
     git_calls.clear()
-    result = repo.stack("info", "--json")
+    result = repo.stack("info", "--prs", "--json")
     report = performance_log.read_text(encoding="utf-8")
 
     assert isinstance(json.loads(result.stdout), list)
@@ -339,7 +339,7 @@ def test_info_records_workers_and_keeps_json_parseable(
     assert any(call[:3] == ["gh", "api", "graphql"] for call in calls)
     assert any(call[:2] == ["git", "merge-tree"] for call in calls)
     assert "query=<omitted>" in report
-    assert "Performance timeline" not in repo.stack("info", "--offline").stderr
+    assert "Performance timeline" not in repo.stack("info").stderr
 
 
 @pytest.mark.usefixtures("performance_enabled")

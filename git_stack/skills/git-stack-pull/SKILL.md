@@ -39,6 +39,6 @@ that never applied.
 
 Rerun the original git-stack command with the same selectors and options.
 For a pull, rerun `git stack pull` with its original arguments. Check
-`git stack info --all --offline`. If another worktree blocked an update,
+`git stack info --all`. If another worktree blocked an update,
 coordinate with whoever is using it before retrying. Use
 `git-stack-integrate` for an integration merge conflict.

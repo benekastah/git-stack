@@ -65,7 +65,7 @@ class Args(argparse.Namespace):
     branches: list[str]
     groups: list[str]
     json: bool
-    offline: bool
+    prs: bool
     all: bool
 
 
@@ -78,9 +78,9 @@ def register(subparsers: Subparsers) -> None:
     add_stack_arguments(p, "show", optional_group=True)
     p.add_argument("-a", "--all", action="store_true", help="show every tracked stack")
     p.add_argument(
-        "--offline",
+        "--prs",
         action="store_true",
-        help="don't ask GitHub about pull requests: check for merges locally, and show no links",
+        help="look up pull request links and merge status on GitHub",
     )
     # For compatibility, info prints a JSON list through its show function.
     p.set_defaults(run=run, show=show, json_list=True)
@@ -189,8 +189,8 @@ def run(stack: StackClient, args: Args) -> Info:
     if args.all:
         if args.branches or args.groups:
             raise StackError("--all cannot be combined with branches or groups")
-        return Info(stack.info(offline=args.offline))
-    return Info(stack.info(args.branches, args.groups, offline=args.offline, current=True))
+        return Info(stack.info(offline=not args.prs))
+    return Info(stack.info(args.branches, args.groups, offline=not args.prs, current=True))
 
 
 def show(stack: StackClient, args: Args, result: Info) -> None:

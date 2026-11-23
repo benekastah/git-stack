@@ -299,7 +299,7 @@ order, for example `(of branch-a, branch-b)`. Integration branches and work
 stacked above them cannot supply inputs to an integration.
 In color, sources proven to have landed on the configured root are cyan.
 An integration whose inputs or root have changed is marked as needing a
-restack. `info --offline` uses locally available landing evidence.
+restack. By default, `info` uses locally available landing evidence.
 
 `restack`, `pull`, and `sync` refresh the integration roots needed by the
 selected stacks. From an integration branch, they select its dependent
@@ -482,7 +482,7 @@ git stack rename add-api api-v2
   Delete the old remote branch yourself (`git push origin :add-api`) if you
   no longer want it.
 
-### `git stack info [<branch|glob>...] [-g [<group>]] [-a] [--json] [--offline]`
+### `git stack info [<branch|glob>...] [-g [<group>]] [-a] [--json] [--prs]`
 
 Show the current stack (or the ones named, see [Groups](#groups)) as a tree,
 with its root (e.g. `main`) on top and the branches built on it below.
@@ -498,9 +498,11 @@ a name.
 **When would I use it?** When you want to see your stacks and what needs doing:
 which branches depend on which, which need a restack, and which were merged.
 It's a good first step before `restack`, `sync` or `push`.
+`info` checks local history by default. Add `--prs` to look up pull request
+links and merge status with the [GitHub adapter](#github).
 
 ```sh
-git stack info
+git stack info --prs
 # main
 # └── add-api *                   https://github.com/acme/widgets/pull/12
 #     ├── use-api (needs restack) https://github.com/acme/widgets/pull/13
@@ -525,9 +527,9 @@ git stack info
   instead; the marker makes its status visible without relying on color.
 - `(stale recorded base)`: the recorded base includes trunk merges in the branch's
   replay range. Run `git stack restack` to see the suggested repair command.
-- `(merged)`: it was merged into its parent (see
-  [When does `sync` consider a branch merged?](#when-does-sync-consider-a-branch-merged));
-  `sync` or `clean` will stop tracking it.
+- `(merged)`: its changes landed in its parent. `sync` and `clean` use their own
+  [merge check](#when-does-sync-consider-a-branch-merged) before untracking a
+  branch, including its PR status when using the GitHub adapter.
 - `(merged, with new commits)`: it was merged, but its remote branch got
   commits after the merge. `sync` skips it, and the branches stacked on it,
   until you sort it out.
@@ -541,7 +543,7 @@ git stack info
   <sha>` that moves it onto the branch the parent was merged into.
 - `group <name>`: the stacks below it are in the group `<name>` (see
   [Groups](#groups)).
-- With the [GitHub adapter](#github), each branch's pull request (open or
+- With `--prs` and the GitHub adapter, each branch's pull request (open or
   merged) is linked in a column at the end of its line: blue if it's open,
   grey if it's a draft, and magenta if it was merged. Rows with links
   determine the column position. On a narrow terminal, each link sits directly
@@ -571,11 +573,11 @@ git stack info
   included tip landed on the root, or is `null` for other branches.
   `integration_needs_restack` says whether the integration needs refreshing.
   `pr` is the branch's pull request's `number`, `url` and `state` (`open`,
-  `draft` or `merged`), or `null` if it has none (or for a root, or without
-  the GitHub adapter).
+  `draft` or `merged`) when requested with `--prs`. It is `null` for roots and
+  when no pull request information is available.
 
   ```sh
-  git stack info --json
+  git stack info --json --prs
   # [
   #   {
   #     "name": "main",
@@ -599,11 +601,8 @@ git stack info
   # ]
   ```
 
-- With the [GitHub adapter](#github), `info` asks GitHub about each branch's
-  pull request, which takes about a second. `--offline` skips that: it checks
-  for merges like the `git` adapter does, and shows no links. For a shell
-  prompt or an editor, the [scripting commands](#scripting) below only read
-  git config, and are fast.
+- For a shell prompt or an editor, the [scripting commands](#scripting)
+  below only read git config.
 
 ### `git stack next`
 
@@ -1229,7 +1228,7 @@ its usual output, it prints a JSON object per line
 ([JSON Lines](https://jsonlines.org)) as it goes: one for each thing that
 happens, then one with the result. git's own output, e.g. from fetching or
 rebasing, goes to stderr. (`info --json` is older, and prints a single list;
-see [`info`](#git-stack-info-branchglob--g-group--a---json---offline).)
+see [`info`](#git-stack-info-branchglob--g-group--a---json---prs).)
 
 ```sh
 git stack clean -d local --json
@@ -1481,22 +1480,27 @@ With the GitHub adapter:
   isn't authorized for your organization's SSO, or GitHub can't be reached),
   `sync`, `clean`, `push` and `prs` stop before changing anything, since
   checking for merges locally could untrack a branch whose pull request is
-  still open, or restack one that was merged. `info` and `restack` warn and
-  check for merges like the `git` adapter does. To run a command with the `git` adapter just
+  still open, or restack one that was merged. `info --prs` and `restack` warn
+  and check for merges like the `git` adapter does. To run a command with the `git` adapter just
   this once, use `git -c stack.adapter=git stack <command>`.
 
 ## When does `sync` consider a branch merged?
 
-`sync`, `clean`, `restack`, `push`, `prs` and `info` all use this check.
+`sync`, `clean`, `restack`, `push`, `prs` and `info` check whether a branch's
+changes landed. By default, `info` uses the local checks below. `info --prs`
+uses the configured adapter, as the other commands do.
 
-With the [GitHub adapter](#github), a branch whose pull request GitHub says was
-merged counts as merged once the merge is in its local parent, unless the branch
-or its remote branch has commits that weren't merged, including a merge commit
-with changes of its own (e.g. a resolved conflict), whose changes the parent
-doesn't have. Otherwise:
+With the [GitHub adapter](#github), a branch with an open pull request whose
+stack parent corresponds to the remote's default branch still counts as
+unmerged, even if the local parent contains its changes. A branch whose pull
+request GitHub says was merged counts as merged once the merge is in its local
+parent, unless the branch or its remote branch has commits that weren't merged.
+That includes a merge commit with changes of its own (e.g. a resolved conflict)
+whose changes the parent doesn't have.
 
-Its changes must already be in its parent (`main`, or the parent PR's branch if
-it was merged into that): either merging it into the parent would change
+For the local check, a branch's changes must already be in its parent
+(`main`, or the parent PR's branch if it was merged into that). Either merging
+it into the parent would change
 nothing, or the parent has a commit with the same changes as the whole branch
 (a squash merge) or commits with the same changes as each of its commits (a
 rebase merge), even if the parent edited the same lines again afterwards. Each

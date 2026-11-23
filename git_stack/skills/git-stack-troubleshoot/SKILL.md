@@ -13,7 +13,7 @@ Report any overlap shown and flag the slowest call if it explains a delay.
 Read the `git-stack` skill first. Look before changing anything, and change the least:
 
 ```sh
-git stack info --all --offline                  # the stacks, and what each branch needs
+git stack info --all                            # the stacks, and what each branch needs
 git config --get-regexp '^branch\..*\.stack'    # what git-stack recorded
 git status                                      # a rebase or cherry-pick still in progress?
 ```
