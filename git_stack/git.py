@@ -595,12 +595,12 @@ class GitClient:
         repo = self._open_repository()
         if repo is not None:
             try:
-                head = repo.lookup_reference("HEAD")
-                if isinstance(head.target, pygit2.Oid):
+                target = repo.lookup_reference("HEAD").target
+                if isinstance(target, pygit2.Oid):
                     return None
-                name = head.resolve().name
-                if name.startswith("refs/heads/"):
-                    return name.removeprefix("refs/heads/")
+                # Git resolves chained aliases with its own traversal limit.
+                if target.startswith("refs/heads/") and isinstance(repo.lookup_reference(target).target, pygit2.Oid):
+                    return target.removeprefix("refs/heads/")
             except KeyError, pygit2.GitError, ValueError:
                 pass
         return self.run("branch", "--show-current") or None

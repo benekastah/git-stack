@@ -782,11 +782,12 @@ def test_replacement_commits_leave_ancestry_to_git(repo: Repo, git_calls: list[G
     assert any(call[:2] == ["merge-base", "--is-ancestor"] for call in git_calls)
 
 
-def test_current_branch_resolves_a_symbolic_branch_alias(repo: Repo) -> None:
+def test_current_branch_resolves_a_symbolic_branch_alias(repo: Repo, git_calls: list[GitCall]) -> None:
     repo.git("symbolic-ref", "refs/heads/alias", "refs/heads/main")
     repo.git("symbolic-ref", "HEAD", "refs/heads/alias")
 
     assert GitClient(repo.path).current_branch() == "main"
+    assert git_calls == [["branch", "--show-current"]]
 
 
 def test_an_out_of_range_reflog_revision_without_a_snapshot_is_missing(repo: Repo) -> None:
