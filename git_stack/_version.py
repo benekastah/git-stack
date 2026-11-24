@@ -10,7 +10,7 @@ from git_stack.errors import StackError
 from git_stack.git import GitClient, is_object_id
 from git_stack.git_read import GIT_REPOSITORY_ENV
 
-__version__ = "0.1.28"
+__version__ = "0.1.29"
 
 
 def build_version() -> str:
