@@ -22,9 +22,9 @@ def test_progress_goes_to_stdout(capsys: pytest.CaptureFixture[str]) -> None:
 
 
 def test_stack_mismatch_suggests_rebuild(capsys: pytest.CaptureFixture[str]) -> None:
-    print_event(events.GitHubStackMismatch((1, 2), (42,)))
+    print_event(events.GitHubStackMismatch((1, 2), (42,), "Retry with --github-rebuild to unstack GitHub stack 42."))
 
-    assert "git stack prs --rebuild-stack" in capsys.readouterr().err
+    assert "Retry with --github-rebuild" in capsys.readouterr().err
 
 
 def test_unstack_preview_reports_stack_and_pull_requests() -> None:

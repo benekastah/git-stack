@@ -147,6 +147,11 @@ def message(event: events.Event) -> str:  # noqa: C901
             return f"linked {pull_requests(event.numbers)} into a stack on GitHub"
         case events.GitHubStackUnstacked():
             return f"unstacked stack {event.stack} on GitHub (including #{event.number})"
+        case events.OrphanedPullRequestClosure():
+            action = "closed" if event.closed else "would close"
+            details = f"{event.url}, {event.head} → {event.base}"
+            confirmation = "" if event.closed else " after confirmation"
+            return f"{action} draft PR #{event.number} ({details}){confirmation}, keeping its branch"
         case events.GitHubStackRebuildPlanned():
             stacks = ", ".join(map(str, event.github_stacks))
             if not stacks:
@@ -168,7 +173,7 @@ def message(event: events.Event) -> str:  # noqa: C901
             return (
                 f"didn't link {pull_requests(event.numbers)} into a stack on GitHub: some are in "
                 f"{'stacks' if len(event.github_stacks) > 1 else 'stack'} {stacks} there, which don't match "
-                f"them; run `git stack prs --rebuild-stack` with the same branches or groups to rebuild it"
+                f"them.\n{event.rebuild_hint}"
             )
         case events.PullRequestRetargeted():
             return f"changed the base of {event.branch}'s pull request #{event.number} to {event.base}"

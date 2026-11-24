@@ -10,8 +10,10 @@ everything the command reports.
 
 import argparse
 import re
+import sys
+from typing import TypedDict
 
-from git_stack.adapters.github import PRProtection
+from git_stack.adapters.github import ConfirmOrphanClosures, OrphanedPullRequest, PRProtection
 from git_stack.core import CURRENT_GROUP, Delete
 from git_stack.errors import StackError
 from git_stack.stack import StackClient
@@ -38,8 +40,34 @@ def add_allow_shared_argument(parser: argparse.ArgumentParser) -> None:
 
 def add_rebuild_stack_argument(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
-        "--rebuild-stack", action="store_true", help="allow unstacking and rebuilding GitHub pull request stacks"
+        "--github-rebuild",
+        "--gh-rebuild",
+        "--rebuild-stack",
+        dest="rebuild_stack",
+        action="store_true",
+        help="rebuild GitHub PR stacks, asking before closing any eligible blocking drafts",
     )
+
+
+def rebuild_confirmation(rebuild_stack: bool) -> ConfirmOrphanClosures | None:
+    return confirm_orphaned_prs if rebuild_stack else None
+
+
+def confirm_orphaned_prs(candidates: list[OrphanedPullRequest]) -> bool:
+    """Require the listed PR numbers from an interactive terminal."""
+    if not (sys.stdin.isatty() and sys.stderr.isatty()):
+        raise StackError("--github-rebuild needs an interactive terminal to confirm closing drafts")
+    print("The rebuild is blocked by these draft pull requests. Closing them keeps their branches.", file=sys.stderr)
+    for candidate in candidates:
+        print(f"- {candidate.description}", file=sys.stderr)
+    print(
+        "Enter all listed PR numbers to continue, separated by spaces, or press Enter to cancel: ",
+        end="",
+        file=sys.stderr,
+        flush=True,
+    )
+    answer = sys.stdin.readline().split()
+    return sorted(value.removeprefix("#") for value in answer) == sorted(str(pr.number) for pr in candidates)
 
 
 class PRProtectionArgs(argparse.Namespace):
@@ -80,7 +108,11 @@ def add_pr_protection_arguments(parser: argparse.ArgumentParser, *, add_force: b
     )
 
 
-def pr_protection(args: PRProtectionArgs, *, separate_force: bool = False) -> dict[str, PRProtection]:
+class PRProtectionOptions(TypedDict, total=False):
+    protection: PRProtection
+
+
+def pr_protection(args: PRProtectionArgs, *, separate_force: bool = False) -> PRProtectionOptions:
     if args.allow_pr_update and not args.protect_prs:
         raise StackError("--allow-pr-update needs --protect-prs")
     if args.protect_prs or (separate_force and args.force):

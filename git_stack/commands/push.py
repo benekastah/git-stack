@@ -8,6 +8,7 @@ from git_stack.commands import (
     add_stack_arguments,
     named_stacks,
     pr_protection,
+    rebuild_confirmation,
 )
 from git_stack.commands.info import print_tree
 from git_stack.commands.prs import show_steps
@@ -66,6 +67,7 @@ def run(stack: StackClient, args: Args) -> PushResult:
         allow_shared=args.allow_shared,
         rebuild_stack=args.rebuild_stack,
         no_verify=args.no_verify,
+        confirm_orphan_closures=rebuild_confirmation(args.rebuild_stack),
         **pr_protection(args),
     )
 

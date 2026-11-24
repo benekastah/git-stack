@@ -35,6 +35,8 @@ writes still check live PR state.
   updates independently. PR body updates use
   bounded GraphQL batches and send the body data on stdin. Run the dry push
   before applying those edits so stale leases leave the PR bases alone.
+  Close blocking drafts only with explicit interactive confirmation and a
+  fresh check of authorship, stack membership, PR protection and open dependents.
   Push and sync can reuse the API's default for a single github.com repository
   reached over direct HTTPS or verified SSH. SSH verification uses the
   effective OpenSSH configuration for both Git services. Other remotes use

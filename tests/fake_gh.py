@@ -59,29 +59,40 @@ def respond(args: list[str], state: dict[str, Any]) -> str | None:
     """Handle the gh command args, updating state. Return what gh would print, or None."""
     prs: list[dict[str, Any]] = state["prs"]
     if args[:2] == ["api", "graphql"]:
-        query = opt_value(args, "query")
-        if "pullRequests(baseRefName: $base, states: MERGED" in query:
-            base = opt_value(args, "base")
-            nodes = [{"number": p["number"]} for p in prs if p["baseRefName"] == base and p["state"] == "MERGED"]
-            return json.dumps({"data": {"repository": {"pullRequests": {"nodes": nodes[:1]}}}})
-        if "search(" in query:
-            return open_pull_requests(opt_value(args, "q"), prs)
-        if "pullRequest(number: $number)" in query:
-            return pull_request(int(opt_value(args, "number")), prs)
-        if "pullRequest(number:" in query:
-            if " stack {" in query and "stacks" not in state and state.get("no_stack_field"):
-                raise GhError("gh: Field 'stack' doesn't exist on type 'PullRequest'")
-            return pull_requests_by_number(query, state)
-        return pull_requests_by_ref(args, query, prs, state.get("default_branch", "main"))
+        return respond_graphql(args, state)
     path = next((a for a in args if "/stacks" in a), None)
     if args[0] == "api" and path is not None:
         return stacks_api(path, state)
+    if args[0] == "api" and "user" in args:
+        return "me"
+    if args[:2] == ["pr", "close"]:
+        pr = next(pr for pr in prs if pr["number"] == int(args[2]))
+        pr["state"] = "CLOSED"
+        return None
     if args[:2] == ["pr", "create"]:
         return create_pull_request(args, prs)
     if args[:2] == ["pr", "edit"]:
         edit_pull_request(args, state)
         return None
     sys.exit(f"fake gh: unexpected {args}")
+
+
+def respond_graphql(args: list[str], state: dict[str, Any]) -> str:
+    prs: list[dict[str, Any]] = state["prs"]
+    query = opt_value(args, "query")
+    if "pullRequests(baseRefName: $base, states: MERGED" in query:
+        base = opt_value(args, "base")
+        nodes = [{"number": p["number"]} for p in prs if p["baseRefName"] == base and p["state"] == "MERGED"]
+        return json.dumps({"data": {"repository": {"pullRequests": {"nodes": nodes[:1]}}}})
+    if "search(" in query:
+        return open_pull_requests(opt_value(args, "q"), prs)
+    if "pullRequest(number: $number)" in query:
+        return pull_request(int(opt_value(args, "number")), prs)
+    if "pullRequest(number:" in query:
+        if " stack {" in query and "stacks" not in state and state.get("no_stack_field"):
+            raise GhError("gh: Field 'stack' doesn't exist on type 'PullRequest'")
+        return pull_requests_by_number(args, query, state)
+    return pull_requests_by_ref(args, query, prs, state.get("default_branch", "main"))
 
 
 def open_pull_requests(q: str, prs: list[dict[str, Any]]) -> str:
@@ -114,16 +125,20 @@ def pull_request(number: int, prs: list[dict[str, Any]]) -> str:
     return json.dumps({"data": {"viewer": {"login": "me"}, "repository": repository}})
 
 
-def pull_requests_by_number(query: str, state: dict[str, Any]) -> str:
+def pull_requests_by_number(args: list[str], query: str, state: dict[str, Any]) -> str:
     """The fields query asks for of the pull requests it names by number. Of
     a stack, all of them, whichever query asks for."""
     prs: list[dict[str, Any]] = state["prs"]
     by_alias: dict[str, Any] = {}
     for alias, number, fields in re.findall(
-        r"(\w+): pullRequest\(number: (\d+)\) \{ (.*?) \}(?= \w+: pullRequest| \} \}$)", query
+        r"(\w+): pullRequest\(number: (\d+)\) \{ (.*?) \}(?= \w+: pullRequests?\(| \} \}$)", query
     ):
         pr = next((p for p in prs if p["number"] == int(number)), None)
         by_alias[alias] = None if pr is None else {f: field_of(pr, f, state) for f in top_level(fields)}
+    if "dependents: pullRequests" in query:
+        base = opt_value(args, "base")
+        nodes = [{"number": pr["number"]} for pr in prs if pr["baseRefName"] == base and pr["state"] == "OPEN"]
+        by_alias["dependents"] = {"nodes": nodes[:1]}
     return json.dumps({"data": {"repository": by_alias}})
 
 
@@ -142,6 +157,9 @@ def top_level(fields: str) -> list[str]:
 
 def field_of(pr: dict[str, Any], name: str, state: dict[str, Any]) -> object:
     """pr's field name, as GraphQL gives it."""
+    if name == "author":
+        author = pr.get("author", "me")
+        return None if author is None else {"login": author}
     if name == "id":
         return f"PR_{pr['number']}"
     if name == "stack":

@@ -10,6 +10,7 @@ from git_stack.commands import (
     add_rebuild_stack_argument,
     add_stack_arguments,
     pr_protection,
+    rebuild_confirmation,
 )
 from git_stack.commands.info import print_tree
 from git_stack.core import Delete
@@ -81,6 +82,7 @@ def run(stack: StackClient, args: Args) -> SyncResult:
         force=args.force,
         rebuild_stack=args.rebuild_stack,
         no_verify=args.no_verify,
+        confirm_orphan_closures=rebuild_confirmation(args.rebuild_stack),
         **pr_protection(args),
     )
 

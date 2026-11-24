@@ -29,6 +29,12 @@ class PullRequestLink:
     state: PullRequestState
 
 
+@dataclass(frozen=True)
+class PushRetargets:
+    apply: Callable[[], None]
+    confirmed_closures: bool
+
+
 class GitAdapter:
     """Works out whether branches were merged from the repository alone."""
 
@@ -253,7 +259,7 @@ class GitAdapter:
         rebuild_stack: bool = False,
         scope: list[str] | None = None,
         opening: bool = False,
-    ) -> Callable[[], None] | None:
+    ) -> PushRetargets | None:
         """Validate any PR changes and return the edits needed before the push."""
         return None
 

@@ -704,7 +704,7 @@ git stack restack --latest              # also move the stack onto main's latest
 - A branch checked out in another worktree is skipped, with a warning; see
   [Branches checked out in other worktrees](#branches-checked-out-in-other-worktrees).
 
-### `git stack sync [<branch|glob>...] [-g [<group>]] [--remote <name>] [-d local|remote|both] [-l] [--force] [--no-verify] [--ignore-revert <branch>] [--allow-shared] [--pull-tracked-upstream] [--rewritten-upstream] [--rebuild-stack] [--github | --git-only] [--protect-prs]`
+### `git stack sync [<branch|glob>...] [-g [<group>]] [--remote <name>] [-d local|remote|both] [-l] [--force] [--no-verify] [--ignore-revert <branch>] [--allow-shared] [--pull-tracked-upstream] [--rewritten-upstream] [--github-rebuild] [--github | --git-only] [--protect-prs]`
 
 Bring the current stack (or the ones named, see [Groups](#groups)) up to date
 with the remote:
@@ -866,7 +866,7 @@ PR edits made by git-stack, including changes to GitHub stack membership. Review
 the affected branches and PRs before publishing a stack. A remote PR's status
 can change between a check and the update.
 
-### `git stack push [<branch|glob>...] [-g [<group>]] [--remote <name>] [--force] [--no-verify] [--prs] [--allow-shared] [--rebuild-stack] [--github | --git-only] [--protect-prs]`
+### `git stack push [<branch|glob>...] [-g [<group>]] [--remote <name>] [--force] [--no-verify] [--prs] [--allow-shared] [--github-rebuild] [--github | --git-only] [--protect-prs]`
 
 Force-push (with lease) every branch in the current stack (or the ones named,
 see [Groups](#groups)), and set each one's upstream.
@@ -940,7 +940,7 @@ git stack push --prs            # then open pull requests, as `git stack prs` do
   The pre-push hook runs on the real push. If the push still fails (e.g. the remote refuses
   it), the error lists what was changed on GitHub and how to undo it.
 - `--prs` (or `--pr`) then does what
-  [`git stack prs`](#git-stack-prs-branchglob--g-group---remote-name--n---rebuild-stack) does
+  [`git stack prs`](#git-stack-prs-branchglob--g-group---remote-name--n---github-rebuild) does
   for the stacks it pushed, so it's `git stack push` and `git stack prs` in
   one. Without the GitHub adapter, it still pushes and shows the stacks, but
   then fails, saying it didn't open or update any pull requests.
@@ -975,7 +975,7 @@ git stack ungroup search-ui             # take search-ui's stack back out
   mistake. To merge them, run `git stack group add --move <name> -g <other group>`.
 - `info` shows a group once it has two or more stacks.
 
-### `git stack prs [<branch|glob>...] [-g [<group>]] [--remote <name>] [-n] [--rebuild-stack]`
+### `git stack prs [<branch|glob>...] [-g [<group>]] [--remote <name>] [-n] [--github-rebuild]`
 
 Open a draft pull request on GitHub for each branch in the current stack (or
 the ones named, see [Groups](#groups)) that has none, into its stack parent,
@@ -1035,15 +1035,29 @@ git stack prs
   be taken out of a stack on GitHub, so if some are in one that doesn't match
   (e.g. in another order, or ending with a merged pull request that a new
   one isn't based on), it leaves them, using description sections instead.
-  If the local stack is a chain, it also warns and suggests `--rebuild-stack`,
+  If the local stack is a chain, it also warns and suggests `--github-rebuild`,
   which can't relink a stack that branches out. GitHub doesn't change
   the base of a pull request in a stack either. When a stack is reshaped
   (e.g. a branch is put in its middle), `push`, `sync`, and `prs` refuse to
-  unstack it to change those bases unless given `--rebuild-stack`. It refuses
-  if the GitHub stack includes open PRs outside the selected local stacks;
-  closed and merged PRs do not block rebuilding.
+  unstack it to change those bases unless given `--github-rebuild` (alias
+  `--gh-rebuild`). The previous name, `--rebuild-stack`, still works.
+  Open PRs outside the selected local stacks can block rebuilding.
+
+  A rebuild can close a blocking PR if it's your own untracked draft from
+  the same repository, without approval, a merge queue entry, or open PRs
+  targeting its head. If you omit `--github-rebuild`, Git-stack reports what
+  the rebuild would change and lists eligible drafts one per line.
+  With `--github-rebuild`, Git-stack shows the PR links, heads and bases and
+  waits for you to enter all the listed PR numbers in an interactive
+  terminal. It verifies eligibility before closing each draft. The closures
+  keep the branches. Use `git stack prs --dry-run --github-rebuild` to preview
+  changes to existing PRs. Rebuilds that require opening new PRs can discover
+  blockers after the new PRs open. Those PRs stay open if you decline the
+  closure. During `push --prs`, a rebuild that only
+  changes stack links may happen after the branches are pushed.
+
   Run `prs` to
-  link them again, or use `push --prs --rebuild-stack` to do both together.
+  link them again, or use `push --prs --github-rebuild` to do both together.
   Only a stack that's a chain is linked again: one that branches out is left
   unlinked, with description sections, since nothing says yet which path
   through it to link.
@@ -1054,16 +1068,17 @@ git stack prs
   stacks, [gh-stack](https://github.com/github/gh-stack)
   (`gh extension install github/gh-stack`).
 
-  Use `git stack prs --rebuild-stack` to unstack the selected pull requests on
+  Use `git stack prs --github-rebuild` to unstack the selected pull requests on
   GitHub and create a new stack when the existing stack doesn't match (for a
   stack that's a chain; one that branches out is only unstacked). Merged
-  pull requests remain in the old stack. It refuses if unstacking would also
-  remove an open pull request outside the selected stack; a closed one outside
-  it is taken out of the stack with the rest, and isn't linked again unless
+  pull requests remain in the old stack. An open pull request outside the
+  selected stack blocks unstacking unless you confirm closing it with
+  `--github-rebuild`. A closed PR outside the selection is taken out of
+  the stack with the rest, and isn't linked again unless
   it's reopened and a later `prs` links it with its stack. If creating the
   new stack fails, the pull requests remain unstacked; rerun `prs` to retry.
   A stack that matches is never unstacked: new pull requests are added to its
-  top, as without `--rebuild-stack`, so it keeps its number.
+  top, as without `--github-rebuild`, so it keeps its number.
   Add `--dry-run` to see the planned unstack and creation, or additions,
   without changing them.
 
@@ -1436,7 +1451,7 @@ The CLI uses Git evidence by default and starts [`gh`](https://cli.github.com)
 only when explicitly requested. Use `--prs` with `info` or `restack`.
 Use `--github` (alias `--gh`) with `pull`, `sync`, `clean`, `push`, `integrate`
 or `unrevert`. `--protect-prs`,
-`--rebuild-stack`, `push --prs`, and the GitHub-specific commands `prs` and
+`--github-rebuild`, `push --prs`, and the GitHub-specific commands `prs` and
 `import` also opt in. Ordinary Git fetches and pushes still contact the
 configured remotes.
 

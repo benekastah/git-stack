@@ -161,7 +161,9 @@ def test_local_clean_can_untrack_source_held_by_other_worktree(repo: Repo, gh: F
     assert gh.calls() == []
 
 
-@pytest.mark.parametrize("opt_in", ["--github", "--gh", "--prs", "--protect-prs", "--rebuild-stack"])
+@pytest.mark.parametrize(
+    "opt_in", ["--github", "--gh", "--prs", "--protect-prs", "--github-rebuild", "--gh-rebuild", "--rebuild-stack"]
+)
 def test_git_only_conflicts_with_github_opt_in(repo: Repo, gh: FakeGitHub, opt_in: str) -> None:
     result = repo.stack("push", "--git-only", opt_in, expect_success=False)
     assert result.returncode == 2

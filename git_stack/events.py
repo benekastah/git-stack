@@ -371,6 +371,18 @@ class GitHubStackUnstacked:
 
 
 @dataclass(frozen=True)
+class OrphanedPullRequestClosure:
+    """A blocking draft was closed or would be closed after confirmation."""
+
+    event_type: ClassVar[str] = "orphaned-pull-request-closure"
+    number: int
+    url: str
+    head: str
+    base: str
+    closed: bool
+
+
+@dataclass(frozen=True)
 class GitHubStackRebuildPlanned:
     """GitHub stacks to unstack and pull requests to put in a new stack."""
 
@@ -408,6 +420,7 @@ class GitHubStackMismatch:
 
     numbers: tuple[int, ...]
     github_stacks: tuple[int, ...]
+    rebuild_hint: str = ""
 
 
 @dataclass(frozen=True)
@@ -458,6 +471,7 @@ type Event = (
     | GitHubStackLinked
     | GitHubStackMismatch
     | GitHubStackUnstacked
+    | OrphanedPullRequestClosure
     | GitHubStackRebuildPlanned
     | GitHubStackAddPlanned
     | GitHubStackUnstackPlanned
