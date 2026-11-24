@@ -6,7 +6,7 @@ from typing import Any
 import pytest
 
 from git_stack.adapters.github import GitHubAdapter, GitHubStack, OrphanedPullRequest
-from git_stack.git import GitClient
+from git_stack.stack import StackClient
 from tests import fake_gh
 from tests.helpers import FakeGitHub, Repo
 
@@ -145,7 +145,9 @@ def test_close_orphaned_prs_keeps_a_draft_tracked_in_another_stack(repo: Repo, g
 
 
 @pytest.mark.usefixtures("orphan")
-def test_draft_closures_wait_for_push_lease_check(repo: Repo, gh: FakeGitHub, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_push_reports_draft_closure_when_real_push_fails(
+    repo: Repo, gh: FakeGitHub, monkeypatch: pytest.MonkeyPatch
+) -> None:
     state = gh.load()
     state["prs"][2]["baseRefName"] = "main"
     gh.save(state)
@@ -159,9 +161,11 @@ def test_draft_closures_wait_for_push_lease_check(repo: Repo, gh: FakeGitHub, mo
 
     result = repo.stack("push", "--pr-rebuild", expect_success=False)
 
-    assert "push would fail, so nothing was pushed or changed" in result.stderr
-    assert gh.calls("pr", "close") == []
-    assert gh.calls("pr", "edit") == []
+    assert "push failed, so nothing was pushed" in result.stderr
+    assert "closed draft PR #2" in result.stderr
+    assert "reopen with `gh pr reopen 2" in result.stderr
+    assert gh.calls("pr", "close")
+    assert gh.load()["prs"][1]["state"] == "CLOSED"
     assert repo.remote_subject("pr3") == "upstream update"
 
 
@@ -214,16 +218,15 @@ def test_push_rechecks_queue_for_changed_refs_outside_the_rebuilt_github_stack(
     repo.commit("a", "updated locally\n", "update pr1")
     before = repo.remote_subject("pr1")
 
-    dry_push = GitClient.push_would_fail
+    initial_protection = StackClient.protect_push
 
-    def queue_after_dry_push(git: GitClient, *args: str) -> str | None:
-        result = dry_push(git, *args)
+    def queue_after_protection(client: StackClient, *args: Any, **kwargs: Any) -> None:
+        initial_protection(client, *args, **kwargs)
         state = gh.load()
         state["prs"][0]["isInMergeQueue"] = True
         gh.save(state)
-        return result
 
-    monkeypatch.setattr(GitClient, "push_would_fail", queue_after_dry_push)
+    monkeypatch.setattr(StackClient, "protect_push", queue_after_protection)
     result = repo.stack("push", "--pr-rebuild", expect_success=False)
 
     assert "merge queue" in result.stderr
@@ -390,23 +393,22 @@ def test_unlinked_stack_warning_distinguishes_eligible_and_ineligible_drafts(rep
 
 
 @pytest.mark.usefixtures("orphan")
-def test_push_refuses_new_closure_candidates_after_the_dry_push(
+def test_push_refuses_new_closure_candidates_after_protection(
     repo: Repo, gh: FakeGitHub, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     state = gh.load()
     state["stacks"][0]["prs"] = [1, 3]
     state["prs"][2]["baseRefName"] = "main"
     gh.save(state)
-    original = GitClient.push_would_fail
+    initial_protection = StackClient.protect_push
 
-    def add_blocker(git: GitClient, *args: str) -> str | None:
-        result = original(git, *args)
+    def add_blocker(client: StackClient, *args: Any, **kwargs: Any) -> None:
+        initial_protection(client, *args, **kwargs)
         state = gh.load()
         state["stacks"][0]["prs"].insert(1, 2)
         gh.save(state)
-        return result
 
-    monkeypatch.setattr(GitClient, "push_would_fail", add_blocker)
+    monkeypatch.setattr(StackClient, "protect_push", add_blocker)
 
     result = repo.stack("push", "--pr-rebuild", expect_success=False)
 

@@ -2,15 +2,18 @@
 
 import pathlib
 import subprocess
+from typing import Any
 
 import pytest
 
 from git_stack import events
+from git_stack.adapters import github
 from git_stack.adapters.git import PullRequestLink, PullRequestState
 from git_stack.adapters.github import PullRequest, github_repo
 from git_stack.errors import StackError
 from git_stack.git import GitClient
 from git_stack.stack import BranchStatus, StackClient
+from tests import fake_gh
 from tests.git_support import GitCall, real_git
 from tests.helpers import FakeGitHub, Repo, install_command
 
@@ -466,6 +469,56 @@ def test_push_reports_github_stacks_it_left_unstacked_when_the_push_fails(repo: 
     ) in " ".join(result.stderr.split())
 
 
+@pytest.mark.parametrize("fail", [False, True])
+def test_rebuild_unstacks_before_batching_ready_retargets(
+    repo: Repo, gh: FakeGitHub, git_calls: list[GitCall], fail: bool
+) -> None:
+    stack_whose_pull_requests_push_retargets_first(repo, gh)
+    gh.enable_stacks([1, 2])
+    if fail:
+        gh.fail_editing(2)
+    gh.clear_calls()
+    git_calls.clear()
+
+    result = repo.stack("push", "--pr-rebuild", expect_success=not fail)
+
+    pushes = [call for call in git_calls if call[0] == "push"]
+    assert len(pushes) == (0 if fail else 1)
+    assert all("--dry-run" not in call for call in pushes)
+
+    assert bases(gh) == {1: "main", 2: "main" if fail else "pr2"}
+    assert not any("--base" in call for call in gh.calls("pr", "edit"))
+    assert len(gh.calls("api", "--hostname", "github.com", "-X", "POST", "repos/acme/widgets/stacks/1000/unstack")) == 1
+    assert len(gh.calls("api", "graphql", "--hostname", "github.com", "--input", "-")) == 1
+    assert gh.stacks() == ([] if fail else [[1, 2]])
+    if fail:
+        assert "couldn't retarget #2" in result.stderr
+        assert "#1's base was changed from pr1 to main" in result.stderr
+        assert repo.remote_subject("pr3") != "pr3 c2"
+
+
+def test_rebuild_rechecks_later_retarget_batches(repo: Repo, gh: FakeGitHub, monkeypatch: pytest.MonkeyPatch) -> None:
+    stack_whose_pull_requests_push_retargets_first(repo, gh)
+    gh.enable_stacks([1, 2])
+    update_pull_requests = fake_gh.update_pull_requests
+
+    def change_base_after_first_update(request: dict[str, Any], state: dict[str, Any]) -> str:
+        response = update_pull_requests(request, state)
+        if "baseRefName" in request["variables"].get("p1", {}):
+            state["prs"][1]["baseRefName"] = "pr1"
+        return response
+
+    monkeypatch.setattr(github, "PR_UPDATE_BATCH_SIZE", 1)
+    monkeypatch.setattr(fake_gh, "update_pull_requests", change_base_after_first_update)
+
+    result = repo.stack("push", "--pr-rebuild", expect_success=False)
+
+    assert "PR #2 changed while preparing to retarget it" in result.stderr
+    assert "#1's base was changed from pr1 to main" in result.stderr
+    assert "Nothing was pushed." in result.stderr
+    assert bases(gh) == {1: "main", 2: "pr1"}
+
+
 def test_push_runs_the_pre_push_hook_once(repo: Repo, gh: FakeGitHub) -> None:
     stack_whose_pull_requests_push_retargets_first(repo, gh)
     runs = repo.tmp / "pre-push-runs"
@@ -476,17 +529,25 @@ def test_push_runs_the_pre_push_hook_once(repo: Repo, gh: FakeGitHub) -> None:
     assert runs.read_text().splitlines() == ["run"]
 
 
-def test_push_changes_no_pull_request_when_the_push_would_fail(repo: Repo, gh: FakeGitHub) -> None:
+def test_stale_lease_preserves_remote_refs_and_reports_pre_push_pr_edits(
+    repo: Repo, gh: FakeGitHub, git_calls: list[GitCall]
+) -> None:
     stack_whose_pull_requests_push_retargets_first(repo, gh)
     # Someone pushes to pr3 after we last fetched.
     repo.commit_on_forge("pr3", "d", "theirs\n", "theirs")
+    before = repo.git("show-ref", cwd=repo.origin)
+    git_calls.clear()
 
     result = repo.stack("push", "--with-prs", expect_success=False)
 
-    assert "push would fail, so nothing was pushed or changed" in result.stderr
+    assert "push failed, so nothing was pushed" in result.stderr
     assert "pr3 -> pr3 (stale info)" in result.stderr
-    assert bases(gh) == {1: "pr1", 2: "main"}
-    assert gh.calls("pr", "edit") == []
+    assert "#1's base was changed from pr1 to main" in result.stderr
+    assert "#2's base was changed from main to pr2" in result.stderr
+    assert bases(gh) == {1: "main", 2: "pr2"}
+    assert repo.git("show-ref", cwd=repo.origin) == before
+    pushes = [call for call in git_calls if call[0] == "push"]
+    assert len(pushes) == 1 and "--dry-run" not in pushes[0]
 
 
 @pytest.mark.parametrize("no_stack_field", [False, True])

@@ -1285,11 +1285,11 @@ local branch is moved to it instead, as \f[CR]sync\f[R] does (see
 Rebased on the remote).
 \f[CR]\-\-force\f[R] pushes over it.
 .IP \(bu 2
-The branches are pushed atomically to each destination.
-If a remote has several push URLs, a dry run checks leases at all
-destinations first.
-A failure during the real push can still leave some destinations
-updated.
+One \f[CR]git push\f[R] covers all selected branches.
+Git checks leases and applies the updates atomically at each
+destination.
+When a remote has several push URLs, a failure at one destination can
+leave others updated.
 .IP \(bu 2
 If Git\(cqs list of push URLs is ambiguous, the default branch check
 refuses the push.
@@ -1307,12 +1307,11 @@ branches that have none, which \f[CR]git stack prs\f[R] opens.
 Where the parent is already on the remote, that\(aqs done before
 pushing, so the pull request never shows the new parent\(aqs commits as
 its own.
-When the push needs to retarget a PR first, a dry\-run push checks the
-leases before editing GitHub.
-The pre\-push hook runs on the real push.
-If the push still fails (e.g.
-the remote refuses it), the error lists what was changed on GitHub and
-how to undo it.
+Git checks leases and runs the pre\-push hook after those PR edits.
+If Git rejects a lease, the atomic push leaves all refs at that
+destination as they were.
+If the push fails after making PR edits, the error lists the GitHub
+changes and how to undo them.
 .IP \(bu 2
 \f[CR]\-\-prs\f[R] (or \f[CR]\-\-pr\f[R]) then does what
 \f[CR]git stack prs\f[R] does for the stacks it pushed, so it\(aqs

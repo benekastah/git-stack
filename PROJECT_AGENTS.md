@@ -38,9 +38,13 @@ writes still check live PR state.
   GitHub. The GitHub adapter validates PR changes before an atomic push and
   plans any retargets that must run before publication. PR protection uses
   live GitHub state before writes. The Git push leases still guard ref
-  updates independently. PR body updates use
-  bounded GraphQL batches and send the body data on stdin. Run the dry push
-  before applying those edits so stale leases leave the PR bases alone.
+  updates independently. Each `git stack push` runs at most one `git push`,
+  with explicit leases and atomic ref updates at each destination. Report PR
+  edits left by a failed push.
+  Recheck known GitHub stacks before unstacking them for retargets. Batch
+  retargets to published bases and description updates in bounded GraphQL
+  requests on stdin. Check PR protection before each batch and record
+  successful retargets even if another edit failed.
   Close blocking drafts only with explicit authorization from `--pr-rebuild`
   and a fresh check of authorship, stack membership, PR protection and open dependents.
   Batch the orphan checks and do read-only rebuild preflight before the live

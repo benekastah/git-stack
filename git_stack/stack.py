@@ -2484,7 +2484,7 @@ class StackClient(StackCore):
                 continue
             configured = git.config_get(name, "remote")
             if configured is None or (configured == remote and git.remote_branch_name(name, remote) == target):
-                self.record_published_branch(integrations, name, remote, target, tip)
+                self.record_published_branches(integrations, remote, [(name, target, tip)])
 
     def move_off_deleted_parents(
         self,
@@ -3012,17 +3012,21 @@ class StackClient(StackCore):
             rebuild_stack,
             scope,
             opening,
-            bool(integration_pushes),
             push_urls,
             protection,
+            integration=bool(integration_pushes),
         )
-        # Atomic, so a branch that can't be pushed doesn't leave the rest of the
-        # stack pushed without it, and its pull requests not retargeted.
+        # Publish the entire selection in one Git push, regardless of stack
+        # depth. Git checks every lease and applies the refs atomically at each
+        # destination. PR changes are separate and reported if the push fails.
         verify_options = ["--no-verify"] if no_verify else []
         upstream_options = ["--set-upstream"] if set_upstream else []
-        for integration in integration_pushes:
-            integrations.verify(integration.refs)
-        self.remember_atomic_push(integrations, integration_pushes, remote, pinned)
+        try:
+            for integration in integration_pushes:
+                integrations.verify(integration.refs)
+            self.remember_atomic_push(integrations, integration_pushes, remote, pinned)
+        except StackError as e:
+            raise StackError(f"Nothing was pushed.\n{e}{self.changes_left(adapter)}") from e
         if not git.passthrough("push", "--atomic", *verify_options, *leases, *upstream_options, remote, *refspecs):
             detail = "some destinations may have been updated" if multiple_destinations else "nothing was pushed"
             raise StackError(
@@ -3149,40 +3153,23 @@ class StackClient(StackCore):
         rebuild_stack: bool,
         scope: list[str] | None,
         opening: bool,
-        integration: bool,
         push_urls: tuple[str, ...],
         protection: PRProtection,
+        *,
+        integration: bool,
     ) -> None:
-        """Check leases before editing PRs or pushing to several destinations."""
-
-        def update_error(error: StackError) -> StackError:
-            return StackError(f"Nothing was pushed.\n{error}{self.changes_left(adapter)}")
-
+        """Run PR protections before applying pre-push retargets."""
         try:
             retarget = adapter.prepare_push_retargets(branches, stacks, rebuild_stack, scope, opening)
-            # A blocked rebuild can stop before querying the live protections
-            # on refs it won't change. Check them before writing.
             self.protect_push(leases, refspecs, remote, adapter, protection, push_urls)
             if opening and isinstance(adapter, GitHubAdapter):
                 self.protect_pr_opening(branches, stacks, adapter)
-        except StackError as e:
-            raise update_error(e) from e
-        if retarget is None and len(push_urls) <= 1:
-            return
-        if integration:
-            self.emit(events.CheckingPush(remote))
-        # Leave PR bases and remote refs unchanged on a stale lease. A real
-        # push is atomic at each destination, and can still be refused.
-        if (why := self.git.push_would_fail("--atomic", *leases, remote, *refspecs)) is not None:
-            raise StackError(
-                f"push would fail, so nothing was pushed or changed; if the remote has new commits, run "
-                f"`git stack sync` and try again:\n{why}"
-            )
-        try:
+            if integration and (retarget is not None or len(push_urls) > 1):
+                self.emit(events.CheckingPush(remote))
             if retarget is not None:
                 retarget(lambda: self.protect_push(leases, refspecs, remote, adapter, protection, push_urls))
         except StackError as e:
-            raise update_error(e) from e
+            raise StackError(f"Nothing was pushed.\n{e}{self.changes_left(adapter)}") from e
 
     def add_integration_refspecs(
         self,
@@ -3239,13 +3226,15 @@ class StackClient(StackCore):
             if self.git.config_get(branch, "remote") is None:
                 integrations.remember_first_push(branch, remote, branch, tip)
 
-    def record_published_branch(
-        self, integrations: Integrations, name: str, remote: str, target: str, tip: str
+    def record_published_branches(
+        self, integrations: Integrations, remote: str, published: list[tuple[str, str, str]]
     ) -> None:
-        if self.git.config_get(name, "remote") is None:
+        missing = [(name, target) for name, target, _ in published if self.git.config_get(name, "remote") is None]
+        for name, target in missing:
             self.git.run("branch", f"--set-upstream-to=refs/remotes/{remote}/{target}", "--", name)
-        self.record_pulled_tips([(name, tip)])
-        integrations.forget_first_push(name)
+        self.record_pulled_tips((name, tip) for name, _, tip in published)
+        for name, _, _ in published:
+            integrations.forget_first_push(name)
 
     def record_pulled_tips(self, tips: Iterable[tuple[str, str]]) -> None:
         """Plan metadata writes before making any, so they share one config read."""
@@ -3272,10 +3261,6 @@ class StackClient(StackCore):
         for deletion in deletions or ():
             self.emit(events.RemoteBranchDeleted(deletion.upstream))
         integrations = Integrations(self)
-        for push in pushes:
-            tip = push.refs[push.name]
-            assert tip is not None
-            self.record_published_branch(integrations, push.name, remote, push.target, tip)
         if not pushes:
             # Hooks can move local refs while publishing, and a concurrent
             # fetch can replace the tracking ref. Only record matching tips.
@@ -3287,10 +3272,13 @@ class StackClient(StackCore):
                 and upstream[2] == work_tips[name]
             )
             return
-        for name in branches:
-            self.record_published_branch(
-                integrations, name, remote, self.git.remote_branch_name(name, remote), work_tips[name]
-            )
+        published: list[tuple[str, str, str]] = []
+        for push in pushes:
+            tip = push.refs[push.name]
+            assert tip is not None
+            published.append((push.name, push.target, tip))
+        published.extend((name, self.git.remote_branch_name(name, remote), work_tips[name]) for name in branches)
+        self.record_published_branches(integrations, remote, published)
 
     def changes_left(self, adapter: GitAdapter) -> str:
         """What adapter changed before a push failed, for its error, or ""."""

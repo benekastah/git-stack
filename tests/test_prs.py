@@ -1,10 +1,13 @@
 """git stack prs, with tests/fake_gh.py standing in for gh."""
 
 from collections.abc import Callable
+from typing import Any
 
 import pytest
 
 from git_stack import events, stack_section
+from git_stack.adapters import github
+from git_stack.adapters.github import PRProtection
 from git_stack.errors import StackError
 from git_stack.stack import BranchStatus, PullRequestAction, PullRequestStep, StackClient
 from tests import fake_gh
@@ -398,6 +401,33 @@ def test_prs_batches_changed_descriptions(repo: Repo, gh: FakeGitHub, client: St
     assert len(gh.calls("api", "graphql", "--hostname", "github.com", "--input", "-")) == 1
     assert not gh.calls("pr", "edit")
     assert body(gh, 2) == stack("- `main`", "  - #1", "    - #2 👈", "      - #3")
+
+
+def test_prs_rechecks_protection_for_later_description_batches(
+    repo: Repo, gh: FakeGitHub, client: StackClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo.make_stack()
+    client.push(prs=True)
+    state = gh.load()
+    for pr in state["prs"]:
+        pr["body"] = "new description"
+    gh.save(state)
+    update_pull_requests = fake_gh.update_pull_requests
+
+    def approve_after_first_update(request: dict[str, Any], state: dict[str, Any]) -> str:
+        response = update_pull_requests(request, state)
+        if "p1" in request["variables"]:
+            state["prs"][1]["reviewDecision"] = "APPROVED"
+        return response
+
+    monkeypatch.setattr(github, "PR_UPDATE_BATCH_SIZE", 1)
+    monkeypatch.setattr(fake_gh, "update_pull_requests", approve_after_first_update)
+
+    with pytest.raises(StackError, match=r"can't edit the description of PR #2: it is approved"):
+        client.prs(protection=PRProtection(protect=True))
+
+    assert stack_section.START in body(gh, 1)
+    assert body(gh, 2) == "new description"
 
 
 def test_prs_reports_the_failed_description_from_a_partial_batch(
@@ -862,6 +892,25 @@ def test_prs_shows_the_group_across_roots_in_the_selected_pr(
 
     assert body(gh, 1) == stack("- `main`", "  - #1 👈", "- `release`", "  - #2")
     assert [call[2] for call in gh.calls("pr", "edit")] == ["1"]
+
+
+def test_prs_batches_descriptions_across_roots(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+    repo.git("branch", "release", "main")
+    repo.git("push", "--quiet", "--set-upstream", "origin", "release")
+    client.branch("a", group="g")
+    repo.commit("a", "a\n", "a")
+    client.branch("b", group="g", from_branch="release")
+    repo.commit("b", "b\n", "b")
+    client.push(groups=["g"])
+    gh.clear_calls()
+
+    client.prs(groups=["g"])
+
+    (mutation,) = [call for call in gh.calls("api", "graphql") if "--input" in call]
+    assert mutation[-2:] == ["--input", "-"]
+    assert gh.calls("pr", "edit") == []
+    assert body(gh, 1) == stack("- `main`", "  - #1 👈", "- `release`", "  - #2")
+    assert body(gh, 2) == stack("- `main`", "  - #1", "- `release`", "  - #2 👈")
 
 
 @pytest.mark.parametrize("sync", [False, True])

@@ -951,16 +951,6 @@ class GitClient:
             "push", *(["--no-verify"] if no_verify else []), f"--force-with-lease={ref}:{tip}", remote, f":{ref}"
         )
 
-    def push_would_fail(self, *args: str) -> str | None:
-        """Why `git push <args>` would fail (git's error output), found with a
-        dry run, or None if it wouldn't. The dry run skips the pre-push hook,
-        which the real push runs, so it doesn't run twice."""
-        try:
-            self._git.run("push", "--dry-run", "--no-verify", *args)
-        except GitError as e:
-            return e.stderr.strip()
-        return None
-
     def fetch(self, remote: str) -> None:
         if not self.passthrough("fetch", "--prune", remote):
             raise StackError(f"fetching {remote} failed")

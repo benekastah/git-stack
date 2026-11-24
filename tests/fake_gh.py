@@ -334,18 +334,25 @@ def create_pull_request(args: list[str], prs: list[dict[str, Any]]) -> str:
     return f"https://github.com/acme/widgets/pull/{number}"
 
 
-def update_descriptions(request: dict[str, Any], state: dict[str, Any]) -> str:
+def update_pull_requests(request: dict[str, Any], state: dict[str, Any]) -> str:
     data = {}
     errors = []
     for alias, value in request["variables"].items():
         pr = next(p for p in state["prs"] if f"PR_{p['number']}" == value["pullRequestId"])
         number = pr["number"]
-        if number in state.get("fail_edits", []):
-            errors.append({"path": [alias], "message": "fake gh: failing as asked"})
+        try:
+            if number in state.get("fail_edits", []):
+                raise GhError("fake gh: failing as asked")
+            result = {"number": number}
+            if "baseRefName" in value:
+                edit_pull_request(["pr", "edit", str(number), "--base", value["baseRefName"]], state)
+                result["baseRefName"] = pr["baseRefName"]
+            if "body" in value:
+                pr["body"] = value["body"]
+            data[alias] = {"pullRequest": result}
+        except GhError as e:
+            errors.append({"path": [alias], "message": str(e)})
             data[alias] = None
-        else:
-            pr["body"] = value["body"]
-            data[alias] = {"pullRequest": {"number": number}}
     return json.dumps({"data": data, **({"errors": errors} if errors else {})})
 
 
@@ -402,7 +409,7 @@ def run(args: list[str], stdin: Callable[[], bytes] = bytes) -> tuple[int, bytes
     if not failing:
         try:
             out = (
-                update_descriptions(json.loads(read_stdin()), state)
+                update_pull_requests(json.loads(read_stdin()), state)
                 if args[:2] == ["api", "graphql"] and "--input" in args
                 else respond(args, state)
             )

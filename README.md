@@ -923,9 +923,9 @@ git stack push --prs            # then open pull requests, as `git stack prs` do
   "Rebase stack" button, isn't pushed over: the local branch is moved to it
   instead, as `sync` does (see
   [Rebased on the remote](#rebased-on-the-remote)). `--force` pushes over it.
-- The branches are pushed atomically to each destination. If a remote has
-  several push URLs, a dry run checks leases at all destinations first. A
-  failure during the real push can still leave some destinations updated.
+- One `git push` covers all selected branches. Git checks leases and applies
+  the updates atomically at each destination. When a remote has several push
+  URLs, a failure at one destination can leave others updated.
 - If Git’s list of push URLs is ambiguous, the default branch check refuses
   the push.
 - Refuses to push a branch whose remote branch was deleted, since that's
@@ -935,10 +935,11 @@ git stack push --prs            # then open pull requests, as `git stack prs` do
   stack parent (e.g. at `main` once the parent PR was merged), and lists the
   branches that have none, which `git stack prs` opens. Where the parent is
   already on the remote, that's done before pushing, so the pull request
-  never shows the new parent's commits as its own. When the push needs to
-  retarget a PR first, a dry-run push checks the leases before editing GitHub.
-  The pre-push hook runs on the real push. If the push still fails (e.g. the remote refuses
-  it), the error lists what was changed on GitHub and how to undo it.
+  never shows the new parent's commits as its own. Git checks leases and
+  runs the pre-push hook after those PR edits. If Git rejects a lease, the
+  atomic push leaves all refs at that destination as they were. If the push
+  fails after making PR edits, the error lists the GitHub changes and how to
+  undo them.
 - `--prs` (or `--pr`) then does what
   [`git stack prs`](#git-stack-prs-branchglob--g-group---remote-name--n---pr-rebuild) does
   for the stacks it pushed, so it's `git stack push` and `git stack prs` in

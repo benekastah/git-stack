@@ -9,9 +9,10 @@ import subprocess
 import sys
 import threading
 import urllib.parse
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator
 from contextlib import suppress
 from dataclasses import dataclass, replace
+from itertools import batched
 from typing import Self
 
 from git_stack import events, stack_section
@@ -57,7 +58,7 @@ REVIEW_FIELDS = (
     "isDraft baseRefName reviewDecision mergeStateStatus "
     "latestOpinionatedReviews(first: 20) { nodes { state } pageInfo { hasNextPage } }"
 )
-DESCRIPTION_BATCH_SIZE = 10
+PR_UPDATE_BATCH_SIZE = 10
 # Where GitHub looks for a repository's pull request template, matching names
 # case-insensitively. GitHub doesn't say which wins if there are several.
 TEMPLATE_DIRECTORIES = (".github", "", "docs")
@@ -1069,25 +1070,27 @@ class GitHubAdapter(GitAdapter):
                 ready.append((branch, parent))
             if rebuild_stack or not parent_published:
                 pending[pr.number] = base
-        closures = self.validate_deferred_retargets(pending, rebuild_stack, allowed) if pending else []
+        closures, membership = self.validate_push_retargets(pending, rebuild_stack, allowed) if pending else ([], {})
         self.protect_retargets(to_push, stacks)
 
         def retarget(protect_refs: Callable[[], None]) -> None:
             check_refs = protect_refs if closures else lambda: None
             check_refs()
             self.close_orphans(closures, edits=self.retarget_edits(to_push, stacks) if closures else None)
-            for branch, parent in ready:
-                # Only close drafts found in preflight, before the push lease check.
-                self.retarget(branch, parent, rebuild_stack, allowed, allow_new_closures=False)
+            if rebuild_stack:
+                self.apply_ready_retargets(ready, pending, membership, allowed, {pr.number for pr in closures})
+            else:
+                for branch, parent in ready:
+                    self.retarget(branch, parent, allowed=allowed)
 
             check_refs()
 
         return retarget if ready or closures else None
 
-    def validate_deferred_retargets(
+    def validate_push_retargets(
         self, pending: dict[int, str], rebuild_stack: bool, allowed: set[int]
-    ) -> list[OrphanedPullRequest]:
-        """Check whether retargeting to parents published by this push is allowed."""
+    ) -> tuple[list[OrphanedPullRequest], dict[int, GitHubStack]]:
+        """Check pending base changes and retain the stack membership seen in preflight."""
         try:
             fields = self.pull_request_fields(pending, STACK_FIELDS)
         except StackError as e:
@@ -1095,18 +1098,68 @@ class GitHubAdapter(GitAdapter):
                 raise StackError(
                     "couldn't check whether pull requests need unstacking before pushing; nothing was pushed"
                 ) from e
-            return []
+            return [], {}
         stacks = {
             number: stack for number, pr in fields.items() if (stack := optional_field(pr, "stack", dict)) is not None
         }
-        existing = [GitHubStack.from_json(stacks[number]) for number in sorted(stacks)]
+        membership = {number: GitHubStack.from_json(stacks[number]) for number in sorted(stacks)}
+        existing = list(membership.values())
         if existing and not rebuild_stack:
             changes = [f"Retarget #{n} to {pending[n]}" for n in sorted(stacks)]
             raise StackError(self.rebuild_hint(existing, allowed, changes))
         closures = self.plan_orphan_closures(existing, allowed)
         members = {n for stack in existing for n, state in stack.entries if state is GitHubState.OPEN}
         self.protect_edits(dict.fromkeys(members - {pr.number for pr in closures}), "unstack")
-        return closures
+        return closures, membership
+
+    def apply_ready_retargets(
+        self,
+        ready: list[tuple[str, str]],
+        pending: dict[int, str],
+        membership: dict[int, GitHubStack],
+        allowed: set[int],
+        closed: set[int],
+    ) -> None:
+        """Unstack known stacks, then retarget to bases that already exist."""
+        prs = self.pull_requests()
+        changes = {prs[branch].number: branch for branch, _ in ready}
+        unstacked: set[int] = set()
+        for number in changes:
+            if (stack := membership.get(number)) is not None and stack.number not in unstacked:
+                self.unstack(number, allowed, expected=stack, closed=closed, allow_new_closures=False)
+                unstacked.add(stack.number)
+        if len(ready) == 1:
+            branch, parent = ready[0]
+            self.retarget(branch, parent, True, allowed, allow_new_closures=False)
+        elif changes:
+            self.batch_retargets(changes, pending)
+
+    def batch_retargets(self, changes: dict[int, str], targets: dict[int, str]) -> None:
+        for numbers in batched(changes, PR_UPDATE_BATCH_SIZE, strict=False):
+            self.retarget_batch({n: changes[n] for n in numbers}, targets)
+
+    def retarget_batch(self, changes: dict[int, str], targets: dict[int, str]) -> None:
+        prs = self.pull_requests()
+        fields = f"{self.protection.fields} id"
+        if not self.protection.protect:
+            fields += " baseRefName"
+        inputs: dict[int, dict[str, str]] = {}
+        for number, live in self.pull_request_fields(changes, fields).items():
+            base = targets[number]
+            pr = prs[changes[number]]
+            current = field(live, "baseRefName", str)
+            if github_state(live) is not GitHubState.OPEN or current not in (pr.base, base):
+                raise StackError(f"PR #{number} changed while preparing to retarget it; retry the command")
+            if current == base:
+                prs[changes[number]] = replace(pr, base=base)
+                continue
+            self.protection.check(live, "retarget", repo=f"{self.owner}/{self.name}", new_base=base)
+            inputs[number] = {"pullRequestId": field(live, "id", str), "baseRefName": base}
+
+        if inputs:
+            for number in self.apply_pr_update_batch(inputs, "retarget", result_field="baseRefName"):
+                branch = changes[number]
+                self.record_retarget(branch, prs[branch], targets[number])
 
     def after_push(
         self,
@@ -1174,11 +1227,14 @@ class GitHubAdapter(GitAdapter):
                 ) from e
             self.unstack(pr.number, allowed or set(), new_base=base, allow_new_closures=allow_new_closures)
             self.gh(*edit)
+        self.record_retarget(branch, pr, base)
+
+    def record_retarget(self, branch: str, pr: PullRequest, base: str) -> None:
         self.changes.append(
             f"#{pr.number}'s base was changed from {pr.base} to {base} "
             f"(undo with `gh pr edit {pr.number} --repo {self.repo} --base {pr.base}`)"
         )
-        prs[branch] = replace(pr, base=base)
+        self.pull_requests()[branch] = replace(pr, base=base)
         self.core.emit(events.PullRequestRetargeted(branch, pr.number, base))
 
     @staticmethod
@@ -1357,6 +1413,8 @@ class GitHubAdapter(GitAdapter):
         new_base: str | None = None,
         after_closures: bool = False,
         allow_new_closures: bool = True,
+        expected: GitHubStack | None = None,
+        closed: set[int] | None = None,
     ) -> None:
         """Take the unmerged pull requests of pull request number's stack on
         GitHub out of it. Merged ones stay in it. Closed ones outside allowed are
@@ -1364,12 +1422,14 @@ class GitHubAdapter(GitAdapter):
         fields = self.pull_request_fields([number], STACK_FIELDS)
         stack_field = optional_field(fields[number], "stack", dict)
         if stack_field is None:
-            if after_closures:
+            if after_closures or expected is not None:
                 return
             raise StackError(f"GitHub no longer reports #{number} in a stack; retry the command")
         github_stack = GitHubStack.from_json(stack_field)
         if (after_closures or not allow_new_closures) and self.orphan_blockers([github_stack], allowed):
             raise StackError("the GitHub stack gained other open pull requests; retry the command")
+        if expected is not None and not github_stack.matches_after_closures(expected, closed or set()):
+            raise StackError(f"#{number}'s GitHub stack changed while checking it; retry the command")
         closures = self.plan_orphan_closures([github_stack], allowed)
         if closures:
             self.protect_edits(
@@ -1511,18 +1571,23 @@ class GitHubAdapter(GitAdapter):
             # doesn't know the field.
             fields = self.pull_request_fields(numbers, f"id body {BASE_CHANGES}")
         merged = self.merged_parents({n: fields[n] for n in history_roots}, history_roots)
+        edits: dict[int, str] = {}
         for root in sorted({stacks.root(b) for b in branches}):
             on_root = [b for b in branches if stacks.root(b) == root]
-            self.update_stack_sections_on_root(
-                on_root,
-                stacks,
-                prs,
-                fields,
-                {b: to_update[b] for b in on_root if b in to_update},
-                merged,
-                rebuild_stack,
-                dry_run,
+            edits.update(
+                self.plan_stack_sections_on_root(
+                    on_root,
+                    stacks,
+                    prs,
+                    fields,
+                    {b: to_update[b] for b in on_root if b in to_update},
+                    merged,
+                    rebuild_stack,
+                    dry_run,
+                )
             )
+        if edits:
+            self.update_descriptions(edits, fields)
 
     @staticmethod
     def stack_section_history_roots(
@@ -1535,7 +1600,7 @@ class GitHubAdapter(GitAdapter):
             bottoms.update(stacks.group_bottoms(bottom))
         return {prs[b].number: stacks.root(b) for b in bottoms if b in prs and prs[b].state is GitHubState.OPEN}
 
-    def update_stack_sections_on_root(
+    def plan_stack_sections_on_root(
         self,
         branches: list[str],
         stacks: Stacks,
@@ -1545,7 +1610,7 @@ class GitHubAdapter(GitAdapter):
         group_history: dict[int, int],
         rebuild_stack: bool,
         dry_run: bool,
-    ) -> None:
+    ) -> dict[int, str]:
         root = stacks.root(branches[0])
         selected = set(branches)
 
@@ -1571,7 +1636,7 @@ class GitHubAdapter(GitAdapter):
         # nothing else is left to say which path to link.
         chain = [to_update[b] for b in branches] if paths == [branches] else []
         if dry_run and rebuild_stack and self.plan_retargets(to_update, prs, stacks, github_stacks, chain):
-            return
+            return {}
         linked = (
             self.link_github_stacks(
                 [[to_update[b] for b in path] for path in paths], github_stacks, rebuild_stack, dry_run
@@ -1580,7 +1645,7 @@ class GitHubAdapter(GitAdapter):
             else set[int]()
         )
         if dry_run:
-            return
+            return {}
         edits: dict[int, str] = {}
         for branch, number in to_update.items():
             body = field(fields[number], "body", str)
@@ -1594,55 +1659,66 @@ class GitHubAdapter(GitAdapter):
                 new_body = stack_section.replace(body, section)
             if new_body != body:
                 edits[number] = new_body
-        self.update_descriptions(edits, fields)
+        return edits
 
     def update_descriptions(self, edits: dict[int, str], fields: dict[int, object]) -> None:
         """Batch body-only changes and verify each mutation's result."""
-        self.protect_edits(dict.fromkeys(edits), "edit the description of")
-        numbers = list(edits)
-        if len(numbers) == 1:
-            number = numbers[0]
+        if len(edits) == 1:
+            number = next(iter(edits))
+            self.protect_edits({number: None}, "edit the description of")
             self.gh("pr", "edit", str(number), "--repo", self.repo, "--body-file", "-", input=edits[number])
             return
-        for start in range(0, len(numbers), DESCRIPTION_BATCH_SIZE):
-            batch = numbers[start : start + DESCRIPTION_BATCH_SIZE]
-            inputs = {f"p{n}": {"pullRequestId": field(fields[n], "id", str), "body": edits[n]} for n in batch}
-            declarations = ", ".join(f"${alias}: UpdatePullRequestInput!" for alias in inputs)
-            mutations = " ".join(
-                f"{alias}: updatePullRequest(input: ${alias}) {{ pullRequest {{ number }} }}" for alias in inputs
-            )
-            # The descriptions can be long and belong on stdin, outside the
-            # command line and performance log.
-            request = json.dumps({"query": f"mutation({declarations}) {{ {mutations} }}", "variables": inputs})
-            errors: list[str] = []
-            raw_response = self.gh(
-                "api", "graphql", "--hostname", self.host, "--input", "-", input=request, partial_errors=errors
-            )
-            try:
-                response = parse_json(raw_response)
-                data = optional_field(response, "data", dict) or {}
-            except StackError as error:
-                if errors:
-                    raise StackError("\n".join(errors)) from error
-                raise
-            failed = [
-                n
-                for n in batch
-                if not isinstance(entry := data.get(f"p{n}"), dict) or entry.get("pullRequest") != {"number": n}
-            ]
-            if failed:
-                names = ", ".join(f"#{n}" for n in failed)
-                # A partial response can omit or garble these diagnostics.
-                with suppress(StackError):
-                    for item in optional_field(response, "errors", list) or []:
-                        with suppress(StackError):
-                            message = optional_field(item, "message", str)
-                            if message and not any(message in error for error in errors):
-                                errors.append(message)
-                details = "".join(f"\n{error}" for error in errors)
-                raise StackError(
-                    f"couldn't update descriptions for {names}; rerun to update the remaining pull requests{details}"
-                )
+        for batch in batched(edits, PR_UPDATE_BATCH_SIZE, strict=False):
+            self.protect_edits(dict.fromkeys(batch), "edit the description of")
+            inputs = {n: {"pullRequestId": field(fields[n], "id", str), "body": edits[n]} for n in batch}
+            for _ in self.apply_pr_update_batch(inputs, "update descriptions for"):
+                pass
+
+    def apply_pr_update_batch(
+        self, updates: dict[int, dict[str, str]], action: str, *, result_field: str = ""
+    ) -> Iterator[int]:
+        """Yield confirmed changes before raising any error from a partial result."""
+        inputs = {f"p{n}": update for n, update in updates.items()}
+        declarations = ", ".join(f"${alias}: UpdatePullRequestInput!" for alias in inputs)
+        mutations = " ".join(
+            f"{alias}: updatePullRequest(input: ${alias}) {{ pullRequest {{ number {result_field} }} }}"
+            for alias in inputs
+        )
+        # The descriptions can be long and belong on stdin, outside the
+        # command line and performance log.
+        request = json.dumps({"query": f"mutation({declarations}) {{ {mutations} }}", "variables": inputs})
+        errors: list[str] = []
+        raw_response = self.gh(
+            "api", "graphql", "--hostname", self.host, "--input", "-", input=request, partial_errors=errors
+        )
+        try:
+            response = parse_json(raw_response)
+            data = optional_field(response, "data", dict) or {}
+        except StackError as error:
+            if errors:
+                raise StackError("\n".join(errors)) from error
+            raise
+        failed: list[int] = []
+        for n in updates:
+            entry = data.get(f"p{n}")
+            expected: dict[str, object] = {"number": n}
+            if result_field:
+                expected[result_field] = updates[n][result_field]
+            if isinstance(entry, dict) and entry.get("pullRequest") == expected:
+                yield n
+            else:
+                failed.append(n)
+        if failed:
+            names = ", ".join(f"#{n}" for n in failed)
+            # A partial response can omit or garble these diagnostics.
+            with suppress(StackError):
+                for item in optional_field(response, "errors", list) or []:
+                    with suppress(StackError):
+                        message = optional_field(item, "message", str)
+                        if message and not any(message in error for error in errors):
+                            errors.append(message)
+            details = "".join(f"\n{error}" for error in errors)
+            raise StackError(f"couldn't {action} {names}; rerun to update the remaining pull requests{details}")
 
     def link_github_stacks(
         self, chains: list[list[int]], stacks: dict[int, GitHubStack | None], rebuild_stack: bool, dry_run: bool

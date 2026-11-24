@@ -2277,9 +2277,50 @@ def test_push_refuses_to_replace_a_remote_integration_deleted_since_last_fetch(
     result = repo.stack("push", *args, expect_success=False)
 
     assert "checking whether origin will accept the push" in result.stdout
-    assert "push would fail" in result.stderr
+    assert "push failed, so nothing was pushed" in result.stderr
+    assert "#1's base was changed from main to combined" in result.stderr
     assert tip(repo, "work", remote=True) == before
-    assert gh.calls("pr", "edit") == []
+    assert not repo.git("branch", "--list", "combined", cwd=repo.origin)
+
+
+def test_integration_ref_change_after_retarget_reports_pr_recovery(
+    repo: Repo, gh: FakeGitHub, git_calls: list[GitCall], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    integration(repo)
+    work(repo)
+    repo.stack("push")
+    remote_work = tip(repo, "work", remote=True)
+    remote_base = tip(repo, "combined", remote=True)
+    gh.add_pr(
+        number=1,
+        state="OPEN",
+        headRefName="work",
+        headRefOid=remote_work,
+        baseRefName="main",
+        mergeCommit=None,
+    )
+    repo.commit("c", "next work commit\n", "advance work")
+
+    respond = fake_gh.respond
+
+    def move_local_ref(args: list[str], state: dict[str, Any]) -> str | None:
+        response = respond(args, state)
+        if args[:3] == ["pr", "edit", "1"] and "--base" in args:
+            repo.git("update-ref", "refs/heads/combined", tip(repo, "main"))
+        return response
+
+    monkeypatch.setattr(fake_gh, "respond", move_local_ref)
+    git_calls.clear()
+
+    result = repo.stack("push", "--with-prs", expect_success=False)
+
+    assert "integration refs changed" in result.stderr
+    assert "Nothing was pushed." in result.stderr
+    assert "#1's base was changed from main to combined" in result.stderr
+    assert "gh pr edit 1 --repo github.com/acme/widgets --base main" in result.stderr
+    assert not any(call[0] == "push" for call in git_calls)
+    assert tip(repo, "work", remote=True) == remote_work
+    assert tip(repo, "combined", remote=True) == remote_base
 
 
 def test_push_prs_accepts_published_integration_without_cached_ref(repo: Repo, gh: FakeGitHub) -> None:
@@ -2351,6 +2392,24 @@ def test_dirty_integration_push_reports_protected_destination_first(
     assert "work track origin's default branch" in result.stderr
     assert tip(repo, "main", remote=True) == before
     assert gh.calls("pr", "create") == []
+
+
+def test_integration_push_batches_publication_metadata_reads(repo: Repo, git_calls: list[GitCall]) -> None:
+    integration(repo)
+    work(repo)
+    branches = ["combined", "work", *repo.make_chain(3)]
+    repo.stack("push")
+    for branch in branches:
+        repo.git("config", "--unset", f"branch.{branch}.stackPulled")
+    git_calls.clear()
+
+    repo.stack("push")
+
+    start = next(i for i, call in enumerate(git_calls) if call[0] == "push")
+    config_reads = [call for call in git_calls[start + 1 :] if call[0] == "config" and "--list" in call]
+    assert len(config_reads) <= 2
+    for branch in branches:
+        assert repo.config(branch, "stackPulled") == tip(repo, branch, remote=True)
 
 
 @pytest.mark.parametrize("restack_first", [False, True])

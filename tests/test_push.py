@@ -11,13 +11,16 @@ from tests.git_support import GitCall
 from tests.helpers import FakeGitHub, Repo
 
 
-def test_push_checks_leases_once_when_no_pull_request_needs_retargeting(
+def test_deep_stack_publishes_every_branch_with_one_atomic_push(
     repo: Repo, gh: FakeGitHub, git_calls: list[GitCall]
 ) -> None:
-    repo.make_stack()
+    chain = repo.make_chain(8)
+    git_calls.clear()
+
     repo.stack("push", "--prs")
 
-    assert gh.calls("pr", "create")
+    assert len(gh.calls("pr", "create")) == len(chain)
+    assert all(repo.git("rev-parse", b, cwd=repo.origin) == repo.git("rev-parse", b) for b in chain)
     pushes = [call for call in git_calls if call[0] == "push"]
     assert len(pushes) == 1
     assert "--dry-run" not in pushes[0]
@@ -106,17 +109,17 @@ def test_push_does_not_record_a_tracking_ref_changed_after_publication(
         ),
     ],
 )
-def test_push_checks_leases_at_all_destinations_before_writing(
-    repo: Repo, client: StackClient, push_config: str
+def test_push_uses_one_invocation_and_keeps_leases_at_every_destination(
+    repo: Repo, client: StackClient, git_calls: list[GitCall], push_config: str
 ) -> None:
     client.branch("feature")
     repo.commit("a", "feature\n", "feature")
-    old = repo.git("rev-parse", "feature")
     client.push()
     name = f"{repo.origin.name} " if push_config == "trailing space" else "other-push.git"
     other = repo.origin.with_name(name)
     repo.git("clone", "--bare", "--quiet", str(repo.origin), str(other))
-    repo.git("update-ref", "refs/heads/feature", repo.git("rev-parse", "main"), cwd=other)
+    divergent = repo.git("rev-parse", "main")
+    repo.git("update-ref", "refs/heads/feature", divergent, cwd=other)
     if push_config != "cleared pushurl":
         repo.git("config", "--add", "remote.origin.pushurl", str(repo.origin))
         repo.git("config", "--add", "remote.origin.pushurl", str(other))
@@ -125,10 +128,14 @@ def test_push_checks_leases_at_all_destinations_before_writing(
         repo.git("config", "--add", "remote.origin.pushurl", "")
     repo.commit("a", "local advance\n", "advance")
 
-    with pytest.raises(StackError, match="push would fail"):
+    git_calls.clear()
+    with pytest.raises(StackError, match="some destinations may have been updated"):
         client.push()
 
-    assert repo.git("rev-parse", "refs/heads/feature", cwd=repo.origin) == old
+    pushes = [call for call in git_calls if call[0] == "push"]
+    assert len(pushes) == 1 and "--atomic" in pushes[0] and "--dry-run" not in pushes[0]
+    assert repo.git("rev-parse", "refs/heads/feature", cwd=repo.origin) == repo.git("rev-parse", "feature")
+    assert repo.git("rev-parse", "refs/heads/feature", cwd=other) == divergent
 
 
 def test_push_reports_partial_success_when_a_second_attempt_fails(repo: Repo, client: StackClient) -> None:
