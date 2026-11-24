@@ -204,6 +204,18 @@ def test_config_get_sees_our_own_write_to_another_config_file(
     assert git.config_get("main", "stackParent") == value
 
 
+def test_unsetting_an_absent_setting_keeps_the_config_cache(repo: Repo, git_calls: list[GitCall]) -> None:
+    """It changes nothing, so reading the config again would be wasted."""
+    git = GitClient(repo.path)
+    git.branch_config()
+
+    git.config_unset("main", "stackParent")
+    git_calls.clear()
+
+    assert git.config_get("main", "stackParent") is None
+    assert git_calls == []
+
+
 @pytest.mark.parametrize("explicit", [False, True])
 def test_push_destinations_see_changes_in_an_included_config(repo: Repo, explicit: bool) -> None:
     included = repo.tmp / "remote-config"

@@ -19,12 +19,14 @@ until then every command skips it.
 ## The config cache doesn't see other config files
 
 `GitClient.branch_config` rereads the config only when the contents of the
-common `.git/config` have changed, so settings changed in another config file
-(`git config --worktree` with `extensions.worktreeConfig`, an included file,
-or, for `GitClient.config_value`'s `stack.adapter`, `stack.orientation` and
-remote URLs, the global config) aren't seen until something writes
-`.git/config`. The command line reads them afresh each time it runs; a script
-that keeps a `StackClient` across such a change doesn't.
+common `.git/config` have changed or git-stack itself has written a setting,
+so settings another process changes in another config file (`git config
+--worktree` with `extensions.worktreeConfig`, an included file, the file
+`GIT_CONFIG` names, or, for `GitClient.config_value`'s `stack.adapter`,
+`stack.orientation` and remote URLs, the global config) aren't seen until
+something writes `.git/config` or git-stack writes a setting. The command
+line reads them afresh each time it runs; a script that keeps a `StackClient`
+across such a change doesn't.
 
 ## Group sync can lose its integration selector after the last work branch lands
 

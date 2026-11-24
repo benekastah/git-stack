@@ -14,6 +14,7 @@ from typing import TextIO
 import git_client
 import pygit2
 from git_client import (
+    ConfigResult,
     ConfigSet,
     ConfigUnset,
     Git,
@@ -518,7 +519,7 @@ class GitClient:
         """key's value, as `git config --get` gives it (the last, and "" for
         a key with none), or None if it's unset. Read with the branch config
         (see branch_config), so it's no git call of its own, and read again
-        when it is: once .git/config changes."""
+        when it is: once .git/config changes or git-stack writes a setting."""
         self.branch_config()
         values = self._config.get(config_key(key))
         return None if values is None else values[-1] or ""
@@ -557,18 +558,23 @@ class GitClient:
 
     def _write_config(self, change: ConfigSet | ConfigUnset) -> None:
         """Write branch config, retrying while the config file is locked."""
+        # Unless git says it changed nothing (an unset of a setting that isn't
+        # there, or of one with several values), assume it changed something.
+        changed = True
         try:
-            self._git.write_configs(change, wait=CONFIG_LOCK_TIMEOUT)
+            [result] = self._git.write_configs(change, wait=CONFIG_LOCK_TIMEOUT)
+            changed = result is ConfigResult.CHANGED
         except GitError as error:
             if isinstance(change, ConfigSet):
                 raise StackError(f"git config {change.key} {change.value} failed:\n{error.stderr.strip()}") from error
         except NoAnswerError as error:
             raise StackError(str(error)) from error
         finally:
-            # The write may not have touched .git/config's contents (e.g. with
-            # GIT_CONFIG set, git config writes that file), so the cache
-            # wouldn't see it change.
-            self._config_read = False
+            if changed:
+                # The write may not have touched .git/config's contents (e.g.
+                # with GIT_CONFIG set, git config writes that file), so the
+                # cache wouldn't see it change.
+                self._config_read = False
             if not change.key.rpartition(".")[2].lower().startswith("stack"):
                 # A config write can't move a worktree's HEAD.
                 self._forget_refs(worktrees=False)
