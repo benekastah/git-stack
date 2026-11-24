@@ -1270,12 +1270,29 @@ class StackClient(StackCore):
             stacks.restricted(s for b in branches if b in stacks for s in stacks.stack_of(b, groups=False)), adapter
         )
 
-    def checked_adapter(self, remote: str, *, lookup_branches: Iterable[str] | None = None) -> GitAdapter:
+    def checked_adapter(
+        self, remote: str, *, lookup_branches: Iterable[str] | None = None, check_worktree: bool = False
+    ) -> GitAdapter:
         """The adapter for sync, clean and push, which fetch and change
         branches. Fails unless it can say which branches were merged, since
         checking locally instead could untrack (or delete) a branch whose pull
         request is open, or restack one that was merged."""
         adapter = make_adapter(self, remote, fetch=True, lookup_branches=lookup_branches)
+        if check_worktree and isinstance(adapter, GitHubAdapter):
+            # Status reads the checkout. The PR lookup can fetch objects,
+            # but does not change the checkout or index.
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                worktree = pool.submit(self.ensure_clean_worktree)
+                self.ensure_adapter_available(adapter)
+                worktree.result()
+        else:
+            self.ensure_adapter_available(adapter)
+            if check_worktree:
+                self.ensure_clean_worktree()
+        return adapter
+
+    @staticmethod
+    def ensure_adapter_available(adapter: GitAdapter) -> None:
         try:
             adapter.ensure_available()
         except StackError as e:
@@ -1283,7 +1300,6 @@ class StackClient(StackCore):
                 f"{e}\nNothing was changed. To only check for merges locally, run "
                 f"`git -c {ADAPTER_SETTING}=git stack ...`"
             ) from e
-        return adapter
 
     @staticmethod
     def configure_pr_protection(adapter: GitAdapter, protection: PRProtection, force: bool) -> PRProtection:
@@ -2813,17 +2829,19 @@ class StackClient(StackCore):
                 if branch not in branches_for_sections:
                     branches_for_sections.update(dict.fromkeys(stacks.stack_of(branch)))
             lookup_branches.update(branches_for_sections)
-        adapter = self.checked_adapter(push_remote, lookup_branches=lookup_branches)
-        self.configure_orphan_closures(adapter, confirm_orphan_closures, rebuild_stack)
-        protection = self.configure_pr_protection(adapter, protection, force)
-        github = adapter if prs and isinstance(adapter, GitHubAdapter) else None
         roots = {stacks.root(branch) for branch in stack}
-        known_default = adapter.default_branch_for_push() if not force and isinstance(adapter, GitHubAdapter) else None
-        self.ensure_sync_destination(stack, roots, push_remote, force, "push", known_default=known_default)
         integrations = Integrations(self)
         selection = RefreshSelection(
             stack, {root: config for root in sorted(roots) if (config := integrations.read(root)) is not None}
         )
+        adapter = self.checked_adapter(
+            push_remote, lookup_branches=lookup_branches, check_worktree=bool(selection.integrations)
+        )
+        self.configure_orphan_closures(adapter, confirm_orphan_closures, rebuild_stack)
+        protection = self.configure_pr_protection(adapter, protection, force)
+        github = adapter if prs and isinstance(adapter, GitHubAdapter) else None
+        known_default = adapter.default_branch_for_push() if not force and isinstance(adapter, GitHubAdapter) else None
+        self.ensure_sync_destination(stack, roots, push_remote, force, "push", known_default=known_default)
         branches, integration_pushes = self.prepare_push(selection, stacks, adapter, push_remote, force)
         pushed = self.push_branches(
             branches,
@@ -2857,7 +2875,6 @@ class StackClient(StackCore):
         """Prepare selected work and any generated bases for a single push."""
         if not selection.integrations:
             return self.take_branches_for_push(selection.branches, stacks, adapter, remote, force), []
-        self.ensure_clean_worktree()
         expected = self.preflight_integrations(selection, stacks)
         self.preflight_integration_worktrees(selection, expected)
         roots = {stacks.root(branch) for branch in selection.branches}

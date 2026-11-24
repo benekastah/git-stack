@@ -3,6 +3,8 @@
 import json
 import pathlib
 import shutil
+import threading
+from typing import Any
 
 import pytest
 
@@ -14,6 +16,7 @@ from git_stack.git import GitClient
 from git_stack.integrations import Integration, Integrations
 from git_stack.stack import StackClient
 from git_stack.stacks import StackNode, Stacks
+from tests import fake_gh
 from tests.git_support import GitCall
 from tests.helpers import FakeGitHub, Repo, captured_output
 
@@ -2288,6 +2291,49 @@ def test_push_prs_accepts_published_integration_without_cached_ref(repo: Repo, g
     repo.stack("push", "--prs")
 
     assert [(pr["headRefName"], pr["baseRefName"]) for pr in gh.load()["prs"]] == [("work", "combined")]
+
+
+@pytest.mark.parametrize("dirty", [False, True])
+def test_integrated_push_overlaps_initial_pr_lookup_with_status(
+    repo: Repo, gh: FakeGitHub, monkeypatch: pytest.MonkeyPatch, dirty: bool
+) -> None:
+    integration(repo)
+    work(repo)
+    repo.stack("push", "--prs")
+    original_tip = tip(repo, "work", remote=True)
+    repo.commit("c", "publish me\n", "new work")
+    if dirty:
+        repo.write("c", "uncommitted\n")
+
+    status_started = threading.Event()
+    lookup_started = threading.Event()
+    check_worktree = StackClient.ensure_clean_worktree
+    respond = fake_gh.respond
+
+    def check(client: StackClient) -> None:
+        status_started.set()
+        assert lookup_started.wait(5), "PR lookup didn't start alongside the worktree check"
+        check_worktree(client)
+
+    def lookup(args: list[str], state: dict[str, Any]) -> str | None:
+        if args[:2] == ["api", "graphql"] and "b0=work" in args:
+            lookup_started.set()
+            assert status_started.wait(5), "the worktree check didn't start alongside the PR lookup"
+        return respond(args, state)
+
+    monkeypatch.setattr(StackClient, "ensure_clean_worktree", check)
+    monkeypatch.setattr(fake_gh, "respond", lookup)
+    gh.clear_calls()
+
+    result = repo.stack("push", "--prs", expect_success=not dirty)
+
+    assert status_started.is_set() and lookup_started.is_set()
+    if dirty:
+        assert "you have uncommitted changes" in result.stderr
+        assert tip(repo, "work", remote=True) == original_tip
+        assert gh.calls("pr", "edit") == []
+    else:
+        assert tip(repo, "work", remote=True) == tip(repo, "work")
 
 
 @pytest.mark.parametrize("restack_first", [False, True])
