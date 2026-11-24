@@ -1458,7 +1458,10 @@ run, so two of them never interleave their writes: one started while another
 is running (in any worktree of the repository) says on stderr that it's
 waiting, and waits for it to finish. Read-only commands like `info` take it only to record a
 restack or pull you finished by hand (see [Scripting](#scripting)), and only
-while they record it. The lock is
+while they record it. While a command holds the lock, what it starts (e.g.
+git's hooks) has `GIT_STACK_LOCK_HELD` set, and a read-only command started
+with it set leaves such a restack or pull to a later command rather than wait
+for the lock its caller holds. The lock is
 released when a command exits, including when a rebase stops on a conflict,
 so resolving it never waits on anything.
 

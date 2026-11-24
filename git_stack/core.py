@@ -1,5 +1,6 @@
 import enum
 import fnmatch
+import os
 import shlex
 from collections import Counter
 from collections.abc import Callable, Generator, Iterable, Sequence
@@ -56,6 +57,10 @@ CHECK_CACHE_FILE = "git-stack-cache.json"
 # Held (see StackCore.exclusive) by each command that changes stack metadata, so
 # two never interleave their writes.
 LOCK_FILE = "git-stack.lock"
+# Set, to the holder's process ID, in the environment of what a process
+# holding the lock starts, so a git-stack that one of git's hooks runs then
+# knows not to wait for the lock (see StackClient.settled_stacks).
+LOCK_HELD_ENV = "GIT_STACK_LOCK_HELD"
 CONFLICT_CHECK_KEY = "stackConflictCheck"
 # Renamed whenever what the check counts as landed changes, so answers worked
 # out the old way aren't used.
@@ -201,6 +206,8 @@ class StackCore:
         only reads takes it to settle, it forgets what the snapshot and the
         branch config cache read before, which another command may have
         changed until then.
+
+        While it's held, the processes this one starts have LOCK_HELD_ENV set.
         """
         if self._exclusive_depth:
             self._exclusive_depth += 1
@@ -212,10 +219,24 @@ class StackCore:
         with file_lock(self.git.common_dir() / LOCK_FILE, lambda: self.emit(events.WaitingForLock())):
             self.git.forget_snapshot()
             self._exclusive_depth = 1
+            held_before = os.environ.get(LOCK_HELD_ENV)
+            os.environ[LOCK_HELD_ENV] = str(os.getpid())
             try:
                 yield
             finally:
+                if held_before is None:
+                    del os.environ[LOCK_HELD_ENV]
+                else:
+                    os.environ[LOCK_HELD_ENV] = held_before
                 self._exclusive_depth = 0
+
+    @staticmethod
+    def lock_held_by_caller() -> bool:
+        """Whether a process that holds the lock, other than this one,
+        started this one, e.g. through one of git's hooks (see
+        LOCK_HELD_ENV), so waiting for the lock could wait forever."""
+        held_by = os.environ.get(LOCK_HELD_ENV)
+        return bool(held_by) and held_by != str(os.getpid())
 
     @property
     def checks(self) -> CheckCache:

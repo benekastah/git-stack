@@ -97,6 +97,42 @@ def test_base_gives_the_base_it_settles(repo: Repo, client: StackClient) -> None
     assert client.base("pr2") == new_base
 
 
+def test_processes_started_under_the_lock_are_told_it_is_held(repo: Repo, client: StackClient) -> None:
+    """They inherit our environment, so git's hooks see it."""
+    assert core.LOCK_HELD_ENV not in os.environ
+    with client.exclusive():
+        assert os.environ[core.LOCK_HELD_ENV] == str(os.getpid())
+    assert core.LOCK_HELD_ENV not in os.environ
+
+
+def test_reading_command_under_another_holding_the_lock_records_nothing(
+    repo: Repo, client: StackClient, locks_taken: list[pathlib.Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Rather than wait for a lock it may never get: e.g. run by a hook of a
+    git command that a git-stack command holding the lock started."""
+    restack_finished_by_hand(repo)
+    old_base = repo.git("rev-parse", "pr1~1")
+    pending = repo.config("pr2", core.PENDING_RESTACK_KEY)
+    monkeypatch.setenv(core.LOCK_HELD_ENV, str(os.getpid() + 1))
+    locks_taken.clear()
+
+    assert client.base("pr2") == old_base
+
+    assert locks_taken == []
+    assert repo.config("pr2", core.PENDING_RESTACK_KEY) == pending
+
+
+def test_reading_command_started_by_one_holding_the_lock_doesnt_wait_for_it(repo: Repo, client: StackClient) -> None:
+    restack_finished_by_hand(repo)
+    old_base = repo.git("rev-parse", "pr1~1")
+
+    with client.exclusive():
+        # It would wait for this process, its parent here, forever.
+        base = repo.stack_process("base")
+
+    assert base.stdout == f"{old_base}\n"
+
+
 def start_waiting_for_lock(
     repo: Repo, command: Callable[[StackClient], object]
 ) -> tuple[threading.Thread, list[object]]:

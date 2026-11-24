@@ -1066,8 +1066,10 @@ class StackClient(StackCore):
         settle_waiting), as there usually isn't. If there is, it takes the
         lock (waiting for another command that has it) only while it
         records it, checking again under the lock, since that command may
-        have recorded it meanwhile."""
-        if self.settle_waiting():
+        have recorded it meanwhile. Started by a process that holds the
+        lock (see lock_held_by_caller), it leaves it for a later command,
+        rather than wait for that process, which is waiting for it."""
+        if not self.lock_held_by_caller() and self.settle_waiting():
             with self.exclusive():
                 if not self.git.operation_in_progress():
                     self.settle_all(forget_unfinished=False)
