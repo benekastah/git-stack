@@ -41,26 +41,18 @@ integration when no source was retired. To retry, name the integration
 explicitly with `git stack sync <integration>` and include any surviving
 stacks that still need to sync.
 
-## A writing command run by a hook of a lock-holding git-stack waits forever
-
-While a git-stack command holds the lock, git's hooks it triggers inherit
-`GIT_STACK_LOCK_HELD`, and the reading commands skip settling rather than wait
-for that lock. A command that changes metadata (`@exclusive`) doesn't check it:
-a post-checkout hook running `git stack track ...` during `git stack branch`
-waits for the lock its grandparent holds, which waits for the hook, so neither
-finishes. It could fail fast instead, with a StackError, when
-`lock_held_by_caller()` and trying the lock without waiting fails.
-
 ## GIT_STACK_LOCK_HELD is set in the whole process's environment
 
 `StackCore.exclusive` sets it in `os.environ`, which costs:
 
 - In a host process that uses git-stack as a library, the children of every
   thread inherit it while any thread holds the lock, so a git-stack another
-  thread starts skips settling though it could have waited.
+  thread starts skips settling though it could have waited, and a command
+  that changes metadata fails rather than wait for the lock.
 - Setting the environment races with C code calling `getenv` in other threads.
 - A long-lived descendant (e.g. a daemon a hook starts) keeps the value after
-  the lock is released, and a git-stack it starts later skips settling.
+  the lock is released, and a git-stack it starts later skips settling, or,
+  if it changes metadata, fails while another command holds the lock.
 
 Either would avoid these: try the lock without waiting before skipping, so a
 stale or foreign value costs nothing when the lock is free; or pass the

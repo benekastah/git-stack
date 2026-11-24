@@ -12,7 +12,7 @@ from contextlib import contextmanager
 import pytest
 
 from git_stack import core, events, git
-from git_stack.errors import StackError
+from git_stack.errors import LockHeldByCaller, StackError
 from git_stack.file_lock import file_lock
 from git_stack.git import GitClient
 from git_stack.stack import BranchStatus, StackClient
@@ -131,6 +131,47 @@ def test_reading_command_started_by_one_holding_the_lock_doesnt_wait_for_it(repo
         base = repo.stack_process("base")
 
     assert base.stdout == f"{old_base}\n"
+
+
+def test_writing_command_started_by_one_holding_the_lock_fails_at_once(repo: Repo, client: StackClient) -> None:
+    """E.g. `git stack track` in a post-checkout hook of `git stack branch`:
+    waiting for this process, its parent here, would wait forever."""
+    repo.git("branch", "side")
+    repo.git("switch", "--quiet", "side")
+
+    with client.exclusive():
+        track = repo.stack_process("track", "main", expect_success=False)
+
+    assert track.returncode == 1
+    assert f"the git stack command that started this one (process {os.getpid()}) holds" in track.stderr
+    assert "waiting" not in track.stderr
+    assert not repo.config_exists("side", core.PARENT_KEY)
+
+
+def test_writing_command_told_the_lock_is_held_waits_for_nothing(
+    repo: Repo, client: StackClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Told so by its caller, a command that finds the lock taken gives up
+    rather than wait, without saying it's waiting."""
+    monkeypatch.setenv(core.LOCK_HELD_ENV, str(os.getpid() + 1))
+
+    with lock_held_by_another_command(repo), pytest.raises(LockHeldByCaller, match=f"process {os.getpid() + 1}"):
+        client.branch("pr1")
+
+    assert not any(isinstance(event, events.WaitingForLock) for event in repo.emitted)
+    assert not repo.config_exists("pr1", core.PARENT_KEY)
+
+
+def test_writing_command_told_the_lock_is_held_takes_it_if_its_free(
+    repo: Repo, client: StackClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The variable may be stale, e.g. in a process its holder started that
+    outlived the lock."""
+    monkeypatch.setenv(core.LOCK_HELD_ENV, str(os.getpid() + 1))
+
+    client.branch("pr1")
+
+    assert repo.config("pr1", core.PARENT_KEY) == "main"
 
 
 def start_waiting_for_lock(

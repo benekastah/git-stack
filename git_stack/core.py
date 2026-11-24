@@ -9,7 +9,7 @@ from dataclasses import dataclass
 
 from git_stack import events
 from git_stack.check_cache import CheckCache
-from git_stack.errors import BrokenStackError, StackError
+from git_stack.errors import BrokenStackError, LockHeldByCaller, StackError
 from git_stack.file_lock import file_lock
 from git_stack.git import GitClient, is_object_id
 from git_stack.stacks import Ownership, StackNode, Stacks
@@ -59,7 +59,7 @@ CHECK_CACHE_FILE = "git-stack-cache.json"
 LOCK_FILE = "git-stack.lock"
 # Set, to the holder's process ID, in the environment of what a process
 # holding the lock starts, so a git-stack that one of git's hooks runs then
-# knows not to wait for the lock (see StackClient.settled_stacks).
+# knows not to wait for the lock (see StackCore.exclusive).
 LOCK_HELD_ENV = "GIT_STACK_LOCK_HELD"
 CONFLICT_CHECK_KEY = "stackConflictCheck"
 # Renamed whenever what the check counts as landed changes, so answers worked
@@ -209,7 +209,10 @@ class StackCore:
 
         While it's held, it sets LOCK_HELD_ENV (GIT_STACK_LOCK_HELD) in this
         process's environment (os.environ), so every process this one starts
-        meanwhile has it.
+        meanwhile has it. Started with it set (see lock_held_by_caller), a
+        command that finds the lock taken raises LockHeldByCaller rather than
+        wait for the process that started it, which waits for it. With the
+        lock free, it takes it as ever, so a stale value costs nothing then.
         """
         if self._exclusive_depth:
             self._exclusive_depth += 1
@@ -218,7 +221,17 @@ class StackCore:
             finally:
                 self._exclusive_depth -= 1
             return
-        with file_lock(self.git.common_dir() / LOCK_FILE, lambda: self.emit(events.WaitingForLock())):
+
+        def on_wait() -> None:
+            if self.lock_held_by_caller():
+                raise LockHeldByCaller(
+                    "can't take git-stack's lock: the git stack command that started this one "
+                    f"(process {os.environ[LOCK_HELD_ENV]}) holds it, and waits for this one, "
+                    "e.g. through one of git's hooks; run this once that command has finished"
+                )
+            self.emit(events.WaitingForLock())
+
+        with file_lock(self.git.common_dir() / LOCK_FILE, on_wait):
             self.git.forget_snapshot()
             self._exclusive_depth = 1
             held_before = os.environ.get(LOCK_HELD_ENV)
@@ -234,9 +247,11 @@ class StackCore:
 
     @staticmethod
     def lock_held_by_caller() -> bool:
-        """Whether a process that holds the lock, other than this one,
-        started this one, e.g. through one of git's hooks (see
-        LOCK_HELD_ENV), so waiting for the lock could wait forever."""
+        """Whether this process's environment says a process that held the
+        lock, other than this one, started it, e.g. through one of git's hooks
+        (see LOCK_HELD_ENV), so waiting for the lock could wait forever. The
+        value may be stale (the lock released since), so it's only a reason
+        not to wait for a lock that's taken."""
         held_by = os.environ.get(LOCK_HELD_ENV)
         return bool(held_by) and held_by != str(os.getpid())
 
