@@ -59,8 +59,7 @@ writes still check live PR state.
   for full PR descriptions. For an integration push, run the status check
   alongside initial GitHub discovery and join before preparing the push.
   Push and sync can reuse the API's default for a single github.com repository
-  reached over direct HTTPS or verified SSH. SSH verification uses the
-  effective OpenSSH configuration for both Git services. Other remotes use
+  reached over direct HTTPS. Other remotes, ssh ones included, use
   live HEAD probes for the fetch remote and any separate push destinations.
   Concurrent destination probes isolate Git launches and join before
   publication. Branch containment uses local trees and ancestry when it can

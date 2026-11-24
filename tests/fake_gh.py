@@ -90,7 +90,7 @@ def respond_graphql(args: list[str], state: dict[str, Any]) -> str:
         if " stack {" in query and "stacks" not in state and state.get("no_stack_field"):
             raise GhError("gh: Field 'stack' doesn't exist on type 'PullRequest'")
         return pull_requests_by_number(args, query, state)
-    return pull_requests_by_ref(args, query, prs, state.get("default_branch", "main"))
+    return pull_requests_by_ref(args, query, prs)
 
 
 def open_pull_requests(q: str, prs: list[dict[str, Any]]) -> str:
@@ -238,9 +238,9 @@ def link_stack(path: str, numbers: list[int], state: dict[str, Any]) -> str:
     return json.dumps({"pull_requests": [{"number": n} for n in numbers]})
 
 
-def pull_requests_by_ref(args: list[str], query: str, prs: list[dict[str, Any]], default: str) -> str:
+def pull_requests_by_ref(args: list[str], query: str, prs: list[dict[str, Any]]) -> str:
     """The pull requests of the branches query names, and the default branch."""
-    found: dict[str, Any] = {"id": "REPO_ID", "defaultBranchRef": {"name": default}}
+    found: dict[str, Any] = {"id": "REPO_ID", "defaultBranchRef": {"name": "main"}}
     connections = [
         (alias, ref_field, variable, False)
         for alias, ref_field, variable in re.findall(r"(\w+): pullRequests\((headRefName|baseRefName): \$(\w+)", query)

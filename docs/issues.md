@@ -81,20 +81,6 @@ calls. Importing 10 PRs takes 76 Git processes and two `gh` calls. With no
 work to do, `sync` takes six Git processes and one `gh` call at all three
 tested stack sizes.
 
-## `sync` and `push` run different processes on Windows than on Linux and macOS
-
-For an ssh remote (`git@github.com:owner/repo`), `GitHubAdapter.matches_direct_ssh` works out from the
-effective ssh settings (`ssh -G`, twice, which prints the configuration and connects to nothing), plus
-`git --exec-path` and `git rev-parse --local-env-vars`, whether git would reach GitHub's own endpoint,
-and if so takes the API's default branch as the remote's, skipping the `git ls-remote --symref` probe
-of the server's HEAD. `uses_openssh` returns False on Windows (Git for Windows adjusts PATH inside its
-bundled runtime, so the `ssh` Python finds may not be the one git runs), so there it runs none of that
-and always probes. A command must run the same processes on every system (see "Linux, macOS and
-Windows" in `PROJECT_AGENTS.md`), and the system test is a crude stand-in for "which ssh does git
-run": people do use OpenSSH on Windows (it ships with it, and Git for Windows bundles one). The fix is
-to run the same on all three: always probe (one more network round trip for an ssh remote on Linux and
-macOS, and no `ssh -G`) or find out which ssh git runs without asking the system.
-
 ## An older git-stack can't finish a restack this one stopped
 
 A restack that stops on a conflict is recorded in one setting,

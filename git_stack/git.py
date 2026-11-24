@@ -90,7 +90,7 @@ def changes_refs(args: tuple[str, ...]) -> bool:
     upstream, which the ref snapshot holds. Only commands known to be read-only
     don't."""
     command, rest = split_command(args)
-    if command in READ_ONLY_COMMANDS or args == ("--exec-path",):
+    if command in READ_ONLY_COMMANDS:
         return False
     if command == "branch":
         return rest != ["--show-current"]
