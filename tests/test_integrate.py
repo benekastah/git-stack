@@ -1962,6 +1962,31 @@ def test_sync_retries_a_rejected_atomic_deletion(repo: Repo, remote_moved: bool)
     assert repo.git("branch", "--list", "one") == ""
 
 
+def test_sync_reports_an_atomic_deletion_rejected_by_a_stale_lease(repo: Repo) -> None:
+    # Git rejects the deletion itself at the second push URL, whose branch doesn't match the
+    # lease, and prints its source as "(delete)" rather than as an empty source.
+    integration(repo, tracked=True)
+    work(repo)
+    repo.stack("push", "one")
+    repo.stack("group", "add", "both", "work", "one")
+    repo.git("switch", "--quiet", "main")
+    repo.git("merge", "--ff-only", "refs/heads/one")
+    repo.git("switch", "--quiet", "work")
+    other = repo.origin.with_name("other-push.git")
+    repo.git("clone", "--bare", "--quiet", str(repo.origin), str(other))
+    divergent = repo.git("rev-parse", "refs/heads/one~1", cwd=other)
+    repo.git("update-ref", "refs/heads/one", divergent, cwd=other)
+    repo.git("config", "--add", "remote.origin.pushurl", str(repo.origin))
+    repo.git("config", "--add", "remote.origin.pushurl", str(other))
+
+    stderr = repo.stack("sync", "--delete", "both", "-g", "both", expect_success=False).stderr
+
+    assert repo.git("ls-remote", "--heads", str(repo.origin), "one") == ""
+    assert repo.git("rev-parse", "refs/heads/one", cwd=other) == divergent
+    assert "Push destination 1 updated refs/heads/combined, refs/heads/one\n" in stderr
+    assert "Push destination 2 rejected refs/heads/combined, refs/heads/one\n" in stderr
+
+
 def test_recovery_survives_completion_from_another_worktree(repo: Repo, monkeypatch: pytest.MonkeyPatch) -> None:
     integration(repo)
     work(repo)
