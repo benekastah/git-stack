@@ -354,6 +354,8 @@ def test_unlinked_stack_warning_lists_each_draft_on_its_own_line(repo: Repo, gh:
         "- https://github.com/acme/widgets/pull/2",
         "- https://github.com/acme/widgets/pull/4",
     ]
+    (dependents,) = [call for call in gh.calls("api", "graphql") if any("base2=" in arg for arg in call)]
+    assert "base4=orphan4" in dependents
     assert gh.calls("pr", "close") == []
     assert gh.stacks() == [[1, 2, 3, 4]]
 
@@ -478,3 +480,24 @@ def test_push_never_prompts_to_close_new_blocker_after_publishing_parent(
     assert gh.calls("pr", "close") == []
     assert gh.load()["prs"][2]["baseRefName"] == "pr1"
     assert repo.remote_subject("new-parent") == "new parent"
+
+
+@pytest.mark.usefixtures("orphan")
+def test_blocked_push_diagnoses_rebuild_before_checking_write_protection(repo: Repo, gh: FakeGitHub) -> None:
+    repo.git("switch", "pr1")
+    repo.client.branch("new-parent")
+    repo.commit("a", "new parent\n", "new parent")
+    repo.git("switch", "pr3")
+    repo.client.restack(onto="new-parent")
+    gh.clear_calls()
+
+    result = repo.stack("push", "--prs", expect_success=False)
+
+    assert "Retry with --pr-rebuild." in result.stderr
+    assert "https://github.com/acme/widgets/pull/2" in result.stderr
+    calls = gh.calls("api", "graphql")
+    assert not any("ref0:" in arg for call in calls for arg in call)
+    assert any("viewer { login }" in arg for call in calls for arg in call)
+    assert len(calls) == len(gh.calls("api")) == 4
+    assert gh.calls("pr", "close") == []
+    assert not repo.git("branch", "--list", "new-parent", cwd=repo.origin)

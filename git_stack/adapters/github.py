@@ -51,6 +51,7 @@ PR_FIELDS = "number state isDraft isCrossRepository headRefOid baseRefName merge
 # How many of a branch's pull requests to look at, newest first. More than one
 # only if its name was reused, or a pull request was closed and replaced.
 PRS_PER_BRANCH = 10
+REF_PROTECTION_BATCH_SIZE = 20
 QUEUE_FIELDS = "number state isInMergeQueue"
 REVIEW_FIELDS = (
     "isDraft baseRefName reviewDecision mergeStateStatus "
@@ -65,7 +66,6 @@ TEMPLATE_NAMES = ("pull_request_template.md", "pull_request_template.txt")
 # or adds to one that's still a path through a stack that branches out
 # (default: true), where the repository has GitHub's stacked pull requests.
 GITHUB_STACKS_SETTING = "stack.githubStacks"
-DEPENDENTS_FIELD = "dependents: pullRequests(baseRefName: $base, states: OPEN, first: 1) { nodes { number } }"
 # A pull request's stack on GitHub, as GraphQL gives it. GitHub only allows a
 # handful of pull requests in one.
 STACK_FIELDS = "stack { number entries(first: 100) { nodes { position pullRequest { number state } } } }"
@@ -326,8 +326,8 @@ class GitHubAdapter(GitAdapter):
         if self.protection.force and not self.protection.protect:
             return
         targets = [(ref, side) for ref in sorted(set(refs)) for side in ("head", "base")]
-        for start in range(0, len(targets), PRS_PER_BRANCH):
-            self.protect_ref_batch(targets[start : start + PRS_PER_BRANCH], allow_number=allow_number)
+        for start in range(0, len(targets), REF_PROTECTION_BATCH_SIZE):
+            self.protect_ref_batch(targets[start : start + REF_PROTECTION_BATCH_SIZE], allow_number=allow_number)
 
     def protect_ref_batch(self, targets: list[tuple[str, str]], *, allow_number: bool) -> None:
         """Check a bounded batch of ref connections, following their independent cursors."""
@@ -458,14 +458,18 @@ class GitHubAdapter(GitAdapter):
                 f"an organization with SSO, that gh's token is authorized for it): {e}"
             ) from e
 
-    def look_up_pull_requests(self) -> dict[str, PullRequest]:
-        candidates = self.core.stacks() if self._lookup_branches is None else self._lookup_branches
+    def look_up_pull_requests(
+        self, candidates: Iterable[str] | None = None, *, open_only: bool = False
+    ) -> dict[str, PullRequest]:
+        if candidates is None:
+            candidates = self.core.stacks() if self._lookup_branches is None else self._lookup_branches
         branches = [b for b in candidates if self.git.config_get(b, "remote") == self.remote]
         if not branches:
             return {}
+        states = "states: OPEN, " if open_only else ""
         # Branch names are passed as variables, so they needn't be escaped.
         fields = " ".join(
-            f"b{i}: pullRequests(headRefName: $b{i}, first: {PRS_PER_BRANCH}, "
+            f"b{i}: pullRequests(headRefName: $b{i}, {states}first: {PRS_PER_BRANCH}, "
             f"orderBy: {{field: CREATED_AT, direction: DESC}}) "
             f"{{ nodes {{ {PR_FIELDS} }} pageInfo {{ hasNextPage endCursor }} }}"
             for i in range(len(branches))
@@ -510,7 +514,7 @@ class GitHubAdapter(GitAdapter):
                 query = (
                     "query($owner: String!, $name: String!, $b0: String!, $after: String!) "
                     "{ repository(owner: $owner, name: $name) "
-                    f"{{ b0: pullRequests(headRefName: $b0, first: {PRS_PER_BRANCH}, after: $after, "
+                    f"{{ b0: pullRequests(headRefName: $b0, {states}first: {PRS_PER_BRANCH}, after: $after, "
                     f"orderBy: {{field: CREATED_AT, direction: DESC}}) "
                     f"{{ nodes {{ {PR_FIELDS} }} pageInfo {{ hasNextPage endCursor }} }} }} }}"
                 )
@@ -1052,7 +1056,6 @@ class GitHubAdapter(GitAdapter):
         # only then discovering that unstacking requires consent.
         prs = self.pull_requests()
         self.ensure_pr_parent_remotes(to_push, stacks, prs, opening)
-        self.protect_retargets(to_push, stacks)
         allowed = {
             prs[b].number
             for b in (scope if scope is not None else to_push)
@@ -1074,11 +1077,14 @@ class GitHubAdapter(GitAdapter):
             if rebuild_stack or not parent_published:
                 pending[pr.number] = base
         closures = self.validate_deferred_retargets(pending, rebuild_stack, allowed) if pending else []
-        # Collect consent before the dry push. A ref could change while the
-        # user reads the prompt, so check the push leases after they answer.
-        self.confirm_orphans(closures)
+        self.protect_retargets(to_push, stacks)
 
-        def retarget() -> None:
+        def confirm() -> None:
+            self.confirm_orphans(closures)
+
+        def retarget(protect_refs: Callable[[], None]) -> None:
+            check_refs = protect_refs if closures else lambda: None
+            check_refs()
             self.close_orphans(
                 closures, confirmed=True, edits=self.retarget_edits(to_push, stacks) if closures else None
             )
@@ -1086,7 +1092,9 @@ class GitHubAdapter(GitAdapter):
                 # A new prompt here would run after the push lease check.
                 self.retarget(branch, parent, rebuild_stack, allowed, allow_closure_prompt=False)
 
-        return PushRetargets(retarget, bool(closures)) if ready or closures else None
+            check_refs()
+
+        return PushRetargets(confirm, retarget) if ready or closures else None
 
     def validate_deferred_retargets(
         self, pending: dict[int, str], rebuild_stack: bool, allowed: set[int]
@@ -1235,8 +1243,6 @@ class GitHubAdapter(GitAdapter):
         expected: OrphanedPullRequest | None = None,
         refusals: list[str] | None = None,
     ) -> list[OrphanedPullRequest]:
-        viewer = self.gh("api", "--hostname", self.host, "user", "--jq", ".login")
-        check_github_login(viewer)
         stacks = self.core.stacks()
         # Check configured heads across all remotes, including aliases for
         # this repository. An ambiguous match is enough to keep the draft.
@@ -1248,20 +1254,18 @@ class GitHubAdapter(GitAdapter):
         fields = (
             f"{QUEUE_FIELDS} {REVIEW_FIELDS} isCrossRepository headRefName headRefOid author {{ login }} {STACK_FIELDS}"
         )
-        if expected is None:
-            details = self.pull_request_fields(blockers, fields)
-            dependents = None
-        else:
-            # Use one final GitHub read for the draft and its dependents.
-            repo = self.repository_fields(
-                f"p{expected.number}: pullRequest(number: {expected.number}) {{ {fields} }} {DEPENDENTS_FIELD}",
-                base=expected.head,
-            )
-            details = {expected.number: repo.get(f"p{expected.number}")}
-            dependents = field(field(repo, "dependents", dict), "nodes", list)
+        prs = self.pr_selections(sorted(blockers), fields)
+        heads = {expected.number: expected.head} if expected is not None else {}
+        # A post-confirmation check already knows the head. Check its live
+        # details, viewer and dependents in one request immediately before closing.
+        query = self.repository_query(f"{prs} {self.dependent_selections(heads)}", heads, viewer=True)
+        repo = field(query, "repository", dict)
+        viewer = field(field(query, "viewer", dict), "login", str)
+        check_github_login(viewer)
         candidates = []
-        for number, data in details.items():
+        for number in sorted(blockers):
             try:
+                data = repo.get(f"p{number}")
                 head = field(data, "headRefName", str)
                 stack = optional_field(data, "stack", dict)
                 if (
@@ -1283,9 +1287,6 @@ class GitHubAdapter(GitAdapter):
                     )
                 if expected is not None and head != expected.head:
                     raise StackError(f"blocking pull request #{number} changed during the rebuild; retry the command")
-                has_dependents = bool(dependents) if dependents is not None else self.has_open_pr_based_on(head)
-                if has_dependents:
-                    raise StackError(f"can't close blocking PR #{number}: open pull requests target its head {head}")
                 candidates.append(
                     OrphanedPullRequest(
                         number,
@@ -1300,11 +1301,35 @@ class GitHubAdapter(GitAdapter):
                 if refusals is None:
                     raise
                 refusals.append(str(e))
-        return candidates
+        if not candidates:
+            return []
+        if expected is None:
+            heads = {pr.number: pr.head for pr in candidates}
+            query = self.repository_query(self.dependent_selections(heads), heads)
+            repo = field(query, "repository", dict)
+        return self.filter_orphan_dependents(candidates, repo, refusals)
 
-    def has_open_pr_based_on(self, head: str) -> bool:
-        repo = self.repository_fields(DEPENDENTS_FIELD, base=head)
-        return bool(field(field(repo, "dependents", dict), "nodes", list))
+    @staticmethod
+    def filter_orphan_dependents(
+        candidates: list[OrphanedPullRequest], repo: dict[str, object], refusals: list[str] | None
+    ) -> list[OrphanedPullRequest]:
+        eligible = []
+        for pr in candidates:
+            dependents = field(field(repo, f"d{pr.number}", dict), "nodes", list)
+            if dependents:
+                message = f"can't close blocking PR #{pr.number}: open pull requests target its head {pr.head}"
+                if refusals is None:
+                    raise StackError(message)
+                refusals.append(message)
+            else:
+                eligible.append(pr)
+        return eligible
+
+    @staticmethod
+    def dependent_selections(heads: dict[int, str]) -> str:
+        return " ".join(
+            f"d{n}: pullRequests(baseRefName: $base{n}, states: OPEN, first: 1) {{ nodes {{ number }} }}" for n in heads
+        )
 
     def confirm_orphans(self, candidates: list[OrphanedPullRequest]) -> None:
         if candidates:
@@ -1452,19 +1477,29 @@ class GitHubAdapter(GitAdapter):
         numbers = sorted(set(numbers))
         if not numbers:
             return {}
-        prs = " ".join(f"p{n}: pullRequest(number: {n}) {{ {fields} }}" for n in numbers)
-        repository = self.repository_fields(prs)
+        query = self.repository_query(self.pr_selections(numbers, fields))
+        repository = field(query, "repository", dict)
         return {n: repository.get(f"p{n}") for n in numbers}
 
-    def repository_fields(self, fields: str, *, base: str | None = None) -> dict[str, object]:
-        declarations = "$owner: String!, $name: String!"
+    @staticmethod
+    def pr_selections(numbers: Iterable[int], fields: str) -> str:
+        return " ".join(f"p{n}: pullRequest(number: {n}) {{ {fields} }}" for n in numbers)
+
+    def repository_query(
+        self, fields: str, heads: dict[int, str] | None = None, *, viewer: bool = False
+    ) -> dict[str, object]:
+        declarations = ["$owner: String!", "$name: String!"]
         variables = ["-f", f"owner={self.owner}", "-f", f"name={self.name}"]
-        if base is not None:
-            declarations += ", $base: String!"
-            variables.extend(["-f", f"base={base}"])
-        query = f"query({declarations}) {{ repository(owner: $owner, name: $name) {{ {fields} }} }}"
+        for number, head in (heads or {}).items():
+            declarations.append(f"$base{number}: String!")
+            variables.extend(["-f", f"base{number}={head}"])
+        viewer_fields = "viewer { login } " if viewer else ""
+        query = (
+            f"query({', '.join(declarations)}) {{ {viewer_fields}"
+            f"repository(owner: $owner, name: $name) {{ {fields.strip()} }} }}"
+        )
         data = parse_json(self.gh("api", "graphql", "--hostname", self.host, *variables, "-f", f"query={query}"))
-        return field(field(data, "data", dict), "repository", dict)
+        return field(data, "data", dict)
 
     def update_stack_sections(
         self, branches: list[str], stacks: Stacks, rebuild_stack: bool = False, dry_run: bool = False
@@ -1699,6 +1734,22 @@ class GitHubAdapter(GitAdapter):
         open_heads = {b for b, pr in self.pull_requests().items() if pr.state is GitHubState.OPEN}
         heads = {head for n, c in changes.items() for head, _ in c if head != roots[n]} - open_heads
         merges = self.merged_pull_requests(sorted(heads))
+        if self._lookup_branches is not None:
+            # A former base can still have an open PR outside the selected
+            # stacks. Consult it only when its merge history would be shown.
+            unqueried = {
+                head
+                for previous in changes.values()
+                for head, at in previous
+                if (history := merges.get(head)) and history[-1][0] <= at
+            } - set(self._lookup_branches)
+            if unqueried:
+                stacks = self.core.stacks()
+                open_former_bases = self.look_up_pull_requests(
+                    (head for head in sorted(unqueried) if head in stacks), open_only=True
+                )
+                for head in open_former_bases:
+                    del merges[head]
         found = {}
         for n, c in changes.items():
             # GitHub's timestamps are all UTC, in the same format, so they

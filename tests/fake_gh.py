@@ -135,11 +135,14 @@ def pull_requests_by_number(args: list[str], query: str, state: dict[str, Any]) 
     ):
         pr = next((p for p in prs if p["number"] == int(number)), None)
         by_alias[alias] = None if pr is None else {f: field_of(pr, f, state) for f in top_level(fields)}
-    if "dependents: pullRequests" in query:
-        base = opt_value(args, "base")
+    for alias, variable in re.findall(r"(d\d+): pullRequests\(baseRefName: \$(base\d+)", query):
+        base = opt_value(args, variable)
         nodes = [{"number": pr["number"]} for pr in prs if pr["baseRefName"] == base and pr["state"] == "OPEN"]
-        by_alias["dependents"] = {"nodes": nodes[:1]}
-    return json.dumps({"data": {"repository": by_alias}})
+        by_alias[alias] = {"nodes": nodes[:1]}
+    data = {"repository": by_alias}
+    if "viewer { login }" in query:
+        data["viewer"] = {"login": "me"}
+    return json.dumps({"data": data})
 
 
 def top_level(fields: str) -> list[str]:

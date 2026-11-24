@@ -632,7 +632,8 @@ def test_info_does_not_fetch_head_of_merged_pr(repo: Repo, gh: FakeGitHub, clien
 
 
 @pytest.mark.parametrize(
-    "command", [("restack",), ("restack", "--prs"), ("sync", "--with-prs"), ("pull", "--with-prs")]
+    "command",
+    [("restack",), ("restack", "--prs"), ("sync", "--with-prs"), ("pull", "--with-prs"), ("push", "--with-prs")],
 )
 @pytest.mark.parametrize("selector", [(), ("pr2",), ("-g", "selected")])
 def test_refresh_queries_only_selected_pull_requests(

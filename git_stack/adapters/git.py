@@ -31,8 +31,8 @@ class PullRequestLink:
 
 @dataclass(frozen=True)
 class PushRetargets:
-    apply: Callable[[], None]
-    confirmed_closures: bool
+    confirm: Callable[[], None]
+    apply: Callable[[Callable[[], None]], None]
 
 
 class GitAdapter:

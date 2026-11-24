@@ -37,6 +37,10 @@ writes still check live PR state.
   before applying those edits so stale leases leave the PR bases alone.
   Close blocking drafts only with explicit interactive confirmation and a
   fresh check of authorship, stack membership, PR protection and open dependents.
+  Batch the orphan checks and do read-only rebuild preflight before the live
+  push protection checks. Keep live protection ahead of confirmation and writes.
+  Push scopes PR discovery to the selection, including group members needed
+  for full PR descriptions.
   Push and sync can reuse the API's default for a single github.com repository
   reached over direct HTTPS or verified SSH. SSH verification uses the
   effective OpenSSH configuration for both Git services. Other remotes use

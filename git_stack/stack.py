@@ -2805,7 +2805,15 @@ class StackClient(StackCore):
         remotes = self.upstream_remotes(stack)
         if not stack or len(remotes) > 1 or (remotes and push_remote not in remotes):
             raise StackError("the selected upstreams changed while settling; retry the push")
-        adapter = self.checked_adapter(push_remote)
+        lookup_branches = dict.fromkeys(stack)
+        if prs:
+            # PR descriptions show the full group, even if push selected one stack.
+            branches_for_sections: dict[str, None] = {}
+            for branch in stack:
+                if branch not in branches_for_sections:
+                    branches_for_sections.update(dict.fromkeys(stacks.stack_of(branch)))
+            lookup_branches.update(branches_for_sections)
+        adapter = self.checked_adapter(push_remote, lookup_branches=lookup_branches)
         self.configure_orphan_closures(adapter, confirm_orphan_closures, rebuild_stack)
         protection = self.configure_pr_protection(adapter, protection, force)
         github = adapter if prs and isinstance(adapter, GitHubAdapter) else None
@@ -2973,9 +2981,6 @@ class StackClient(StackCore):
             integrations.verify(integration.refs)
         push_urls = git.push_urls(remote)
         multiple_destinations = len(push_urls) > 1
-        self.protect_push(leases, refspecs, remote, adapter, protection, push_urls)
-        if opening and isinstance(adapter, GitHubAdapter):
-            self.protect_pr_opening(branches, stacks, adapter)
         self.retarget_before_push(
             branches,
             stacks,
@@ -3134,6 +3139,13 @@ class StackClient(StackCore):
 
         try:
             retarget = adapter.prepare_push_retargets(branches, stacks, rebuild_stack, scope, opening)
+            # A blocked rebuild can stop before querying the live protections
+            # on refs it won't change. Check them before prompting or writing.
+            self.protect_push(leases, refspecs, remote, adapter, protection, push_urls)
+            if opening and isinstance(adapter, GitHubAdapter):
+                self.protect_pr_opening(branches, stacks, adapter)
+            if retarget is not None:
+                retarget.confirm()
         except StackError as e:
             raise update_error(e) from e
         if retarget is None and len(push_urls) <= 1:
@@ -3149,11 +3161,7 @@ class StackClient(StackCore):
             )
         try:
             if retarget is not None:
-                if retarget.confirmed_closures:
-                    self.protect_push(leases, refspecs, remote, adapter, protection, push_urls)
-                retarget.apply()
-                if retarget.confirmed_closures:
-                    self.protect_push(leases, refspecs, remote, adapter, protection, push_urls)
+                retarget.apply(lambda: self.protect_push(leases, refspecs, remote, adapter, protection, push_urls))
         except StackError as e:
             raise update_error(e) from e
 

@@ -806,3 +806,19 @@ def test_bare_pr_consent_cannot_authorize_a_different_push_repository(repo: Repo
 
     assert repo.git("log", "-1", "--format=%s", "pr3", cwd=mirror) == "update mirror"
     assert repo.remote_subject("pr3") == "pr3 c1"
+
+
+def test_nine_changed_refs_fit_one_protection_query(repo: Repo, gh: FakeGitHub) -> None:
+    branches = repo.make_chain(9)
+    repo.stack("push")
+    for branch in branches:
+        repo.git("switch", "--quiet", branch)
+        repo.commit(f"{branch}.txt", "updated\n", "update branch")
+    gh.clear_calls()
+
+    repo.stack("push", "--with-prs")
+
+    checks = [call for call in gh.calls("api", "graphql") if any("ref0:" in arg for arg in call)]
+    assert len(checks) == 1
+    assert sum(arg.startswith("ref") and "=" in arg for arg in checks[0]) == 18
+    assert all(repo.remote_subject(branch) == "update branch" for branch in branches)

@@ -333,8 +333,9 @@ def test_prs_shows_a_merged_pull_request_that_merged_before_the_base_changed(
     assert body(gh, 2) == stack("- `main`", "  - #1 (merged)", "    - #2 👈", "      - #3")
 
 
+@pytest.mark.parametrize(("push", "merged_at"), [(False, ""), (True, ""), (True, "2099-01-01T00:00:00Z")])
 def test_prs_shows_no_merged_pull_request_for_a_branch_moved_off_an_open_one(
-    repo: Repo, gh: FakeGitHub, client: StackClient
+    repo: Repo, gh: FakeGitHub, client: StackClient, push: bool, merged_at: str
 ) -> None:
     repo.make_stack()
     client.push()
@@ -347,12 +348,18 @@ def test_prs_shows_no_merged_pull_request_for_a_branch_moved_off_an_open_one(
         headRefOid=repo.git("rev-parse", "main"),
         baseRefName="main",
         mergeCommit=None,
+        mergedAt=merged_at,
     )
     repo.git("switch", "--quiet", "pr2")
     client.restack(onto="main")
     client.push()
 
-    client.prs()
+    if push:
+        gh.clear_calls()
+        client.push(prs=True)
+        assert any("b0=pr1" in call for call in gh.calls("api", "graphql")) == (not merged_at)
+    else:
+        client.prs()
 
     assert body(gh, 2) == stack("- `main`", "  - #2 👈", "    - #3")
 
@@ -832,7 +839,10 @@ def test_prs_keeps_the_github_stack_of_each_stack_in_a_group(repo: Repo, gh: Fak
         )
 
 
-def test_prs_shows_the_group_across_roots_in_the_selected_pr(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+@pytest.mark.parametrize("push", [False, True])
+def test_prs_shows_the_group_across_roots_in_the_selected_pr(
+    repo: Repo, gh: FakeGitHub, client: StackClient, push: bool
+) -> None:
     repo.git("branch", "release", "main")
     repo.git("push", "--quiet", "--set-upstream", "origin", "release")
     client.branch("a", group="g")
@@ -845,7 +855,10 @@ def test_prs_shows_the_group_across_roots_in_the_selected_pr(repo: Repo, gh: Fak
     assert body(gh, 2) == stack("- `main`", "  - #1", "- `release`", "  - #2 👈")
 
     gh.clear_calls()
-    client.prs(["a"])
+    if push:
+        client.push(["a"], prs=True)
+    else:
+        client.prs(["a"])
 
     assert body(gh, 1) == stack("- `main`", "  - #1 👈", "- `release`", "  - #2")
     assert [call[2] for call in gh.calls("pr", "edit")] == ["1"]
