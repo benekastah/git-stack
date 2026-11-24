@@ -918,7 +918,8 @@ git stack push --prs            # then open pull requests, as `git stack prs` do
 - Default-branch protection can reuse GitHub's response for a single
   github.com repository over direct HTTPS or verified SSH. Push checks the
   live HEAD of the fetch remote and any separate destinations when it
-  cannot verify that they use the same GitHub repository.
+  cannot verify that they use the same GitHub repository. Independent
+  destination probes can run concurrently.
 - A remote branch whose commits were rebased there, e.g. by GitHub's
   "Rebase stack" button, isn't pushed over: the local branch is moved to it
   instead, as `sync` does (see
@@ -1511,6 +1512,9 @@ With the GitHub adapter:
   stacked pull requests, `prs` also links each stack that's a chain into a
   stack on GitHub, and keeps one that's still a path through a stack that
   branches out.
+- Draft creation uses batches. If GitHub rejects part of a batch, git-stack
+  reports the drafts it confirmed and stops before starting the next batch.
+  Run the command again to open the remaining drafts.
 - A pull request that GitHub says was merged counts as merged once its merge
   commit is in the local parent branch (`sync` fetches it), even if the parent
   changed the merged lines since, or the merge changed them.

@@ -1,9 +1,11 @@
 """Local Git reads and CLI fallbacks for repository-specific semantics."""
 
 import os
+from collections.abc import Collection, Sequence
 from pathlib import Path
 
 import pygit2
+from git_client import decode
 
 from git_stack.performance import measure_native
 
@@ -47,6 +49,18 @@ def common_directory(repository: pygit2.Repository) -> Path:
     except FileNotFoundError:
         return directory
     return (directory / relative).resolve()
+
+
+def first_named_blob(root: pygit2.Tree, directories: Sequence[str], names: Collection[str]) -> str | None:
+    for directory in directories:
+        if directory and directory not in root:
+            continue
+        tree = root[directory] if directory else root
+        if isinstance(tree, pygit2.Tree):
+            for entry in tree:
+                if isinstance(entry, pygit2.Blob) and (entry.name or "").lower() in names:
+                    return decode(entry.data).strip()
+    return None
 
 
 def config_key(key: str) -> str:

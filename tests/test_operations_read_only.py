@@ -1,7 +1,4 @@
-"""How many git processes the read-only commands run, at several stack sizes: none of them should
-run more for a longer stack, except the first `info`, which checks each branch for having landed
-in its parent (and remembers the answer on disk, in `.git/git-stack-cache.json`, for the next
-process).
+"""How many git processes the read-only commands run, at several stack sizes.
 
 Each command is a `git stack` process of its own, as a user runs it, in a repository of its
 own, so nothing is cached in Python, or left by another test, to skew a count. Each test also
@@ -60,29 +57,26 @@ def test_next_runs_the_same_for_any_stack_size(repo: Repo, chain: list[str]) -> 
 
 
 def test_the_first_info_checks_each_branch_for_having_landed_in_its_parent(repo: Repo, chain: list[str]) -> None:
-    # Config, refs, color, and one `merge-tree` for each branch: merging it into its parent, to see whether
-    # that changes nothing, which is how a branch whose changes landed (a merged one) is found.
-    # That is the one count here that grows with the stack. Each test has a repository of its own,
-    # with no cache of those checks on disk yet, so this first `info` always has them all to do.
-    with expect_operations(git=3 + len(chain)):
+    # Each parent is an ancestor, so the first containment checks use trees and ancestry in process.
+    with expect_operations(git=2):
         result = repo.stack_process("info")
 
     assert all(mentions(result.stdout, branch) for branch in chain)
 
 
 @pytest.mark.parametrize(
-    ("args", "git"),
-    [(["info"], 3), (["info", "--all"], 3), (["info", "--json"], 2)],
+    "args",
+    [["info"], ["info", "--all"], ["info", "--json"]],
     ids=["info", "info-all", "info-json"],
 )
 def test_info_runs_the_same_for_any_stack_size_once_its_branches_are_checked(
-    repo: Repo, chain: list[str], args: list[str], git: int
+    repo: Repo, chain: list[str], args: list[str]
 ) -> None:
     # Once, outside the block, to fill the on-disk cache of those checks: a second process reads
     # them, with no `merge-tree` for any branch, so it's the same for any stack size.
     repo.stack_process("info")
 
-    with expect_operations(git=git):
+    with expect_operations(git=2):
         result = repo.stack_process(*args)
 
     assert all(mentions(result.stdout, branch) for branch in chain)

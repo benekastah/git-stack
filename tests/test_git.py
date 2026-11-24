@@ -578,7 +578,20 @@ def test_snapshot_asks_about_the_same_commits_once_but_sees_a_branch_move(repo: 
         assert not git.contained_in("refs/heads/main", "refs/heads/other")
 
     commands = [call[0] for call in git_calls]
-    assert (commands.count("merge-base"), commands.count("merge-tree")) == (0, 2)
+    assert "merge-base" not in commands and "merge-tree" not in commands
+
+
+def test_containment_of_diverged_branches_reuses_the_same_merge_tree(repo: Repo, git_calls: list[GitCall]) -> None:
+    repo.git("switch", "--quiet", "-c", "other")
+    repo.commit("a", "other\n", "other change")
+    repo.git("switch", "--quiet", "main")
+    repo.commit("b", "main\n", "main change")
+    git = GitClient(repo.path)
+    with git.snapshot():
+        for _ in range(2):
+            assert not git.contained_in("refs/heads/other", "refs/heads/main")
+
+    assert sum(call[0] == "merge-tree" for call in git_calls) == 1
 
 
 def test_nothing_is_contained_in_a_branch_that_doesnt_exist(repo: Repo) -> None:

@@ -6,7 +6,8 @@ import tempfile
 import threading
 import uuid
 from collections import Counter
-from collections.abc import Generator, Iterable, Mapping, Sequence
+from collections.abc import Collection, Generator, Iterable, Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from typing import TextIO
 
@@ -646,6 +647,61 @@ class GitClient:
         commit = self.rev(rev)
         return self._object(commit, "tree") if commit is not None else None
 
+    def first_subject(self, base: str, branch: str) -> str | None:
+        """The first subject Git displays for commits on branch since base."""
+        ref = f"refs/heads/{branch}"
+        repo = self._graph_repository()
+        if repo is not None and all(
+            self.config_value(key) is None
+            for key in ("i18n.logOutputEncoding", "i18n.commitEncoding", "log.showSignature")
+        ):
+            tip = self.tip(branch)
+            if tip == base:
+                return None
+            # In a linear range the oldest commit is the one based on base.
+            # Git still orders merged histories and formats unusual messages.
+            try:
+                with measure_native("subject"):
+                    commit = repo[tip].peel(pygit2.Commit)
+                    while len(commit.parent_ids) == 1:
+                        parent = commit.parent_ids[0]
+                        if str(parent) == base:
+                            first, _, rest = commit.raw_message.decode("utf-8").partition("\n")
+                            if (
+                                not commit.message_encoding
+                                and first
+                                and first == first.strip()
+                                and first.splitlines() == [first]
+                                and "\0" not in first
+                                and not rest.partition("\n")[0].strip(" \t\r\v\f")
+                            ):
+                                return first
+                            break
+                        commit = repo[parent].peel(pygit2.Commit)
+            except KeyError, pygit2.GitError, ValueError:
+                pass
+        lines = self.run("log", "--reverse", "--format=%s", f"{base}..{ref}").splitlines()
+        return lines[0] if lines else None
+
+    def first_named_blob(self, ref: str, directories: Sequence[str], names: Collection[str]) -> str | None:
+        """Read the first matching blob in the given directories, in Git tree order."""
+        repo = self._graph_repository()
+        tip = self.rev(ref)
+        if repo is not None and tip is not None:
+            try:
+                with measure_native("tree-blob"):
+                    return git_read.first_named_blob(repo[tip].peel(pygit2.Tree), directories, names)
+            except KeyError, pygit2.GitError, ValueError:
+                pass
+        for directory in directories:
+            listing = self.run("ls-tree", "-z", f"{ref}:{directory}", check=False)
+            for entry in filter(None, listing.split("\0")):
+                info, _, name = entry.partition("\t")
+                _, kind, oid = info.split()
+                if kind == "blob" and name.lower() in names:
+                    return self.run("cat-file", "blob", oid)
+        return None
+
     def _object(self, object_id: str, kind: str) -> str | None:
         """Resolve an object by type, caching results until the next ref change."""
         if (known := self._objects.get((object_id, kind))) is not None:
@@ -913,8 +969,11 @@ class GitClient:
         """Protect the fetch default and every distinct push destination's default."""
         if self._snapshot_depth and remote in self._push_defaults:
             return self._push_defaults[remote]
-        default = self.remote_default_branch(remote, known=known)
-        defaults = self._push_destination_defaults(remote, default) if default is not None else None
+        if self._shared_remote_url(remote) is not None:
+            default = self.remote_default_branch(remote, known=known)
+            defaults = frozenset({default}) if default is not None else None
+        else:
+            defaults = self._push_destination_defaults(remote, known=known)
         if self._snapshot_depth:
             self._push_defaults[remote] = defaults
         return defaults
@@ -945,9 +1004,7 @@ class GitClient:
             return ()
         return tuple(output.removesuffix("\n").split("\n")) if output else ()
 
-    def _push_destination_defaults(self, remote: str, default: str) -> frozenset[str] | None:
-        if self._shared_remote_url(remote) is not None:
-            return frozenset({default})
+    def _push_destination_defaults(self, remote: str, *, known: str | None) -> frozenset[str] | None:
         push_urls = self._resolved_push_urls(remote)
         if not push_urls:
             return None
@@ -956,14 +1013,27 @@ class GitClient:
         rules = ("insteadof",) if explicit else ("insteadof", "pushinsteadof")
         if len(push_urls) > 1 and self._ambiguous_push_urls(explicit or urls, rules):
             return None
-        defaults = {default}
         fetch_url = urls[0] if urls else None
         if fetch_url is not None and self._url_is_rewritten(fetch_url, "insteadof"):
             fetch_url = None
-        for url in dict.fromkeys(push_urls):
-            if url == fetch_url:
-                continue
-            if (branch := self._default_at_resolved_url(url)) is None:
+        distinct = [url for url in dict.fromkeys(push_urls) if url != fetch_url]
+        if not distinct or (len(distinct) == 1 and known is not None):
+            default = self.remote_default_branch(remote, known=known)
+            return self._combine_defaults(default, map(self._default_at_resolved_url, distinct))
+        # The transports can wait independently. Keep fetch errors first and
+        # join every probe before releasing the ref snapshot or publishing.
+        with self.isolate_parallel_launches(), ThreadPoolExecutor(max_workers=min(4, len(distinct))) as pool:
+            probes = [pool.submit(self._default_at_resolved_url, url) for url in distinct]
+            default = self.remote_default_branch(remote, known=known)
+            return self._combine_defaults(default, (probe.result() for probe in probes))
+
+    @staticmethod
+    def _combine_defaults(default: str | None, branches: Iterable[str | None]) -> frozenset[str] | None:
+        if default is None:
+            return None
+        defaults = {default}
+        for branch in branches:
+            if branch is None:
                 return None
             defaults.add(branch)
         return frozenset(defaults)
@@ -1067,7 +1137,15 @@ class GitClient:
         in target's history. False if target names no commit.
         """
         tree = self.tree(target)
-        return tree is not None and self.merged_tree(target, branch) == tree
+        if tree is None:
+            return False
+        if self._graph_repository() is not None:
+            branch_tree = self.tree(branch)
+            if branch_tree is not None and self.is_ancestor(branch, target):
+                return True
+            if branch_tree is not None and self.is_ancestor(target, branch):
+                return branch_tree == tree
+        return self.merged_tree(target, branch) == tree
 
     def merged_tree(self, ours: str, theirs: str) -> str | None:
         """The tree merging theirs into ours gives, or None if it conflicts (or

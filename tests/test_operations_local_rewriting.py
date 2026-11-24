@@ -15,16 +15,13 @@ pytestmark = pytest.mark.usefixtures("separate_processes")
 # size and with the formula that fits all three. A formula is how the count grows, so a change
 # to it, not just to the number, shows up in review.
 #
-# Restacking replays each branch above the one that changed, and each replay costs 10 (11 + 10 *
-# (branches - 1), measured at 3 and 10). A stack of 1 has nothing above it to replay, so it's only
-# the check of whether it needs it, the same as an up to date stack's (4).
-RESTACK_BEHIND = {1: 4, 3: 31, 10: 101}
-# Even an up to date stack is checked a branch at a time: 3 + branches.
-RESTACK_UP_TO_DATE = {1: 4, 3: 6, 10: 13}
-# Nothing to pull: 7 calls across all three sizes.
-PULL_NOTHING = {1: 7, 3: 7, 10: 7}
-# Nothing merged, and nothing pushed: 8 + branches.
-CLEAN_NOTHING = {1: 9, 3: 11, 10: 18}
+# Restacking replays each branch above the one that changed, at nine processes per replay.
+# Multiple replays share eight more processes. A stack of one only checks its base.
+RESTACK_BEHIND = {1: 3, 3: 29, 10: 92}
+# The ancestry of an up-to-date stack is checked in process.
+RESTACK_UP_TO_DATE = {1: 3, 3: 3, 10: 3}
+PULL_NOTHING = {1: 5, 3: 5, 10: 5}
+CLEAN_NOTHING = {1: 4, 3: 4, 10: 4}
 # Renaming moves what's recorded for the branch, and rewrites the parent (recorded by name) of the
 # branch stacked directly on it, but not that of the ones above that: so it grows from 1 branch to 2,
 # not after.

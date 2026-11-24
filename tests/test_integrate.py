@@ -2399,7 +2399,7 @@ def test_dirty_integration_push_reports_protected_destination_first(
 
     assert "work track origin's default branch" in result.stderr
     assert tip(repo, "main", remote=True) == before
-    assert gh.calls("pr", "create") == []
+    assert gh.load()["prs"] == []
 
 
 def test_integration_push_batches_publication_metadata_reads(repo: Repo, git_calls: list[GitCall]) -> None:

@@ -4,6 +4,7 @@ import json
 import pathlib
 import shlex
 import sys
+import threading
 from collections.abc import Iterable
 from dataclasses import replace
 from typing import Any
@@ -34,7 +35,7 @@ def test_deep_stack_publishes_every_branch_with_one_atomic_push(
 
     repo.stack("push", "--prs")
 
-    assert len(gh.calls("pr", "create")) == len(chain)
+    assert {pr["headRefName"] for pr in gh.load()["prs"]} == set(chain)
     assert all(repo.git("rev-parse", b, cwd=repo.origin) == repo.git("rev-parse", b) for b in chain)
     pushes = publication_calls(git_calls)
     assert len(pushes) == 1
@@ -473,6 +474,36 @@ def test_push_refuses_an_ambiguous_default_branch_probe(repo: Repo, client: Stac
     assert repo.git("rev-parse", "refs/heads/release", cwd=destination) == before
 
 
+def test_push_overlaps_independent_remote_default_probes(
+    repo: Repo, client: StackClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client.branch("feature")
+    repo.commit("a", "feature\n", "feature")
+    client.push()
+    destination = repo.tmp / "other.git"
+    repo.git("clone", "--bare", "--quiet", str(repo.origin), str(destination))
+    repo.git("config", "remote.origin.pushurl", str(destination))
+    repo.commit("a", "advanced\n", "advance")
+    both_probing = threading.Barrier(2)
+    fetch_default = GitClient._ask_remote_default_branch  # pyright: ignore[reportPrivateUsage]
+    push_default = GitClient._default_at_resolved_url  # pyright: ignore[reportPrivateUsage]
+
+    def fetch(git: GitClient, remote: str) -> str | None:
+        both_probing.wait(timeout=3)
+        return fetch_default(git, remote)
+
+    def push(git: GitClient, url: str) -> str | None:
+        both_probing.wait(timeout=3)
+        return push_default(git, url)
+
+    monkeypatch.setattr(GitClient, "_ask_remote_default_branch", fetch)
+    monkeypatch.setattr(GitClient, "_default_at_resolved_url", push)
+
+    client.push()
+
+    assert repo.git("log", "-1", "--format=%s", "refs/heads/feature", cwd=destination) == "advance"
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="Win32 disallows newlines in paths")
 @pytest.mark.parametrize("multiple", [False, True])
 def test_push_accepts_a_separate_unambiguous_destination(repo: Repo, client: StackClient, multiple: bool) -> None:
@@ -881,7 +912,7 @@ def test_protected_prs_keeps_ready_or_queued_pr_targeting_main(
 
     assert "#2" in result.stderr
     assert reason in result.stderr
-    assert not gh.calls("pr", "create")
+    assert [pr["number"] for pr in gh.load()["prs"]] == [2]
     assert not gh.calls("pr", "edit")
 
 
@@ -903,6 +934,33 @@ def test_protected_push_only_checks_prs_whose_heads_would_change(repo: Repo, gh:
 
     assert repo.remote_subject("pr3") == "advance pr3"
     assert repo.remote_subject("pr1") == "pr1 c2"
+
+
+@pytest.mark.parametrize("failed", [False, True])
+def test_push_batches_retargets_to_published_bases(repo: Repo, gh: FakeGitHub, failed: bool) -> None:
+    repo.make_stack()
+    repo.stack("push")
+    for number in (2, 3):
+        gh.add_pr(
+            number=number,
+            state="OPEN",
+            headRefName=f"pr{number}",
+            baseRefName="main",
+            headRefOid=repo.git("rev-parse", f"refs/heads/pr{number}"),
+            mergeCommit=None,
+        )
+    if failed:
+        gh.fail_editing(2)
+    repo.commit("c", "advance\n", "advance pr3")
+
+    result = repo.stack("push", "--with-prs", expect_success=not failed)
+
+    assert not gh.calls("pr", "edit")
+    assert [pr["baseRefName"] for pr in gh.load()["prs"]] == ["main" if failed else "pr1", "pr2"]
+    assert repo.remote_subject("pr3") == ("pr3 c1" if failed else "advance pr3")
+    if failed:
+        assert "couldn't retarget #2" in result.stderr
+        assert "#3's base was changed from main to pr2" in result.stderr
 
 
 def test_protected_push_preserves_an_individual_approval(repo: Repo, gh: FakeGitHub) -> None:

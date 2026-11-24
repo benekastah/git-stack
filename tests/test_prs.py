@@ -207,11 +207,12 @@ def test_prs_skips_template_lookup_when_all_pull_requests_exist(
 ) -> None:
     repo.make_stack()
     client.push(prs=True)
+    created = opened(gh)
     gh.clear_calls()
     git_calls.clear()
 
     assert all(step.action is PullRequestAction.EXISTS for step in client.prs().steps)
-    assert not gh.calls("pr", "create")
+    assert opened(gh) == created
     assert not any(call[0] == "ls-tree" for call in git_calls)
 
 
@@ -237,9 +238,34 @@ def test_prs_says_which_it_opened_when_one_fails(repo: Repo, gh: FakeGitHub, cli
     client.push()
     gh.fail_opening("pr2")
 
-    with pytest.raises(StackError, match=r"opening a pull request for pr2 failed \(after opening #1 for pr1\): "):
+    with pytest.raises(StackError, match=r"opening a pull request for pr2 failed \(opened #1 for pr1, #2 for pr3\): "):
         client.prs()
-    assert [head for head, *_ in opened(gh)] == ["pr1"]
+    assert [head for head, *_ in opened(gh)] == ["pr1", "pr3"]
+
+    gh.fail_opening()
+    client.prs()
+
+    assert sorted(head for head, *_ in opened(gh)) == ["pr1", "pr2", "pr3"]
+
+
+def test_push_prs_takes_template_on_first_publication(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+    add_template(repo, ".github/PULL_REQUEST_TEMPLATE.md")
+    client.branch("feature")
+    repo.commit("a", "feature\n", "feature")
+
+    client.push(prs=True)
+
+    assert opened(gh) == [("feature", "main", "feature", TEMPLATE, True)]
+
+
+def test_pr_title_uses_gits_first_subject_when_it_spans_lines(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+    client.branch("feature")
+    repo.commit("a", "first\n", "first line\nsecond line\n\nDetails.")
+    repo.commit("a", "second\n", "Later commit")
+
+    client.push(prs=True)
+
+    assert opened(gh) == [("feature", "main", "first line second line", "", True)]
 
 
 def test_prs_adds_new_pull_requests_to_the_stack_of_existing_ones(

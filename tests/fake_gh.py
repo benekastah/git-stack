@@ -69,8 +69,6 @@ def respond(args: list[str], state: dict[str, Any]) -> str | None:
         pr = next(pr for pr in prs if pr["number"] == int(args[2]))
         pr["state"] = "CLOSED"
         return None
-    if args[:2] == ["pr", "create"]:
-        return create_pull_request(args, prs)
     if args[:2] == ["pr", "edit"]:
         edit_pull_request(args, state)
         return None
@@ -242,7 +240,7 @@ def link_stack(path: str, numbers: list[int], state: dict[str, Any]) -> str:
 
 def pull_requests_by_ref(args: list[str], query: str, prs: list[dict[str, Any]], default: str) -> str:
     """The pull requests of the branches query names, and the default branch."""
-    found: dict[str, Any] = {"defaultBranchRef": {"name": default}}
+    found: dict[str, Any] = {"id": "REPO_ID", "defaultBranchRef": {"name": default}}
     connections = [
         (alias, ref_field, variable, False)
         for alias, ref_field, variable in re.findall(r"(\w+): pullRequests\((headRefName|baseRefName): \$(\w+)", query)
@@ -315,23 +313,33 @@ def pull_requests_by_ref(args: list[str], query: str, prs: list[dict[str, Any]],
     return json.dumps({"data": {"repository": found}})
 
 
-def create_pull_request(args: list[str], prs: list[dict[str, Any]]) -> str:
-    number = max((p["number"] for p in prs), default=0) + 1
-    prs.append(
-        {
-            "number": number,
-            "state": "OPEN",
-            "isCrossRepository": False,
-            "headRefName": opt(args, "--head"),
-            "headRefOid": "",
-            "baseRefName": opt(args, "--base"),
-            "mergeCommit": None,
-            "title": opt(args, "--title"),
-            "body": read_stdin(),
-            "isDraft": "--draft" in args,
-        }
-    )
-    return f"https://github.com/acme/widgets/pull/{number}"
+def create_pull_requests(request: dict[str, Any], state: dict[str, Any]) -> str:
+    data = {}
+    errors = []
+    for alias, value in request["variables"].items():
+        assert value["repositoryId"] == "REPO_ID"
+        if value["headRefName"] in state.get("fail_heads", []):
+            data[alias] = None
+            errors.append({"message": "fake gh: failing as asked", "path": [alias]})
+            continue
+        number = max((p["number"] for p in state["prs"]), default=0) + 1
+        state["prs"].append(
+            {
+                "number": number,
+                "state": "OPEN",
+                "isCrossRepository": False,
+                "headRefName": value["headRefName"],
+                "headRefOid": "",
+                "baseRefName": value["baseRefName"],
+                "mergeCommit": None,
+                "title": value["title"],
+                "body": value["body"],
+                "isDraft": value["draft"],
+            }
+        )
+        url = f"https://github.com/acme/widgets/pull/{number}"
+        data[alias] = {"pullRequest": {"number": number, "url": url}}
+    return json.dumps({"data": data, **({"errors": errors} if errors else {})})
 
 
 def update_pull_requests(request: dict[str, Any], state: dict[str, Any]) -> str:
@@ -399,20 +407,17 @@ def run(args: list[str], stdin: Callable[[], bytes] = bytes) -> tuple[int, bytes
     with open(path) as f:
         state = json.load(f)
     state["calls"].append(args)
-    failing = (
-        args[0] in state["fail"]
-        or (args[:2] == ["pr", "create"] and args[args.index("--head") + 1] in state.get("fail_heads", []))
-        or (args[:2] == ["pr", "edit"] and int(args[2]) in state.get("fail_edits", []))
-    )
+    failing = args[0] in state["fail"] or (args[:2] == ["pr", "edit"] and int(args[2]) in state.get("fail_edits", []))
     error = "fake gh: failing as asked" if failing else None
     out = None
     if not failing:
         try:
-            out = (
-                update_pull_requests(json.loads(read_stdin()), state)
-                if args[:2] == ["api", "graphql"] and "--input" in args
-                else respond(args, state)
-            )
+            if args[:2] == ["api", "graphql"] and "--input" in args:
+                request = json.loads(read_stdin())
+                handler = create_pull_requests if ": createPullRequest(" in request["query"] else update_pull_requests
+                out = handler(request, state)
+            else:
+                out = respond(args, state)
         except GhError as e:
             error = str(e)
     with open(path, "w") as f:

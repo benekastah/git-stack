@@ -47,9 +47,10 @@ writes still check live PR state.
   URL due to redaction as uncertain. Print the selected Git executable in
   rollback commands. Report PR edits left by a failed push.
   Recheck known GitHub stacks before unstacking them for retargets. Batch
-  retargets to published bases and description updates in bounded GraphQL
-  requests on stdin. Check PR protection before each batch and record
-  successful retargets even if another edit failed.
+  draft creation, eligible retargets and description updates in bounded GraphQL
+  requests on stdin. Check live PR protection before mutating existing PRs.
+  Record confirmed creations and retargets even if another mutation failed. The
+  first draft uses the repository's default-branch template even on first push.
   Close blocking drafts only with explicit authorization from `--pr-rebuild`
   and a fresh check of authorship, stack membership, PR protection and open dependents.
   Batch the orphan checks and do read-only rebuild preflight before the live
@@ -61,6 +62,9 @@ writes still check live PR state.
   reached over direct HTTPS or verified SSH. SSH verification uses the
   effective OpenSSH configuration for both Git services. Other remotes use
   live HEAD probes for the fetch remote and any separate push destinations.
+  Concurrent destination probes isolate Git launches and join before
+  publication. Branch containment uses local trees and ancestry when it can
+  prove a fast-forward result and uses Git for the remaining merge checks.
 - `GitClient` uses py-git-client for Git subprocesses and bulk ref and config
   operations. `git_stack/git_command.py` selects `$GIT_STACK_GIT` or Git on PATH
   for each invocation. Git-stack uses pygit2 for local object and ancestry queries,

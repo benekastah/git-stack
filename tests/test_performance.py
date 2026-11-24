@@ -391,7 +391,7 @@ def test_timeline_records_failed_gh_calls(repo: Repo, gh: FakeGitHub, performanc
     assert result.returncode == 1
     assert json.loads(result.stdout.splitlines()[-1])["type"] == "error"
     assert "git stack:" in result.stderr and "Performance timeline" not in result.stderr
-    assert any(call[:3] == ["gh", "pr", "create"] for call in timed_commands(report))
+    assert any(call[:3] == ["gh", "api", "graphql"] and "--input" in call for call in timed_commands(report))
 
 
 @pytest.mark.usefixtures("performance_enabled")

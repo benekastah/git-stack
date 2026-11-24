@@ -296,6 +296,8 @@ class GitHubAdapter(GitAdapter):
         # So branches checked in parallel (as info does) look them up only once.
         self._pull_requests_lock = threading.Lock()
         self._default_branch: str | None = None
+        self._repository_id: str | None = None
+        self._stack_creation_available = True
         self._viewer: str | None = None
         self.protection = PRProtection()
         self.close_orphaned_prs = False
@@ -471,7 +473,7 @@ class GitHubAdapter(GitAdapter):
         variables = "".join(f", $b{i}: String!" for i in range(len(branches)))
         query = (
             f"query($owner: String!, $name: String!{variables}) {{ repository(owner: $owner, name: $name) "
-            f"{{ defaultBranchRef {{ name }} {fields} }} }}"
+            f"{{ id defaultBranchRef {{ name }} {fields} }} }}"
         )
         args = [
             "api",
@@ -488,6 +490,7 @@ class GitHubAdapter(GitAdapter):
         for i, branch in enumerate(branches):
             args += ["-f", f"b{i}={self.git.remote_branch_name(branch, self.remote)}"]
         repository = field(field(parse_json(self.gh(*args)), "data", dict), "repository", dict)
+        self._repository_id = optional_field(repository, "id", str)
         default_branch = optional_field(repository, "defaultBranchRef", dict)
         default_name = field(default_branch, "name", str) if default_branch else None
         pull_requests = {}
@@ -1070,6 +1073,11 @@ class GitHubAdapter(GitAdapter):
                 ready.append((branch, parent))
             if rebuild_stack or not parent_published:
                 pending[pr.number] = base
+        batch_ready = len(ready) > 1
+        if batch_ready and not rebuild_stack:
+            pending.update(
+                (prs[branch].number, self.git.remote_branch_name(parent, self.remote)) for branch, parent in ready
+            )
         closures, membership = self.validate_push_retargets(pending, rebuild_stack, allowed) if pending else ([], {})
         self.protect_retargets(to_push, stacks)
 
@@ -1077,7 +1085,7 @@ class GitHubAdapter(GitAdapter):
             check_refs = protect_refs if closures else lambda: None
             check_refs()
             self.close_orphans(closures, edits=self.retarget_edits(to_push, stacks) if closures else None)
-            if rebuild_stack:
+            if rebuild_stack or batch_ready:
                 self.apply_ready_retargets(ready, pending, membership, allowed, {pr.number for pr in closures})
             else:
                 for branch, parent in ready:
@@ -1178,9 +1186,14 @@ class GitHubAdapter(GitAdapter):
             for b in (scope if scope is not None else pushed)
             if b in prs and prs[b].state is GitHubState.OPEN
         }
-        for b in pushed:
-            if b in prs:
-                self.retarget(b, stacks.parent(b), rebuild_stack, allowed, allow_new_closures=False)
+        edits = {number: base for number, base in self.retarget_edits(pushed, stacks).items() if base is not None}
+        if len(edits) > 1 and not rebuild_stack:
+            changes = {prs[b].number: b for b in pushed if b in prs and prs[b].number in edits}
+            self.batch_retargets(changes, edits)
+        else:
+            for b in pushed:
+                if b in prs:
+                    self.retarget(b, stacks.parent(b), rebuild_stack, allowed, allow_new_closures=False)
         without = tuple(b for b in pushed if b not in prs)
         if without and not opening:
             self.core.emit(events.NoPullRequests(without))
@@ -1466,47 +1479,82 @@ class GitHubAdapter(GitAdapter):
         if self._default_branch is None:
             return None
         ref = f"refs/remotes/{self.remote}/{self._default_branch}"
-        for directory in TEMPLATE_DIRECTORIES:
-            listing = self.git.run("ls-tree", "-z", f"{ref}:{directory}", check=False)
-            for entry in filter(None, listing.split("\0")):
-                info, _, name = entry.partition("\t")
-                _, kind, oid = info.split()
-                if kind == "blob" and name.lower() in TEMPLATE_NAMES:
-                    return self.git.run("cat-file", "blob", oid)
-        return None
+        return self.git.first_named_blob(ref, TEMPLATE_DIRECTORIES, TEMPLATE_NAMES)
 
-    def open_pull_request(self, branch: str, base: str, title: str, body: str) -> tuple[int, str]:
-        """Open a draft pull request of branch into base. Returns its number and URL."""
-        url = self.gh(
-            "pr",
-            "create",
-            "--repo",
-            self.repo,
-            "--draft",
-            "--base",
-            self.git.remote_branch_name(base, self.remote),
-            "--head",
-            self.git.remote_branch_name(branch, self.remote),
-            "--title",
-            title,
-            "--body-file",
-            "-",
-            input=body,
-        ).splitlines()[-1]
-        match = re.search(r"/pull/(\d+)$", url)
-        if not match:
-            raise StackError(f"couldn't tell which pull request gh opened for {branch} from {url!r}")
-        number = int(match.group(1))
-        self.pull_requests()[branch] = PullRequest(
-            number,
-            GitHubState.OPEN,
-            True,
-            False,
-            self.git.tip(branch),
-            self.git.remote_branch_name(base, self.remote),
-            None,
+    def create_draft_pull_requests(self, requests: list[tuple[str, str, str]]) -> Iterator[tuple[str, int, str]]:
+        """Create drafts after publication and report all confirmed creations in a failed batch."""
+        if not requests:
+            return
+        repository_id = self._repository_id
+        if repository_id is None:
+            # On a first push, discovery had no configured upstreams to look up.
+            data = field(self.repository_query("id defaultBranchRef { name }"), "repository", dict)
+            repository_id = self._repository_id = field(data, "id", str)
+            default = optional_field(data, "defaultBranchRef", dict)
+            self._default_branch = field(default, "name", str) if default else None
+        body = self.pull_request_template() or ""
+        prs = self.pull_requests()
+        opened: list[str] = []
+        for batch in batched(requests, PR_UPDATE_BATCH_SIZE, strict=False):
+            failed: list[str] = []
+            errors: list[str] = []
+            try:
+                data = self.create_draft_batch(batch, repository_id, body, errors)
+            except StackError as error:
+                errors.append(str(error))
+                data = {}
+            for i, (branch, base, _) in enumerate(batch):
+                try:
+                    result = field(data.get(f"p{i}"), "pullRequest", dict)
+                    number, url = field(result, "number", int), field(result, "url", str)
+                except StackError:
+                    failed.append(branch)
+                    continue
+                prs[branch] = PullRequest(
+                    number,
+                    GitHubState.OPEN,
+                    True,
+                    False,
+                    self.git.tip(branch),
+                    self.git.remote_branch_name(base, self.remote),
+                    None,
+                )
+                opened.append(f"#{number} for {branch}")
+                yield branch, number, url
+            if failed:
+                succeeded = f" (opened {', '.join(opened)})" if opened else ""
+                detail = "\n".join(errors) or "GitHub did not confirm creation"
+                raise StackError(f"opening a pull request for {', '.join(failed)} failed{succeeded}: {detail}")
+
+    def create_draft_batch(
+        self, batch: tuple[tuple[str, str, str], ...], repository_id: str, body: str, errors: list[str]
+    ) -> dict[str, object]:
+        variables = {
+            f"p{i}": {
+                "repositoryId": repository_id,
+                "baseRefName": self.git.remote_branch_name(base, self.remote),
+                "headRefName": self.git.remote_branch_name(branch, self.remote),
+                "title": title,
+                "body": body,
+                "draft": True,
+                "maintainerCanModify": True,
+            }
+            for i, (branch, base, title) in enumerate(batch)
+        }
+        declarations = ", ".join(f"${alias}: CreatePullRequestInput!" for alias in variables)
+        mutations = " ".join(
+            f"{alias}: createPullRequest(input: ${alias}) {{ pullRequest {{ number url }} }}" for alias in variables
         )
-        return number, url
+        request = json.dumps({"query": f"mutation({declarations}) {{ {mutations} }}", "variables": variables})
+        raw = self.gh("api", "graphql", "--hostname", self.host, "--input", "-", input=request, partial_errors=errors)
+        response = parse_json(raw)
+        with suppress(StackError):
+            for error in optional_field(response, "errors", list) or []:
+                with suppress(StackError):
+                    message = optional_field(error, "message", str)
+                    if message and not any(message in existing for existing in errors):
+                        errors.append(message)
+        return optional_field(response, "data", dict) or {}
 
     def pull_request_fields(self, numbers: Iterable[int], fields: str) -> dict[int, object]:
         """{number: its pull request's fields, a JSON object or None if there's
@@ -1898,7 +1946,7 @@ class GitHubAdapter(GitAdapter):
             )
             self.core.emit(events.GitHubStackMismatch(tuple(chain), tuple(sorted(found)), hint))
             return []
-        return chain if self.stacks_api("", chain) else []
+        return chain if self._stack_creation_available and self.stacks_api("", chain) else []
 
     def rebuild_github_stack(self, chain: list[int], found: dict[int, GitHubStack], dry_run: bool) -> bool:
         """Unstack the stacks on GitHub found, {number: stack}, which don't fit
@@ -1918,6 +1966,11 @@ class GitHubAdapter(GitAdapter):
         return self.stacks_api("", chain)
 
     def github_stacks_enabled(self) -> bool:
+        value = self.git.config_value(GITHUB_STACKS_SETTING)
+        if value is None:
+            return True
+        if value.lower() in ("true", "false"):
+            return value.lower() == "true"
         setting = self.git.run("config", "--type=bool", "--get", GITHUB_STACKS_SETTING, check=False)
         return setting != "false"
 
@@ -1938,6 +1991,8 @@ class GitHubAdapter(GitAdapter):
             self.core.emit(events.GitHubStackLinked(tuple(numbers)))
             return True
         if "(HTTP 404)" in result.stderr:
+            if not path:
+                self._stack_creation_available = False
             return False
         raise StackError(
             f"linking {', '.join(f'#{n}' for n in numbers)} into a stack on GitHub failed:\n{result.stderr.strip()}"

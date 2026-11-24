@@ -3498,39 +3498,27 @@ class StackClient(StackCore):
         if not dry_run:
             adapter.protect_retargets(branches, stacks)
             self.protect_pr_opening(branches, stacks, adapter)
-        template: str | None = None
-        steps: list[PullRequestStep] = []
+        steps: dict[str, PullRequestStep] = {}
+        opening: list[tuple[str, str, str]] = []
         for b in branches:
             parent = stacks.parent(b)
             pr = prs.get(b)
             if pr is not None:
                 if not dry_run:
                     adapter.retarget(b, parent, rebuild_stack, allowed)
-                steps.append(PullRequestStep(b, parent, PullRequestAction.EXISTS, number=pr.number))
+                steps[b] = PullRequestStep(b, parent, PullRequestAction.EXISTS, number=pr.number)
                 continue
             base = self.recorded_base(b, parent)
-            subjects = git.run("log", "--reverse", "--format=%s", f"{base}..refs/heads/{b}").splitlines()
-            if not subjects:
-                steps.append(PullRequestStep(b, parent, PullRequestAction.NO_COMMITS))
-                continue
-            title = subjects[0]
-            if dry_run:
-                steps.append(PullRequestStep(b, parent, PullRequestAction.OPEN, title=title))
-                continue
-            if template is None:
-                template = adapter.pull_request_template() or ""
-            try:
-                number, url = adapter.open_pull_request(b, parent, title, template)
-            except StackError as e:
-                opened = ", ".join(f"#{s.number} for {s.branch}" for s in steps if s.action is PullRequestAction.OPEN)
-                raise StackError(
-                    f"opening a pull request for {b} failed{f' (after opening {opened})' if opened else ''}: {e}"
-                ) from e
-            steps.append(PullRequestStep(b, parent, PullRequestAction.OPEN, title=title, number=number, url=url))
-            allowed.add(number)
+            title = git.first_subject(base, b)
+            action = PullRequestAction.NO_COMMITS if title is None else PullRequestAction.OPEN
+            steps[b] = PullRequestStep(b, parent, action, title=title)
+            if title is not None and not dry_run:
+                opening.append((b, parent, title))
+        for b, number, url in adapter.create_draft_pull_requests(opening):
+            steps[b] = replace(steps[b], number=number, url=url)
         if branches and (not dry_run or rebuild_stack):
             self.update_stack_sections(branches, stacks, adapter, rebuild_stack, dry_run)
-        return steps
+        return [steps[b] for b in branches]
 
     def update_stack_sections(
         self,

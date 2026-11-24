@@ -17,23 +17,23 @@ from tests.operations import expect_operations
 pytestmark = [pytest.mark.usefixtures("separate_processes", "gh")]
 
 # Each is (git processes, gh commands) at 1, 3 and 10 branches.
-# Pushing starts a few processes for each branch (a stack of 10 pushes in 37 against 10 for 1)...
-PUSH = {1: (10, 0), 3: (16, 0), 10: (37, 0)}
+# Publishing records two config keys for each new branch.
+PUSH = {1: (8, 0), 3: (12, 0), 10: (26, 0)}
 # ...and opening a pull request for each costs more of both.
-PUSH_OPENING_PRS = {1: (11, 2), 3: (20, 8), 10: (48, 15)}
-# With every pull request open, git doesn't grow with the stack from 3 branches up, and gh stays at 4
+PUSH_OPENING_PRS = {1: (8, 3), 3: (12, 7), 10: (26, 7)}
+# With every pull request open, git and gh no longer grow with the stack, and gh stays at 4
 # (2 for a stack of 1).
-PUSH_WITH_PRS_OPEN = {1: (7, 2), 3: (8, 4), 10: (8, 4)}
-PRS_ALL_OPEN = {1: (3, 2), 3: (4, 4), 10: (4, 4)}
-# Nothing to do: gh is asked once, and git 7 times.
-SYNC_NOTHING = {1: (7, 1), 3: (7, 1), 10: (7, 1)}
+PUSH_WITH_PRS_OPEN = {1: (6, 2), 3: (6, 4), 10: (6, 4)}
+PRS_ALL_OPEN = {1: (2, 2), 3: (2, 4), 10: (2, 4)}
+# Nothing to do: gh is asked once, and git six times.
+SYNC_NOTHING = {1: (6, 1), 3: (6, 1), 10: (6, 1)}
 # The bottom merged, as GitHub reports it (the merge commit and the head it had): the rest are
 # restacked onto main and pushed again. The fake supplies the GitHub merge evidence.
-SYNC_BOTTOM_MERGED = {1: (31, 1), 3: (65, 5), 10: (184, 6)}
+SYNC_BOTTOM_MERGED = {1: (31, 1), 3: (62, 5), 10: (174, 5)}
 # gh is asked twice, however many pull requests there are.
-IMPORT = {1: (18, 2), 3: (34, 2), 10: (90, 2)}
+IMPORT = {1: (13, 2), 3: (27, 2), 10: (76, 2)}
 # info asks GitHub about all the branches in one request.
-INFO = {1: (3, 1), 3: (3, 1), 10: (3, 1)}
+INFO = {1: (2, 1), 3: (2, 1), 10: (2, 1)}
 
 
 # The tests also check what the command did, since running fewer operations than allotted only
@@ -73,9 +73,32 @@ def test_push_opening_a_pull_request_for_each_branch(repo: Repo, gh: FakeGitHub,
     assert_pull_requests(gh, chain)
 
 
+@pytest.mark.parametrize("count", [2, 5])
+def test_push_opening_prs_for_multiple_stacks_in_a_group(repo: Repo, gh: FakeGitHub, count: int) -> None:
+    expected: list[tuple[str, str]] = []
+    for i in range(count):
+        repo.git("switch", "--quiet", "main")
+        lower, upper = f"lower-{i}", f"upper-{i}"
+        repo.client.branch(lower)
+        repo.commit("a", f"{lower}\n", lower)
+        repo.client.branch(upper)
+        repo.commit("b", f"{upper}\n", upper)
+        expected.extend(((lower, "main"), (upper, lower)))
+    repo.client.group_add("work", [f"lower-{i}" for i in range(count)])
+
+    with expect_operations(git=6 + 4 * count, gh=5):
+        repo.stack_process("push", "--group", "work", "--prs")
+
+    requests = gh.load()["prs"]
+    assert sorted((pr["headRefName"], pr["baseRefName"]) for pr in requests) == sorted(expected)
+    assert all(
+        repo.git("rev-parse", branch, cwd=repo.origin) == repo.git("rev-parse", branch) for branch, _ in expected
+    )
+    assert all(all(f"#{other['number']}" in pr["body"] for other in requests) for pr in requests)
+
+
 def test_push_when_every_branch_has_a_pull_request(repo: Repo, gh: FakeGitHub, chain: list[str]) -> None:
     open_pull_requests(repo)
-    created = len(gh.calls("pr", "create"))
     git, gh_commands = PUSH_WITH_PRS_OPEN[len(chain)]
 
     with expect_operations(git=git, gh=gh_commands):
@@ -83,18 +106,15 @@ def test_push_when_every_branch_has_a_pull_request(repo: Repo, gh: FakeGitHub, c
 
     # No new pull request: each branch has the one it had.
     assert_pull_requests(gh, chain)
-    assert len(gh.calls("pr", "create")) == created
 
 
 def test_prs_when_every_branch_has_a_pull_request(repo: Repo, gh: FakeGitHub, chain: list[str]) -> None:
     open_pull_requests(repo)
-    created = len(gh.calls("pr", "create"))
     git, gh_commands = PRS_ALL_OPEN[len(chain)]
 
     with expect_operations(git=git, gh=gh_commands):
         repo.stack_process("prs")
 
-    assert len(gh.calls("pr", "create")) == created
     assert_pull_requests(gh, chain)
 
 
