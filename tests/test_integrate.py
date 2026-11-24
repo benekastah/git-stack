@@ -2339,7 +2339,7 @@ def test_push_prs_accepts_published_integration_without_cached_ref(repo: Repo, g
 
 @pytest.mark.parametrize("dirty", [False, True])
 def test_integrated_push_overlaps_initial_pr_lookup_with_status(
-    repo: Repo, gh: FakeGitHub, monkeypatch: pytest.MonkeyPatch, dirty: bool
+    repo: Repo, gh: FakeGitHub, git_calls: list[GitCall], monkeypatch: pytest.MonkeyPatch, dirty: bool
 ) -> None:
     integration(repo)
     work(repo)
@@ -2367,16 +2367,21 @@ def test_integrated_push_overlaps_initial_pr_lookup_with_status(
 
     monkeypatch.setattr(StackClient, "ensure_clean_worktree", check)
     monkeypatch.setattr(fake_gh, "respond", lookup)
+    monkeypatch.setattr(cli, "CLI_GIT_CLOSE_FDS", False)
     gh.clear_calls()
+    git_calls.clear()
 
     result = repo.stack("push", "--prs", expect_success=not dirty)
 
     assert status_started.is_set() and lookup_started.is_set()
+    assert next(call for call in git_calls if call[0] == "status").close_fds
+    assert next(call for call in git_calls if call[0] == "ls-remote").close_fds
     if dirty:
         assert "you have uncommitted changes" in result.stderr
         assert tip(repo, "work", remote=True) == original_tip
         assert gh.calls("pr", "edit") == []
     else:
+        assert not next(call for call in git_calls if call[0] == "push").close_fds
         assert tip(repo, "work", remote=True) == tip(repo, "work")
 
 

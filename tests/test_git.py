@@ -24,6 +24,7 @@ def test_git_stack_runs_git_through_the_shared_client(repo: Repo, monkeypatch: p
     process = Git.process
 
     def record(self: Git, *args: Any, **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
+        assert self.close_fds
         commands.append(args)
         return process(self, *args, **kwargs)
 

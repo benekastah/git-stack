@@ -61,6 +61,11 @@ writes still check live PR state.
   for each invocation. Git-stack uses pygit2 for local object and ancestry queries,
   discovery, and worktree state. The snapshot also owns the library's cache for
   Git metadata queries. Per-command reference and graph caches live in `GitClient`.
+  GitClient isolates subprocess descriptors by default. On macOS, the CLI opts
+  into a faster launch mode for serial Git operations. Branch-status and integration
+  push workers isolate their launches so a child cannot hold another child's pipes
+  open. Enter `GitClient.isolate_parallel_launches` before submitting work and leave
+  it after joining workers. Snapshots and temporary patch readers inherit the setting.
 - `git_stack/stacks.py` (`Stacks`) holds the tracked branches as trees, with
   the rules for groups and ownership, without touching the repository.
   `StackCore.stacks()` reads it, a command changes it in memory, and

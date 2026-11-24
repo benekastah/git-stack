@@ -8,7 +8,7 @@ license-files = ["LICENSE"]
 authors = [{ name = "Paul Harper", email = "benekastah@gmail.com" }]
 requires-python = ">=3.15"
 dependencies = [
-    "py-git-client[pygit2] @ git+https://github.com/benekastah/py-git-client@85cfd8a1f918c7e9b07007465292c1cce9f1bb2a",
+    "py-git-client[pygit2] @ git+https://github.com/benekastah/py-git-client@71e2a7c5c975d3ed7d26d16b211dee48f8dd0d47",
 ]
 
 [project.scripts]

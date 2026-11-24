@@ -150,12 +150,15 @@ class GitClient:
     set, otherwise the git on PATH. Local object and graph lookups use pygit2
     where it can read the graph Git uses."""
 
-    def __init__(self, directory: str | os.PathLike[str] = ".") -> None:
+    def __init__(self, directory: str | os.PathLike[str] = ".", *, close_fds: bool = True) -> None:
         self.directory = pathlib.Path(directory)
         try:
             timeline = active_timeline.get()
             self._git = Git(
-                self.directory, program=find_git(GIT_VARIABLE), performance=timeline.git if timeline else None
+                self.directory,
+                program=find_git(GIT_VARIABLE),
+                performance=timeline.git if timeline else None,
+                close_fds=close_fds,
             )
         except (FileNotFoundError, ValueError) as e:
             # No git on PATH, or on Windows, a batch file.
@@ -206,6 +209,22 @@ class GitClient:
         finally:
             self._git.performance = original
 
+    @contextmanager
+    def isolate_parallel_launches(self) -> Generator[None]:
+        """Keep parallel Git launches from inheriting extra file descriptors.
+
+        Enter before submitting any work and join all workers before leaving.
+        On macOS without pipe2, a subprocess pipe briefly exists before Python marks
+        it close-on-exec. Inheriting it can delay EOF until the sibling exits.
+        """
+        git = self._git
+        original = git.close_fds
+        git.close_fds = True
+        try:
+            yield
+        finally:
+            git.close_fds = original
+
     def _git_with(
         self, client_type: type[Git] = Git, *, cache: GitCache | None = None, object_id_length: int | None = None
     ) -> Git:
@@ -213,6 +232,7 @@ class GitClient:
             self.directory,
             program=self._git.program,
             performance=self._git.performance,
+            close_fds=self._git.close_fds,
             cache=cache,
             object_id_length=object_id_length,
         )

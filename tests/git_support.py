@@ -27,11 +27,12 @@ def real_git() -> str:
 
 
 class GitCall(list[str]):
-    """Arguments recorded by the git_calls fixture, plus their executable."""
+    """Arguments, executable and client close_fds setting recorded by git_calls."""
 
-    def __init__(self, args: Sequence[str], program: str) -> None:
+    def __init__(self, args: Sequence[str], program: str, *, close_fds: bool) -> None:
         super().__init__(args)
         self.program = program
+        self.close_fds = close_fds
 
 
 @contextmanager

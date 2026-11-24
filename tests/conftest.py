@@ -180,11 +180,11 @@ def git_calls(monkeypatch: pytest.MonkeyPatch) -> list[GitCall]:
     popen = Git.popen
 
     def recording(self: Git, *args: str, **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
-        calls.append(GitCall(args, self.program))
+        calls.append(GitCall(args, self.program, close_fds=self.close_fds))
         return process(self, *args, **kwargs)
 
     def recording_popen(self: Git, *args: str, **kwargs: Any) -> subprocess.Popen[bytes]:
-        calls.append(GitCall(args, self.program))
+        calls.append(GitCall(args, self.program, close_fds=self.close_fds))
         return popen(self, *args, **kwargs)
 
     monkeypatch.setattr(Git, "process", recording)

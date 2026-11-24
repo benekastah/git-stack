@@ -2,6 +2,7 @@
 
 import json
 import re
+import sys
 from threading import Event, get_ident
 
 import pytest
@@ -13,6 +14,24 @@ from git_stack.errors import StackError
 from git_stack.stack import BranchInfo, BranchStatus, StackClient
 from tests.git_support import GitCall
 from tests.helpers import FakeGitHub, Repo
+
+
+def test_info_isolates_parallel_launches_and_restores_the_serial_policy(
+    repo: Repo, client: StackClient, git_calls: list[GitCall], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client.branch("topic")
+    repo.commit("a", "topic\n", "topic")
+    repo.git("switch", "main")
+    repo.commit("b", "trunk\n", "advance main")
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    git_calls.clear()
+
+    assert "topic" in repo.stack("info").stdout
+
+    for command in ("merge-tree", "patch-id"):
+        assert {call.close_fds for call in git_calls if call[0] == command} == {True}
+    for operation in ("--list", "--get-colorbool"):
+        assert {call.close_fds for call in git_calls if call[:2] == ["config", operation]} == {sys.platform != "darwin"}
 
 
 def test_info_skips_patch_comparison_when_branch_already_contains_parent(
