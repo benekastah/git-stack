@@ -606,7 +606,7 @@ git stack info --prs
   ```
 
 - For a shell prompt or an editor, the [scripting commands](#scripting)
-  below only read git config.
+  below are quicker: each starts two Git processes, however long the stack.
 
 ### `git stack next`
 
@@ -1194,12 +1194,18 @@ git stack install-skills --codex    # for Codex, even if it isn't found
 ## Scripting
 
 The commands below print one thing per line, for use in scripts, aliases,
-shell prompts and editors. They only read git config, so they're fast, and they're
-safe to run while another git-stack command is running. They fail with exit
-status 1 for a branch that isn't in a stack.
+shell prompts and editors. On a typical repository each starts two Git
+processes, to read the branches and git config, however long the stack is.
+They fail with exit status 1 for a branch that isn't in a stack.
 
-They don't change any branch. The only thing they write, like every command,
-is the result of a restack or pull you finished by hand after a conflict.
+They don't change any branch, and they usually only read, so they're safe to
+run while another git-stack command is running. The exception, as for every
+command, is a restack or pull you finished by hand after a conflict (see
+[Conflicts](#conflicts)), whose result the next git-stack command records.
+When one of these finds such a result waiting, it takes git-stack's lock to
+record it, so it waits for another git-stack command that has the lock to
+finish first (see [How it works](#how-it-works)), and starts a few more Git
+processes.
 
 Every command can also print JSON; see [JSON output](#json-output).
 
@@ -1450,7 +1456,9 @@ to 5 seconds.
 Commands that change stack metadata hold `.git/git-stack.lock` while they
 run, so two of them never interleave their writes: one started while another
 is running (in any worktree of the repository) says it's waiting, and waits
-for it to finish. Read-only commands like `info` don't take it. The lock is
+for it to finish. Read-only commands like `info` take it only to record a
+restack or pull you finished by hand (see [Scripting](#scripting)), and only
+while they record it. The lock is
 released when a command exits, including when a rebase stops on a conflict,
 so resolving it never waits on anything.
 

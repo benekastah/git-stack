@@ -1059,9 +1059,18 @@ class StackClient(StackCore):
         """Like stacks, but first picks up the result of a restack or
         pull the user finished by hand. One that hasn't finished is left alone,
         even if it looks aborted, since it may be about to start in another
-        git-stack process, so this is safe to call at any time."""
-        if not self.git.operation_in_progress():
-            self.settle_all(forget_unfinished=False)
+        git-stack process, so this is safe to call at any time.
+
+        For the commands that only read: it checks first, without the lock
+        and writing nothing, whether there's anything to record (see
+        settle_waiting), as there usually isn't. If there is, it takes the
+        lock (waiting for another command that has it) only while it
+        records it, checking again under the lock, since that command may
+        have recorded it meanwhile."""
+        if self.settle_waiting():
+            with self.exclusive():
+                if not self.git.operation_in_progress():
+                    self.settle_all(forget_unfinished=False)
         return self.stacks()
 
     def stacked_branch(self, branch: str | None, stacks: Stacks) -> str:

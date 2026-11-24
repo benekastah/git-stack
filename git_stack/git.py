@@ -381,6 +381,19 @@ class GitClient:
                 self._refs_config = {}
                 self._ancestry.clear()
 
+    def forget_snapshot(self) -> None:
+        """Within a snapshot, forget the refs, worktrees and reflogs it has
+        read, the ancestry found from them, and the branch config, so they're
+        read again: for when another process may have changed them since
+        (see StackCore.exclusive). Each remote's default branch is kept.
+        Outside a snapshot, it does nothing."""
+        if not self._snapshot_depth:
+            return
+        self._forget_refs()
+        self._refs_config = {}
+        self._ancestry.clear()
+        self._config_read = False
+
     def _snapshot_refs(self) -> dict[str, Ref] | None:
         """The refs (see snapshot), reading them if they haven't been, or None
         outside a snapshot block."""

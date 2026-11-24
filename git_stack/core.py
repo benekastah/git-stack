@@ -31,7 +31,7 @@ TRACK_UPSTREAM_KEY = "stackTrackUpstream"
 # plain `git rebase --continue` (or back out with `git rebase --abort`).
 # A restack that's started, as "<the branch's tip before> <the parent's tip
 # it's rebased onto> <the parent>", in one setting, so it's recorded with one
-# git process, and all of it or none (see settle_restack). Older versions
+# git process, and all of it or none (see restack_settlement). Older versions
 # don't read it, so a restack this version stopped is finished with this
 # version or a later one.
 PENDING_RESTACK_KEY = "stackPendingRestack"
@@ -84,6 +84,18 @@ class TrunkUpstream:
     ref: str
     old: str
     new: str
+
+
+@dataclass(frozen=True)
+class Settlement:
+    """What recording an interrupted restack or pull of branch writes (see
+    StackCore.settle): parent, if set, as its parent, then each of sets, then
+    each of unsets, only if it still has the value given (any, for None)."""
+
+    branch: str
+    parent: str | None = None
+    sets: tuple[tuple[str, str], ...] = ()
+    unsets: tuple[tuple[str, str | None], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -184,6 +196,11 @@ class StackCore:
         as pending, but not started yet, for one that was aborted, and discard
         it (see settle). The lock is in the git directory every worktree
         shares, as the metadata is.
+
+        Taken inside a snapshot (see GitClient.snapshot), as a command that
+        only reads takes it to settle, it forgets what the snapshot and the
+        branch config cache read before, which another command may have
+        changed until then.
         """
         if self._exclusive_depth:
             self._exclusive_depth += 1
@@ -193,6 +210,7 @@ class StackCore:
                 self._exclusive_depth -= 1
             return
         with file_lock(self.git.common_dir() / LOCK_FILE, lambda: self.emit(events.WaitingForLock())):
+            self.git.forget_snapshot()
             self._exclusive_depth = 1
             try:
                 yield
@@ -360,10 +378,24 @@ class StackCore:
         Must not be called while a rebase or cherry-pick is in progress, since the
         branch hasn't been updated yet.
         """
-        self.settle_restack(branch, forget_unfinished, restack_completed)
-        self.settle_pull(branch, forget_unfinished)
+        self.apply(self.restack_settlement(branch, forget_unfinished, restack_completed))
+        self.apply(self.pull_settlement(branch, forget_unfinished))
 
-    def settle_restack(self, branch: str, forget_unfinished: bool, completed: bool = False) -> None:
+    def apply(self, settlement: Settlement | None) -> None:
+        """Write settlement, if there is one."""
+        if settlement is None:
+            return
+        branch = settlement.branch
+        if settlement.parent is not None:
+            self.set_parent(branch, settlement.parent)
+        for key, value in settlement.sets:
+            self.git.config_set(branch, key, value)
+        for key, expected in settlement.unsets:
+            self.git.config_unset(branch, key, expected)
+
+    def restack_settlement(self, branch: str, forget_unfinished: bool, completed: bool = False) -> Settlement | None:
+        """What settle writes to record branch's restack, if anything,
+        without writing it."""
         git = self.git
         before: str | None
         pending_base: str | None
@@ -373,7 +405,7 @@ class StackCore:
         else:
             legacy_parent = git.config_get(branch, LEGACY_PENDING_PARENT_KEY)
             if legacy_parent is None:
-                return
+                return None
             pending_parent = legacy_parent
             pending_base = git.config_get(branch, LEGACY_PENDING_BASE_KEY)
             before = git.config_get(branch, LEGACY_PENDING_RESTACK_FROM_KEY)
@@ -391,21 +423,25 @@ class StackCore:
             and (completed or (before is not None and git.finished_rebase(branch, before, pending_base)))
             and git.is_ancestor(pending_base, f"refs/heads/{branch}")
         ):
-            self.set_parent(branch, pending_parent)
-            git.config_set(branch, BASE_KEY, pending_base)
+            parent: str | None = pending_parent
+            sets: tuple[tuple[str, str], ...] = ((BASE_KEY, pending_base),)
         elif not forget_unfinished or git.other_worktree_of(branch) is not None:
             # Another worktree may have stopped partway through it.
-            return
+            return None
+        else:
+            parent, sets = None, ()
         # Only if it's unchanged, in case another process has started a new
         # restack since we read it.
-        for key, value in recorded.items():
-            git.config_unset(branch, key, value)
+        return Settlement(branch, parent, sets, tuple(recorded.items()))
 
-    def settle_pull(self, branch: str, forget_unfinished: bool) -> None:
+    def pull_settlement(self, branch: str, forget_unfinished: bool) -> Settlement | None:
+        """What settle writes to record a pull into branch, if anything,
+        without writing it."""
         git = self.git
         pending_pulled = git.config_get(branch, PENDING_PULLED_KEY)
         if pending_pulled is None:
-            return
+            return None
+        sets: list[tuple[str, str]] = []
         pull_from = git.config_get(branch, PENDING_PULL_FROM_KEY)
         pending_upstream = git.config_get(branch, PENDING_PULL_UPSTREAM_KEY)
         identities = git.config_get(branch, PENDING_PULL_IDENTITIES_KEY)
@@ -419,20 +455,35 @@ class StackCore:
             and picked <= git.identity_counts(f"{pull_from}..refs/heads/{branch}")
         ):
             if pending_upstream is None or pending_upstream == self.upstream_identity(branch):
-                git.config_set(branch, PULLED_KEY, pending_pulled)
+                sets.append((PULLED_KEY, pending_pulled))
                 if pending_upstream is not None:
-                    git.config_set(branch, PULLED_UPSTREAM_KEY, pending_upstream)
+                    sets.append((PULLED_UPSTREAM_KEY, pending_upstream))
         elif not forget_unfinished or git.other_worktree_of(branch) is not None:
-            return
-        git.config_unset(branch, PENDING_PULLED_KEY, pending_pulled)
-        git.config_unset(branch, PENDING_PULL_FROM_KEY, pull_from)
-        git.config_unset(branch, PENDING_PULL_UPSTREAM_KEY, pending_upstream)
-        git.config_unset(branch, PENDING_PULL_IDENTITIES_KEY, identities)
-        git.config_unset(branch, LEGACY_PULL_IDENTITIES_KEY)
+            return None
+        unsets = (
+            (PENDING_PULLED_KEY, pending_pulled),
+            (PENDING_PULL_FROM_KEY, pull_from),
+            (PENDING_PULL_UPSTREAM_KEY, pending_upstream),
+            (PENDING_PULL_IDENTITIES_KEY, identities),
+            (LEGACY_PULL_IDENTITIES_KEY, None),
+        )
+        return Settlement(branch, None, tuple(sets), unsets)
 
     def settle_all(self, forget_unfinished: bool = True) -> None:
         for branch in self.stacks():
             self.settle(branch, forget_unfinished)
+
+    def settle_waiting(self) -> bool:
+        """Whether settle_all(forget_unfinished=False) would record anything
+        now, found without writing or taking the lock. Never while a rebase,
+        cherry-pick, revert or merge is in progress (see settle)."""
+        if self.git.operation_in_progress():
+            return False
+        return any(
+            self.restack_settlement(branch, forget_unfinished=False)
+            or self.pull_settlement(branch, forget_unfinished=False)
+            for branch in self.stacks()
+        )
 
     def recorded_base(self, branch: str, parent: str) -> str:
         """Return branch's base, checking that it is still in the branch's history."""

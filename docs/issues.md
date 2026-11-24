@@ -41,21 +41,6 @@ integration when no source was retired. To retry, name the integration
 explicitly with `git stack sync <integration>` and include any surviving
 stacks that still need to sync.
 
-## The scripting commands run more than the README says, and can write config
-
-The README says `parent`, `base` and `show-stack` "only read git config, so they're fast, and
-they're safe to run while another git-stack command is running". Each starts two Git
-processes on a typical repository (`config --list` and `for-each-ref`), however long the
-stack is. A shell prompt or editor running one on every keystroke pays for them.
-
-Each also begins with `settled_stacks`, which records a restack or a pull the user finished by hand, so
-one of them can write branch config, without the lock that the commands that change metadata
-hold, while another git-stack process may be running. That only happens when such a restack is
-waiting to be recorded, but then the prompt or editor is the one that writes it. Either the
-README's claims go, or these commands settle only under the lock, or not at all. The check for a
-stopped operation has to stay: it's what keeps `settled_stacks` from settling in the middle of a
-rebase.
-
 ## Commands start processes for every branch, many of them one at a time
 
 The operation tests exercise stacks of 1, 3 and 10 branches. On the largest,

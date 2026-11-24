@@ -1,17 +1,146 @@
 """Commands running at once: the git-stack lock, and git config's."""
 
 import os
+import pathlib
 import subprocess
 import sys
 import threading
+from collections.abc import Callable, Generator
+from contextlib import contextmanager
 
 import pytest
 
-from git_stack import git
+from git_stack import core, events, git
 from git_stack.errors import StackError
 from git_stack.git import GitClient
 from git_stack.stack import BranchStatus, StackClient
 from tests.helpers import Repo
+
+# The commands that only read, each run on pr2 of make_stack's stack (see
+# settled_stacks).
+READING_COMMANDS: dict[str, Callable[[StackClient], object]] = {
+    "parent": lambda client: client.parent(),
+    "base": lambda client: client.base(),
+    "show-stack": lambda client: client.show_stack(),
+    "next": lambda client: client.next(),
+    "prev": lambda client: client.prev(),
+    "info": lambda client: client.info(offline=True),
+}
+
+
+@pytest.fixture
+def locks_taken(monkeypatch: pytest.MonkeyPatch) -> list[pathlib.Path]:
+    """The git-stack locks (see StackCore.exclusive) taken from now on."""
+    taken: list[pathlib.Path] = []
+    file_lock = core.file_lock
+
+    @contextmanager
+    def recording(path: pathlib.Path, on_wait: Callable[[], None]) -> Generator[None]:
+        taken.append(path)
+        with file_lock(path, on_wait):
+            yield
+
+    monkeypatch.setattr(core, "file_lock", recording)
+    return taken
+
+
+def restack_finished_by_hand(repo: Repo) -> str:
+    """Make a restack of pr2 stop on a conflict, then finish it with git, as
+    the user would, leaving it to be recorded, and return the commit pr2 is
+    now on (its new base)."""
+    repo.make_stack()
+    repo.git("switch", "--quiet", "pr1")
+    repo.commit("b", "pr1 conflicts with pr2\n", "pr1 c3")
+    with pytest.raises(StackError, match="restacking pr2 stopped on a conflict"):
+        repo.client.restack()
+    repo.write("b", "resolved\n")
+    repo.git("add", "b")
+    repo.git("-c", "core.editor=true", "rebase", "--continue")
+    assert repo.config_exists("pr2", core.PENDING_RESTACK_KEY)
+    return repo.git("rev-parse", "pr1")
+
+
+@pytest.mark.parametrize("command", READING_COMMANDS.values(), ids=READING_COMMANDS.keys())
+def test_reading_command_with_nothing_to_settle_takes_no_lock_and_writes_nothing(
+    repo: Repo, client: StackClient, locks_taken: list[pathlib.Path], command: Callable[[StackClient], object]
+) -> None:
+    repo.make_stack()
+    repo.git("switch", "--quiet", "pr2")
+    config = (repo.path / ".git" / "config").read_bytes()
+    locks_taken.clear()
+
+    command(client)
+
+    assert locks_taken == []
+    assert (repo.path / ".git" / "config").read_bytes() == config
+
+
+@pytest.mark.parametrize("command", READING_COMMANDS.values(), ids=READING_COMMANDS.keys())
+def test_reading_command_settles_under_the_lock(
+    repo: Repo, client: StackClient, locks_taken: list[pathlib.Path], command: Callable[[StackClient], object]
+) -> None:
+    new_base = restack_finished_by_hand(repo)
+    locks_taken.clear()
+
+    command(client)
+
+    assert locks_taken == [client.git.common_dir() / core.LOCK_FILE]
+    assert not repo.config_exists("pr2", core.PENDING_RESTACK_KEY)
+    assert repo.config("pr2", core.BASE_KEY) == new_base
+
+
+def test_base_gives_the_base_it_settles(repo: Repo, client: StackClient) -> None:
+    new_base = restack_finished_by_hand(repo)
+
+    assert client.base("pr2") == new_base
+
+
+def start_waiting_for_lock(
+    repo: Repo, command: Callable[[StackClient], object]
+) -> tuple[threading.Thread, list[object]]:
+    """Start command in a thread, with a client of its own, once the caller
+    holds the lock, and return the thread, once the command is waiting for the
+    lock, and a list it puts what the command returns in."""
+    waiting = threading.Event()
+
+    def on_event(event: events.Event) -> None:
+        if isinstance(event, events.WaitingForLock):
+            waiting.set()
+
+    reader = StackClient(GitClient(repo.path), on_event=on_event)
+    result: list[object] = []
+    thread = threading.Thread(target=lambda: result.append(command(reader)), daemon=True)
+    thread.start()
+    assert waiting.wait(timeout=60)
+    return thread, result
+
+
+def test_reading_command_waits_for_the_lock_to_settle(repo: Repo, client: StackClient) -> None:
+    new_base = restack_finished_by_hand(repo)
+
+    with client.exclusive():
+        thread, result = start_waiting_for_lock(repo, lambda reader: reader.base("pr2"))
+        # Nothing's recorded while another command has the lock.
+        assert repo.config_exists("pr2", core.PENDING_RESTACK_KEY)
+        assert thread.is_alive()
+    thread.join(timeout=60)
+
+    assert result == [new_base]
+    assert not repo.config_exists("pr2", core.PENDING_RESTACK_KEY)
+
+
+def test_reading_command_finds_under_the_lock_what_another_settled(repo: Repo, client: StackClient) -> None:
+    new_base = restack_finished_by_hand(repo)
+
+    with client.exclusive():
+        thread, result = start_waiting_for_lock(repo, lambda reader: reader.base("pr2"))
+        # The command holding the lock records it meanwhile.
+        client.settle_all()
+        config = (repo.path / ".git" / "config").read_bytes()
+    thread.join(timeout=60)
+
+    assert result == [new_base]
+    assert (repo.path / ".git" / "config").read_bytes() == config
 
 
 def main_moves_on(repo: Repo) -> None:

@@ -380,6 +380,25 @@ def test_snapshot_ends_with_the_outermost_block(repo: Repo) -> None:
     assert git.tip("main") == moved
 
 
+def test_forget_snapshot_sees_changes_other_processes_made(repo: Repo, git_calls: list[GitCall]) -> None:
+    main = repo.git("rev-parse", "main")
+    repo.commit("a", "more\n", "more")
+    moved = repo.git("rev-parse", "main")
+    repo.git("update-ref", "refs/heads/main", main)
+    git = GitClient(repo.path)
+    with git.snapshot():
+        assert git.tip("main") == main
+        git.branch_config()
+        repo.git("update-ref", "refs/heads/main", moved)
+        git_calls.clear()
+
+        git.forget_snapshot()
+
+        assert git.tip("main") == moved
+        # The config is read again too, though its file hasn't changed.
+        assert [call[0] for call in git_calls] == ["config", "for-each-ref"]
+
+
 def test_snapshot_leaves_revisions_to_git(repo: Repo) -> None:
     repo.commit("a", "more\n", "more")
     git = GitClient(repo.path)

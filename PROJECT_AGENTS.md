@@ -104,7 +104,10 @@ writes still check live PR state.
   and refs in bulk and caches them. Refs are cached only within a command (see
   `GitClient.snapshot`): a command that changes anything is `@exclusive`, which
   takes the snapshot under the lock, and one that only reads is `@snapshot`.
-  Run git through `GitClient` so the snapshot is forgotten when a git command
+  A `@snapshot` command writes only to record a restack or pull finished by
+  hand (see `StackClient.settled_stacks`): it checks for one without the lock
+  or a write, and takes the lock only while it records one, which forgets
+  what the snapshot read before (see `StackCore.exclusive`). Run git through `GitClient` so the snapshot is forgotten when a git command
   may change refs, and only add a command to `READ_ONLY_COMMANDS` if it never
   does. The stale-trunk-base check reuses results from the check cache when
   its commit IDs describe an unmodified history graph.
