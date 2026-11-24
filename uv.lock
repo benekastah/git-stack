@@ -146,7 +146,7 @@ template-dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "py-git-client", extras = ["pygit2"], git = "https://github.com/benekastah/py-git-client?rev=71e2a7c5c975d3ed7d26d16b211dee48f8dd0d47" }]
+requires-dist = [{ name = "py-git-client", extras = ["pygit2"], git = "https://github.com/benekastah/py-git-client?rev=afea3060d5d12704925d8a28325b751ebd4148f6" }]
 
 [package.metadata.requires-dev]
 dev = [
@@ -213,7 +213,7 @@ wheels = [
 [[package]]
 name = "py-git-client"
 version = "0.0.3"
-source = { git = "https://github.com/benekastah/py-git-client?rev=71e2a7c5c975d3ed7d26d16b211dee48f8dd0d47#71e2a7c5c975d3ed7d26d16b211dee48f8dd0d47" }
+source = { git = "https://github.com/benekastah/py-git-client?rev=afea3060d5d12704925d8a28325b751ebd4148f6#afea3060d5d12704925d8a28325b751ebd4148f6" }
 
 [package.optional-dependencies]
 pygit2 = [
