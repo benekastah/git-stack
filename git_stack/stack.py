@@ -3,6 +3,7 @@ import fnmatch
 import functools
 from collections.abc import Callable, Iterable, Sequence
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import nullcontext
 from dataclasses import dataclass, field, replace
 from itertools import takewhile
 from typing import Concatenate
@@ -1270,25 +1271,13 @@ class StackClient(StackCore):
             stacks.restricted(s for b in branches if b in stacks for s in stacks.stack_of(b, groups=False)), adapter
         )
 
-    def checked_adapter(
-        self, remote: str, *, lookup_branches: Iterable[str] | None = None, check_worktree: bool = False
-    ) -> GitAdapter:
-        """The adapter for sync, clean and push, which fetch and change
-        branches. Fails unless it can say which branches were merged, since
+    def checked_adapter(self, remote: str, *, lookup_branches: Iterable[str] | None = None) -> GitAdapter:
+        """The adapter for sync and clean. Fails unless it can say which
+        branches were merged, since
         checking locally instead could untrack (or delete) a branch whose pull
         request is open, or restack one that was merged."""
         adapter = make_adapter(self, remote, fetch=True, lookup_branches=lookup_branches)
-        if check_worktree and isinstance(adapter, GitHubAdapter):
-            # Status reads the checkout. The PR lookup can fetch objects,
-            # but does not change the checkout or index.
-            with ThreadPoolExecutor(max_workers=1) as pool:
-                worktree = pool.submit(self.ensure_clean_worktree)
-                self.ensure_adapter_available(adapter)
-                worktree.result()
-        else:
-            self.ensure_adapter_available(adapter)
-            if check_worktree:
-                self.ensure_clean_worktree()
+        self.ensure_adapter_available(adapter)
         return adapter
 
     @staticmethod
@@ -2834,14 +2823,10 @@ class StackClient(StackCore):
         selection = RefreshSelection(
             stack, {root: config for root in sorted(roots) if (config := integrations.read(root)) is not None}
         )
-        adapter = self.checked_adapter(
-            push_remote, lookup_branches=lookup_branches, check_worktree=bool(selection.integrations)
-        )
+        adapter = self.checked_push_adapter(push_remote, lookup_branches, selection, roots, force)
         self.configure_orphan_closures(adapter, confirm_orphan_closures, rebuild_stack)
         protection = self.configure_pr_protection(adapter, protection, force)
         github = adapter if prs and isinstance(adapter, GitHubAdapter) else None
-        known_default = adapter.default_branch_for_push() if not force and isinstance(adapter, GitHubAdapter) else None
-        self.ensure_sync_destination(stack, roots, push_remote, force, "push", known_default=known_default)
         branches, integration_pushes = self.prepare_push(selection, stacks, adapter, push_remote, force)
         pushed = self.push_branches(
             branches,
@@ -2868,6 +2853,28 @@ class StackClient(StackCore):
             self.branch_infos(stacks.restricted(stack), adapter) if only_remote else self.stack_infos(stack, adapter)
         )
         return PushResult([*(push.name for push in integration_pushes), *pushed], shown, steps, error)
+
+    def checked_push_adapter(
+        self, remote: str, lookup_branches: Iterable[str], selection: RefreshSelection, roots: set[str], force: bool
+    ) -> GitAdapter:
+        """Validate discovery, destination and the checkout before preparing a push."""
+        adapter = make_adapter(self, remote, fetch=True, lookup_branches=lookup_branches)
+        check_worktree = bool(selection.integrations)
+        # Status reads the checkout. Discovery may fetch objects, but leaves
+        # the checkout and index alone. Report destination errors first.
+        executor = ThreadPoolExecutor(max_workers=1) if check_worktree and isinstance(adapter, GitHubAdapter) else None
+        with executor if executor is not None else nullcontext():
+            worktree = executor.submit(self.ensure_clean_worktree) if executor is not None else None
+            self.ensure_adapter_available(adapter)
+            known_default = (
+                adapter.default_branch_for_push() if not force and isinstance(adapter, GitHubAdapter) else None
+            )
+            self.ensure_sync_destination(selection.branches, roots, remote, force, "push", known_default=known_default)
+            if worktree is not None:
+                worktree.result()
+            elif check_worktree:
+                self.ensure_clean_worktree()
+        return adapter
 
     def prepare_push(
         self, selection: RefreshSelection, stacks: Stacks, adapter: GitAdapter, remote: str, force: bool

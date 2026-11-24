@@ -2336,6 +2336,23 @@ def test_integrated_push_overlaps_initial_pr_lookup_with_status(
         assert tip(repo, "work", remote=True) == tip(repo, "work")
 
 
+@pytest.mark.parametrize("args", [(), ("--prs",)])
+def test_dirty_integration_push_reports_protected_destination_first(
+    repo: Repo, gh: FakeGitHub, args: tuple[str, ...]
+) -> None:
+    integration(repo)
+    work(repo)
+    repo.git("branch", "--set-upstream-to=origin/main", "work")
+    repo.write("c", "uncommitted\n")
+    before = tip(repo, "main", remote=True)
+
+    result = repo.stack("push", *args, expect_success=False)
+
+    assert "work track origin's default branch" in result.stderr
+    assert tip(repo, "main", remote=True) == before
+    assert gh.calls("pr", "create") == []
+
+
 @pytest.mark.parametrize("restack_first", [False, True])
 def test_push_refreshes_integration_and_publishes_work_with_its_base(
     repo: Repo, git_calls: list[GitCall], restack_first: bool
