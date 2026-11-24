@@ -123,8 +123,19 @@ code `restack` uses, pull) before it can follow.
 
 ## Consider storing stack state in refs
 
-Explore a configurable choice between the current config-backed state and dedicated refs.
-Config can remain appropriate for individual use. Refs could support atomic updates to stack
-metadata and give teams a way to share selected state. Examine which metadata belongs in refs,
-how old clients would coexist with ref-backed repositories, and how users would migrate or
-switch back. Compare the two approaches before choosing a format or default.
+Offer a repository-level choice between the current config-backed state and a ref-backed strategy.
+Config remains useful when only one person uses git-stack; in ref mode, pushing a stack should
+publish its shape automatically, so a teammate can discover and import it even before it has PRs.
+Do not require a separate sharing step or put metadata files in the working tree.
+
+Before choosing a format or default, settle:
+
+- Which state belongs in shared refs, and whether to use per-branch, per-stack or other refs.
+- Which ref namespaces hosting services accept, and whether a fallback would appear as a branch.
+- How to protect concurrent updates from overwriting one another, including leases and conflicts.
+- How to publish branches and metadata atomically where supported, and detect stale metadata after
+  a plain Git push or a partial update across multiple push URLs.
+- How teammates discover and fetch metadata, including refspec configuration and initial import.
+- How to update or retire metadata when branches are deleted or squash-merged: metadata refs are
+  separate from branch commits and do not become part of `main` through a squash merge.
+- How old clients coexist with ref-backed repositories, and how users migrate or switch back.
