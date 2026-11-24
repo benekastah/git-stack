@@ -291,3 +291,23 @@ def test_info_reads_its_settings_with_the_config(repo: Repo, git_calls: list[Git
         ["config", "--list"],
         ["config", "--get-colorbool"],
     ]
+
+
+@pytest.mark.parametrize("no_color", [None, "1"])
+def test_info_colors_unless_no_color_is_set(
+    repo: Repo, git_calls: list[GitCall], monkeypatch: pytest.MonkeyPatch, no_color: str | None
+) -> None:
+    """With NO_COLOR set, info neither asks git whether to color nor colors, even when
+    color.stack says always."""
+    repo.make_stack()
+    repo.git("config", "color.stack", "always")
+    if no_color is not None:
+        monkeypatch.setenv("NO_COLOR", no_color)
+    git_calls.clear()
+
+    output = repo.stack("info").stdout
+
+    asked = any(call[:2] == ["config", "--get-colorbool"] for call in git_calls)
+    assert asked is (no_color is None)
+    assert ("\033[" in output) is (no_color is None)
+    assert all(branch in output for branch in ("pr1", "pr2", "pr3"))
