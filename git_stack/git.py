@@ -563,7 +563,9 @@ class GitClient:
         changed = True
         try:
             [result] = self._git.write_configs(change, wait=CONFIG_LOCK_TIMEOUT)
-            changed = result is ConfigResult.CHANGED
+            changed = result is ConfigResult.CHANGED or (
+                result is ConfigResult.NOT_FOUND and self._cache_has(change.key, change.value)
+            )
         except GitError as error:
             if isinstance(change, ConfigSet):
                 raise StackError(f"git config {change.key} {change.value} failed:\n{error.stderr.strip()}") from error
@@ -575,9 +577,20 @@ class GitClient:
                 # with GIT_CONFIG set, git config writes that file), so the
                 # cache wouldn't see it change.
                 self._config_read = False
-            if not change.key.rpartition(".")[2].lower().startswith("stack"):
-                # A config write can't move a worktree's HEAD.
-                self._forget_refs(worktrees=False)
+                if not change.key.rpartition(".")[2].lower().startswith("stack"):
+                    # It may have changed an upstream. A config write can't
+                    # move a worktree's HEAD.
+                    self._forget_refs(worktrees=False)
+
+    def _cache_has(self, key: str, value: str | None) -> bool:
+        """Whether the cached config has key (with value, if one is given).
+        If git found no such setting to unset, it was removed behind the
+        cache's back (e.g. from the file GIT_CONFIG names), so the cache is
+        stale."""
+        if not self._config_read:
+            return False
+        values = self._config.get(config_key(key))
+        return values is not None and (value is None or value in values)
 
     def rev(self, ref: str) -> str | None:
         """The commit ref names, or None if it names none. A local or

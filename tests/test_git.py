@@ -204,16 +204,53 @@ def test_config_get_sees_our_own_write_to_another_config_file(
     assert git.config_get("main", "stackParent") == value
 
 
-def test_unsetting_an_absent_setting_keeps_the_config_cache(repo: Repo, git_calls: list[GitCall]) -> None:
-    """It changes nothing, so reading the config again would be wasted."""
+@pytest.mark.parametrize(
+    ("key", "values", "unset"),
+    [
+        ("stackParent", [], None),
+        ("stackParent", ["trunk"], "other"),
+        # Not a stack setting, so it could have changed an upstream had it
+        # changed anything.
+        ("pushRemote", [], None),
+        ("stackParent", ["trunk", "base"], None),
+    ],
+    ids=["absent", "other-value", "absent-upstream", "several-values"],
+)
+def test_an_unset_that_changes_nothing_keeps_the_caches(
+    repo: Repo, git_calls: list[GitCall], key: str, values: list[str], unset: str | None
+) -> None:
+    """Reading the config or the refs again would be wasted."""
+    for value in values:
+        repo.git("config", "--add", f"branch.main.{key}", value)
     git = GitClient(repo.path)
-    git.branch_config()
+    before = git.config_get("main", key)
+    with git.snapshot():
+        assert git.rev("main@{upstream}") == git.tip("main")
 
-    git.config_unset("main", "stackParent")
-    git_calls.clear()
+        git.config_unset("main", key, unset)
+        git_calls.clear()
 
-    assert git.config_get("main", "stackParent") is None
-    assert git_calls == []
+        assert git.config_get("main", key) == before
+        assert git.rev("main@{upstream}") == git.tip("main")
+        assert git_calls == []
+
+
+def test_unsetting_a_setting_another_process_removed_rereads_the_config(
+    repo: Repo, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """git finds nothing to unset, which shows the cache is stale."""
+    other = repo.tmp / "other-config"
+    other.write_text('[branch "main"]\n\tstackParent = base\n\tstackPulled = abc\n', encoding="utf-8")
+    monkeypatch.setenv("GIT_CONFIG", str(other))
+    git = GitClient(repo.path)
+    assert git.config_get("main", "stackPulled") == "abc"
+    repo.git("config", "--file", str(other), "--unset", "branch.main.stackPulled")
+    repo.git("config", "--file", str(other), "branch.main.stackParent", "trunk")
+
+    git.config_unset("main", "stackPulled")
+
+    assert git.config_get("main", "stackPulled") is None
+    assert git.config_get("main", "stackParent") == "trunk"
 
 
 @pytest.mark.parametrize("explicit", [False, True])
