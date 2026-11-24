@@ -16,24 +16,25 @@ from tests.operations import expect_operations
 # there, and how the commands they run are counted).
 pytestmark = [pytest.mark.usefixtures("separate_processes", "gh")]
 
-# Each is (git processes, gh commands) at 1, 3 and 10 branches.
+# Each is (git processes, gh commands) at 1, 3 and 10 branches. A command that ends by printing
+# the stack runs one `git config --get-colorbool` to decide whether to color it.
 # Publishing records two config keys for each new branch.
-PUSH = {1: (8, 0), 3: (12, 0), 10: (26, 0)}
+PUSH = {1: (9, 0), 3: (13, 0), 10: (27, 0)}
 # ...and opening a pull request for each costs more of both.
-PUSH_OPENING_PRS = {1: (8, 3), 3: (12, 7), 10: (26, 7)}
+PUSH_OPENING_PRS = {1: (9, 3), 3: (13, 7), 10: (27, 7)}
 # With every pull request open, git and gh no longer grow with the stack, and gh stays at 4
 # (2 for a stack of 1).
-PUSH_WITH_PRS_OPEN = {1: (6, 2), 3: (6, 4), 10: (6, 4)}
-PRS_ALL_OPEN = {1: (2, 2), 3: (2, 4), 10: (2, 4)}
-# Nothing to do: gh is asked once, and git six times.
-SYNC_NOTHING = {1: (6, 1), 3: (6, 1), 10: (6, 1)}
+PUSH_WITH_PRS_OPEN = {1: (7, 2), 3: (7, 4), 10: (7, 4)}
+PRS_ALL_OPEN = {1: (3, 2), 3: (3, 4), 10: (3, 4)}
+# Nothing to do: gh is asked once, and git seven times.
+SYNC_NOTHING = {1: (7, 1), 3: (7, 1), 10: (7, 1)}
 # The bottom merged, as GitHub reports it (the merge commit and the head it had): the rest are
 # restacked onto main and pushed again. The fake supplies the GitHub merge evidence.
-SYNC_BOTTOM_MERGED = {1: (31, 1), 3: (62, 5), 10: (174, 5)}
+SYNC_BOTTOM_MERGED = {1: (31, 1), 3: (63, 5), 10: (175, 5)}
 # gh is asked twice, however many pull requests there are.
-IMPORT = {1: (13, 2), 3: (27, 2), 10: (76, 2)}
+IMPORT = {1: (14, 2), 3: (28, 2), 10: (77, 2)}
 # info asks GitHub about all the branches in one request.
-INFO = {1: (2, 1), 3: (2, 1), 10: (2, 1)}
+INFO = {1: (3, 1), 3: (3, 1), 10: (3, 1)}
 
 
 # The tests also check what the command did, since running fewer operations than allotted only
@@ -86,7 +87,7 @@ def test_push_opening_prs_for_multiple_stacks_in_a_group(repo: Repo, gh: FakeGit
         expected.extend(((lower, "main"), (upper, lower)))
     repo.client.group_add("work", [f"lower-{i}" for i in range(count)])
 
-    with expect_operations(git=6 + 4 * count, gh=5):
+    with expect_operations(git=7 + 4 * count, gh=5):
         repo.stack_process("push", "--group", "work", "--prs")
 
     requests = gh.load()["prs"]

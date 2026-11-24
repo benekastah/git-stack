@@ -56,27 +56,32 @@ def test_next_runs_the_same_for_any_stack_size(repo: Repo, chain: list[str]) -> 
     assert repo.git("branch", "--show-current") == chain[-1]
 
 
+# `info` reads config and refs, and asks `git config --get-colorbool` whether to color its tree;
+# `info --json` prints no tree, so it doesn't ask.
+INFO = {"info": 3, "info-all": 3, "info-json": 2}
+
+
 def test_the_first_info_checks_each_branch_for_having_landed_in_its_parent(repo: Repo, chain: list[str]) -> None:
     # Each parent is an ancestor, so the first containment checks use trees and ancestry in process.
-    with expect_operations(git=2):
+    with expect_operations(git=INFO["info"]):
         result = repo.stack_process("info")
 
     assert all(mentions(result.stdout, branch) for branch in chain)
 
 
 @pytest.mark.parametrize(
-    "args",
-    [["info"], ["info", "--all"], ["info", "--json"]],
+    ("args", "git"),
+    [(["info"], INFO["info"]), (["info", "--all"], INFO["info-all"]), (["info", "--json"], INFO["info-json"])],
     ids=["info", "info-all", "info-json"],
 )
 def test_info_runs_the_same_for_any_stack_size_once_its_branches_are_checked(
-    repo: Repo, chain: list[str], args: list[str]
+    repo: Repo, chain: list[str], args: list[str], git: int
 ) -> None:
     # Once, outside the block, to fill the on-disk cache of those checks: a second process reads
     # them, with no `merge-tree` for any branch, so it's the same for any stack size.
     repo.stack_process("info")
 
-    with expect_operations(git=2):
+    with expect_operations(git=git):
         result = repo.stack_process(*args)
 
     assert all(mentions(result.stdout, branch) for branch in chain)

@@ -20,8 +20,9 @@ pytestmark = pytest.mark.usefixtures("separate_processes")
 RESTACK_BEHIND = {1: 3, 3: 29, 10: 92}
 # The ancestry of an up-to-date stack is checked in process.
 RESTACK_UP_TO_DATE = {1: 3, 3: 3, 10: 3}
-PULL_NOTHING = {1: 5, 3: 5, 10: 5}
-CLEAN_NOTHING = {1: 4, 3: 4, 10: 4}
+# Pull and clean end by printing the stack, asking `git config --get-colorbool` whether to color it.
+PULL_NOTHING = {1: 6, 3: 6, 10: 6}
+CLEAN_NOTHING = {1: 5, 3: 5, 10: 5}
 # Renaming moves what's recorded for the branch, and rewrites the parent (recorded by name) of the
 # branch stacked directly on it, but not that of the ones above that: so it grows from 1 branch to 2,
 # not after.

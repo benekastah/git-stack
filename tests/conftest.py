@@ -83,6 +83,9 @@ def git_environment(tmp_path_factory: pytest.TempPathFactory) -> Iterator[pathli
         for name in tuple(os.environ):
             if (name.startswith("GIT_") and name != GIT_VARIABLE) or name == "SSH_ASKPASS":
                 patch.delenv(name)
+        # NO_COLOR spares `info` its `git config --get-colorbool`, so a developer's setting
+        # would change the processes a test counts, and what `info` prints.
+        patch.delenv("NO_COLOR", raising=False)
         patch.setenv("GIT_CONFIG_GLOBAL", str(global_config))
         patch.setenv("GIT_CONFIG_NOSYSTEM", "1")
         patch.setenv("GIT_ATTR_NOSYSTEM", "1")
