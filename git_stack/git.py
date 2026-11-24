@@ -673,7 +673,7 @@ class GitClient:
                                 and first == first.strip()
                                 and first.splitlines() == [first]
                                 and "\0" not in first
-                                and not rest.partition("\n")[0].strip(" \t\r\v\f")
+                                and (not rest or rest.startswith("\n"))
                             ):
                                 return first
                             break

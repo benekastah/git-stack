@@ -600,6 +600,18 @@ def test_nothing_is_contained_in_a_branch_that_doesnt_exist(repo: Repo) -> None:
         assert not git.contained_in("refs/heads/main", "refs/heads/nope")
 
 
+@pytest.mark.parametrize("separator", ["\v", "\f"])
+def test_first_subject_uses_gits_format_for_unusual_message_separators(repo: Repo, separator: str) -> None:
+    base = repo.git("rev-parse", "HEAD")
+    tree = f"{base}^{{tree}}"
+    first = repo.git("commit-tree", tree, "-p", base, "-m", f"title\n{separator}\nbody")
+    tip = repo.git("commit-tree", tree, "-p", first, "-m", "later subject")
+    repo.git("branch", "feature", tip)
+    expected = repo.git("log", "--reverse", "--format=%s", f"{base}..refs/heads/feature").splitlines()[0]
+
+    assert GitClient(repo.path).first_subject(base, "feature") == expected
+
+
 def test_snapshot_reads_a_reflog_once_until_its_branch_moves(repo: Repo, git_calls: list[GitCall]) -> None:
     git = GitClient(repo.path)
     with git.snapshot():
