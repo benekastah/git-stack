@@ -482,10 +482,11 @@ class GitClient:
         """Every branch.<name>.<key> setting, as {(name, key in lower case): value}.
 
         Read with one git call, and read again only once the repository's config
-        file's contents have changed, which is whenever anything (us, a git
-        command we run, or another process) writes to it. Commands look up the
-        same few keys of every tracked branch over and over, and each git call
-        is slow enough to add up, while reading the small file isn't. Its
+        file's contents have changed, which is whenever anything (a git command
+        we run, or another process) writes to it, or once we write a setting
+        ourselves. Commands look up the same few keys of every tracked branch
+        over and over, and each git call is slow enough to add up, while
+        reading the small file isn't. Its
         contents decide, not its inode, mtime and size, which a filesystem that
         reuses inodes and two same-size writes in one timestamp tick could leave
         looking unchanged. With fresh, it's read again regardless, for settings
@@ -564,6 +565,10 @@ class GitClient:
         except NoAnswerError as error:
             raise StackError(str(error)) from error
         finally:
+            # The write may not have touched .git/config's contents (e.g. with
+            # GIT_CONFIG set, git config writes that file), so the cache
+            # wouldn't see it change.
+            self._config_read = False
             if not change.key.rpartition(".")[2].lower().startswith("stack"):
                 # A config write can't move a worktree's HEAD.
                 self._forget_refs(worktrees=False)

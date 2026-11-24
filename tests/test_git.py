@@ -184,6 +184,26 @@ def test_config_get_sees_a_change_that_leaves_the_files_metadata_alone(repo: Rep
     assert git.config_get("main", "stackParent") == "bbbb"
 
 
+@pytest.mark.parametrize("value", ["trunk", None])
+def test_config_get_sees_our_own_write_to_another_config_file(
+    repo: Repo, monkeypatch: pytest.MonkeyPatch, value: str | None
+) -> None:
+    """With GIT_CONFIG set, git config reads and writes that file, and
+    .git/config's contents stay as they were."""
+    other = repo.tmp / "other-config"
+    other.write_text('[branch "main"]\n\tstackParent = base\n', encoding="utf-8")
+    monkeypatch.setenv("GIT_CONFIG", str(other))
+    git = GitClient(repo.path)
+    assert git.config_get("main", "stackParent") == "base"
+
+    if value is None:
+        git.config_unset("main", "stackParent")
+    else:
+        git.config_set("main", "stackParent", value)
+
+    assert git.config_get("main", "stackParent") == value
+
+
 @pytest.mark.parametrize("explicit", [False, True])
 def test_push_destinations_see_changes_in_an_included_config(repo: Repo, explicit: bool) -> None:
     included = repo.tmp / "remote-config"
