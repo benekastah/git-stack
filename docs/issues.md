@@ -28,6 +28,11 @@ something writes `.git/config` or git-stack writes a setting. The command
 line reads them afresh each time it runs; a script that keeps a `StackClient`
 across such a change doesn't.
 
+Not every write by git-stack forces a reread: an unset that git refuses
+because the setting has several values keeps the cache. So if another process
+added a second value to a setting in the file `GIT_CONFIG` names, git-stack
+keeps reading the old one.
+
 ## Group sync can lose its integration selector after the last work branch lands
 
 If a group sync removes the last selected work branch above an integration

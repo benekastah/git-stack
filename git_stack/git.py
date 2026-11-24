@@ -560,6 +560,8 @@ class GitClient:
         """Write branch config, retrying while the config file is locked."""
         # Unless git says it changed nothing (an unset of a setting that isn't
         # there, or of one with several values), assume it changed something.
+        # An unset git found nothing for, though the cache has the setting,
+        # counts as a change too: the cache may be stale (see _cache_has).
         changed = True
         try:
             [result] = self._git.write_configs(change, wait=CONFIG_LOCK_TIMEOUT)
@@ -584,9 +586,11 @@ class GitClient:
 
     def _cache_has(self, key: str, value: str | None) -> bool:
         """Whether the cached config has key (with value, if one is given).
-        If git found no such setting to unset, it was removed behind the
-        cache's back (e.g. from the file GIT_CONFIG names), so the cache is
-        stale."""
+        If git found no such setting to unset, it may have been removed behind
+        the cache's back (e.g. from the file GIT_CONFIG names), so the cache
+        may be stale and is read again. It may not be: the cache also holds
+        settings from files `git config --unset` doesn't write (the global,
+        system, worktree and included ones)."""
         if not self._config_read:
             return False
         values = self._config.get(config_key(key))
