@@ -486,7 +486,7 @@ class GitClient:
         we run, or another process) writes to it, or once we write a setting
         ourselves. Commands look up the same few keys of every tracked branch
         over and over, and each git call is slow enough to add up, while
-        reading the small file isn't. Its
+        reading the file starts no process and costs far less than one. Its
         contents decide, not its inode, mtime and size, which a filesystem that
         reuses inodes and two same-size writes in one timestamp tick could leave
         looking unchanged. With fresh, it's read again regardless, for settings
