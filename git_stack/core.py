@@ -910,9 +910,8 @@ class StackCore:
     def forget(self, branch: str) -> None:
         """Remove all of branch's stack metadata: each of its settings that
         starts with "stack", as all of git-stack's do (and older versions'
-        did). Read afresh rather than from the cache (see
-        GitClient.branch_config), so none is left behind."""
-        for name, key in list(self.git.branch_config(fresh=True)):
+        did)."""
+        for name, key in list(self.git.branch_config()):
             if name == branch and key.startswith("stack"):
                 self.git.config_unset(branch, key)
         self.checks.forget(branch)

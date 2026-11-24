@@ -16,28 +16,15 @@ were stacked on it are warned about. Nothing is lost, and
 `clean --ignore-revert <branch>` (or `sync`'s) says it wasn't a revert, but
 until then every command skips it.
 
-## The branch config cache could miss a write
+## The config cache doesn't see other config files
 
-`GitClient.branch_config` rereads `.git/config` only when its inode, mtime or
-size has changed since it last read it. `git config` writes a new file and
-renames it into place, so each write normally gets a new inode. But a
-filesystem that reuses inode numbers (e.g. ext4) could give the file the inode
-it had two writes earlier, and two writes in the same timestamp tick that
-leave the file the same size (e.g. overwriting a commit ID with another) would
-then look like no change, and git-stack would keep using the old values. Not
-reproduced; on btrfs, where inode numbers aren't reused, it can't happen.
-
-It also only watches the common `.git/config`, so settings changed in another
-config file (`git config --worktree` with `extensions.worktreeConfig`, an
-included file, or, for `GitClient.config_value`'s `stack.adapter`,
-`stack.orientation` and remote URLs, the global config) aren't seen until
-something writes `.git/config`. The command line reads them afresh each time
-it runs; a script that keeps a `StackClient` across such a change doesn't.
-
-`forget` rereads the config rather than trusting the cache, so untracking a
-branch can't leave its settings behind, but every other read still trusts it.
-Comparing the file's contents (or a hash of them) instead of its metadata
-would rule out the missed write at little cost, since the file is small.
+`GitClient.branch_config` rereads the config only when the contents of the
+common `.git/config` have changed, so settings changed in another config file
+(`git config --worktree` with `extensions.worktreeConfig`, an included file,
+or, for `GitClient.config_value`'s `stack.adapter`, `stack.orientation` and
+remote URLs, the global config) aren't seen until something writes
+`.git/config`. The command line reads them afresh each time it runs; a script
+that keeps a `StackClient` across such a change doesn't.
 
 ## Group sync can lose its integration selector after the last work branch lands
 

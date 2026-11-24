@@ -28,9 +28,9 @@ CLEAN_NOTHING = {1: 5, 3: 5, 10: 5}
 # not after.
 RENAME_BOTTOM = {1: 7, 3: 8, 10: 8}
 RENAME_TOP = {1: 7, 3: 7, 10: 7}
-UNTRACK_TOP = {1: 5, 3: 5, 10: 5}
-# Untracking every branch: 2 + 3 * branches.
-UNTRACK_ALL = {1: 5, 3: 11, 10: 32}
+UNTRACK_TOP = {1: 4, 3: 4, 10: 4}
+# Untracking every branch: 1 + 3 * branches.
+UNTRACK_ALL = {1: 4, 3: 10, 10: 31}
 
 
 def commit_to_bottom(repo: Repo) -> None:

@@ -185,9 +185,9 @@ class GitClient:
         self._merged_trees: dict[tuple[str, str], str | None] = {}
         self._native = _NativeReads()
         # See branch_config: whether it has read the config file, and the
-        # file's stat when it did (None if there was no file).
+        # file's contents when it did (None if there was no file).
         self._config_read = False
-        self._config_stat: tuple[int, int, int] | None = None
+        self._config_contents: bytes | None = None
         self._branch_config: dict[tuple[str, str], str] = {}
         self._config: dict[str, list[str | None]] = {}
         # See snapshot: how many snapshot blocks we're in; the refs by full name, the
@@ -482,22 +482,24 @@ class GitClient:
         """Every branch.<name>.<key> setting, as {(name, key in lower case): value}.
 
         Read with one git call, and read again only once the repository's config
-        file has changed, which is whenever anything (us, a git command we run,
-        or another process) writes to it. Commands look up the same few keys of
-        every tracked branch over and over, and each git call is slow enough to
-        add up. With fresh, it's read again regardless, for when a missed write
-        (see "The branch config cache could miss a write" in docs/issues.md) would
-        matter.
+        file's contents have changed, which is whenever anything (us, a git
+        command we run, or another process) writes to it. Commands look up the
+        same few keys of every tracked branch over and over, and each git call
+        is slow enough to add up, while reading the small file isn't. Its
+        contents decide, not its inode, mtime and size, which a filesystem that
+        reuses inodes and two same-size writes in one timestamp tick could leave
+        looking unchanged. With fresh, it's read again regardless, for settings
+        in other config files, which the file's contents don't show (see "The
+        config cache doesn't see other config files" in docs/issues.md).
         """
         # Before reading, so a write that lands in between is read again next time.
-        stat: tuple[int, int, int] | None
+        contents: bytes | None
         try:
-            st = (self.common_dir() / "config").stat()
-            stat = (st.st_ino, st.st_mtime_ns, st.st_size)
+            contents = (self.common_dir() / "config").read_bytes()
         except FileNotFoundError:
             # git works without one, as if it were empty.
-            stat = None
-        if fresh or not self._config_read or stat != self._config_stat:
+            contents = None
+        if fresh or not self._config_read or contents != self._config_contents:
             branches: dict[tuple[str, str], str] = {}
             with git_errors():
                 entries = git_client.config(self._git)
@@ -508,7 +510,7 @@ class GitClient:
                     branch, _, name = key.removeprefix("branch.").rpartition(".")
                     branches[branch, name] = values[-1] or ""
             self._config, self._branch_config = entries, branches
-            self._config_stat, self._config_read = stat, True
+            self._config_contents, self._config_read = contents, True
         return self._branch_config
 
     def config_value(self, key: str) -> str | None:

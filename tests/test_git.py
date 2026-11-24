@@ -163,6 +163,27 @@ def test_config_get_sees_changes_made_by_other_processes(repo: Repo) -> None:
     assert git.config_get("main", "stackParent") == "trunk"
 
 
+def test_config_get_sees_a_change_that_leaves_the_files_metadata_alone(repo: Repo) -> None:
+    """As when a filesystem reuses the inode and two writes of the same size
+    land in the same timestamp tick."""
+    repo.git("config", "branch.main.stackParent", "aaaa")
+    git = GitClient(repo.path)
+    assert git.config_get("main", "stackParent") == "aaaa"
+    config = repo.path / ".git" / "config"
+    before = config.stat()
+
+    # In place, so the inode stays, with the same size and mtime.
+    with config.open("r+b") as file:
+        contents = file.read()
+        file.seek(0)
+        file.write(contents.replace(b"aaaa", b"bbbb"))
+    os.utime(config, ns=(before.st_atime_ns, before.st_mtime_ns))
+    after = config.stat()
+    assert (after.st_ino, after.st_mtime_ns, after.st_size) == (before.st_ino, before.st_mtime_ns, before.st_size)
+
+    assert git.config_get("main", "stackParent") == "bbbb"
+
+
 @pytest.mark.parametrize("explicit", [False, True])
 def test_push_destinations_see_changes_in_an_included_config(repo: Repo, explicit: bool) -> None:
     included = repo.tmp / "remote-config"

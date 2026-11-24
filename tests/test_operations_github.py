@@ -30,7 +30,7 @@ PRS_ALL_OPEN = {1: (3, 2), 3: (3, 4), 10: (3, 4)}
 SYNC_NOTHING = {1: (7, 1), 3: (7, 1), 10: (7, 1)}
 # The bottom merged, as GitHub reports it (the merge commit and the head it had): the rest are
 # restacked onto main and pushed again. The fake supplies the GitHub merge evidence.
-SYNC_BOTTOM_MERGED = {1: (31, 1), 3: (63, 5), 10: (175, 5)}
+SYNC_BOTTOM_MERGED = {1: (30, 1), 3: (62, 5), 10: (174, 5)}
 # gh is asked twice, however many pull requests there are.
 IMPORT = {1: (14, 2), 3: (28, 2), 10: (77, 2)}
 # info asks GitHub about all the branches in one request.
