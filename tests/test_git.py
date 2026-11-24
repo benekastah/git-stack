@@ -24,7 +24,6 @@ def test_git_stack_runs_git_through_the_shared_client(repo: Repo, monkeypatch: p
     process = Git.process
 
     def record(self: Git, *args: Any, **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
-        assert self.close_fds
         commands.append(args)
         return process(self, *args, **kwargs)
 
@@ -32,6 +31,34 @@ def test_git_stack_runs_git_through_the_shared_client(repo: Repo, monkeypatch: p
 
     assert GitClient(repo.path).run("branch", "--show-current") == "main"
     assert commands == [("branch", "--show-current")]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX file descriptors are inherited by descriptor number")
+def test_cli_git_does_not_inherit_open_descriptors(
+    repo: Repo, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo.client.branch("topic")
+    repo.commit("a", "topic\n", "topic")
+    repo.git("switch", "main")
+    repo.commit("b", "trunk\n", "advance main")
+
+    install_command(tmp_path / "bin", "fake-git", "tests.fake_git")
+    log = tmp_path / "git-log.jsonl"
+    monkeypatch.setenv("FAKE_GIT_LOG", str(log))
+    monkeypatch.setenv("REAL_GIT", real_git())
+    monkeypatch.setenv(GIT_VARIABLE, str(tmp_path / "bin" / "fake-git"))
+    descriptor_file = tmp_path / "open-file"
+    monkeypatch.setenv("FAKE_GIT_DESCRIPTOR_FILE", str(descriptor_file))
+
+    with descriptor_file.open("wb") as opened:
+        os.set_inheritable(opened.fileno(), True)
+        monkeypatch.setenv("FAKE_GIT_DESCRIPTOR", str(opened.fileno()))
+        repo.stack("info")
+
+    calls = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+    # The config read runs serially and branch-status workers compare patches.
+    assert {call["args"][2] for call in calls} >= {"config", "patch-id"}
+    assert {call["inherited_descriptor"] for call in calls} == {False}
 
 
 def test_cli_runner_uses_configured_git_executable(

@@ -2287,6 +2287,7 @@ export GIT_STACK_GIT=\(dq$(git \-\-exec\-path)/git\(dq
 .PP
 A wrapper that needs to see what git\-stack does (e.g.
 the commits a restack rewrites) then won\(aqt.
+git\-stack closes extra file descriptors when launching Git.
 On Windows, \f[CR]GIT_STACK_GIT\f[R] has to name an \f[CR].exe\f[R]:
 git\-stack refuses a batch file (\f[CR].bat\f[R] or \f[CR].cmd\f[R]),
 which would run in cmd.exe, where characters a branch name can have

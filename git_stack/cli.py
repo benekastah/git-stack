@@ -38,9 +38,6 @@ from git_stack.output import JsonStream, print_event
 from git_stack.performance import Timeline, append_performance_log, performance_log_settings
 from git_stack.stack import StackClient
 
-# Serial Git calls from the CLI can use Python's faster launch path on macOS.
-CLI_GIT_CLOSE_FDS = sys.platform != "darwin"
-
 # In the order `git stack -h` lists them.
 COMMANDS = (
     branch,
@@ -140,7 +137,7 @@ def _run(args: argparse.Namespace, stack: StackClient | None, argv: list[str]) -
             # Joining starts over at an absolute path, as git's -C does. It
             # fails if there's no git to run.
             directory = pathlib.Path(".", *args.directories)
-            stack = StackClient(GitClient(directory, close_fds=CLI_GIT_CLOSE_FDS))
+            stack = StackClient(GitClient(directory))
         log_settings = performance_log_settings(stack.git)
         timeline = Timeline() if log_settings is not None else None
         if timeline is None:

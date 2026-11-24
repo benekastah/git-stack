@@ -1197,10 +1197,7 @@ class StackClient(StackCore):
         # main conflicts with it can take a second or more in a big repository
         # if the branch is far behind, so they're worked out in parallel, while
         # the adapter looks up pull requests (about a second on GitHub).
-        with (
-            git.isolate_parallel_launches(),
-            ThreadPoolExecutor(initializer=active_timeline.set, initargs=(active_timeline.get(),)) as pool,
-        ):
+        with ThreadPoolExecutor(initializer=active_timeline.set, initargs=(active_timeline.get(),)) as pool:
             prefetched = pool.submit(adapter.prefetch)
             root_results = pool.submit(root_infos) if overlap_root_info else None
             branches = list(stacks)
@@ -2875,10 +2872,7 @@ class StackClient(StackCore):
         # Status reads the checkout. Discovery may fetch objects, but leaves
         # the checkout and index alone. Report destination errors first.
         executor = ThreadPoolExecutor(max_workers=1) if check_worktree and isinstance(adapter, GitHubAdapter) else None
-        with (
-            self.git.isolate_parallel_launches() if executor is not None else nullcontext(),
-            executor if executor is not None else nullcontext(),
-        ):
+        with executor if executor is not None else nullcontext():
             worktree = executor.submit(self.ensure_clean_worktree) if executor is not None else None
             self.ensure_adapter_available(adapter)
             known_default = (
