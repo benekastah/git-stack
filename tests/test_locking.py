@@ -106,7 +106,7 @@ def test_processes_started_under_the_lock_are_told_it_is_held(repo: Repo, client
 
 
 def test_reading_command_under_another_holding_the_lock_records_nothing(
-    repo: Repo, client: StackClient, locks_taken: list[pathlib.Path], monkeypatch: pytest.MonkeyPatch
+    repo: Repo, client: StackClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Rather than wait for a lock it may never get: e.g. run by a hook of a
     git command that a git-stack command holding the lock started."""
@@ -114,12 +114,26 @@ def test_reading_command_under_another_holding_the_lock_records_nothing(
     old_base = repo.git("rev-parse", "pr1~1")
     pending = repo.config("pr2", core.PENDING_RESTACK_KEY)
     monkeypatch.setenv(core.LOCK_HELD_ENV, str(os.getpid() + 1))
-    locks_taken.clear()
 
-    assert client.base("pr2") == old_base
+    with lock_held_by_another_command(repo):
+        assert client.base("pr2") == old_base
 
-    assert locks_taken == []
+    assert not any(isinstance(event, events.WaitingForLock) for event in repo.emitted)
     assert repo.config("pr2", core.PENDING_RESTACK_KEY) == pending
+
+
+def test_reading_command_told_the_lock_is_held_settles_if_its_free(
+    repo: Repo, client: StackClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The variable may be stale, e.g. in a process its holder started that
+    outlived the lock, or foreign, e.g. inherited from another thread of a
+    host process using git-stack."""
+    new_base = restack_finished_by_hand(repo)
+    monkeypatch.setenv(core.LOCK_HELD_ENV, str(os.getpid() + 1))
+
+    assert client.base("pr2") == new_base
+
+    assert not repo.config_exists("pr2", core.PENDING_RESTACK_KEY)
 
 
 def test_reading_command_started_by_one_holding_the_lock_doesnt_wait_for_it(repo: Repo, client: StackClient) -> None:

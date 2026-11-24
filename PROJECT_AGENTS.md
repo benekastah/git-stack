@@ -110,7 +110,8 @@ writes still check live PR state.
   what the snapshot read before (see `StackCore.exclusive`). Under the lock,
   `GIT_STACK_LOCK_HELD` (`LOCK_HELD_ENV`) tells the processes a command starts,
   e.g. a hook running git-stack, not to wait for it: `StackCore.exclusive`
-  then raises `LockHeldByCaller` when the lock is taken. Run git through `GitClient` so the snapshot is forgotten when a git command
+  then raises `LockHeldByCaller` when the lock is taken, which a reading
+  command takes as a reason to leave settling for later. Run git through `GitClient` so the snapshot is forgotten when a git command
   may change refs, and only add a command to `READ_ONLY_COMMANDS` if it never
   does. The stale-trunk-base check reuses results from the check cache when
   its commit IDs describe an unmodified history graph.

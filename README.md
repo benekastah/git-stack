@@ -1460,8 +1460,9 @@ waiting, or as a `--json` event, and waits for it to finish. Read-only commands 
 restack or pull you finished by hand (see [Scripting](#scripting)), and only
 while they record it. While a command holds the lock, what it starts (e.g.
 git's hooks) has `GIT_STACK_LOCK_HELD` set, and a command started with it set
-doesn't wait for the lock its caller holds: a read-only one leaves such a
-restack or pull to a later command, and one that changes stack metadata (e.g.
+doesn't wait for the lock its caller holds: it takes the lock if it's free,
+but if it's taken, a read-only one leaves such a restack or pull to a later
+command, and one that changes stack metadata (e.g.
 `git stack track` in a post-checkout hook of `git stack branch`) fails with
 exit status 1. The lock is
 released when a command exits, including when a rebase stops on a conflict,

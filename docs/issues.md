@@ -45,19 +45,18 @@ stacks that still need to sync.
 
 `StackCore.exclusive` sets it in `os.environ`, which costs:
 
-- In a host process that uses git-stack as a library, the children of every
-  thread inherit it while any thread holds the lock, so a git-stack another
-  thread starts skips settling though it could have waited, and a command
-  that changes metadata fails rather than wait for the lock.
-- Setting the environment races with C code calling `getenv` in other threads.
-- A long-lived descendant (e.g. a daemon a hook starts) keeps the value after
-  the lock is released, and a git-stack it starts later skips settling, or,
-  if it changes metadata, fails while another command holds the lock.
+- Setting the environment races with C code calling `getenv` in other threads
+  of a host process that uses git-stack as a library.
+- A git-stack started with a stale or foreign value (inherited from another
+  thread of such a host process while that thread holds the lock, or by a
+  long-lived descendant, e.g. a daemon a hook starts) doesn't wait if it
+  finds the lock taken, by a command that would have finished: a reading
+  command skips settling, and one that changes metadata fails. With the lock
+  free, it takes it as usual, so this only matters while another command
+  runs.
 
-Either would avoid these: try the lock without waiting before skipping, so a
-stale or foreign value costs nothing when the lock is free; or pass the
-variable only to the processes git-stack itself starts, rather than through
-`os.environ`.
+Passing the variable only to the processes git-stack itself starts, rather
+than through `os.environ`, would avoid both.
 
 ## A test that deadlocks can hang the suite
 
