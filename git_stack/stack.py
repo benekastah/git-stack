@@ -3007,9 +3007,7 @@ class StackClient(StackCore):
         try:
             adapter.after_push(branches, stacks, opening, rebuild_stack, scope)
         except StackError as e:
-            raise StackError(
-                f"pushed, but updating pull requests failed (set {ADAPTER_SETTING} to git to stop using GitHub): {e}"
-            ) from e
+            raise StackError(f"pushed, but updating pull requests failed\n{e}") from e
         return branches
 
     def protect_pr_opening(self, branches: list[str], stacks: Stacks, adapter: GitHubAdapter) -> None:
@@ -3132,10 +3130,7 @@ class StackClient(StackCore):
         """Check leases before editing PRs or pushing to several destinations."""
 
         def update_error(error: StackError) -> StackError:
-            return StackError(
-                f"updating pull requests failed, so nothing was pushed (set {ADAPTER_SETTING} "
-                f"to git to stop using GitHub): {error}{self.changes_left(adapter)}"
-            )
+            return StackError(f"Nothing was pushed.\n{error}{self.changes_left(adapter)}")
 
         try:
             retarget = adapter.prepare_push_retargets(branches, stacks, rebuild_stack, scope, opening)

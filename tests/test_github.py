@@ -444,7 +444,7 @@ def test_push_reports_retargets_it_left_when_a_later_one_fails(repo: Repo, gh: F
 
     result = repo.stack("push", "--with-prs", expect_success=False)
 
-    assert "updating pull requests failed, so nothing was pushed" in result.stderr
+    assert "Nothing was pushed." in result.stderr
     assert bases(gh) == {1: "main", 2: "main"}
     assert "#1's base was changed from pr1 to main" in result.stderr
     assert "#2's base" not in result.stderr

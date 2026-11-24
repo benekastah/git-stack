@@ -1059,7 +1059,7 @@ class GitHubAdapter(GitAdapter):
             if b in prs and prs[b].state is GitHubState.OPEN
         }
         ready: list[tuple[str, str]] = []
-        pending: dict[int, tuple[str, str]] = {}
+        pending: dict[int, str] = {}
         for branch in to_push:
             pr = prs.get(branch)
             if pr is None or pr.state is not GitHubState.OPEN:
@@ -1072,7 +1072,7 @@ class GitHubAdapter(GitAdapter):
             if parent_published:
                 ready.append((branch, parent))
             if rebuild_stack or not parent_published:
-                pending[pr.number] = (pr.base, base)
+                pending[pr.number] = base
         closures = self.validate_deferred_retargets(pending, rebuild_stack, allowed) if pending else []
         # Collect consent before the dry push. A ref could change while the
         # user reads the prompt, so check the push leases after they answer.
@@ -1089,7 +1089,7 @@ class GitHubAdapter(GitAdapter):
         return PushRetargets(retarget, bool(closures)) if ready or closures else None
 
     def validate_deferred_retargets(
-        self, pending: dict[int, tuple[str, str]], rebuild_stack: bool, allowed: set[int]
+        self, pending: dict[int, str], rebuild_stack: bool, allowed: set[int]
     ) -> list[OrphanedPullRequest]:
         """Check whether retargeting to parents published by this push is allowed."""
         try:
@@ -1105,8 +1105,8 @@ class GitHubAdapter(GitAdapter):
         }
         existing = [GitHubStack.from_json(stacks[number]) for number in sorted(stacks)]
         if existing and not rebuild_stack:
-            changes = ", ".join(f"#{n}: {pending[n][0]} → {pending[n][1]}" for n in sorted(stacks))
-            raise StackError(self.rebuild_hint(existing, allowed, f"change PR bases ({changes})"))
+            changes = [f"Retarget #{n} to {pending[n]}" for n in sorted(stacks)]
+            raise StackError(self.rebuild_hint(existing, allowed, changes))
         closures = self.plan_orphan_closures(existing, allowed)
         members = {n for stack in existing for n, state in stack.entries if state is GitHubState.OPEN}
         self.protect_edits(dict.fromkeys(members - {pr.number for pr in closures}), "unstack")
@@ -1173,7 +1173,7 @@ class GitHubAdapter(GitAdapter):
                     self.rebuild_hint(
                         [GitHubStack.from_json(stack)],
                         allowed or set(),
-                        f"change the PR base (#{pr.number}: {pr.base} → {base})",
+                        [f"Retarget #{pr.number} to {base}"],
                     )
                 ) from e
             self.unstack(pr.number, allowed or set(), new_base=base, allow_closure_prompt=allow_closure_prompt)
@@ -1191,28 +1191,26 @@ class GitHubAdapter(GitAdapter):
             n: stack for stack in stacks for n, state in stack.entries if state is GitHubState.OPEN and n not in allowed
         }
 
-    def rebuild_hint(self, stacks: list[GitHubStack], allowed: set[int], action: str) -> str:
+    def rebuild_hint(self, stacks: list[GitHubStack], allowed: set[int], actions: list[str]) -> str:
         ids = sorted({stack.number for stack in stacks})
         noun = "stacks" if len(ids) > 1 else "stack"
-        steps = f"unstack GitHub {noun} {', '.join(map(str, ids))} (merged PRs stay linked), then {action}"
+        unstack = f"Unstack GitHub {noun} {', '.join(map(str, ids))} (keep merged PRs linked)"
+        steps = "\n".join(f"- {step}" for step in [unstack, *actions])
         blockers = self.orphan_blockers(stacks, allowed)
         if not blockers:
-            return f"Retry with --pr-rebuild to {steps}."
+            return f"Retry with --pr-rebuild.\n\n{steps}"
         refusals: list[str] = []
         try:
             candidates = self.orphan_details(blockers, refusals=refusals)
         except StackError as e:
-            return f"Rebuilding would {steps}, but couldn't check the blockers: {e}"
-        draft_list = "\n".join(f"- {pr.description}" for pr in candidates)
+            return f"Couldn't check rebuild blockers.\n{e}\n\n{steps}"
+        draft_list = "\n".join(f"- {pr.url}" for pr in candidates)
         if refusals:
             problems = "\n".join(refusals)
-            eligible = f"\nEligible drafts:\n{draft_list}" if candidates else ""
-            return (
-                f"Rebuilding would {steps}. No drafts would be closed while any blockers remain.\n{problems}{eligible}"
-            )
+            eligible = f"\n\nEligible drafts\n{draft_list}" if candidates else ""
+            return f"Rebuild blocked. No drafts will close.\n{problems}{eligible}\n\n{steps}"
         return (
-            f"Retry with --pr-rebuild to {steps}.\n"
-            f"The rebuild would first ask you to confirm closing these draft PRs, keeping their branches:\n{draft_list}"
+            f"Retry with --pr-rebuild.\n\nDrafts to close after confirmation (keep branches)\n{draft_list}\n\n{steps}"
         )
 
     def plan_orphan_closures(self, stacks: Iterable[GitHubStack], allowed: set[int]) -> list[OrphanedPullRequest]:
@@ -1792,7 +1790,7 @@ class GitHubAdapter(GitAdapter):
             return chain if self.rebuild_github_stack(chain, found, dry_run) else []
         if found:
             hint = self.rebuild_hint(
-                list(found.values()), set(chain), f"link {', '.join(f'#{n}' for n in chain)} in a new stack"
+                list(found.values()), set(chain), [f"Link {', '.join(f'#{n}' for n in chain)} in a new stack"]
             )
             self.core.emit(events.GitHubStackMismatch(tuple(chain), tuple(sorted(found)), hint))
             return []

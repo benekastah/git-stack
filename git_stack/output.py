@@ -169,12 +169,7 @@ def message(event: events.Event) -> str:  # noqa: C901
                 f"to retarget {pull_requests(event.numbers)} (merged pull requests remain)"
             )
         case events.GitHubStackMismatch():
-            stacks = ", ".join(map(str, event.github_stacks))
-            return (
-                f"didn't link {pull_requests(event.numbers)} into a stack on GitHub: some are in "
-                f"{'stacks' if len(event.github_stacks) > 1 else 'stack'} {stacks} there, which don't match "
-                f"them.\n{event.rebuild_hint}"
-            )
+            return f"PR stack links need rebuilding.\n{event.rebuild_hint}"
         case events.PullRequestRetargeted():
             return f"changed the base of {event.branch}'s pull request #{event.number} to {event.base}"
         case _:

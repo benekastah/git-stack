@@ -313,12 +313,19 @@ def test_retarget_without_rebuild_reports_stack_base_and_draft(repo: Repo, gh: F
     state["prs"][2]["baseRefName"] = "main"
     gh.save(state)
 
-    result = repo.stack(command, *(["--with-prs"] if command == "push" else []), expect_success=False)
+    result = repo.stack(command, *(["--prs"] if command == "push" else []), expect_success=False)
 
-    assert "--pr-rebuild" in result.stderr
-    assert "unstack GitHub stack 1000" in result.stderr
-    assert "#3: main → pr1" in result.stderr
-    assert "- #2 https://github.com/acme/widgets/pull/2 (pr2 → pr1)" in result.stderr
+    if command == "push":
+        assert result.stderr.splitlines()[0] == "git stack: Nothing was pushed."
+    assert result.stderr.removeprefix("git stack: ").splitlines()[-7:] == [
+        "Retry with --pr-rebuild.",
+        "",
+        "Drafts to close after confirmation (keep branches)",
+        "- https://github.com/acme/widgets/pull/2",
+        "",
+        "- Unstack GitHub stack 1000 (keep merged PRs linked)",
+        "- Retarget #3 to pr1",
+    ]
     assert gh.calls("pr", "close") == []
     assert gh.stacks() == [[1, 2, 3]]
 
@@ -341,11 +348,11 @@ def test_unlinked_stack_warning_lists_each_draft_on_its_own_line(repo: Repo, gh:
     result = repo.stack("prs")
 
     assert "--pr-rebuild" in result.stderr
-    assert "unstack GitHub stack 1000" in result.stderr
-    assert "link #1, #3" in result.stderr
-    assert [line.strip() for line in result.stderr.splitlines() if line.lstrip().startswith("- ")] == [
-        "- #2 https://github.com/acme/widgets/pull/2 (pr2 → pr1)",
-        "- #4 https://github.com/acme/widgets/pull/4 (orphan4 → pr1)",
+    assert "Unstack GitHub stack 1000" in result.stderr
+    assert "Link #1, #3" in result.stderr
+    assert [line.strip() for line in result.stderr.splitlines() if line.startswith("- https://")] == [
+        "- https://github.com/acme/widgets/pull/2",
+        "- https://github.com/acme/widgets/pull/4",
     ]
     assert gh.calls("pr", "close") == []
     assert gh.stacks() == [[1, 2, 3, 4]]
@@ -409,8 +416,8 @@ def test_unlinked_stack_warning_distinguishes_eligible_and_ineligible_drafts(rep
     result = repo.stack("prs")
 
     assert "can't close blocking PR #4" in result.stderr
-    assert "No drafts would be closed while any blockers remain." in result.stderr
-    assert "- #2 https://github.com/acme/widgets/pull/2 (pr2 → pr1)" in result.stderr
+    assert "No drafts will close." in result.stderr
+    assert "- https://github.com/acme/widgets/pull/2" in result.stderr
     assert "Retry with --pr-rebuild" not in result.stderr
     assert gh.calls("pr", "close") == []
 

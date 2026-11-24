@@ -1045,7 +1045,7 @@ git stack prs
   A rebuild can close a blocking PR if it's your own untracked draft from
   the same repository, without approval, a merge queue entry, or open PRs
   targeting its head. If you omit `--pr-rebuild`, Git-stack reports what
-  the rebuild would change and lists eligible drafts one per line.
+  the rebuild would change in a list, with one link per eligible draft.
   With `--pr-rebuild`, Git-stack shows the PR links, heads and bases and
   waits for you to enter all the listed PR numbers in an interactive
   terminal. It verifies eligibility before closing each draft. The closures
