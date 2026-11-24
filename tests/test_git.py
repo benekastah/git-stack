@@ -33,6 +33,22 @@ def test_git_stack_runs_git_through_the_shared_client(repo: Repo, monkeypatch: p
     assert commands == [("branch", "--show-current")]
 
 
+def test_cli_git_launches_with_descriptor_isolation(repo: Repo, monkeypatch: pytest.MonkeyPatch) -> None:
+    # On Windows this controls inheritance of handles rather than POSIX descriptors.
+    close_fds_values: set[bool] = set()
+    launch = subprocess.Popen.__init__
+
+    def record_launch(self: subprocess.Popen[bytes], *args: Any, close_fds: bool = True, **kwargs: Any) -> None:
+        close_fds_values.add(close_fds)
+        launch(self, *args, close_fds=close_fds, **kwargs)
+
+    monkeypatch.setattr(subprocess.Popen, "__init__", record_launch)
+
+    repo.stack("info")
+
+    assert close_fds_values == {True}
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX file descriptors are inherited by descriptor number")
 def test_cli_git_does_not_inherit_open_descriptors(
     repo: Repo, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
