@@ -219,6 +219,18 @@ def test_reading_command_records_nothing_once_an_operation_stops(repo: Repo, cli
     assert repo.config("pr2", core.PENDING_RESTACK_KEY) == pending
 
 
+def test_next_goes_on_from_the_branch_checked_out_once_it_has_the_lock(repo: Repo, client: StackClient) -> None:
+    restack_finished_by_hand(repo)
+
+    with client.exclusive():
+        thread, result = start_waiting_for_lock(repo, lambda reader: reader.next())
+        # The command holding the lock switches branches meanwhile.
+        repo.git("switch", "--quiet", "pr1")
+    thread.join(timeout=60)
+
+    assert result == ["pr2"]
+
+
 def main_moves_on(repo: Repo) -> None:
     """Commit a new file to main, so the stack needs restacking (with --latest)."""
     repo.git("switch", "--quiet", "main")

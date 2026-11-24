@@ -385,7 +385,9 @@ class GitClient:
         """Within a snapshot, forget the refs, worktrees and reflogs it has
         read, the ancestry found from them, and the branch config, so they're
         read again: for when another process may have changed them since
-        (see StackCore.exclusive). Each remote's default branch is kept.
+        (see StackCore.exclusive). The rest is kept: each remote's default
+        branch and push destinations, asked of the remotes, and the library's
+        cache of where the repository is and its object format.
         Outside a snapshot, it does nothing."""
         if not self._snapshot_depth:
             return

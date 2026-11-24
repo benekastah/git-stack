@@ -1107,10 +1107,13 @@ class StackClient(StackCore):
     @snapshot
     def next(self) -> str:
         """Switch to the branch stacked on the current one, and return it."""
+        # Settling first, which may wait for the lock, so the current branch
+        # is read after anything that held it.
+        stacks = self.settled_stacks()
         current = self.git.current_branch()
         if current is None:
             raise StackError("not on a branch")
-        children = self.settled_stacks().children(current)
+        children = stacks.children(current)
         if not children:
             raise StackError(f"no branch is stacked on {current}")
         if len(children) > 1:
