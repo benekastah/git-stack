@@ -207,7 +207,9 @@ class StackCore:
         branch config cache read before, which another command may have
         changed until then.
 
-        While it's held, the processes this one starts have LOCK_HELD_ENV set.
+        While it's held, it sets LOCK_HELD_ENV (GIT_STACK_LOCK_HELD) in this
+        process's environment (os.environ), so every process this one starts
+        meanwhile has it.
         """
         if self._exclusive_depth:
             self._exclusive_depth += 1
