@@ -925,7 +925,17 @@ git stack push --prs            # then open pull requests, as `git stack prs` do
   [Rebased on the remote](#rebased-on-the-remote)). `--force` pushes over it.
 - One `git push` covers all selected branches. Git checks leases and applies
   the updates atomically at each destination. When a remote has several push
-  URLs, a failure at one destination can leave others updated.
+  URLs, a failure at one destination can leave others updated. The error
+  lists confirmed ref updates, rejections, up-to-date refs and uncertain
+  outcomes by destination. You can inspect the destinations in the order shown
+  by `git remote get-url --push --all <remote>`.
+- Git-stack leaves any partial updates in place. Where Git confirms what
+  changed and the destination can be addressed safely, the error includes a
+  manual rollback command that uses the same Git executable as the push.
+  Each command applies atomically at one destination.
+  The leases require the exact tips Git published or require a deleted ref
+  to still be absent. Verify the destination and any affected pull requests
+  before running a command.
 - If Git’s list of push URLs is ambiguous, the default branch check refuses
   the push.
 - Refuses to push a branch whose remote branch was deleted, since that's

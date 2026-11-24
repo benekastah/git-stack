@@ -1,17 +1,30 @@
 import os
 import pathlib
 import subprocess
+import sys
 import tempfile
 import threading
 import uuid
 from collections import Counter
-from collections.abc import Generator, Mapping, Sequence
+from collections.abc import Generator, Iterable, Mapping, Sequence
 from contextlib import contextmanager
 from typing import TextIO
 
 import git_client
 import pygit2
-from git_client import ConfigSet, ConfigUnset, Git, GitCache, GitError, NoAnswerError, PerformanceRecorder, Ref, decode
+from git_client import (
+    ConfigSet,
+    ConfigUnset,
+    Git,
+    GitCache,
+    GitError,
+    NoAnswerError,
+    PerformanceRecorder,
+    PushResult,
+    Ref,
+    decode,
+    push,
+)
 
 from git_stack import git_read
 from git_stack.errors import StackError
@@ -304,6 +317,42 @@ class GitClient:
                 return self._git.passthrough(*args, stdout=self.passthrough_stdout)
         finally:
             self._ran(args)
+
+    @property
+    def program(self) -> str:
+        """The selected Git executable, including any user-supplied wrapper."""
+        return self._git.program
+
+    def push_report(self, *args: str) -> PushResult:
+        """Run one push with a structured result for each reported destination."""
+        try:
+            with git_errors():
+                result = push(self._git, *args)
+            print(result.stdout, end="", file=self.passthrough_stdout or sys.stdout)
+            print(result.stderr, end="", file=sys.stderr)
+            return result
+        finally:
+            self._ran(("push", *args))
+
+    def addressable_push_urls(self, remote: str, urls: Iterable[str]) -> set[str]:
+        """The URLs a repair can address without losing named transport settings."""
+        self.branch_config(fresh=True)
+        # An explicit URL would drop connection and server-command settings
+        # attached to the named remote, potentially addressing another repo.
+        transport_settings = ("receivepack", "vcs", "proxy", "proxyauthmethod", "mirror")
+        if any(config_key(f"remote.{remote}.{key}") in self._config for key in transport_settings):
+            return set()
+        rules = ("insteadof", "pushinsteadof")
+        configured = self._configured_remote_urls(remote, "pushurl") or self._configured_remote_urls(remote, "url")
+        if self._ambiguous_push_urls(configured, rules):
+            return set()
+        return {
+            url
+            for url in urls
+            if not self._url_is_rewritten(url, *rules)
+            and config_key(f"remotes.{url}") not in self._config
+            and not any(key.startswith(f"remote.{url}.") for key in self._config)
+        }
 
     @contextmanager
     def snapshot(self) -> Generator[None]:

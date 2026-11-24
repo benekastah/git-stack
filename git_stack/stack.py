@@ -1,12 +1,17 @@
 import enum
 import fnmatch
 import functools
+import shlex
+from collections import Counter
 from collections.abc import Callable, Iterable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import nullcontext
 from dataclasses import dataclass, field, replace
 from itertools import takewhile
+from pathlib import Path
 from typing import Concatenate
+
+from git_client import PushResult as GitPushResult
 
 from git_stack import events
 from git_stack.adapters import (
@@ -46,6 +51,13 @@ from git_stack.git import DEFAULT_REMOTE, SWITCH
 from git_stack.integrations import Integration, Integrations, RetiredSource, Source
 from git_stack.json_fields import json_name
 from git_stack.performance import active_timeline
+from git_stack.push_repair import (
+    PushRepair,
+    destination_status,
+    redacted_push_url,
+    repairable_url,
+    rollback_for_destination,
+)
 from git_stack.stacks import Ownership, Stacks
 
 DEFAULT_PR_PROTECTION = PRProtection()
@@ -3033,10 +3045,12 @@ class StackClient(StackCore):
             self.remember_atomic_push(integrations, integration_pushes, remote, pinned)
         except StackError as e:
             raise StackError(f"Nothing was pushed.\n{e}{self.changes_left(adapter)}") from e
-        if not git.passthrough("push", "--atomic", *verify_options, *leases, *upstream_options, remote, *refspecs):
-            detail = "some destinations may have been updated" if multiple_destinations else "nothing was pushed"
+        push_args = ("--atomic", *verify_options, *leases, *upstream_options, remote, *refspecs)
+        if multiple_destinations:
+            self.publish_to_multiple_destinations(push_args, push_urls, leases, refspecs, remote, adapter, protection)
+        elif not git.passthrough("push", *push_args):
             raise StackError(
-                f"push failed, so {detail}; if the remote has new commits, run `git stack sync` and try "
+                "push failed, so nothing was pushed; if the remote has new commits, run `git stack sync` and try "
                 f"again{self.changes_left(adapter)}"
             )
         self.record_pushed(branches, integration_pushes, deletions, remote, work_tips)
@@ -3045,6 +3059,101 @@ class StackClient(StackCore):
         except StackError as e:
             raise StackError(f"pushed, but updating pull requests failed\n{e}") from e
         return branches
+
+    def publish_to_multiple_destinations(
+        self,
+        args: tuple[str, ...],
+        urls: tuple[str, ...],
+        leases: list[str],
+        refspecs: list[str],
+        remote: str,
+        adapter: GitAdapter,
+        protection: PRProtection,
+    ) -> None:
+        executable = Path(self.git.program)
+        program = executable.as_posix()
+        executable_known = executable.is_absolute() and program.isprintable()
+        if executable_known:
+            inspect = shlex.join((program, "remote", "get-url", "--push", "--all", remote))
+            inspection = f"Inspect each destination listed by `{inspect}`."
+        else:
+            inspection = "Inspect each destination configured for this remote using the selected Git executable."
+        try:
+            addressable = self.git.addressable_push_urls(remote, filter(repairable_url, urls))
+        except StackError as e:
+            raise StackError(f"Nothing was pushed.\n{e}{self.changes_left(adapter)}") from e
+
+        try:
+            result = self.git.push_report(*args)
+        except StackError as e:
+            raise StackError(
+                f"{e}\nSome destinations may have been updated. {inspection}{self.changes_left(adapter)}"
+            ) from e
+        if result.returncode == 0:
+            return
+
+        planned: dict[str, tuple[str, str]] = {}
+        for lease, refspec in zip(leases, refspecs, strict=True):
+            target, _, old = lease.removeprefix("--force-with-lease=").partition(":")
+            source, separator, _ = refspec.partition(":")
+            planned[target] = (old, source if separator else f"refs/heads/{source}")
+        details, repairs = self.describe_partial_push(result, urls, addressable, planned)
+        if repairs and executable_known:
+            details.extend(self.rollback_instructions(repairs, remote, adapter, protection, urls, program))
+        details.append(inspection)
+        detail = "\n".join(details)
+        raise StackError(
+            f"push failed, so some destinations may have been updated.\n{detail}{self.changes_left(adapter)}"
+        )
+
+    @staticmethod
+    def describe_partial_push(
+        result: GitPushResult, urls: tuple[str, ...], addressable: set[str], planned: dict[str, tuple[str, str]]
+    ) -> tuple[list[str], list[PushRepair]]:
+        configured = Counter(urls)
+        possible_labels = configured.copy()
+        possible_labels.update(label for url in urls if (label := redacted_push_url(url)) is not None)
+        reported = Counter(destination.url for destination in result.destinations)
+        by_url = {destination.url: destination for destination in result.destinations}
+        # Git can redact user information in its displayed URLs. Require a
+        # complete one-to-one match before suggesting any literal destination.
+        complete = configured == reported and len(configured) == len(urls)
+        details: list[str] = []
+        repairs: list[PushRepair] = []
+        for index, url in enumerate(urls, start=1):
+            label = f"Push destination {index}"
+            if possible_labels[url] != 1 or reported[url] != 1:
+                details.append(f"{label} outcome uncertain")
+                continue
+            destination = by_url[url]
+            details.append(f"{label} {destination_status(destination, planned)}")
+            if complete and url in addressable and (repair := rollback_for_destination(destination, planned)):
+                repairs.append(repair)
+        return details, repairs
+
+    def rollback_instructions(
+        self,
+        repairs: list[PushRepair],
+        remote: str,
+        adapter: GitAdapter,
+        protection: PRProtection,
+        urls: tuple[str, ...],
+        program: str,
+    ) -> list[str]:
+        try:
+            addressable = self.git.addressable_push_urls(remote, (repair.url for repair in repairs))
+            repairs = [repair for repair in repairs if repair.url in addressable]
+            if not repairs:
+                return []
+            heads = {ref.removeprefix("refs/heads/") for repair in repairs for ref, _, _ in repair.refs}
+            self.protect_remote_heads(remote, adapter, protection, heads, urls)
+        except StackError as e:
+            return [f"Could not verify rollback commands. {e}"]
+        return [
+            "To roll back the confirmed changes, first verify the destinations and affected pull requests.",
+            "Run these commands from this repository in a POSIX shell.",
+            *(repair.command(program) for repair in repairs),
+        ]
 
     def protect_pr_opening(self, branches: list[str], stacks: Stacks, adapter: GitHubAdapter) -> None:
         prs = adapter.pull_requests()

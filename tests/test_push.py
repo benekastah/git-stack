@@ -1,14 +1,29 @@
 """git stack push."""
 
+import json
+import pathlib
+import shlex
 import sys
+from collections.abc import Iterable
+from dataclasses import replace
+from typing import Any
 
 import pytest
+from git_client import PushDestination, PushRef, PushStatus
+from git_client import PushResult as GitPushResult
 
 from git_stack import events
 from git_stack.errors import StackError
+from git_stack.git import GIT_VARIABLE, GitClient, split_command
+from git_stack.push_repair import repairable_url
 from git_stack.stack import StackClient
-from tests.git_support import GitCall
-from tests.helpers import FakeGitHub, Repo
+from tests.git_support import GitCall, real_git
+from tests.helpers import FakeGitHub, Repo, install_command
+
+
+def publication_calls(calls: list[GitCall]) -> list[list[str]]:
+    commands = (split_command(tuple(call)) for call in calls)
+    return [[command, *args] for command, args in commands if command == "push"]
 
 
 def test_deep_stack_publishes_every_branch_with_one_atomic_push(
@@ -21,7 +36,7 @@ def test_deep_stack_publishes_every_branch_with_one_atomic_push(
 
     assert len(gh.calls("pr", "create")) == len(chain)
     assert all(repo.git("rev-parse", b, cwd=repo.origin) == repo.git("rev-parse", b) for b in chain)
-    pushes = [call for call in git_calls if call[0] == "push"]
+    pushes = publication_calls(git_calls)
     assert len(pushes) == 1
     assert "--dry-run" not in pushes[0]
     assert "--atomic" in pushes[0] and any(arg.startswith("--force-with-lease=") for arg in pushes[0])
@@ -104,17 +119,24 @@ def test_push_does_not_record_a_tracking_ref_changed_after_publication(
     [
         "pushurls",
         "cleared pushurl",
+        "custom executable",
         pytest.param(
             "trailing space", marks=pytest.mark.skipif(sys.platform == "win32", reason="Win32 trims the path")
         ),
     ],
 )
-def test_push_uses_one_invocation_and_keeps_leases_at_every_destination(
-    repo: Repo, client: StackClient, git_calls: list[GitCall], push_config: str
+def test_partial_push_reports_status_and_prints_a_leased_rollback(
+    repo: Repo,
+    client: StackClient,
+    git_calls: list[GitCall],
+    push_config: str,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client.branch("feature")
     repo.commit("a", "feature\n", "feature")
     client.push()
+    original = repo.git("rev-parse", "feature")
     name = f"{repo.origin.name} " if push_config == "trailing space" else "other-push.git"
     other = repo.origin.with_name(name)
     repo.git("clone", "--bare", "--quiet", str(repo.origin), str(other))
@@ -128,14 +150,258 @@ def test_push_uses_one_invocation_and_keeps_leases_at_every_destination(
         repo.git("config", "--add", "remote.origin.pushurl", "")
     repo.commit("a", "local advance\n", "advance")
 
+    program = real_git()
+    if push_config == "custom executable":
+        bin_dir = tmp_path / "alternate executable"
+        bin_dir.mkdir()
+        install_command(bin_dir, "fake-git", "tests.fake_git")
+        program = str(bin_dir / ("fake-git.exe" if sys.platform == "win32" else "fake-git"))
+        monkeypatch.setenv(GIT_VARIABLE, program)
+        monkeypatch.setenv("FAKE_GIT_LOG", str(tmp_path / "git-log.jsonl"))
+        monkeypatch.setenv("REAL_GIT", real_git())
+        client = StackClient(GitClient(repo.path))
+
     git_calls.clear()
-    with pytest.raises(StackError, match="some destinations may have been updated"):
+    with pytest.raises(StackError) as error:
         client.push()
 
-    pushes = [call for call in git_calls if call[0] == "push"]
+    pushes = publication_calls(git_calls)
     assert len(pushes) == 1 and "--atomic" in pushes[0] and "--dry-run" not in pushes[0]
-    assert repo.git("rev-parse", "refs/heads/feature", cwd=repo.origin) == repo.git("rev-parse", "feature")
+    published = repo.git("rev-parse", "feature")
+    assert repo.git("rev-parse", "refs/heads/feature", cwd=repo.origin) == published
     assert repo.git("rev-parse", "refs/heads/feature", cwd=other) == divergent
+    detail = str(error.value)
+    assert "Push destination 1 updated refs/heads/feature" in detail
+    assert "Push destination 2 rejected refs/heads/feature" in detail
+    args = shlex.split(next(line for line in detail.splitlines() if " -c push.pushOption= push " in line))
+    assert args[0] == pathlib.Path(program).as_posix()
+    assert f"--force-with-lease=refs/heads/feature:{published}" in args
+    assert f"{original}^{{commit}}:refs/heads/feature" in args
+
+    # The command addresses just the successful destination and cannot undo a later update.
+    repo.git("update-ref", "refs/heads/feature", divergent, cwd=repo.origin)
+    with pytest.raises(pytest.fail.Exception, match="stale info"):
+        repo.git(*args[1:])
+    assert repo.git("rev-parse", "refs/heads/feature", cwd=repo.origin) == divergent
+    repo.git("update-ref", "refs/heads/feature", published, cwd=repo.origin)
+
+    repo.git("branch", original, published)
+    repo.git(*args[1:])
+
+    assert repo.git("rev-parse", "refs/heads/feature", cwd=repo.origin) == original
+    assert repo.git("rev-parse", "refs/heads/feature", cwd=other) == divergent
+
+
+@pytest.mark.parametrize(
+    ("redacted_url", "configured_url"),
+    [
+        ("ssh://example.com/repo", "ssh://alice@example.com/repo"),
+        ("example.com:project/repo", "alice@example.com:project/repo"),
+        ("https://example.com/repo", "https://alice:token@example.com/repo"),
+    ],
+)
+def test_partial_push_does_not_attribute_a_report_with_a_redacted_url_collision(
+    redacted_url: str, configured_url: str
+) -> None:
+    ref = "refs/heads/feature"
+    old, new = "a" * 40, "b" * 40
+    refs = (PushRef(ref, ref, PushStatus.FAST_FORWARD, "", old, new),)
+    independent = "ssh://example.com/independent"
+    result = GitPushResult(1, "", "", (PushDestination(redacted_url, refs), PushDestination(independent, refs)))
+
+    details, repairs = StackClient.describe_partial_push(
+        result, (configured_url, redacted_url, independent), {redacted_url, independent}, {ref: (old, ref)}
+    )
+
+    assert details == [
+        "Push destination 1 outcome uncertain",
+        "Push destination 2 outcome uncertain",
+        "Push destination 3 updated refs/heads/feature",
+    ]
+    assert repairs == []
+
+
+def test_rollback_requires_a_slash_in_an_scp_destination() -> None:
+    # A slashless destination can select a legacy remote of the same name.
+    assert not repairable_url("example.com:repo")
+    assert repairable_url("example.com:project/repo")
+
+
+@pytest.mark.parametrize("fail_after_push", [False, True])
+def test_partial_push_configuration_error_reports_retained_pr_retarget(
+    repo: Repo, gh: FakeGitHub, git_calls: list[GitCall], monkeypatch: pytest.MonkeyPatch, fail_after_push: bool
+) -> None:
+    repo.make_stack()
+    repo.client.push()
+    old = repo.git("rev-parse", "pr2")
+    gh.add_pr(
+        number=2,
+        state="OPEN",
+        headRefName="pr2",
+        headRefOid=old,
+        baseRefName="main",
+        mergeCommit=None,
+    )
+    other = repo.tmp / "other.git"
+    repo.git("clone", "--bare", "--quiet", str(repo.origin), str(other))
+    repo.git("update-ref", "refs/heads/pr2", repo.git("rev-parse", "main"), cwd=other)
+    for destination in (repo.origin, other):
+        repo.git("config", "--add", "remote.origin.pushurl", str(destination))
+    repo.git("switch", "--quiet", "pr2")
+    repo.commit("b", "local advance\n", "advance")
+    repo.client.restack()
+    addressable = GitClient.addressable_push_urls
+
+    def read_config(self: GitClient, remote: str, urls: Iterable[str]) -> set[str]:
+        if bool(publication_calls(git_calls)) == fail_after_push:
+            raise StackError("Git config unavailable")
+        return addressable(self, remote, urls)
+
+    monkeypatch.setattr(GitClient, "addressable_push_urls", read_config)
+    git_calls.clear()
+
+    result = repo.stack("push", "--with-prs", expect_success=False)
+
+    assert "#2's base was changed from main to pr1" in result.stderr
+    assert "Git config unavailable" in result.stderr
+    assert " -c push.pushOption= push " not in result.stderr
+    assert len(publication_calls(git_calls)) == int(fail_after_push)
+    assert gh.load()["prs"][0]["baseRefName"] == "pr1"
+    if fail_after_push:
+        assert "Push destination 1 updated refs/heads/pr2" in result.stderr
+    else:
+        assert "Nothing was pushed" in result.stderr
+
+
+@pytest.mark.parametrize("remove_setting_in_hook", [False, True])
+def test_partial_push_does_not_repair_with_a_different_receive_pack(
+    repo: Repo, git_calls: list[GitCall], remove_setting_in_hook: bool
+) -> None:
+    repo.client.branch("feature")
+    repo.commit("a", "feature\n", "feature")
+    repo.client.push()
+    other = repo.tmp / "other.git"
+    repo.git("clone", "--bare", "--quiet", str(repo.origin), str(other))
+    repo.git("update-ref", "refs/heads/feature", repo.git("rev-parse", "main"), cwd=other)
+    for destination in (repo.origin, other):
+        repo.git("config", "--add", "remote.origin.pushurl", str(destination))
+    repo.git("config", "remote.origin.receivepack", "git-receive-pack")
+    if remove_setting_in_hook:
+        repo.add_hook(repo.path, "pre-push", "#!/bin/sh\ngit config --unset remote.origin.receivepack || :\n")
+    repo.commit("a", "local advance\n", "advance")
+    git_calls.clear()
+
+    result = repo.stack("push", expect_success=False)
+
+    assert "Inspect each destination" in result.stderr
+    assert " -c push.pushOption= push " not in result.stderr
+    assert len(publication_calls(git_calls)) == 1
+    assert "Push destination 1 updated refs/heads/feature" in result.stderr
+    assert repo.remote_subject("feature") == "advance"
+
+
+def test_partial_push_does_not_undo_an_up_to_date_destination(repo: Repo, git_calls: list[GitCall]) -> None:
+    repo.client.branch("feature")
+    repo.commit("a", "feature\n", "feature")
+    repo.client.push()
+    other = repo.tmp / "other.git"
+    repo.git("clone", "--bare", "--quiet", str(repo.origin), str(other))
+    repo.git("update-ref", "refs/heads/feature", repo.git("rev-parse", "main"), cwd=other)
+    for destination in (repo.origin, other):
+        repo.git("config", "--add", "remote.origin.pushurl", str(destination))
+    repo.commit("a", "local advance\n", "advance")
+    # Publish the exact same value independently, leaving origin/feature stale.
+    repo.git("push", str(repo.origin), "feature")
+    git_calls.clear()
+
+    result = repo.stack("push", expect_success=False)
+
+    assert "Inspect each destination" in result.stderr
+    assert "Push destination 1 up to date refs/heads/feature" in result.stderr
+    assert " -c push.pushOption= push " not in result.stderr
+    assert len(publication_calls(git_calls)) == 1
+    assert repo.remote_subject("feature") == "advance"
+
+
+def test_partial_push_reports_a_created_ref_without_guessing_a_rollback_lease(
+    repo: Repo, git_calls: list[GitCall]
+) -> None:
+    repo.client.branch("feature")
+    repo.commit("a", "feature\n", "feature")
+    other = repo.tmp / "other.git"
+    repo.git("clone", "--bare", "--quiet", str(repo.origin), str(other))
+    repo.git("update-ref", "refs/heads/feature", repo.git("rev-parse", "main"), cwd=other)
+    for destination in (repo.origin, other):
+        repo.git("config", "--add", "remote.origin.pushurl", str(destination))
+    git_calls.clear()
+
+    result = repo.stack("push", expect_success=False)
+
+    assert "Push destination 1 updated refs/heads/feature" in result.stderr
+    assert "Push destination 2 rejected refs/heads/feature" in result.stderr
+    assert " -c push.pushOption= push " not in result.stderr
+    assert len(publication_calls(git_calls)) == 1
+    assert repo.remote_subject("feature") == "feature"
+
+
+@pytest.mark.parametrize("blocked_by", ["ambiguous report", "write protection"])
+def test_partial_push_withholds_unsafe_repair_commands(
+    repo: Repo, git_calls: list[GitCall], monkeypatch: pytest.MonkeyPatch, blocked_by: str
+) -> None:
+    repo.client.branch("feature")
+    repo.commit("a", "feature\n", "feature")
+    repo.client.push()
+    other = repo.tmp / "other.git"
+    repo.git("clone", "--bare", "--quiet", str(repo.origin), str(other))
+    repo.git("update-ref", "refs/heads/feature", repo.git("rev-parse", "main"), cwd=other)
+    for destination in (repo.origin, other):
+        repo.git("config", "--add", "remote.origin.pushurl", str(destination))
+    repo.commit("a", "local advance\n", "advance")
+    report = GitClient.push_report
+    protect = StackClient.protect_remote_heads
+
+    def incomplete_report(git: GitClient, *args: str) -> GitPushResult:
+        outcome = report(git, *args)
+        return replace(outcome, destinations=outcome.destinations[:1])
+
+    def protect_heads(client: StackClient, *args: Any, **kwargs: Any) -> None:
+        if repo.remote_subject("feature") == "advance":
+            raise StackError("PR entered the merge queue")
+        protect(client, *args, **kwargs)
+
+    if blocked_by == "ambiguous report":
+        monkeypatch.setattr(GitClient, "push_report", incomplete_report)
+    else:
+        monkeypatch.setattr(StackClient, "protect_remote_heads", protect_heads)
+    git_calls.clear()
+
+    result = repo.stack("push", expect_success=False)
+
+    assert "Inspect each destination" in result.stderr
+    assert " -c push.pushOption= push " not in result.stderr
+    assert ("PR entered the merge queue" in result.stderr) == (blocked_by == "write protection")
+    assert "Push destination 1 updated refs/heads/feature" in result.stderr
+    if blocked_by == "ambiguous report":
+        assert "Push destination 2 outcome uncertain" in result.stderr
+    assert len(publication_calls(git_calls)) == 1
+    assert repo.remote_subject("feature") == "advance"
+
+
+def test_successful_multi_destination_push_keeps_one_push_and_json_output(repo: Repo, git_calls: list[GitCall]) -> None:
+    other = repo.tmp / "other.git"
+    repo.git("clone", "--bare", "--quiet", str(repo.origin), str(other))
+    for destination in (repo.origin, other):
+        repo.git("config", "--add", "remote.origin.pushurl", str(destination))
+    repo.client.branch("feature")
+    repo.commit("a", "feature\n", "feature")
+    git_calls.clear()
+
+    result = repo.stack("push", "--json")
+
+    assert json.loads(result.stdout.splitlines()[-1])["type"] == "result"
+    assert len(publication_calls(git_calls)) == 1
+    assert repo.git("config", "branch.feature.remote") == "origin"
+    assert repo.git("rev-parse", "feature", cwd=other) == repo.git("rev-parse", "feature", cwd=repo.origin)
 
 
 def test_push_reports_partial_success_when_a_second_attempt_fails(repo: Repo, client: StackClient) -> None:

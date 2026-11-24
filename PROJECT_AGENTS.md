@@ -38,9 +38,14 @@ writes still check live PR state.
   GitHub. The GitHub adapter validates PR changes before an atomic push and
   plans any retargets that must run before publication. PR protection uses
   live GitHub state before writes. The Git push leases still guard ref
-  updates independently. Each `git stack push` runs at most one `git push`,
-  with explicit leases and atomic ref updates at each destination. Report PR
-  edits left by a failed push.
+  updates independently. Publish the whole selection with one leased atomic
+  Git push. Use py-git-client's structured push report for multiple push URLs.
+  Report the outcome of each push destination when publication fails. Leave
+  partial updates in place and suggest a leased atomic rollback only for
+  confirmed changes at an unambiguous, independently addressable destination
+  after checking PR protection. Treat reports that could refer to more than one
+  URL due to redaction as uncertain. Print the selected Git executable in
+  rollback commands. Report PR edits left by a failed push.
   Recheck known GitHub stacks before unstacking them for retargets. Batch
   retargets to published bases and description updates in bounded GraphQL
   requests on stdin. Check PR protection before each batch and record
