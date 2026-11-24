@@ -422,7 +422,10 @@ def test_group_integration_requires_a_group(repo: Repo, client: StackClient) -> 
     assert not repo.git("branch", "--list", "combined")
 
 
-def test_info_marks_landed_integration_input_and_refresh(repo: Repo, gh: FakeGitHub) -> None:
+def test_info_marks_landed_integration_input_and_refresh(
+    repo: Repo, gh: FakeGitHub, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("NO_COLOR", raising=False)
     integration(repo)
     work(repo)
     repo.git("push", "--set-upstream", "origin", "one")
@@ -448,7 +451,7 @@ def test_info_marks_landed_integration_input_and_refresh(repo: Repo, gh: FakeGit
     repo.git("config", "color.stack", "never")
     assert "combined (of one, two) (needs restack)" in repo.stack("info").stdout
     repo.git("config", "color.stack", "always")
-    repo.stack("restack")
+    repo.stack("restack", "--prs")
     refreshed = repo.stack("info", "--prs")
     assert "\033[36mone\033[m" in refreshed.stdout
     assert "!" not in refreshed.stdout
