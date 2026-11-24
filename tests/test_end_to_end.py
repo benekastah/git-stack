@@ -94,7 +94,7 @@ def test_push_says_to_open_pull_requests_with_prs(repo: Repo, gh: FakeGitHub) ->
     repo.stack_process("branch", "pr1")
     repo.commit("a", "pr1\n", "pr1 c1")
 
-    result = repo.stack_process("push", "--github")
+    result = repo.stack_process("push", "--with-prs")
 
     assert "pr1 has no pull request; open drafts with `git stack prs`" in result.stdout
 

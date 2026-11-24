@@ -23,6 +23,9 @@ rules in `git-stack`.
 - Use `git stack sync --protect-prs` for the current stack or `git stack sync --protect-prs <branch>` for a
   named stack. Pass `-g` for its group or `-g <group>` for a named group. Use
   `--remote <name>` if the selected branches track different remotes.
+- If sync requires a remote PR stack rebuild, show the user the reported
+  changes and get approval before retrying with `--pr-rebuild`. Follow
+  `git-stack` for any draft closure prompts.
 - A branch directly on an ordinary root moves when it conflicts with the
   updated root. Use `git stack sync --protect-prs --latest` when the user wants it rebased
   even if it applies cleanly. This can rewrite an already approved PR.

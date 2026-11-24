@@ -111,14 +111,14 @@ def main(argv: list[str] | None = None, stack: StackClient | None = None) -> int
     # A global flag and a command's flag may have been read by different parsers.
     if args.json and args.command == "show-stack" and args.quiet:
         parser.error("argument -q/--quiet: not allowed with argument --json")
-    github_enabled = args.command in {"import", "autocreate", "pr", "prs"} or any(
-        getattr(args, flag, False) for flag in ("github", "prs", "protect_prs", "rebuild_stack")
+    pr_access_enabled = args.command in {"import", "autocreate", "pr", "prs"} or any(
+        getattr(args, flag, False) for flag in ("with_prs", "prs", "protect_prs", "rebuild_stack")
     )
     git_only = getattr(args, "git_only", False)
-    if github_enabled and git_only:
-        parser.error("--git-only cannot be combined with GitHub options")
+    if pr_access_enabled and git_only:
+        parser.error("--git-only cannot be combined with pull request options")
     access = GitHubAccess.REQUIRED_OPT_IN
-    if github_enabled:
+    if pr_access_enabled:
         access = GitHubAccess.ENABLED
     elif git_only:
         access = GitHubAccess.GIT_ONLY

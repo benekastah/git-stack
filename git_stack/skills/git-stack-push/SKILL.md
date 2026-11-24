@@ -38,7 +38,7 @@ that isn't your branch's upstream may belong to someone else. Verify its
 ownership before setting it as the upstream.
 
 Ask before using `--force` to replace commits or write to a protected
-destination, `--allow-shared` to publish shared work, or `--github-rebuild`
+destination, `--allow-shared` to publish shared work, or `--pr-rebuild`
 to unstack and rebuild a GitHub stack. Before a rebuild, inspect the full
 GitHub stack and include every affected PR in the queue and approval checks.
 A rebuild can prompt to close orphaned drafts. Show the user the listed PRs

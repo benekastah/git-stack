@@ -191,7 +191,7 @@ def stack(autospec_stack: Any) -> Any:
             {"remote": "origin", "delete": None, "latest": False, "push": True, "ignore_reverts": []},
         ),
         (
-            ["sync", "--github-rebuild"],
+            ["sync", "--pr-rebuild"],
             "sync",
             ([], []),
             {"remote": "origin", "delete": None, "latest": False, "push": True, "ignore_reverts": []},
@@ -225,7 +225,7 @@ def stack(autospec_stack: Any) -> Any:
             ([], []),
             {"remote": "origin", "delete": None, "latest": False, "push": True, "ignore_reverts": []},
         ),
-        (["push", "--gh-rebuild"], "push", ([], []), {"remote": "origin", "force": False, "prs": False}),
+        (["push", "--pr-rebuild"], "push", ([], []), {"remote": "origin", "force": False, "prs": False}),
         (["push", "--allow-shared"], "push", ([], []), {"remote": "origin", "force": False, "prs": False}),
         (["push", "--prs"], "push", ([], []), {"remote": "origin", "force": False, "prs": True}),
         (["push", "--pr"], "push", ([], []), {"remote": "origin", "force": False, "prs": True}),
@@ -237,7 +237,7 @@ def stack(autospec_stack: Any) -> Any:
         (["group", "rename", "old", "new"], "group_rename", ("new",), {"old": "old"}),
         (["ownership", "shared"], "set_ownership", (Ownership.SHARED, [], []), {}),
         (["prs"], "prs", ([], []), {"remote": None, "dry_run": False, "rebuild_stack": False}),
-        (["pr", "--rebuild-stack"], "prs", ([], []), {"remote": None, "dry_run": False, "rebuild_stack": True}),
+        (["pr", "--pr-rebuild"], "prs", ([], []), {"remote": None, "dry_run": False, "rebuild_stack": True}),
         (
             ["prs", "pr1", "-n", "--remote", "upstream"],
             "prs",
@@ -271,7 +271,7 @@ def test_command_calls_its_client_method(
         kwargs = {**kwargs, "force": "--force" in argv, "prs": "--prs" in argv}
     if method == "clean":
         kwargs = {**kwargs, "no_verify": "--no-verify" in argv}
-    rebuild = any(flag in argv for flag in ("--github-rebuild", "--gh-rebuild", "--rebuild-stack"))
+    rebuild = "--pr-rebuild" in argv
     if argv[0] in ("sync", "push", "prs", "pr"):
         kwargs = {**kwargs, "confirm_orphan_closures": confirm_orphaned_prs if rebuild else None}
     if method in ("sync", "push"):
@@ -287,6 +287,15 @@ def test_command_calls_its_client_method(
         if argv[0] == "sync":
             kwargs = {**kwargs, "force": "--force" in argv}
     getattr(stack, method).assert_called_once_with(*args, **kwargs)
+
+
+@pytest.mark.parametrize("command", ["push", "sync", "prs"])
+def test_rejects_removed_rebuild_stack_option(command: str, stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as error:
+        main([command, "--rebuild-stack"], stack=stack)
+
+    assert error.value.code == 2
+    assert "unrecognized arguments: --rebuild-stack" in capsys.readouterr().err
 
 
 IMPORTED = [
@@ -755,7 +764,7 @@ def test_sync_shows_the_stacks_then_lists_branches_left_to_push(stack: Any, caps
     main(["sync"], stack=stack)
 
     assert capsys.readouterr().out == STACK_TREE + (
-        "note: run `git stack push --github` to update the remote branches and pull requests of:\n  pr2\n  pr3\n"
+        "note: run `git stack push --with-prs` to update the remote branches and pull requests of:\n  pr2\n  pr3\n"
     )
 
 

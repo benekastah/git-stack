@@ -104,7 +104,7 @@ def test_sync_with_nothing_to_do(repo: Repo, chain: list[str]) -> None:
     git, gh = SYNC_NOTHING[len(chain)]
 
     with expect_operations(git=git, gh=gh):
-        repo.stack_process("sync", "--github")
+        repo.stack_process("sync", "--with-prs")
 
     assert chain_tips(repo, chain) == before
     assert_chain_stacked(repo, chain)
@@ -128,7 +128,7 @@ def test_sync_after_the_bottom_pull_request_was_merged(repo: Repo, gh: FakeGitHu
     git, gh_commands = SYNC_BOTTOM_MERGED[len(chain)]
 
     with expect_operations(git=git, gh=gh_commands):
-        repo.stack_process("sync", "--github")
+        repo.stack_process("sync", "--with-prs")
 
     # The merged branch isn't tracked, and the rest are on main now.
     assert not repo.config_exists("chain1", "stackParent")

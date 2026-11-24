@@ -915,7 +915,7 @@ def test_push_unstacks_a_github_stack_that_no_longer_fits_a_branching_stack(
     repo.git("switch", "--quiet", "pr3")
     client.restack(onto="pr2b")
 
-    with pytest.raises(StackError, match="--github-rebuild"):
+    with pytest.raises(StackError, match="--pr-rebuild"):
         client.push(prs=True)
     assert gh.stacks() == [[1, 2, 3]]
 
@@ -1024,7 +1024,7 @@ def test_push_requires_rebuild_stack_to_retarget_a_stacked_pull_request(
     client.restack(onto="pr1b")
 
     before = repo.git("rev-parse", "refs/remotes/origin/pr2")
-    with pytest.raises(StackError, match="--github-rebuild"):
+    with pytest.raises(StackError, match="--pr-rebuild"):
         client.push()
 
     assert gh.stacks() == [[1, 2, 3]]
@@ -1052,7 +1052,7 @@ def test_prs_requires_rebuild_stack_to_retarget_a_stacked_pull_request(
     state["prs"][1]["baseRefName"] = "main"
     gh.save(state)
 
-    with pytest.raises(StackError, match="--github-rebuild"):
+    with pytest.raises(StackError, match="--pr-rebuild"):
         client.prs()
     assert gh.stacks() == [[1, 2, 3]]
     assert gh.load()["prs"][1]["baseRefName"] == "main"
@@ -1126,7 +1126,7 @@ def test_sync_requires_rebuild_stack_before_pushing_a_retargeted_pull_request(
     repo.commit("b", "updated\n", "pr2 update")
     before = repo.git("rev-parse", "refs/remotes/origin/pr2")
 
-    with pytest.raises(StackError, match="--github-rebuild"):
+    with pytest.raises(StackError, match="--pr-rebuild"):
         client.sync()
     assert gh.stacks() == [[1, 2, 3]]
     assert repo.git("rev-parse", "refs/remotes/origin/pr2") == before
@@ -1200,7 +1200,7 @@ def test_push_checks_protected_stack_member_before_publishing_new_parent(repo: R
     repo.git("switch", "--quiet", "pr2")
     repo.client.restack(onto="pr1b")
 
-    result = repo.stack("push", "--github-rebuild", expect_success=False)
+    result = repo.stack("push", "--pr-rebuild", expect_success=False)
 
     assert "can't unstack PR #1: it is in the merge queue" in result.stderr
     assert gh.stacks() == [[1, 2, 3]]

@@ -22,7 +22,7 @@ stack's top, and never needs unstacking. A new branch on the chosen path's
 last branch joins it, being its only child.
 
 Changing the choice once the other child is in the GitHub stack needs
-`--github-rebuild`, since GitHub can't take pull requests out of a stack.
+`--pr-rebuild`, since GitHub can't take pull requests out of a stack.
 `info` marks the GitHub stack's branches, and `--json` gains a field for it.
 
 Groups aren't the way to say it: a group holds whole stacks, not paths

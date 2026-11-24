@@ -10,10 +10,10 @@ from tests.helpers import FakeGitHub, Repo
     "command",
     [("pull",), ("sync",), ("clean",), ("push",), ("integrate", "combined"), ("unrevert", "restore", "HEAD")],
 )
-def test_github_alias_is_accepted_by_every_github_command(command: tuple[str, ...]) -> None:
+def test_with_prs_is_accepted_by_every_pr_aware_command(command: tuple[str, ...]) -> None:
     parser = build_parser()
 
-    assert parser.parse_args([*command, "--gh"]) == parser.parse_args([*command, "--github"])
+    assert parser.parse_args([*command, "--with-prs"]).with_prs
 
 
 @pytest.mark.parametrize("command", ["info", "restack", "pull", "sync", "clean", "push", "integrate"])
@@ -110,12 +110,12 @@ def test_deletion_requires_exact_integration_source_landing(
         repo.git("config", "stack.adapter", "git")
     elif mode == "git-remote":
         repo.git("remote", "set-url", "origin", str(repo.origin))
-    flags = () if mode == "default" else ("--github",)
+    flags = () if mode == "default" else ("--with-prs",)
 
     denied = repo.stack(*command, *flags, "-d", "local", expect_success=False)
 
     assert "can't delete one" in denied.stderr
-    assert "--github" in denied.stderr
+    assert "--with-prs" in denied.stderr
     assert repo.git("rev-parse", "refs/heads/one") == original
     assert repo.config("one", "stackParent") == "main"
     assert bool(gh.calls()) is (mode == "no-merged-pr")
@@ -137,7 +137,7 @@ def test_cleanup_saves_github_landing_proof_for_later_local_refresh(
         mergeCommit={"oid": repo.git("rev-parse", "refs/heads/main", cwd=repo.origin)},
     )
 
-    repo.stack(*command, "--github", "-d", "local")
+    repo.stack(*command, "--with-prs", "-d", "local")
     assert repo.git("branch", "--list", "one") == ""
     assert gh.calls("api", "graphql")
     gh.clear_calls()
@@ -161,22 +161,19 @@ def test_local_clean_can_untrack_source_held_by_other_worktree(repo: Repo, gh: F
     assert gh.calls() == []
 
 
-@pytest.mark.parametrize(
-    "opt_in", ["--github", "--gh", "--prs", "--protect-prs", "--github-rebuild", "--gh-rebuild", "--rebuild-stack"]
-)
+@pytest.mark.parametrize("opt_in", ["--with-prs", "--prs", "--protect-prs", "--pr-rebuild"])
 def test_git_only_conflicts_with_github_opt_in(repo: Repo, gh: FakeGitHub, opt_in: str) -> None:
     result = repo.stack("push", "--git-only", opt_in, expect_success=False)
     assert result.returncode == 2
-    assert "--git-only cannot be combined with GitHub options" in result.stderr
+    assert "--git-only cannot be combined with pull request options" in result.stderr
     assert gh.calls() == []
 
 
-@pytest.mark.parametrize("flag", ["--github", "--gh"])
-def test_github_opt_in_does_not_carry_to_next_invocation(repo: Repo, gh: FakeGitHub, flag: str) -> None:
+def test_github_opt_in_does_not_carry_to_next_invocation(repo: Repo, gh: FakeGitHub) -> None:
     repo.make_stack()
     repo.git("push", "--set-upstream", "origin", "pr1", "pr2", "pr3")
 
-    repo.stack("pull", flag)
+    repo.stack("pull", "--with-prs")
     assert gh.calls("api", "graphql")
     gh.clear_calls()
     repo.stack("pull")
@@ -292,7 +289,7 @@ def test_cleanup_does_not_trust_landing_after_integration_root_moves_back(repo: 
         baseRefName="main",
         mergeCommit={"oid": landed},
     )
-    repo.stack("integrate", "combined", "one", "two", "--root", "integration-base", "--github")
+    repo.stack("integrate", "combined", "one", "two", "--root", "integration-base", "--with-prs")
     repo.git("branch", "--force", "integration-base", original_root)
     repo.git("config", "branch.one.merge", "refs/heads/review-one")
     gh.clear_calls()
@@ -316,7 +313,7 @@ def test_selected_sync_can_retire_source_landed_under_recorded_upstream(repo: Re
     )
     repo.git("config", "branch.one.merge", "refs/heads/review-one")
 
-    repo.stack("sync", "combined", "one", "--github", "-d", "local")
+    repo.stack("sync", "combined", "one", "--with-prs", "-d", "local")
 
     assert repo.git("branch", "--list", "one") == ""
     assert original not in repo.git("rev-list", "refs/heads/combined").splitlines()
@@ -335,7 +332,7 @@ def test_cleanup_keeps_valid_landing_proof_after_switch_to_local_upstream(repo: 
         baseRefName="main",
         mergeCommit={"oid": landed},
     )
-    repo.stack("integrate", "combined", "one", "two", "--root", "integration-base", "--github")
+    repo.stack("integrate", "combined", "one", "two", "--root", "integration-base", "--with-prs")
     repo.git("switch", "main")
     repo.git("merge", "--ff-only", "refs/heads/one")
     repo.git("branch", "--set-upstream-to=main", "one")

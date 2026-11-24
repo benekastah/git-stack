@@ -36,7 +36,7 @@ git stack import                \f[I]# track your open PRs, each on the branch i
 After that, day to day:
 .IP
 .EX
-git stack sync \-\-github         \f[I]# catch up: drop merged PRs, rebase what\(aqs left, push\f[R]
+git stack sync \-\-with\-prs         \f[I]# catch up: drop merged PRs, rebase what\(aqs left, push\f[R]
 .EE
 .SH CHEAT SHEET
 .PP
@@ -63,22 +63,23 @@ T}
 T{
 update the PRs above one I just changed
 T}@T{
-\f[CR]git stack restack\f[R], then \f[CR]git stack push \-\-github\f[R]
+\f[CR]git stack restack\f[R], then
+\f[CR]git stack push \-\-with\-prs\f[R]
 T}
 T{
 catch up after a PR merged, or \f[CR]main\f[R] changed
 T}@T{
-\f[CR]git stack sync \-\-github\f[R]
+\f[CR]git stack sync \-\-with\-prs\f[R]
 T}
 T{
 also delete merged branches
 T}@T{
-\f[CR]git stack sync \-\-github \-d local\f[R]
+\f[CR]git stack sync \-\-with\-prs \-d local\f[R]
 T}
 T{
 put the stack on the latest \f[CR]main\f[R]
 T}@T{
-\f[CR]git stack sync \-\-github \-\-latest\f[R]
+\f[CR]git stack sync \-\-with\-prs \-\-latest\f[R]
 T}
 T{
 move to the next or previous branch in the stack
@@ -121,12 +122,12 @@ T{
 sync several stacks at once
 T}@T{
 \f[CR]git stack group add <name> <branch\-or\-glob>...\f[R], then
-\f[CR]git stack sync \-\-github \-g <name>\f[R]
+\f[CR]git stack sync \-\-with\-prs \-g <name>\f[R]
 T}
 T{
 clean up merged branches in every stack
 T}@T{
-\f[CR]git stack clean \-\-github\f[R]
+\f[CR]git stack clean \-\-with\-prs\f[R]
 T}
 T{
 bring back a PR whose merge was reverted
@@ -193,13 +194,13 @@ git stack info
 \f[I]# └── add\-api *\f[R]
 \f[I]#     └── use\-api (needs restack)\f[R]
 git stack restack               \f[I]# rebase use\-api onto the new add\-api\f[R]
-git stack push \-\-github
+git stack push \-\-with\-prs
 .EE
 .PP
 Once PR 1 is merged:
 .IP
 .EX
-git stack sync \-\-github \-d local \f[I]# delete add\-api, rebase use\-api onto main, switch to it, push\f[R]
+git stack sync \-\-with\-prs \-d local \f[I]# delete add\-api, rebase use\-api onto main, switch to it, push\f[R]
 .EE
 .PP
 \f[CR]sync\f[R] only touches the current stack.
@@ -321,7 +322,7 @@ themselves, not their stacks, and doesn\(aqt take \f[CR]\-g\f[R].
 Quote a glob, so the shell doesn\(aqt expand it:
 .IP
 .EX
-git stack sync \-\-github pr2b                     \f[I]# pr2b\(aqs stack\f[R]
+git stack sync \-\-with\-prs pr2b                     \f[I]# pr2b\(aqs stack\f[R]
 git stack restack \-g search \(aqfix\-*\(aq     \f[I]# the search group, and every fix\-* branch\(aqs stack\f[R]
 .EE
 .PP
@@ -422,7 +423,7 @@ that.
 .IP \(bu 2
 Nothing is written unless every branch can be tracked, so a bad argument
 doesn\(aqt leave the stack half\-tracked.
-.SS \f[CR]git stack integrate <name> <source> <source>... [\-\-root <branch>] [\-\-adopt] [\-\-github]\f[R]
+.SS \f[CR]git stack integrate <name> <source> <source>... [\-\-root <branch>] [\-\-adopt] [\-\-with\-prs]\f[R]
 Build a local integration branch by merging source tips in the given
 order, starting from \f[CR]main\f[R] or the ordinary untracked branch
 named by \f[CR]\-\-root\f[R].
@@ -471,8 +472,8 @@ the selection, for example with a group selector, to update them before
 rebuilding.
 Before deleting a local source of a fixed\-source integration,
 git\-stack requires proof that its exact tip landed.
-Pass \f[CR]\-\-github\f[R] to check for that proof in a squash\-merged
-PR.
+Pass \f[CR]\-\-with\-prs\f[R] to check for that proof in a
+squash\-merged PR.
 Pull and sync also fetch and fast\-forward the configured root when
 possible.
 \f[CR]push\f[R] refreshes the integration from local source tips and
@@ -523,7 +524,7 @@ If there\(aqs no proof, replace the source list with
 When all sources land, the integration follows the configured root.
 To promote the work, switch to the bottom work branch, run
 \f[CR]git stack restack \-\-onto main\f[R], then
-\f[CR]git stack push \-\-github\f[R] to update open PRs.
+\f[CR]git stack push \-\-with\-prs\f[R] to update open PRs.
 Once no stack or PR uses the integration, delete its local and remote
 branches with Git.
 \f[CR]git stack rename\f[R] updates the names of local sources and
@@ -984,7 +985,7 @@ If a rebase stops on a conflict, see Conflicts.
 .IP \(bu 2
 A branch checked out in another worktree is skipped, with a warning; see
 Branches checked out in other worktrees.
-.SS \f[CR]git stack sync [<branch|glob>...] [\-g [<group>]] [\-\-remote <name>] [\-d local|remote|both] [\-l] [\-\-force] [\-\-no\-verify] [\-\-ignore\-revert <branch>] [\-\-allow\-shared] [\-\-pull\-tracked\-upstream] [\-\-rewritten\-upstream] [\-\-github\-rebuild] [\-\-github | \-\-git\-only] [\-\-protect\-prs]\f[R]
+.SS \f[CR]git stack sync [<branch|glob>...] [\-g [<group>]] [\-\-remote <name>] [\-d local|remote|both] [\-l] [\-\-force] [\-\-no\-verify] [\-\-ignore\-revert <branch>] [\-\-allow\-shared] [\-\-pull\-tracked\-upstream] [\-\-rewritten\-upstream] [\-\-pr\-rebuild] [\-\-with\-prs | \-\-git\-only] [\-\-protect\-prs]\f[R]
 Bring the current stack (or the ones named, see Groups) up to date with
 the remote:
 .IP "1." 3
@@ -1021,9 +1022,9 @@ To catch up locally without touching the remote, use \f[CR]restack\f[R]
 or \f[CR]pull\f[R].
 .IP
 .EX
-git stack sync \-\-github
-git stack sync \-\-github \-d local \f[I]# also delete merged branches locally\f[R]
-git stack sync \-\-github \-d both  \f[I]# ...and their remote branches\f[R]
+git stack sync \-\-with\-prs
+git stack sync \-\-with\-prs \-d local \f[I]# also delete merged branches locally\f[R]
+git stack sync \-\-with\-prs \-d both  \f[I]# ...and their remote branches\f[R]
 .EE
 .IP \(bu 2
 Only the current stack is synced; to untrack merged branches in every
@@ -1040,8 +1041,8 @@ After tracking a branch with \f[CR]\-\-base\f[R], \f[CR]sync\f[R]
 refuses to pull unseen commits that were already on its upstream at that
 point: they could be old copies of rewritten commits.
 Inspect them, then use \f[CR]\-\-pull\-tracked\-upstream\f[R] if you
-want them, or \f[CR]git stack push \-\-github \-\-force\f[R] if they are
-obsolete and should be replaced.
+want them, or \f[CR]git stack push \-\-with\-prs \-\-force\f[R] if they
+are obsolete and should be replaced.
 The usual force\-push lease still applies.
 .IP \(bu 2
 It ends by showing the stacks it synced, as \f[CR]info\f[R] does.
@@ -1127,7 +1128,7 @@ see Branches checked out in other worktrees.
 couldn\(aqt push for that reason.
 .IP \(bu 2
 Needs a clean worktree, and refuses to run outside a stack.
-.SS \f[CR]git stack pull [<branch|glob>...] [\-g [<group>]] [\-\-remote <name>] [\-d local] [\-l] [\-\-ignore\-revert <branch>] [\-\-allow\-shared] [\-\-pull\-tracked\-upstream] [\-\-rewritten\-upstream] [\-\-github]\f[R]
+.SS \f[CR]git stack pull [<branch|glob>...] [\-g [<group>]] [\-\-remote <name>] [\-d local] [\-l] [\-\-ignore\-revert <branch>] [\-\-allow\-shared] [\-\-pull\-tracked\-upstream] [\-\-rewritten\-upstream] [\-\-with\-prs]\f[R]
 Fetch and update the selected stacks locally.
 It can fast\-forward local roots, untrack merged branches, and restack
 or pull into local branches; \f[CR]\-d local\f[R] also deletes merged
@@ -1143,9 +1144,9 @@ its previous tip is unknown), \f[CR]pull\f[R] and \f[CR]sync\f[R] refuse
 to guess whether those commits are new work or old copies.
 Inspect the histories, then pass \f[CR]\-\-rewritten\-upstream\f[R] to
 replay the unseen commits, or use
-\f[CR]git stack push \-\-github \-\-force\f[R] to explicitly replace the
-remote with local history.
-.SS \f[CR]git stack clean [\-\-remote <name>] [\-d local|remote|both] [\-\-no\-verify] [\-\-ignore\-revert <branch>] [\-\-allow\-shared] [\-\-github | \-\-git\-only] [\-\-protect\-prs]\f[R]
+\f[CR]git stack push \-\-with\-prs \-\-force\f[R] to explicitly replace
+the remote with local history.
+.SS \f[CR]git stack clean [\-\-remote <name>] [\-d local|remote|both] [\-\-no\-verify] [\-\-ignore\-revert <branch>] [\-\-allow\-shared] [\-\-with\-prs | \-\-git\-only] [\-\-protect\-prs]\f[R]
 Fetch with \f[CR]\-\-prune\f[R], fast\-forward every stack\(aqs root,
 and stop tracking merged branches in every stack, moving their children
 onto their parent.
@@ -1177,7 +1178,7 @@ which \f[CR]clean\f[R] fast\-forwards, or, with \f[CR]\-d local\f[R] or
 .SS Protecting open pull requests
 Before updating or deleting an existing GitHub branch, \f[CR]push\f[R],
 \f[CR]sync\f[R] and \f[CR]clean\f[R] require an explicit choice.
-Use \f[CR]\-\-github\f[R] for GitHub merge evidence and merge\-queue
+Use \f[CR]\-\-with\-prs\f[R] for GitHub merge evidence and merge\-queue
 checks, or \f[CR]\-\-protect\-prs\f[R] for stronger protection.
 Use \f[CR]\-\-git\-only\f[R] to proceed without PR checks when you have
 handled them separately.
@@ -1206,7 +1207,7 @@ well as PR edits made by git\-stack, including changes to GitHub stack
 membership.
 Review the affected branches and PRs before publishing a stack.
 A remote PR\(aqs status can change between a check and the update.
-.SS \f[CR]git stack push [<branch|glob>...] [\-g [<group>]] [\-\-remote <name>] [\-\-force] [\-\-no\-verify] [\-\-prs] [\-\-allow\-shared] [\-\-github\-rebuild] [\-\-github | \-\-git\-only] [\-\-protect\-prs]\f[R]
+.SS \f[CR]git stack push [<branch|glob>...] [\-g [<group>]] [\-\-remote <name>] [\-\-force] [\-\-no\-verify] [\-\-prs] [\-\-allow\-shared] [\-\-pr\-rebuild] [\-\-with\-prs | \-\-git\-only] [\-\-protect\-prs]\f[R]
 Force\-push (with lease) every branch in the current stack (or the ones
 named, see Groups), and set each one\(aqs upstream.
 .PP
@@ -1220,11 +1221,11 @@ it pushed, so \f[CR]sync\f[R] won\(aqt pull the old copies of your
 rebased commits back in.
 .IP
 .EX
-git stack push \-\-github
-git stack push \-\-github use\-api          \f[I]# push use\-api\(aqs stack from anywhere\f[R]
-git stack push \-\-github \(aqsearch\-*\(aq       \f[I]# the stacks of every search\-* branch\f[R]
-git stack push \-\-github \-\-force          \f[I]# drop commits on the remote you didn\(aqt pull\f[R]
-git stack push \-\-github \-\-no\-verify \f[I]# skip the local pre\-push hook\f[R]
+git stack push \-\-with\-prs
+git stack push \-\-with\-prs use\-api          \f[I]# push use\-api\(aqs stack from anywhere\f[R]
+git stack push \-\-with\-prs \(aqsearch\-*\(aq       \f[I]# the stacks of every search\-* branch\f[R]
+git stack push \-\-with\-prs \-\-force          \f[I]# drop commits on the remote you didn\(aqt pull\f[R]
+git stack push \-\-with\-prs \-\-no\-verify \f[I]# skip the local pre\-push hook\f[R]
 git stack push \-\-prs            \f[I]# then open pull requests, as \(gagit stack prs\(ga does\f[R]
 .EE
 .IP \(bu 2
@@ -1333,7 +1334,7 @@ rename a group \f[CR]sync\f[R] made after a merge.
 .IP
 .EX
 git stack group add search \(aqsearch\-*\(aq   \f[I]# the stacks of every search\-* branch\f[R]
-git stack sync \-\-github \-g search                \f[I]# from anywhere\f[R]
+git stack sync \-\-with\-prs \-g search                \f[I]# from anywhere\f[R]
 git stack group rename search find      \f[I]# or, from one of its stacks, \(gagroup rename find\(ga\f[R]
 git stack ungroup search\-ui             \f[I]# take search\-ui\(aqs stack back out\f[R]
 .EE
@@ -1358,7 +1359,7 @@ To merge them, run
 \f[CR]git stack group add \-\-move <name> \-g <other group>\f[R].
 .IP \(bu 2
 \f[CR]info\f[R] shows a group once it has two or more stacks.
-.SS \f[CR]git stack prs [<branch|glob>...] [\-g [<group>]] [\-\-remote <name>] [\-n] [\-\-github\-rebuild]\f[R]
+.SS \f[CR]git stack prs [<branch|glob>...] [\-g [<group>]] [\-\-remote <name>] [\-n] [\-\-pr\-rebuild]\f[R]
 Open a draft pull request on GitHub for each branch in the current stack
 (or the ones named, see Groups) that has none, into its stack parent,
 bottom\-up.
@@ -1368,7 +1369,7 @@ branches in one, to open their pull requests with the right bases.
 \f[CR]git stack push \-\-prs\f[R] pushes and opens them in one go.
 .IP
 .EX
-git stack push \-\-github
+git stack push \-\-with\-prs
 git stack prs \-n                \f[I]# see what it would open\f[R]
 git stack prs
 \f[I]# main\f[R]
@@ -1432,28 +1433,27 @@ some are in one that doesn\(aqt match (e.g.
 in another order, or ending with a merged pull request that a new one
 isn\(aqt based on), it leaves them, using description sections instead.
 If the local stack is a chain, it also warns and suggests
-\f[CR]\-\-github\-rebuild\f[R], which can\(aqt relink a stack that
-branches out.
+\f[CR]\-\-pr\-rebuild\f[R], which can\(aqt relink a stack that branches
+out.
 GitHub doesn\(aqt change the base of a pull request in a stack either.
 When a stack is reshaped (e.g.
 a branch is put in its middle), \f[CR]push\f[R], \f[CR]sync\f[R], and
 \f[CR]prs\f[R] refuse to unstack it to change those bases unless given
-\f[CR]\-\-github\-rebuild\f[R] (alias \f[CR]\-\-gh\-rebuild\f[R]).
-The previous name, \f[CR]\-\-rebuild\-stack\f[R], still works.
+\f[CR]\-\-pr\-rebuild\f[R].
 Open PRs outside the selected local stacks can block rebuilding.
 .RS 2
 .PP
 A rebuild can close a blocking PR if it\(aqs your own untracked draft
 from the same repository, without approval, a merge queue entry, or open
 PRs targeting its head.
-If you omit \f[CR]\-\-github\-rebuild\f[R], Git\-stack reports what the
+If you omit \f[CR]\-\-pr\-rebuild\f[R], Git\-stack reports what the
 rebuild would change and lists eligible drafts one per line.
-With \f[CR]\-\-github\-rebuild\f[R], Git\-stack shows the PR links,
-heads and bases and waits for you to enter all the listed PR numbers in
-an interactive terminal.
+With \f[CR]\-\-pr\-rebuild\f[R], Git\-stack shows the PR links, heads
+and bases and waits for you to enter all the listed PR numbers in an
+interactive terminal.
 It verifies eligibility before closing each draft.
 The closures keep the branches.
-Use \f[CR]git stack prs \-\-dry\-run \-\-github\-rebuild\f[R] to preview
+Use \f[CR]git stack prs \-\-dry\-run \-\-pr\-rebuild\f[R] to preview
 changes to existing PRs.
 Rebuilds that require opening new PRs can discover blockers after the
 new PRs open.
@@ -1462,7 +1462,7 @@ During \f[CR]push \-\-prs\f[R], a rebuild that only changes stack links
 may happen after the branches are pushed.
 .PP
 Run \f[CR]prs\f[R] to link them again, or use
-\f[CR]push \-\-prs \-\-github\-rebuild\f[R] to do both together.
+\f[CR]push \-\-prs \-\-pr\-rebuild\f[R] to do both together.
 Only a stack that\(aqs a chain is linked again: one that branches out is
 left unlinked, with description sections, since nothing says yet which
 path through it to link.
@@ -1477,21 +1477,20 @@ gh\-stack
 .UE \c
 \ (\f[CR]gh extension install github/gh\-stack\f[R]).
 .PP
-Use \f[CR]git stack prs \-\-github\-rebuild\f[R] to unstack the selected
+Use \f[CR]git stack prs \-\-pr\-rebuild\f[R] to unstack the selected
 pull requests on GitHub and create a new stack when the existing stack
 doesn\(aqt match (for a stack that\(aqs a chain; one that branches out
 is only unstacked).
 Merged pull requests remain in the old stack.
 An open pull request outside the selected stack blocks unstacking unless
-you confirm closing it with \f[CR]\-\-github\-rebuild\f[R].
+you confirm closing it with \f[CR]\-\-pr\-rebuild\f[R].
 A closed PR outside the selection is taken out of the stack with the
 rest, and isn\(aqt linked again unless it\(aqs reopened and a later
 \f[CR]prs\f[R] links it with its stack.
 If creating the new stack fails, the pull requests remain unstacked;
 rerun \f[CR]prs\f[R] to retry.
 A stack that matches is never unstacked: new pull requests are added to
-its top, as without \f[CR]\-\-github\-rebuild\f[R], so it keeps its
-number.
+its top, as without \f[CR]\-\-pr\-rebuild\f[R], so it keeps its number.
 Add \f[CR]\-\-dry\-run\f[R] to see the planned unstack and creation, or
 additions, without changing them.
 .IP
@@ -1525,7 +1524,7 @@ Needs the GitHub adapter.
 \f[CR]\-n\f[R]/\f[CR]\-\-dry\-run\f[R] shows the stacks with the pull
 requests it would open, with their titles, in place of their links,
 without opening them.
-.SS \f[CR]git stack unrevert <name> <revert>... [\-\-from <branch>] [\-\-stack <branch>...] [\-\-remote <name>] [\-\-allow\-shared] [\-\-github]\f[R]
+.SS \f[CR]git stack unrevert <name> <revert>... [\-\-from <branch>] [\-\-stack <branch>...] [\-\-remote <name>] [\-\-allow\-shared] [\-\-with\-prs]\f[R]
 Create \f[CR]<name>\f[R] on \f[CR]\-\-from\f[R], with commits that
 revert the given reverts, to bring back the changes of a merged branch
 they reverted, and move the branches given with \f[CR]\-\-stack\f[R]
@@ -2071,10 +2070,10 @@ The CLI uses Git evidence by default and starts \c
 .UE \c
 \ only when explicitly requested.
 Use \f[CR]\-\-prs\f[R] with \f[CR]info\f[R] or \f[CR]restack\f[R].
-Use \f[CR]\-\-github\f[R] (alias \f[CR]\-\-gh\f[R]) with
-\f[CR]pull\f[R], \f[CR]sync\f[R], \f[CR]clean\f[R], \f[CR]push\f[R],
-\f[CR]integrate\f[R] or \f[CR]unrevert\f[R].
-\f[CR]\-\-protect\-prs\f[R], \f[CR]\-\-github\-rebuild\f[R],
+Use \f[CR]\-\-with\-prs\f[R] with \f[CR]pull\f[R], \f[CR]sync\f[R],
+\f[CR]clean\f[R], \f[CR]push\f[R], \f[CR]integrate\f[R] or
+\f[CR]unrevert\f[R].
+\f[CR]\-\-protect\-prs\f[R], \f[CR]\-\-pr\-rebuild\f[R],
 \f[CR]push \-\-prs\f[R], and the GitHub\-specific commands
 \f[CR]prs\f[R] and \f[CR]import\f[R] also opt in.
 Ordinary Git fetches and pushes still contact the configured remotes.
@@ -2220,7 +2219,8 @@ If a pull stops on a conflict and you abort it (or skip some of the
 commits), the commits you didn\(aqt take aren\(aqt counted as pulled:
 the next \f[CR]sync\f[R] offers them again, and \f[CR]push\f[R] refuses
 to drop them.
-To drop them anyway, run \f[CR]git stack push \-\-github \-\-force\f[R].
+To drop them anyway, run
+\f[CR]git stack push \-\-with\-prs \-\-force\f[R].
 .SS Known limitation: old copies of your own commits
 When you rebase a branch, its old commits stay on its remote branch
 until you push it again.
@@ -2242,7 +2242,7 @@ has that tip, nothing in git\(aqs history tells them apart from commits
 someone else pushed, so they\(aqre pulled in.
 If that happens, drop them (e.g.
 with \f[CR]git rebase \-i $(git stack base)\f[R]), then
-\f[CR]git stack push \-\-github \-\-force\f[R].
+\f[CR]git stack push \-\-with\-prs \-\-force\f[R].
 .SS Rebased on the remote
 GitHub\(aqs \(dqRebase stack\(dq button (or \f[CR]gh stack rebase\f[R]
 on another machine) rebases a stack\(aqs remote branches and
@@ -2262,7 +2262,7 @@ preserved by cherry\-picking only their non\-merge commits.
 This only happens if the branch hasn\(aqt changed since you last pushed
 it, so no local commit is dropped; if it has, pull the remote
 branch\(aqs commits in by hand, or push over them with
-\f[CR]git stack push \-\-github \-\-force\f[R].
+\f[CR]git stack push \-\-with\-prs \-\-force\f[R].
 .SH WHICH GIT IT RUNS
 git\-stack runs the \f[CR]git\f[R] on your \f[CR]PATH\f[R], including a
 wrapper there (such as git\-ai).

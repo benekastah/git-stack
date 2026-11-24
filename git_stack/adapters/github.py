@@ -1197,7 +1197,7 @@ class GitHubAdapter(GitAdapter):
         steps = f"unstack GitHub {noun} {', '.join(map(str, ids))} (merged PRs stay linked), then {action}"
         blockers = self.orphan_blockers(stacks, allowed)
         if not blockers:
-            return f"Retry with --github-rebuild to {steps}."
+            return f"Retry with --pr-rebuild to {steps}."
         refusals: list[str] = []
         try:
             candidates = self.orphan_details(blockers, refusals=refusals)
@@ -1211,7 +1211,7 @@ class GitHubAdapter(GitAdapter):
                 f"Rebuilding would {steps}. No drafts would be closed while any blockers remain.\n{problems}{eligible}"
             )
         return (
-            f"Retry with --github-rebuild to {steps}.\n"
+            f"Retry with --pr-rebuild to {steps}.\n"
             f"The rebuild would first ask you to confirm closing these draft PRs, keeping their branches:\n{draft_list}"
         )
 

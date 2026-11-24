@@ -15,7 +15,7 @@ lands on `main` so each merged build has a distinct version in performance logs.
 ## GitHub access
 
 The CLI starts `gh` only when an option explicitly enables GitHub access,
-such as `--prs` or `--protect-prs`, or invokes a GitHub-specific command such
+such as `--with-prs`, `--prs` or `--protect-prs`, or invokes a GitHub-specific command such
 as `git stack prs`. A GitHub remote or adapter setting alone does not opt in.
 Ordinary Git fetches and pushes can still contact their configured remotes.
 

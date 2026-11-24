@@ -3057,7 +3057,7 @@ class StackClient(StackCore):
         if repositories and access is GitHubAccess.REQUIRED_OPT_IN:
             refs = ", ".join(sorted(heads))
             raise StackError(
-                f"changing existing GitHub refs ({refs}) requires --protect-prs or --github to check open pull "
+                f"changing existing GitHub refs ({refs}) requires --protect-prs or --with-prs to check open pull "
                 "requests, or --git-only to proceed without PR checks"
             )
         hosts = {github.host for github in repositories}

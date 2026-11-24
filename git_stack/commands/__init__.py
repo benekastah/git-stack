@@ -40,12 +40,10 @@ def add_allow_shared_argument(parser: argparse.ArgumentParser) -> None:
 
 def add_rebuild_stack_argument(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
-        "--github-rebuild",
-        "--gh-rebuild",
-        "--rebuild-stack",
+        "--pr-rebuild",
         dest="rebuild_stack",
         action="store_true",
-        help="rebuild GitHub PR stacks, asking before closing any eligible blocking drafts",
+        help="rebuild remote PR stacks, asking before closing any eligible blocking drafts",
     )
 
 
@@ -56,7 +54,7 @@ def rebuild_confirmation(rebuild_stack: bool) -> ConfirmOrphanClosures | None:
 def confirm_orphaned_prs(candidates: list[OrphanedPullRequest]) -> bool:
     """Require the listed PR numbers from an interactive terminal."""
     if not (sys.stdin.isatty() and sys.stderr.isatty()):
-        raise StackError("--github-rebuild needs an interactive terminal to confirm closing drafts")
+        raise StackError("--pr-rebuild needs an interactive terminal to confirm closing drafts")
     print("The rebuild is blocked by these draft pull requests. Closing them keeps their branches.", file=sys.stderr)
     for candidate in candidates:
         print(f"- {candidate.description}", file=sys.stderr)
@@ -84,11 +82,11 @@ def pr_identifier(value: str) -> int | str:
     raise argparse.ArgumentTypeError("expected a positive PR number or OWNER/REPO#NUMBER")
 
 
-def add_github_arguments(parser: argparse.ArgumentParser, *, writes: bool = False) -> None:
-    parser.add_argument("--github", "--gh", action="store_true", help="enable GitHub pull request lookups")
+def add_pr_access_arguments(parser: argparse.ArgumentParser, *, writes: bool = False) -> None:
+    parser.add_argument("--with-prs", action="store_true", help="enable pull request integration for this command")
     if writes:
         parser.add_argument(
-            "--git-only", action="store_true", help="allow GitHub ref changes without checking pull requests"
+            "--git-only", action="store_true", help="allow remote ref changes without checking pull requests"
         )
 
 
@@ -96,7 +94,7 @@ def add_pr_protection_arguments(parser: argparse.ArgumentParser, *, add_force: b
     if add_force:
         parser.add_argument("--force", action="store_true", help="allow updates to queued pull requests")
     parser.add_argument(
-        "--protect-prs", action="store_true", help="check GitHub and protect approved, ready, and queued pull requests"
+        "--protect-prs", action="store_true", help="check and protect approved, ready, and queued pull requests"
     )
     parser.add_argument(
         "--allow-pr-update",

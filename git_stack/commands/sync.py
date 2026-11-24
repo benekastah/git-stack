@@ -3,9 +3,9 @@ from git_stack.commands import (
     Subparsers,
     add_allow_shared_argument,
     add_delete_argument,
-    add_github_arguments,
     add_ignore_revert_argument,
     add_latest_argument,
+    add_pr_access_arguments,
     add_pr_protection_arguments,
     add_rebuild_stack_argument,
     add_stack_arguments,
@@ -62,7 +62,7 @@ def register(subparsers: Subparsers) -> None:
         "--rewritten-upstream", action="store_true", help="pull unseen commits from rewritten upstream history"
     )
     add_pr_protection_arguments(p)
-    add_github_arguments(p, writes=True)
+    add_pr_access_arguments(p, writes=True)
     p.set_defaults(run=run, show=show)
 
 
@@ -91,6 +91,6 @@ def show(stack: StackClient, args: Args, result: SyncResult) -> None:
     if result.branches:
         print_tree(stack, result.branches)
     if result.unpushed:
-        print("note: run `git stack push --github` to update the remote branches and pull requests of:")
+        print("note: run `git stack push --with-prs` to update the remote branches and pull requests of:")
         for branch in result.unpushed:
             print(f"  {branch}")

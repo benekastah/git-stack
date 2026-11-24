@@ -70,7 +70,18 @@ failed push. A command can edit PR bases before the push or fail while updating
 PRs after it. Inspect the live refs and PRs after a failure, and report changes
 that already happened before deciding whether to retry.
 
-## Flags for publishing
+## PR access and publishing flags
+
+- Use `--prs` with `info` or `restack` for PR information. With `push`,
+  `--prs` also opens missing draft PRs.
+- Use `--with-prs` for PR access with `pull`, `sync`, `clean`, `push`,
+  `integrate`, or `unrevert`. The `--protect-prs` option already enables PR
+  access on commands that accept it.
+- Use `--pr-rebuild` with `push`, `sync`, or `prs` only after the user
+  approves rebuilding the remote PR stack. Review the diagnostic or run
+  `git stack prs --protect-prs --dry-run --pr-rebuild` to preview changes
+  involving existing PRs. Show the user any draft PRs listed for closure and
+  leave interactive confirmation to them.
 
 Use `--protect-prs` for every `push`, `sync`, and `prs`, and for
 `git stack clean` with `-d remote` or `-d both`. If protection stops a change, tell the user

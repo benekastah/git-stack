@@ -34,7 +34,7 @@ def source(repo: Repo, branch: str, file: str, *, tracked: bool = False) -> None
 def integration(repo: Repo, *, tracked: bool = False, github: bool = False) -> None:
     source(repo, "one", "a", tracked=tracked)
     source(repo, "two", "b")
-    repo.stack("integrate", "combined", "one", "two", *(("--github",) if github else ()))
+    repo.stack("integrate", "combined", "one", "two", *(("--with-prs",) if github else ()))
 
 
 def test_group_integration_refreshes_its_leaves_and_keeps_source_order(repo: Repo, client: StackClient) -> None:
@@ -932,7 +932,7 @@ def test_squash_landing_of_deleted_sources_and_promotion(repo: Repo, gh: FakeGit
         repo.git("push", "--quiet", "--set-upstream", "origin", f"refs/heads/{branch}:refs/heads/review-{branch}")
     repo.stack("integrate", "combined", "one", "two")
     work(repo)
-    repo.stack("sync", "--github")
+    repo.stack("sync", "--with-prs")
     repo.stack("push", "--prs")
     work_pr = gh.load()["prs"][0]
     assert work_pr["baseRefName"] == "combined"
@@ -960,12 +960,12 @@ def test_squash_landing_of_deleted_sources_and_promotion(repo: Repo, gh: FakeGit
             baseRefName="main",
             mergeCommit={"oid": tip(repo, "main", remote=True)},
         )
-    repo.stack("pull", "--github")
+    repo.stack("pull", "--with-prs")
     assert tip(repo, "combined") == tip(repo, "main")
     assert repo.git("log", "--format=%s", "refs/heads/main..refs/heads/work") == "work"
 
     repo.stack("restack", "--onto", "main")
-    repo.stack("push", "--github")
+    repo.stack("push", "--with-prs")
     assert repo.config("work", "stackParent") == "main"
     assert repo.git("log", "--format=%s", "refs/heads/main..refs/heads/work") == "work"
     assert gh.load()["prs"][0]["baseRefName"] == "main"
@@ -988,7 +988,7 @@ def test_squash_evidence_for_older_tip_does_not_drop_new_work(repo: Repo, gh: Fa
     repo.commit("a", "new work\n", "new work")
 
     before = tip(repo, "combined")
-    result = repo.stack("pull", "--github", "combined", expect_success=False)
+    result = repo.stack("pull", "--with-prs", "combined", expect_success=False)
 
     assert "git stack restack one" in result.stderr
     assert tip(repo, "combined") == before
@@ -1235,9 +1235,9 @@ def test_retired_source_keeps_squash_evidence_offline(
     if conflict:
         repo.commit("a", "conflicting change\n", "conflict")
     command = (
-        ("sync", "--github", "combined", "one", "--delete", "local")
+        ("sync", "--with-prs", "combined", "one", "--delete", "local")
         if delete_local
-        else ("sync", "--github", "combined", "one")
+        else ("sync", "--with-prs", "combined", "one")
     )
     result = repo.stack(*command, expect_success=not conflict)
     assert (repo.git("branch", "--list", "one") == "") is delete_local
@@ -1625,13 +1625,13 @@ def test_narrow_retry_keeps_queued_source_deletion_until_child_is_selected(
     )
     repo.git("switch", "two")
     repo.commit("a", "conflict\n", "conflict")
-    command = ("sync", "--github", "combined", "one", "--delete", "both")
+    command = ("sync", "--with-prs", "combined", "one", "--delete", "both")
     assert "git stack restack two" in repo.stack(*command, expect_success=False).stderr
     resolve_source(repo)
     if mode == "untracked":
         repo.stack("untrack", "source-child")
 
-    repo.stack("sync", "--github", "combined", "--delete", "both")
+    repo.stack("sync", "--with-prs", "combined", "--delete", "both")
 
     assert repo.git("ls-remote", "origin", "refs/heads/one")
     assert tip(repo, "source-child", remote=True) == old_child
@@ -1662,7 +1662,7 @@ def test_sync_keeps_old_pr_base_until_new_base_exists_remotely(repo: Repo, gh: F
     source(repo, "two", "c")
     repo.stack("integrate", "combined", "one", "two")
     repo.git("branch", "-f", "parent", "one")
-    command = ("sync", "--github", "combined", "one", "--delete", "remote")
+    command = ("sync", "--with-prs", "combined", "one", "--delete", "remote")
 
     repo.stack(*command)
 
@@ -1765,7 +1765,7 @@ def test_resume_from_detached_checkout_after_publication_is_interrupted(
 def test_sync_leaves_source_branch_and_pr_outside_the_selected_group(repo: Repo, gh: FakeGitHub) -> None:
     integration(repo, tracked=True)
     work(repo)
-    repo.stack("sync", "--github")
+    repo.stack("sync", "--with-prs")
     repo.stack("push", "--prs", "work")
     repo.stack("push", "--prs", "one")
     state = gh.load()
@@ -1776,13 +1776,13 @@ def test_sync_leaves_source_branch_and_pr_outside_the_selected_group(repo: Repo,
     repo.commit_on_forge("main", "d", "upstream\n", "upstream")
     before = tip(repo, "one")
 
-    repo.stack("sync", "--github", "-g", "app", "--latest")
+    repo.stack("sync", "--with-prs", "-g", "app", "--latest")
 
     assert tip(repo, "one") == tip(repo, "one", remote=True) == before
     assert next(pr for pr in gh.load()["prs"] if pr["headRefName"] == "one")["baseRefName"] == "combined"
 
     repo.stack("group", "add", "app", "one")
-    repo.stack("sync", "--github", "-g", "app", "--latest")
+    repo.stack("sync", "--with-prs", "-g", "app", "--latest")
 
     assert tip(repo, "one") == tip(repo, "one", remote=True) != before
     assert repo.git("show", "combined:a") == repo.git("show", "one:a")
@@ -2050,7 +2050,7 @@ def test_squash_evidence_survives_pruned_alias_and_mirror(repo: Repo, gh: FakeGi
     repo.git("switch", "--quiet", "main")
     repo.git("merge", "--ff-only", "refs/remotes/origin/main")
 
-    repo.stack("integrate", "--github", "combined", "one", "two")
+    repo.stack("integrate", "--with-prs", "combined", "one", "two")
 
     assert repo.git("rev-parse", "refs/heads/combined^1") == tip(repo, "main")
 
@@ -2169,7 +2169,7 @@ def test_negative_evidence_expires_with_unchanged_root_and_source(
 @pytest.mark.parametrize("command", ["pull", "sync"])
 def test_recovering_deleted_parent_checks_integration_tip(repo: Repo, gh: FakeGitHub, command: str) -> None:
     integration(repo)
-    repo.stack("sync", "--github", "combined")
+    repo.stack("sync", "--with-prs", "combined")
     repo.git("switch", "--quiet", "combined")
     repo.git("switch", "--quiet", "-c", "retired")
     repo.commit("a", "retired\n", "retired")
@@ -2197,7 +2197,7 @@ def test_recovering_deleted_parent_checks_integration_tip(repo: Repo, gh: FakeGi
         mergeCommit=None,
     )
 
-    result = repo.stack(command, "--github", "work", expect_success=False)
+    result = repo.stack(command, "--with-prs", "work", expect_success=False)
 
     assert "differs from its last generated tip" in result.stderr
     assert repo.config("work", "stackParent") == "retired"
@@ -2206,7 +2206,7 @@ def test_recovering_deleted_parent_checks_integration_tip(repo: Repo, gh: FakeGi
 
 def test_recovered_parent_is_refreshed_before_work_is_rebased(repo: Repo, gh: FakeGitHub) -> None:
     integration(repo)
-    repo.stack("sync", "--github", "combined")
+    repo.stack("sync", "--with-prs", "combined")
     previous = tip(repo, "combined")
     repo.git("switch", "--quiet", "combined")
     repo.git("switch", "--quiet", "-c", "retired")
@@ -2233,7 +2233,7 @@ def test_recovered_parent_is_refreshed_before_work_is_rebased(repo: Repo, gh: Fa
     repo.git("switch", "--quiet", "one")
     repo.commit("a", "next input\n", "advance input")
 
-    repo.stack("pull", "--github", "work")
+    repo.stack("pull", "--with-prs", "work")
 
     assert tip(repo, "combined") != previous
     assert repo.config("work", "stackParent") == "combined"
@@ -2252,7 +2252,7 @@ def test_prs_requires_integration_to_be_published_first(repo: Repo, gh: FakeGitH
     assert gh.load()["prs"] == []
 
 
-@pytest.mark.parametrize("args", [("--github",), ("--prs",)])
+@pytest.mark.parametrize("args", [("--with-prs",), ("--prs",)])
 def test_push_refuses_to_replace_a_remote_integration_deleted_since_last_fetch(
     repo: Repo, gh: FakeGitHub, args: tuple[str, ...]
 ) -> None:

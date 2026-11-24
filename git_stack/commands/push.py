@@ -2,7 +2,7 @@ from git_stack.commands import (
     PRProtectionArgs,
     Subparsers,
     add_allow_shared_argument,
-    add_github_arguments,
+    add_pr_access_arguments,
     add_pr_protection_arguments,
     add_rebuild_stack_argument,
     add_stack_arguments,
@@ -52,7 +52,7 @@ def register(subparsers: Subparsers) -> None:
     add_allow_shared_argument(p)
     add_rebuild_stack_argument(p)
     add_pr_protection_arguments(p)
-    add_github_arguments(p, writes=True)
+    add_pr_access_arguments(p, writes=True)
     p.set_defaults(run=run, show=show, error=lambda result: result.error)
 
 
