@@ -41,6 +41,23 @@ integration when no source was retired. To retry, name the integration
 explicitly with `git stack sync <integration>` and include any surviving
 stacks that still need to sync.
 
+## A push URL that failed outright can look finished
+
+When a remote has several push URLs and the push fails, git-stack reports each
+destination from py-git-client's parse of `git push --porcelain`, which takes a
+destination's report as finished when Git prints `Done` after it. Git ends a
+destination that failed outright (e.g. with an unpacker error) without `Done`,
+but a later destination that succeeds can print a bare `Done` that completes the
+earlier one's report too. git-stack then takes that report as finished: the
+error's partial-publication summary can list that destination's refs as
+updated, rejected or up to date rather than uncertain, and it can offer a
+rollback command for it. The command's leases still require the tips Git
+reported, so it fails rather than overwrite anything else, but it suggests
+undoing an update that may never have happened. This predates pinning
+py-git-client e599be1, which only documents it. git-stack never passes
+`--quiet` to `git push`, so the related problem the library also documents
+(Git leaving successful destinations out of the report) doesn't apply.
+
 ## A writing command run by a hook of a lock-holding git-stack waits forever
 
 While a git-stack command holds the lock, git's hooks it triggers inherit
