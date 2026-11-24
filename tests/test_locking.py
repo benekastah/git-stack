@@ -145,6 +145,44 @@ def test_reading_command_finds_under_the_lock_what_another_settled(repo: Repo, c
     assert (repo.path / ".git" / "config").read_bytes() == config
 
 
+def test_reading_command_reads_refs_again_under_the_lock(repo: Repo, client: StackClient) -> None:
+    """The refs it read before waiting may have moved meanwhile."""
+    restack_finished_by_hand(repo)
+    old_base = repo.git("rev-parse", "pr1~1")
+    pending = repo.config("pr2", core.PENDING_RESTACK_KEY)
+
+    with client.exclusive():
+        thread, result = start_waiting_for_lock(repo, lambda reader: reader.base("pr2"))
+        # Another command moves pr2 to its old base, so its reflog still says
+        # the restack finished, but what it was restacked onto isn't in its
+        # history any more.
+        repo.git("update-ref", "refs/heads/pr2", old_base)
+    thread.join(timeout=60)
+
+    assert result == [old_base]
+    assert repo.config("pr2", core.BASE_KEY) == old_base
+    assert repo.config("pr2", core.PENDING_RESTACK_KEY) == pending
+
+
+def test_reading_command_records_nothing_once_an_operation_stops(repo: Repo, client: StackClient) -> None:
+    """Another command may have stopped on a conflict while it waited."""
+    restack_finished_by_hand(repo)
+    old_base = repo.git("rev-parse", "pr1~1")
+    pending = repo.config("pr2", core.PENDING_RESTACK_KEY)
+    repo.git("switch", "--quiet", "-c", "side", "pr2~1")
+    repo.commit("b", "side\n", "side c1")
+    repo.git("switch", "--quiet", "pr2")
+
+    with client.exclusive():
+        thread, result = start_waiting_for_lock(repo, lambda reader: reader.base("pr2"))
+        assert not client.git.ok("cherry-pick", "refs/heads/side")
+        assert client.git.operation_in_progress()
+    thread.join(timeout=60)
+
+    assert result == [old_base]
+    assert repo.config("pr2", core.PENDING_RESTACK_KEY) == pending
+
+
 def main_moves_on(repo: Repo) -> None:
     """Commit a new file to main, so the stack needs restacking (with --latest)."""
     repo.git("switch", "--quiet", "main")
