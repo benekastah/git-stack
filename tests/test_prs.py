@@ -45,6 +45,25 @@ def opened(gh: FakeGitHub) -> list[tuple[str, str, str, str, bool]]:
     ]
 
 
+def record_mutations(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, list[str]]]:
+    """Each batch of pull request mutations the fake gh is sent, as ("create", the heads it opens)
+    or ("update", the pull requests it changes), in order."""
+    mutations: list[tuple[str, list[str]]] = []
+    create, update = fake_gh.create_pull_requests, fake_gh.update_pull_requests
+
+    def creating(request: dict[str, Any], state: dict[str, Any]) -> str:
+        mutations.append(("create", [value["headRefName"] for value in request["variables"].values()]))
+        return create(request, state)
+
+    def updating(request: dict[str, Any], state: dict[str, Any]) -> str:
+        mutations.append(("update", [value["pullRequestId"] for value in request["variables"].values()]))
+        return update(request, state)
+
+    monkeypatch.setattr(fake_gh, "create_pull_requests", creating)
+    monkeypatch.setattr(fake_gh, "update_pull_requests", updating)
+    return mutations
+
+
 def test_prs_opens_drafts_for_the_whole_stack_into_stack_parents(
     repo: Repo, gh: FakeGitHub, client: StackClient
 ) -> None:
@@ -418,13 +437,19 @@ def test_prs_shows_a_merged_branch_it_skipped(repo: Repo, gh: FakeGitHub, client
     ]
 
 
-def test_prs_batches_changed_descriptions(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+def test_prs_batches_changed_descriptions(
+    repo: Repo, gh: FakeGitHub, client: StackClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     repo.make_stack()
     client.push()
+    mutations = record_mutations(monkeypatch)
 
     client.prs()
 
-    assert len(gh.calls("api", "graphql", "--hostname", "github.com", "--input", "-")) == 1
+    # One request opens the drafts, and one more gives them the stack's descriptions, which need
+    # the numbers the first assigned.
+    assert mutations == [("create", ["pr1", "pr2", "pr3"]), ("update", ["PR_1", "PR_2", "PR_3"])]
+    assert len(gh.calls("api", "graphql", "--hostname", "github.com", "--input", "-")) == 2
     assert not gh.calls("pr", "edit")
     assert body(gh, 2) == stack("- `main`", "  - #1", "    - #2 👈", "      - #3")
 
@@ -487,7 +512,11 @@ def test_description_batch_keeps_gh_error_with_an_invalid_response(
     repo: Repo, gh: FakeGitHub, client: StackClient, monkeypatch: pytest.MonkeyPatch, payload: bytes
 ) -> None:
     repo.make_stack()
-    client.push()
+    client.push(prs=True)
+    state = gh.load()
+    for pr in state["prs"]:
+        pr["body"] = "new description"
+    gh.save(state)
     run_gh = fake_gh.run
 
     def gh_response(args: list[str], read_input: Callable[[], bytes]) -> tuple[int, bytes, bytes]:
@@ -920,7 +949,9 @@ def test_prs_shows_the_group_across_roots_in_the_selected_pr(
     assert [call[2] for call in gh.calls("pr", "edit")] == ["1"]
 
 
-def test_prs_batches_descriptions_across_roots(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
+def test_prs_batches_descriptions_across_roots(
+    repo: Repo, gh: FakeGitHub, client: StackClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     repo.git("branch", "release", "main")
     repo.git("push", "--quiet", "--set-upstream", "origin", "release")
     client.branch("a", group="g")
@@ -928,12 +959,11 @@ def test_prs_batches_descriptions_across_roots(repo: Repo, gh: FakeGitHub, clien
     client.branch("b", group="g", from_branch="release")
     repo.commit("b", "b\n", "b")
     client.push(groups=["g"])
-    gh.clear_calls()
+    mutations = record_mutations(monkeypatch)
 
     client.prs(groups=["g"])
 
-    (mutation,) = [call for call in gh.calls("api", "graphql") if "--input" in call]
-    assert mutation[-2:] == ["--input", "-"]
+    assert mutations == [("create", ["a", "b"]), ("update", ["PR_1", "PR_2"])]
     assert gh.calls("pr", "edit") == []
     assert body(gh, 1) == stack("- `main`", "  - #1 👈", "- `release`", "  - #2")
     assert body(gh, 2) == stack("- `main`", "  - #1", "- `release`", "  - #2 👈")

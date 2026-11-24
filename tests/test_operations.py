@@ -193,10 +193,13 @@ def test_a_git_stack_process_runs_the_same_git_processes_as_one_in_this_process(
 def test_a_with_block_counts_the_gh_commands_of_a_git_stack_process(repo: Repo, gh: FakeGitHub) -> None:
     repo.make_stack()
 
-    with expect_operations(git=20, gh=8) as operations:
+    with expect_operations(git=13, gh=7) as operations:
         repo.stack_process("push", "--prs")
 
-    assert [command[:2] for command in operations.gh].count(["pr", "create"]) == 3
+    # The process opened the three pull requests in one GraphQL mutation on stdin, and gave them
+    # their descriptions in another.
+    assert len(gh.load()["prs"]) == 3
+    assert [command[:2] + command[-2:] for command in operations.gh].count(["api", "graphql", "--input", "-"]) == 2
 
 
 def test_only_what_git_stack_starts_is_counted_not_what_git_starts_for_it(repo: Repo) -> None:
@@ -204,7 +207,7 @@ def test_only_what_git_stack_starts_is_counted_not_what_git_starts_for_it(repo: 
     repo.git("switch", "--quiet", "pr1")
     repo.commit("a", "pr1 third\n", "pr1 c3")
 
-    with expect_operations(git=32) as operations:
+    with expect_operations(git=29) as operations:
         repo.stack_process("restack")
 
     # Each branch is rebased by a `git rebase`, which runs `git notes copy` itself.
