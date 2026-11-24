@@ -631,19 +631,72 @@ def test_info_does_not_fetch_head_of_merged_pr(repo: Repo, gh: FakeGitHub, clien
     assert client.git.rev(updated_head) is None
 
 
-def test_restack_ignores_merged_pr_until_parent_has_the_merge(
-    repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event]
+@pytest.mark.parametrize("command", [("restack",), ("restack", "--prs"), ("sync",), ("pull",)])
+@pytest.mark.parametrize("selector", [(), ("pr2",), ("-g", "selected")])
+def test_refresh_queries_only_selected_pull_requests(
+    repo: Repo, gh: FakeGitHub, command: tuple[str, ...], selector: tuple[str, ...]
+) -> None:
+    repo.make_stack()
+    repo.client.branch("unrelated", from_branch="main")
+    repo.commit("a", "unrelated\n", "unrelated")
+    repo.git("push", "--quiet", "--set-upstream", "origin", "pr1", "pr2", "pr3", "unrelated")
+    repo.stack("group", "add", "selected", "pr1")
+    repo.stack("group", "add", "other", "unrelated")
+    repo.git("switch", "--quiet", "pr2")
+    gh.clear_calls()
+
+    repo.stack(*command, *selector)
+
+    if command == ("restack",):
+        assert gh.calls() == []
+    else:
+        (lookup,) = gh.calls("api", "graphql")
+        assert sorted(
+            arg.split("=", 1)[1] for arg in lookup if arg.startswith("b") and arg.partition("=")[0][1:].isdigit()
+        ) == ["pr1", "pr2", "pr3"]
+
+
+def test_restack_group_queries_each_selected_github_remote(repo: Repo, gh: FakeGitHub) -> None:
+    repo.git("remote", "rename", "origin", "primary")
+    repo.git("remote", "add", "origin", str(repo.origin))
+    repo.git("config", "branch.main.remote", "origin")
+    repo.git("remote", "add", "mirror", "https://github.com/other/widgets.git")
+    repo.git("config", "stack.adapter", "github")
+    for branch, remote, group in (
+        ("primary", "primary", "selected"),
+        ("secondary", "mirror", "selected"),
+        ("unrelated", "mirror", "other"),
+    ):
+        repo.client.branch(branch, from_branch="main", group=group)
+        repo.commit("a", branch + "\n", branch)
+        repo.git("config", f"branch.{branch}.remote", remote)
+        repo.git("config", f"branch.{branch}.merge", f"refs/heads/{branch}")
+
+    repo.stack("restack", "--prs", "-g", "selected")
+
+    queries = [
+        sorted(arg for arg in call if arg.startswith(("owner=", "b0=", "b1="))) for call in gh.calls("api", "graphql")
+    ]
+    assert sorted(queries) == [["b0=primary", "owner=acme"], ["b0=secondary", "owner=other"]]
+
+
+@pytest.mark.parametrize("local_merge", [False, True])
+def test_restack_only_trusts_a_merged_pr_once_parent_has_the_merge(
+    repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event], local_merge: bool
 ) -> None:
     repo.make_stack()
     merge_pr1_on_forge_with_a_tweak(repo, gh)
     repo.git("fetch", "--quiet")
+    if local_merge:
+        repo.git("switch", "--quiet", "main")
+        repo.git("merge", "--ff-only", "refs/remotes/origin/main")
     repo.git("switch", "--quiet", "pr2")
 
-    client.restack()
+    client.restack(prs=True)
 
-    assert not any(isinstance(event, events.SkippedMerged) for event in emitted)
+    assert (events.SkippedMerged("pr1", "main") in emitted) is local_merge
     assert repo.config("pr1", "stackParent") == "main"
-    assert repo.config("pr2", "stackParent") == "pr1"
+    assert repo.config("pr2", "stackParent") == ("main" if local_merge else "pr1")
 
 
 def test_sync_skips_merged_pr_with_local_commits_after_merge(

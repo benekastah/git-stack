@@ -336,7 +336,7 @@ class StackCore:
             )
 
     def ensure_clean_worktree(self) -> None:
-        if self.git.run("status", "--porcelain", "--untracked-files=no"):
+        if self.git.run("status", "--porcelain", "--untracked-files=no", "--no-renames"):
             raise StackError("you have uncommitted changes; commit or stash them first")
 
     def settle(self, branch: str, forget_unfinished: bool = True, restack_completed: bool = False) -> None:
@@ -860,7 +860,11 @@ class StackCore:
     def trunk_upstream(self, root: str) -> TrunkUpstream | None:
         """An ordinary local root's upstream if it exists and is at another commit."""
         git = self.git
-        if git.config_get(root, INTEGRATION_KEY) is not None or not git.local_branch_exists(root):
+        if (
+            git.config_get(root, INTEGRATION_KEY) is not None
+            or not git.local_branch_exists(root)
+            or git.upstream_is_at_tip(root)
+        ):
             return None
         upstream = git.run("rev-parse", "--abbrev-ref", f"{root}@{{upstream}}", check=False)
         if not upstream:

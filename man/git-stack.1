@@ -922,7 +922,7 @@ choice can change the default.
 Existing stacks default to owned.
 Ownership is local to this clone, not a permission or a substitute for
 coordinating with contributors.
-.SS \f[CR]git stack restack [<branch|glob>...] [\-g [<group>]] [\-\-onto <parent>] [\-l] [\-\-allow\-shared] [\-\-force]\f[R]
+.SS \f[CR]git stack restack [<branch|glob>...] [\-g [<group>]] [\-\-onto <parent>] [\-l] [\-\-prs] [\-\-allow\-shared] [\-\-force]\f[R]
 Rebase every branch in the current stack (or the ones named, see Groups)
 onto its parent, bottom\-up, except that a branch on the stack\(aqs root
 (e.g.
@@ -933,7 +933,11 @@ commit.
 other branches stacked on it, e.g.
 to address review feedback on PR 1, so the branches above it include the
 change.
-It works locally, without fetching or pushing.
+By default it uses local Git history.
+Add \f[CR]\-\-prs\f[R] to also check GitHub merge evidence for the
+selected stacks and any integration sources needed to restack them.
+This can recognize a squash merge whose changes differ from the PR.
+Restack never fetches or pushes.
 With \f[CR]\-\-onto\f[R], when a branch should be stacked somewhere
 else, e.g.
 PR 2 turns out not to need PR 1.
@@ -2077,9 +2081,9 @@ If a merged pull request\(aqs last commit was never fetched (say
 GitHub\(aqs \(dqUpdate branch\(dq made it right before the merge, and
 the branch was deleted on merge), \f[CR]sync\f[R], \f[CR]clean\f[R] and
 \f[CR]push\f[R] fetch it from the pull request.
-Until then, \f[CR]info\f[R] and \f[CR]restack\f[R], which don\(aqt
-fetch, can\(aqt tell that pull request is the branch\(aqs, and check the
-branch like the \f[CR]git\f[R] adapter does.
+Until then, \f[CR]info \-\-prs\f[R] and \f[CR]restack \-\-prs\f[R],
+which don\(aqt fetch, can\(aqt tell that pull request is the
+branch\(aqs, and check the branch like the \f[CR]git\f[R] adapter does.
 .IP \(bu 2
 \f[CR]git stack push\f[R] changes the base of the stack\(aqs open pull
 requests to match their stack parents, e.g.
@@ -2111,16 +2115,17 @@ organization\(aqs SSO, or GitHub can\(aqt be reached), \f[CR]sync\f[R],
 \f[CR]clean\f[R], \f[CR]push\f[R] and \f[CR]prs\f[R] stop before
 changing anything, since checking for merges locally could untrack a
 branch whose pull request is still open, or restack one that was merged.
-\f[CR]info \-\-prs\f[R] and \f[CR]restack\f[R] warn and check for merges
-like the \f[CR]git\f[R] adapter does.
+\f[CR]info \-\-prs\f[R] and \f[CR]restack \-\-prs\f[R] warn and check
+for merges like the \f[CR]git\f[R] adapter does.
 To run a command with the \f[CR]git\f[R] adapter just this once, use
 \f[CR]git \-c stack.adapter=git stack <command>\f[R].
 .SH WHEN DOES SYNC CONSIDER A BRANCH MERGED?
 \f[CR]sync\f[R], \f[CR]clean\f[R], \f[CR]restack\f[R], \f[CR]push\f[R],
 \f[CR]prs\f[R] and \f[CR]info\f[R] check whether a branch\(aqs changes
 landed.
-By default, \f[CR]info\f[R] uses the local checks below.
-\f[CR]info \-\-prs\f[R] uses the configured adapter, as the other
+By default, \f[CR]info\f[R] and \f[CR]restack\f[R] use the local checks
+below.
+With \f[CR]\-\-prs\f[R] they use the configured adapter, as the other
 commands do.
 .PP
 With the GitHub adapter, a branch with an open pull request whose stack

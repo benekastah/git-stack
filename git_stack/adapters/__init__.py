@@ -24,13 +24,19 @@ class Adapter(enum.Enum):
 
 
 def make_adapter(
-    core: StackCore, remote: str, fetch: bool, *, lookup_branches: Iterable[str] | None = None
+    core: StackCore,
+    remote: str,
+    fetch: bool,
+    *,
+    lookup_branches: Iterable[str] | None = None,
+    allow_local_remote: bool = False,
 ) -> GitAdapter:
     """The adapter stack.adapter asks for. If unset, GitHub's when remote is on
     github.com and gh is installed, and git's otherwise.
 
     fetch says whether the adapter may fetch from remote. It's False for
-    commands that otherwise don't fetch (info and restack).
+    commands that otherwise don't fetch (info and restack). Mixed-remote
+    restack can fall back to local evidence for non-GitHub remotes.
     """
     value = core.git.config_value(ADAPTER_SETTING)
     try:
@@ -43,6 +49,8 @@ def make_adapter(
     repo = github_repo(core.git, remote)
     if setting is Adapter.GITHUB:
         if repo is None:
+            if allow_local_remote:
+                return GitAdapter(core)
             raise StackError(f"{ADAPTER_SETTING} is github, but {remote}'s URL isn't a GitHub repository")
         if not shutil.which("gh"):
             raise StackError(f"{ADAPTER_SETTING} is github, which needs the gh CLI on your PATH")

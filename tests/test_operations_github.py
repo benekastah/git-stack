@@ -25,11 +25,11 @@ PUSH_OPENING_PRS = {1: (11, 2), 3: (20, 8), 10: (48, 15)}
 # (2 for a stack of 1).
 PUSH_WITH_PRS_OPEN = {1: (7, 2), 3: (8, 4), 10: (8, 4)}
 PRS_ALL_OPEN = {1: (3, 2), 3: (4, 4), 10: (4, 4)}
-# Nothing to do: gh is asked once, and git 9 times.
-SYNC_NOTHING = {1: (9, 1), 3: (9, 1), 10: (9, 1)}
+# Nothing to do: gh is asked once, and git 7 times.
+SYNC_NOTHING = {1: (7, 1), 3: (7, 1), 10: (7, 1)}
 # The bottom merged, as GitHub reports it (the merge commit and the head it had): the rest are
 # restacked onto main and pushed again. The fake supplies the GitHub merge evidence.
-SYNC_BOTTOM_MERGED = {1: (31, 1), 3: (66, 5), 10: (185, 6)}
+SYNC_BOTTOM_MERGED = {1: (31, 1), 3: (65, 5), 10: (184, 6)}
 # gh is asked twice, however many pull requests there are.
 IMPORT = {1: (18, 2), 3: (34, 2), 10: (90, 2)}
 # info asks GitHub about all the branches in one request.

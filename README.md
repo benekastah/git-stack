@@ -658,7 +658,7 @@ explicit `ownership owned` or `ownership shared` choice can change the default.
 Existing stacks default to owned. Ownership is local to this clone, not a
 permission or a substitute for coordinating with contributors.
 
-### `git stack restack [<branch|glob>...] [-g [<group>]] [--onto <parent>] [-l] [--allow-shared] [--force]`
+### `git stack restack [<branch|glob>...] [-g [<group>]] [--onto <parent>] [-l] [--prs] [--allow-shared] [--force]`
 
 Rebase every branch in the current stack (or the ones named, see
 [Groups](#groups)) onto its parent, bottom-up, except
@@ -667,8 +667,11 @@ with the root's latest commit.
 
 **When would I use it?** After you commit to a branch that has other branches
 stacked on it, e.g. to address review feedback on PR 1, so the branches above
-it include the change. It works locally, without fetching or pushing. With
-`--onto`, when a branch should be stacked somewhere else, e.g. PR 2 turns out
+it include the change. By default it uses local Git history. Add `--prs`
+to also check GitHub merge evidence for the selected stacks and any
+integration sources needed to restack them. This can recognize a squash
+merge whose changes differ from the PR. Restack never fetches or pushes.
+With `--onto`, when a branch should be stacked somewhere else, e.g. PR 2 turns out
 not to need PR 1. With `--latest`, when you want the stack on
 the latest `main` anyway, e.g. because the repository requires pull requests
 to be up to date before they're merged.
@@ -1459,8 +1462,8 @@ With the GitHub adapter:
   If a merged pull request's last commit was never fetched (say GitHub's
   "Update branch" made it right before the merge, and the branch was deleted
   on merge), `sync`, `clean` and `push` fetch it from the pull request. Until
-  then, `info` and `restack`, which don't fetch, can't tell that pull request
-  is the branch's, and check the branch like the `git` adapter does.
+  then, `info --prs` and `restack --prs`, which don't fetch, can't tell that
+  pull request is the branch's, and check the branch like the `git` adapter does.
 - `git stack push` changes the base of the stack's open pull requests to match
   their stack parents, e.g. to `main` once the parent PR was merged. It does
   that before pushing, so a pull request is never compared with its old base
@@ -1482,15 +1485,15 @@ With the GitHub adapter:
   isn't authorized for your organization's SSO, or GitHub can't be reached),
   `sync`, `clean`, `push` and `prs` stop before changing anything, since
   checking for merges locally could untrack a branch whose pull request is
-  still open, or restack one that was merged. `info --prs` and `restack` warn
-  and check for merges like the `git` adapter does. To run a command with the `git` adapter just
-  this once, use `git -c stack.adapter=git stack <command>`.
+  still open, or restack one that was merged. `info --prs` and `restack --prs`
+  warn and check for merges like the `git` adapter does. To run a command with
+  the `git` adapter just this once, use `git -c stack.adapter=git stack <command>`.
 
 ## When does `sync` consider a branch merged?
 
 `sync`, `clean`, `restack`, `push`, `prs` and `info` check whether a branch's
-changes landed. By default, `info` uses the local checks below. `info --prs`
-uses the configured adapter, as the other commands do.
+changes landed. By default, `info` and `restack` use the local checks below.
+With `--prs` they use the configured adapter, as the other commands do.
 
 With the [GitHub adapter](#github), a branch with an open pull request whose
 stack parent corresponds to the remote's default branch still counts as

@@ -17,6 +17,7 @@ class Args(argparse.Namespace):
     groups: list[str]
     onto: str | None
     latest: bool
+    prs: bool
     force: bool
     allow_shared: bool
 
@@ -34,6 +35,7 @@ def register(subparsers: Subparsers) -> None:
         help="first change the parent of the one branch named (default: the current branch) to ONTO",
     )
     p.add_argument("--force", action="store_true", help="replace the tip of an explicitly named integration root")
+    p.add_argument("--prs", action="store_true", help="also check GitHub pull requests for merge evidence")
     add_latest_argument(p)
     add_allow_shared_argument(p)
     p.set_defaults(run=run, show=show)
@@ -52,6 +54,7 @@ def run(stack: StackClient, args: Args) -> Restacked:
         latest=args.latest,
         allow_shared=args.allow_shared,
         force=args.force,
+        prs=args.prs,
     )
     return Restacked()
 

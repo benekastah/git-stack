@@ -65,16 +65,16 @@ rebase.
 ## Commands start processes for every branch, many of them one at a time
 
 The operation tests exercise stacks of 1, 3 and 10 branches. On the largest,
-an up-to-date `restack` starts 14 Git processes, `untrack` starts 32, and replaying
-the branches above a change takes 102. The replay and metadata writes still run
+an up-to-date `restack` starts 13 Git processes, `untrack` starts 32, and replaying
+the branches above a change takes 101. The replay and metadata writes still run
 one branch at a time.
 
 ## Syncing, importing and opening pull requests start many processes for a long stack
 
 On a 10-branch stack, opening PRs takes 48 Git processes and 15 `gh` calls.
-Syncing after the bottom PR merges takes 185 Git processes and up to six
+Syncing after the bottom PR merges takes 184 Git processes and up to six
 `gh` calls. Importing 10 PRs takes 90 Git processes and two `gh` calls.
-With no work to do, `sync` takes nine Git processes and one `gh` call at
+With no work to do, `sync` takes seven Git processes and one `gh` call at
 all three tested stack sizes.
 
 ## `sync` and `push` run different processes on Windows than on Linux and macOS

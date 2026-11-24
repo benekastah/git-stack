@@ -212,9 +212,10 @@ def test_restack_keeps_work_remote_when_source_tracks_another_remote(
     repo.git("config", "branch.work.merge", "refs/heads/work")
     repo.git("config", "stack.adapter", "github")
 
-    repo.stack("restack", "combined")
+    gh.clear_calls()
+    repo.stack("restack", "combined", "--prs")
 
-    assert any("owner=example" in call for call in gh.calls("api", "graphql"))
+    assert any("owner=example" in call and "b0=work" in call for call in gh.calls("api", "graphql"))
 
 
 def test_group_integration_uses_the_remote_default_and_tracks_group_rename(repo: Repo, client: StackClient) -> None:
@@ -2068,7 +2069,7 @@ def test_unchanged_integration_reuses_batched_evidence(repo: Repo, gh: FakeGitHu
     first = [c for c in gh.load()["calls"] if any("states: MERGED" in arg for arg in c)]
     gh.clear_calls()
 
-    repo.stack("restack", "combined")
+    repo.stack("restack", "combined", "--prs")
 
     assert len(first) == 1
     assert not any("states: MERGED" in arg for call in gh.load()["calls"] for arg in call)
@@ -2152,7 +2153,11 @@ def test_negative_evidence_expires_with_unchanged_root_and_source(
     )
     monkeypatch.setattr(integration_module, "EVIDENCE_RECHECK_SECONDS", 0)
 
+    gh.clear_calls()
     repo.stack("restack", "combined")
+    assert gh.calls() == []
+
+    repo.stack("restack", "combined", "--prs")
 
     assert repo.git("rev-parse", "refs/heads/combined^1") == tip(repo, "main")
 

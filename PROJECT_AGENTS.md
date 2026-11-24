@@ -52,6 +52,9 @@ lands on `main` so each merged build has a distinct version in performance logs.
   The refresh commands order selected source stacks before the integration builds, then
   use the ordinary single-parent rebase path for the work above each integration.
   Local restack adds each integration's tracked sources and their ancestors to its selection.
+  Restack consults GitHub merge evidence only with `--prs`. The initial PR lookup
+  for restack, pull and sync is scoped to their selected work. Live push protection
+  also checks PRs that target a ref being changed.
 - Each command is a module in `git_stack/commands/` with `register`, `run` and
   `show`: `run` does the command and returns a dataclass result, and `show`
   prints it as text. With `--json`, the CLI prints the result as JSON instead

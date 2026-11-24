@@ -59,6 +59,18 @@ def test_sync_reads_each_branchs_unpulled_commits_once(
     assert [call[:2] for call in git_calls].count(["rev-list", "--parents"]) == expected_checks
 
 
+def test_sync_reuses_ref_snapshot_for_unchanged_trunk(
+    repo: Repo, client: StackClient, git_calls: list[GitCall]
+) -> None:
+    repo.make_stack()
+    client.push()
+    git_calls.clear()
+
+    client.sync()
+
+    assert not any("main@{upstream}" in call and call[0] == "rev-parse" for call in git_calls)
+
+
 def test_pull_updates_local_branch_without_pushing(repo: Repo, client: StackClient) -> None:
     client.branch("pr1")
     repo.commit("a", "initial\n", "initial")
@@ -140,7 +152,7 @@ def test_changing_upstream_does_not_reuse_the_previous_upstream_tip(repo: Repo, 
     assert repo.git("show", "local-feature:b") == "remote"
 
 
-def test_sync_pushes_to_a_differently_named_upstream(repo: Repo, client: StackClient) -> None:
+def test_sync_pushes_to_a_differently_named_upstream(repo: Repo, client: StackClient, git_calls: list[GitCall]) -> None:
     client.branch("local-feature")
     repo.commit("a", "local\n", "local")
     repo.git("switch", "--quiet", "-c", "remote-feature", "origin/main", cwd=repo.forge)
@@ -151,8 +163,11 @@ def test_sync_pushes_to_a_differently_named_upstream(repo: Repo, client: StackCl
     repo.git("branch", "--set-upstream-to=origin/remote-feature", "local-feature")
     main = repo.git("rev-parse", "main", cwd=repo.origin)
 
+    git_calls.clear()
     client.sync(rewritten_upstream=True)
 
+    (push,) = [call for call in git_calls if call[0] == "push"]
+    assert "--set-upstream" not in push
     assert repo.git("show", "remote-feature:a", cwd=repo.origin) == "local"
     assert repo.git("show", "remote-feature:b", cwd=repo.origin) == "remote"
     assert repo.git("rev-parse", "main", cwd=repo.origin) == main

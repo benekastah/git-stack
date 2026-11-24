@@ -758,6 +758,16 @@ class GitClient:
             self.config_get(branch, "remote") == remote and self.config_get(branch, "merge") == f"refs/heads/{branch}"
         )
 
+    def upstream_is_at_tip(self, branch: str) -> bool:
+        """Whether the ref snapshot proves that the branch and its upstream match."""
+        self.branch_config()
+        refs = self._snapshot_refs()
+        if refs is None or self._refs_config != self._config:
+            return False
+        local = refs.get(f"refs/heads/{branch}")
+        upstream = refs.get(local.upstream) if local is not None else None
+        return upstream is not None and local is not None and upstream.object == local.object
+
     def has_branch_upstream(self, branch: str, remote: str) -> bool:
         """Whether branch's upstream is a branch on remote that git resolves to
         its remote-tracking branch, rather than config that only names remote

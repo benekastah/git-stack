@@ -17,7 +17,9 @@ local rewrites, including with `--latest`, and follow the open-PR checks in
   ancestors. Check those dependencies for shared work and queued PRs.
 - A branch directly on an ordinary root moves if it conflicts with that
   root. Use `git stack restack --latest` to move it onto the latest local
-  root either way. Use `git-stack-pull` when you also need to fetch.
+  root either way. Use `git stack restack --prs` if you need GitHub merge
+  evidence, such as for a squash merge with edits. Use `git-stack-pull` when
+  you also need to fetch.
 - Use `git stack restack <branch> --onto <parent>` to move one branch and its
   descendants only after the user approves the rearrangement. Follow
   `git-stack-rearrange` to check affected PRs before moving them.

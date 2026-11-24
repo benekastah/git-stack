@@ -439,6 +439,7 @@ class Integrations:
         remote: str,
         fetch: bool,
         *,
+        prs: bool = True,
         previous: Integration | None = None,
         group: str | None = None,
     ) -> tuple[Integration, dict[str, str | None]]:
@@ -473,7 +474,7 @@ class Integrations:
             else:
                 unresolved.append(current)
             inputs.append(current)
-        self.look_up_landings(unresolved, remote, root_tip, fetch)
+        self.look_up_landings(unresolved, remote, root_tip, fetch, prs=prs)
         for current in inputs:
             if observed[current["name"]] is None and not current["landing"]:
                 raise StackError(
@@ -518,8 +519,8 @@ class Integrations:
             and all(old[key] == source[key] for key in ("tip", "remote", "head"))
         )
 
-    def look_up_landings(self, sources: list[Source], remote: str, root_tip: str, fetch: bool) -> None:
-        if not sources:
+    def look_up_landings(self, sources: list[Source], remote: str, root_tip: str, fetch: bool, *, prs: bool) -> None:
+        if not (prs and sources):
             return
         self.check_landings(sources, remote, root_tip, fetch)
         # A source can also have landed via a PR in another GitHub repository
