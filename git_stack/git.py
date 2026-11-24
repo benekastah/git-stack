@@ -1004,7 +1004,7 @@ class GitClient:
             return self._combine_defaults(default, map(self._default_at_resolved_url, distinct))
         # The transports can wait independently. Keep fetch errors first and
         # join every probe before releasing the ref snapshot or publishing.
-        with self.isolate_parallel_launches(), ThreadPoolExecutor(max_workers=min(4, len(distinct))) as pool:
+        with ThreadPoolExecutor(max_workers=min(4, len(distinct))) as pool:
             probes = [pool.submit(self._default_at_resolved_url, url) for url in distinct]
             default = self.remote_default_branch(remote, known=known)
             return self._combine_defaults(default, (probe.result() for probe in probes))
