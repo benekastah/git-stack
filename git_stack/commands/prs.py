@@ -6,7 +6,6 @@ from git_stack.commands import (
     add_stack_arguments,
     named_stacks,
     pr_protection,
-    rebuild_confirmation,
 )
 from git_stack.commands.info import print_tree
 from git_stack.stack import BranchInfo, PrsResult, PullRequestAction, PullRequestStep, StackClient
@@ -46,7 +45,7 @@ def run(stack: StackClient, args: Args) -> PrsResult:
         remote=args.remote,
         dry_run=args.dry_run,
         rebuild_stack=args.rebuild_stack,
-        confirm_orphan_closures=rebuild_confirmation(args.rebuild_stack),
+        close_orphaned_prs=args.rebuild_stack,
         **pr_protection(args, separate_force=True),
     )
 

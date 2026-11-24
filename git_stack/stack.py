@@ -18,7 +18,6 @@ from git_stack.adapters import (
 )
 from git_stack.adapters.git import GitAdapter, PullRequestLink
 from git_stack.adapters.github import (
-    ConfirmOrphanClosures,
     GitHubAdapter,
     GitHubState,
     OpenPullRequest,
@@ -1299,11 +1298,9 @@ class StackClient(StackCore):
         return protection
 
     @staticmethod
-    def configure_orphan_closures(
-        adapter: GitAdapter, confirm: ConfirmOrphanClosures | None, rebuild_stack: bool
-    ) -> None:
+    def configure_orphan_closures(adapter: GitAdapter, close_orphaned_prs: bool, rebuild_stack: bool) -> None:
         if rebuild_stack and isinstance(adapter, GitHubAdapter):
-            adapter.confirm_orphan_closures = confirm
+            adapter.close_orphaned_prs = close_orphaned_prs
 
     def skip_merged(
         self,
@@ -2015,7 +2012,7 @@ class StackClient(StackCore):
         rebuild_stack: bool = False,
         no_verify: bool = False,
         protection: PRProtection = DEFAULT_PR_PROTECTION,
-        confirm_orphan_closures: ConfirmOrphanClosures | None = None,
+        close_orphaned_prs: bool = False,
     ) -> SyncResult:
         """Fetch, untrack the merged branches in the current stack, or in the
         stacks of the branches that branches and groups name (see named), deleting what
@@ -2071,7 +2068,7 @@ class StackClient(StackCore):
         root_remotes = self.upstream_remotes(roots_to_update)
         push_remote = remote if only_remote else self.stack_remote(upstream_remotes, root_remotes)
         adapter = self.checked_adapter(push_remote, lookup_branches=stack)
-        self.configure_orphan_closures(adapter, confirm_orphan_closures, rebuild_stack)
+        self.configure_orphan_closures(adapter, close_orphaned_prs, rebuild_stack)
         protection = self.configure_pr_protection(adapter, protection, force)
         known_default = (
             adapter.default_branch_for_push() if push and not force and isinstance(adapter, GitHubAdapter) else None
@@ -2770,7 +2767,7 @@ class StackClient(StackCore):
         only_remote: bool = False,
         no_verify: bool = False,
         protection: PRProtection = DEFAULT_PR_PROTECTION,
-        confirm_orphan_closures: ConfirmOrphanClosures | None = None,
+        close_orphaned_prs: bool = False,
     ) -> PushResult:
         """Force-push (with lease) every unmerged branch in the current stack, or
         in the stacks of the branches that branches and groups name (see named), then let
@@ -2824,7 +2821,7 @@ class StackClient(StackCore):
             stack, {root: config for root in sorted(roots) if (config := integrations.read(root)) is not None}
         )
         adapter = self.checked_push_adapter(push_remote, lookup_branches, selection, roots, force)
-        self.configure_orphan_closures(adapter, confirm_orphan_closures, rebuild_stack)
+        self.configure_orphan_closures(adapter, close_orphaned_prs, rebuild_stack)
         protection = self.configure_pr_protection(adapter, protection, force)
         github = adapter if prs and isinstance(adapter, GitHubAdapter) else None
         branches, integration_pushes = self.prepare_push(selection, stacks, adapter, push_remote, force)
@@ -3164,12 +3161,10 @@ class StackClient(StackCore):
         try:
             retarget = adapter.prepare_push_retargets(branches, stacks, rebuild_stack, scope, opening)
             # A blocked rebuild can stop before querying the live protections
-            # on refs it won't change. Check them before prompting or writing.
+            # on refs it won't change. Check them before writing.
             self.protect_push(leases, refspecs, remote, adapter, protection, push_urls)
             if opening and isinstance(adapter, GitHubAdapter):
                 self.protect_pr_opening(branches, stacks, adapter)
-            if retarget is not None:
-                retarget.confirm()
         except StackError as e:
             raise update_error(e) from e
         if retarget is None and len(push_urls) <= 1:
@@ -3185,7 +3180,7 @@ class StackClient(StackCore):
             )
         try:
             if retarget is not None:
-                retarget.apply(lambda: self.protect_push(leases, refspecs, remote, adapter, protection, push_urls))
+                retarget(lambda: self.protect_push(leases, refspecs, remote, adapter, protection, push_urls))
         except StackError as e:
             raise update_error(e) from e
 
@@ -3351,7 +3346,7 @@ class StackClient(StackCore):
         dry_run: bool = False,
         rebuild_stack: bool = False,
         protection: PRProtection = DEFAULT_PR_PROTECTION,
-        confirm_orphan_closures: ConfirmOrphanClosures | None = None,
+        close_orphaned_prs: bool = False,
     ) -> PrsResult:
         """Open a draft pull request into its stack parent for each unmerged
         branch in the current stack (or in the stacks of the branches that
@@ -3375,7 +3370,7 @@ class StackClient(StackCore):
         remote = remote or self.default_remote(stack, stacks)
         adapter = ensure_github(make_adapter(self, remote, fetch=True), remote)
         adapter.ensure_available()
-        self.configure_orphan_closures(adapter, confirm_orphan_closures, rebuild_stack)
+        self.configure_orphan_closures(adapter, close_orphaned_prs, rebuild_stack)
         adapter.protection = protection
         branches = self.skip_merged(stack, stacks, adapter)
         self.ensure_published_pr_roots({stacks.root(b) for b in branches}, remote)

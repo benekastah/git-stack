@@ -372,7 +372,7 @@ class GitHubStackUnstacked:
 
 @dataclass(frozen=True)
 class OrphanedPullRequestClosure:
-    """A blocking draft was closed or would be closed after confirmation."""
+    """A blocking draft was closed or would be closed during a rebuild."""
 
     event_type: ClassVar[str] = "orphaned-pull-request-closure"
     number: int

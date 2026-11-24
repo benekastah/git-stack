@@ -1317,6 +1317,8 @@ how to undo it.
 \f[CR]\-\-prs\f[R] (or \f[CR]\-\-pr\f[R]) then does what
 \f[CR]git stack prs\f[R] does for the stacks it pushed, so it\(aqs
 \f[CR]git stack push\f[R] and \f[CR]git stack prs\f[R] in one.
+\f[CR]\-\-pr\-rebuild\f[R] implies \f[CR]\-\-prs\f[R] on
+\f[CR]push\f[R], including opening missing draft PRs.
 Without the GitHub adapter, it still pushes and shows the stacks, but
 then fails, saying it didn\(aqt open or update any pull requests.
 .SS \f[CR]git stack group add <name> [<branch|glob>...] [\-g [<group>]] [\-\-move]\f[R]
@@ -1448,21 +1450,17 @@ from the same repository, without approval, a merge queue entry, or open
 PRs targeting its head.
 If you omit \f[CR]\-\-pr\-rebuild\f[R], Git\-stack reports what the
 rebuild would change in a list, with one link per eligible draft.
-With \f[CR]\-\-pr\-rebuild\f[R], Git\-stack shows the PR links, heads
-and bases and waits for you to enter all the listed PR numbers in an
-interactive terminal.
-It verifies eligibility before closing each draft.
-The closures keep the branches.
+Passing \f[CR]\-\-pr\-rebuild\f[R] authorizes closing eligible drafts
+without a prompt.
+Git\-stack rechecks eligibility before each closure and keeps the
+branches.
 Use \f[CR]git stack prs \-\-dry\-run \-\-pr\-rebuild\f[R] to preview
 changes to existing PRs.
-Rebuilds that require opening new PRs can discover blockers after the
-new PRs open.
-Those PRs stay open if you decline the closure.
-During \f[CR]push \-\-prs\f[R], a rebuild that only changes stack links
-may happen after the branches are pushed.
+A rebuild can discover blockers after opening new PRs or, during
+\f[CR]push \-\-pr\-rebuild\f[R], after publishing branches.
 .PP
 Run \f[CR]prs\f[R] to link them again, or use
-\f[CR]push \-\-prs \-\-pr\-rebuild\f[R] to do both together.
+\f[CR]push \-\-pr\-rebuild\f[R] to do both together.
 Only a stack that\(aqs a chain is linked again: one that branches out is
 left unlinked, with description sections, since nothing says yet which
 path through it to link.
@@ -1483,7 +1481,7 @@ doesn\(aqt match (for a stack that\(aqs a chain; one that branches out
 is only unstacked).
 Merged pull requests remain in the old stack.
 An open pull request outside the selected stack blocks unstacking unless
-you confirm closing it with \f[CR]\-\-pr\-rebuild\f[R].
+it qualifies for closure under \f[CR]\-\-pr\-rebuild\f[R].
 A closed PR outside the selection is taken out of the stack with the
 rest, and isn\(aqt linked again unless it\(aqs reopened and a later
 \f[CR]prs\f[R] links it with its stack.

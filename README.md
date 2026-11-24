@@ -942,8 +942,9 @@ git stack push --prs            # then open pull requests, as `git stack prs` do
 - `--prs` (or `--pr`) then does what
   [`git stack prs`](#git-stack-prs-branchglob--g-group---remote-name--n---pr-rebuild) does
   for the stacks it pushed, so it's `git stack push` and `git stack prs` in
-  one. Without the GitHub adapter, it still pushes and shows the stacks, but
-  then fails, saying it didn't open or update any pull requests.
+  one. `--pr-rebuild` implies `--prs` on `push`, including opening missing
+  draft PRs. Without the GitHub adapter, it still pushes and shows the stacks,
+  but then fails, saying it didn't open or update any pull requests.
 
 ### `git stack group add <name> [<branch|glob>...] [-g [<group>]] [--move]`
 
@@ -1046,17 +1047,14 @@ git stack prs
   the same repository, without approval, a merge queue entry, or open PRs
   targeting its head. If you omit `--pr-rebuild`, Git-stack reports what
   the rebuild would change in a list, with one link per eligible draft.
-  With `--pr-rebuild`, Git-stack shows the PR links, heads and bases and
-  waits for you to enter all the listed PR numbers in an interactive
-  terminal. It verifies eligibility before closing each draft. The closures
-  keep the branches. Use `git stack prs --dry-run --pr-rebuild` to preview
-  changes to existing PRs. Rebuilds that require opening new PRs can discover
-  blockers after the new PRs open. Those PRs stay open if you decline the
-  closure. During `push --prs`, a rebuild that only
-  changes stack links may happen after the branches are pushed.
+  Passing `--pr-rebuild` authorizes closing eligible drafts without a
+  prompt. Git-stack rechecks eligibility before each closure and keeps the
+  branches. Use `git stack prs --dry-run --pr-rebuild` to preview changes
+  to existing PRs. A rebuild can discover blockers after opening new PRs
+  or, during `push --pr-rebuild`, after publishing branches.
 
-  Run `prs` to
-  link them again, or use `push --prs --pr-rebuild` to do both together.
+  Run `prs` to link them again, or use `push --pr-rebuild` to do both
+  together.
   Only a stack that's a chain is linked again: one that branches out is left
   unlinked, with description sections, since nothing says yet which path
   through it to link.
@@ -1071,7 +1069,7 @@ git stack prs
   GitHub and create a new stack when the existing stack doesn't match (for a
   stack that's a chain; one that branches out is only unstacked). Merged
   pull requests remain in the old stack. An open pull request outside the
-  selected stack blocks unstacking unless you confirm closing it with
+  selected stack blocks unstacking unless it qualifies for closure under
   `--pr-rebuild`. A closed PR outside the selection is taken out of
   the stack with the rest, and isn't linked again unless
   it's reopened and a later `prs` links it with its stack. If creating the

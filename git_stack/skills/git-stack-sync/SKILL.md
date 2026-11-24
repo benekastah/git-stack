@@ -25,7 +25,7 @@ rules in `git-stack`.
   `--remote <name>` if the selected branches track different remotes.
 - If sync requires a remote PR stack rebuild, show the user the reported
   changes and get approval before retrying with `--pr-rebuild`. Follow
-  `git-stack` for any draft closure prompts.
+  `git-stack` for approval to close any listed drafts.
 - A branch directly on an ordinary root moves when it conflicts with the
   updated root. Use `git stack sync --protect-prs --latest` when the user wants it rebased
   even if it applies cleanly. This can rewrite an already approved PR.

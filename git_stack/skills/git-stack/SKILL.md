@@ -81,7 +81,8 @@ that already happened before deciding whether to retry.
   approves rebuilding the remote PR stack. Review the diagnostic or run
   `git stack prs --protect-prs --dry-run --pr-rebuild` to preview changes
   involving existing PRs. Show the user any draft PRs listed for closure and
-  leave interactive confirmation to them.
+  get approval to close them before running the rebuild. The flag authorizes
+  eligible draft closures without a prompt.
 
 Use `--protect-prs` for every `push`, `sync`, and `prs`, and for
 `git stack clean` with `-d remote` or `-d both`. If protection stops a change, tell the user

@@ -202,6 +202,18 @@ def test_default_first_push_launches_no_gh(repo: Repo, gh: FakeGitHub) -> None:
     assert gh.calls() == []
 
 
+def test_push_rebuild_opens_missing_prs(repo: Repo, gh: FakeGitHub) -> None:
+    repo.make_stack()
+
+    repo.stack("push", "--pr-rebuild")
+
+    assert [(pr["headRefName"], pr["baseRefName"], pr["isDraft"]) for pr in gh.load()["prs"]] == [
+        ("pr1", "main", True),
+        ("pr2", "pr1", True),
+        ("pr3", "pr2", True),
+    ]
+
+
 def test_local_pull_can_retire_merged_group_integration_source(repo: Repo, gh: FakeGitHub) -> None:
     repo.client.branch("one", group="topic")
     repo.commit("a", "one\n", "one")

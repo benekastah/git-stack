@@ -12,7 +12,6 @@ import pytest
 from git_stack import events
 from git_stack.adapters.git import PullRequestLink, PullRequestState
 from git_stack.cli import main
-from git_stack.commands import confirm_orphaned_prs
 from git_stack.core import CURRENT_GROUP, Delete
 from git_stack.errors import StackError
 from git_stack.git import GIT_VARIABLE, GitClient
@@ -225,7 +224,7 @@ def stack(autospec_stack: Any) -> Any:
             ([], []),
             {"remote": "origin", "delete": None, "latest": False, "push": True, "ignore_reverts": []},
         ),
-        (["push", "--pr-rebuild"], "push", ([], []), {"remote": "origin", "force": False, "prs": False}),
+        (["push", "--pr-rebuild"], "push", ([], []), {"remote": "origin", "force": False, "prs": True}),
         (["push", "--allow-shared"], "push", ([], []), {"remote": "origin", "force": False, "prs": False}),
         (["push", "--prs"], "push", ([], []), {"remote": "origin", "force": False, "prs": True}),
         (["push", "--pr"], "push", ([], []), {"remote": "origin", "force": False, "prs": True}),
@@ -273,7 +272,7 @@ def test_command_calls_its_client_method(
         kwargs = {**kwargs, "no_verify": "--no-verify" in argv}
     rebuild = "--pr-rebuild" in argv
     if argv[0] in ("sync", "push", "prs", "pr"):
-        kwargs = {**kwargs, "confirm_orphan_closures": confirm_orphaned_prs if rebuild else None}
+        kwargs = {**kwargs, "close_orphaned_prs": rebuild}
     if method in ("sync", "push"):
         kwargs = {**kwargs, "rebuild_stack": rebuild}
         if argv[0] != "pull":

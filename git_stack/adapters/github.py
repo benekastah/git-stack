@@ -15,7 +15,7 @@ from dataclasses import dataclass, replace
 from typing import Self
 
 from git_stack import events, stack_section
-from git_stack.adapters.git import GitAdapter, PullRequestLink, PullRequestState, PushRetargets
+from git_stack.adapters.git import ApplyPushRetargets, GitAdapter, PullRequestLink, PullRequestState
 from git_stack.adapters.merge_state import MergeState
 from git_stack.core import BASE_KEY, StackCore
 from git_stack.errors import StackError
@@ -178,7 +178,7 @@ class GitHubStack:
 
 @dataclass(frozen=True)
 class OrphanedPullRequest:
-    """The identity and refs shown before confirming a draft closure."""
+    """The identity and refs of a draft eligible for closure."""
 
     number: int
     stack: GitHubStack
@@ -186,13 +186,6 @@ class OrphanedPullRequest:
     head: str
     base: str
     head_oid: str
-
-    @property
-    def description(self) -> str:
-        return f"#{self.number} {self.url} ({self.head} → {self.base})"
-
-
-type ConfirmOrphanClosures = Callable[[list[OrphanedPullRequest]], bool]
 
 
 @dataclass(frozen=True)
@@ -304,7 +297,7 @@ class GitHubAdapter(GitAdapter):
         self._default_branch: str | None = None
         self._viewer: str | None = None
         self.protection = PRProtection()
-        self.confirm_orphan_closures: ConfirmOrphanClosures | None = None
+        self.close_orphaned_prs = False
 
     def gh(self, *args: str, input: str | None = None, partial_errors: list[str] | None = None) -> str:
         # As bytes, so Windows doesn't turn the \n in input (e.g. a pull
@@ -1042,7 +1035,7 @@ class GitHubAdapter(GitAdapter):
         rebuild_stack: bool = False,
         scope: list[str] | None = None,
         opening: bool = False,
-    ) -> PushRetargets | None:
+    ) -> ApplyPushRetargets | None:
         """Validate PR changes and return a callback to retarget open PRs
         whose new bases are already on the remote.
 
@@ -1079,22 +1072,17 @@ class GitHubAdapter(GitAdapter):
         closures = self.validate_deferred_retargets(pending, rebuild_stack, allowed) if pending else []
         self.protect_retargets(to_push, stacks)
 
-        def confirm() -> None:
-            self.confirm_orphans(closures)
-
         def retarget(protect_refs: Callable[[], None]) -> None:
             check_refs = protect_refs if closures else lambda: None
             check_refs()
-            self.close_orphans(
-                closures, confirmed=True, edits=self.retarget_edits(to_push, stacks) if closures else None
-            )
+            self.close_orphans(closures, edits=self.retarget_edits(to_push, stacks) if closures else None)
             for branch, parent in ready:
-                # A new prompt here would run after the push lease check.
-                self.retarget(branch, parent, rebuild_stack, allowed, allow_closure_prompt=False)
+                # Only close drafts found in preflight, before the push lease check.
+                self.retarget(branch, parent, rebuild_stack, allowed, allow_new_closures=False)
 
             check_refs()
 
-        return PushRetargets(confirm, retarget) if ready or closures else None
+        return retarget if ready or closures else None
 
     def validate_deferred_retargets(
         self, pending: dict[int, str], rebuild_stack: bool, allowed: set[int]
@@ -1139,7 +1127,7 @@ class GitHubAdapter(GitAdapter):
         }
         for b in pushed:
             if b in prs:
-                self.retarget(b, stacks.parent(b), rebuild_stack, allowed, allow_closure_prompt=False)
+                self.retarget(b, stacks.parent(b), rebuild_stack, allowed, allow_new_closures=False)
         without = tuple(b for b in pushed if b not in prs)
         if without and not opening:
             self.core.emit(events.NoPullRequests(without))
@@ -1151,7 +1139,7 @@ class GitHubAdapter(GitAdapter):
         rebuild_stack: bool = False,
         allowed: set[int] | None = None,
         *,
-        allow_closure_prompt: bool = True,
+        allow_new_closures: bool = True,
     ) -> None:
         """Point branch's pull request at base, if it's open and isn't already."""
         prs = self.pull_requests()
@@ -1184,7 +1172,7 @@ class GitHubAdapter(GitAdapter):
                         [f"Retarget #{pr.number} to {base}"],
                     )
                 ) from e
-            self.unstack(pr.number, allowed or set(), new_base=base, allow_closure_prompt=allow_closure_prompt)
+            self.unstack(pr.number, allowed or set(), new_base=base, allow_new_closures=allow_new_closures)
             self.gh(*edit)
         self.changes.append(
             f"#{pr.number}'s base was changed from {pr.base} to {base} "
@@ -1217,9 +1205,7 @@ class GitHubAdapter(GitAdapter):
             problems = "\n".join(refusals)
             eligible = f"\n\nEligible drafts\n{draft_list}" if candidates else ""
             return f"Rebuild blocked. No drafts will close.\n{problems}{eligible}\n\n{steps}"
-        return (
-            f"Retry with --pr-rebuild.\n\nDrafts to close after confirmation (keep branches)\n{draft_list}\n\n{steps}"
-        )
+        return f"Retry with --pr-rebuild.\n\nDrafts to close (keep branches)\n{draft_list}\n\n{steps}"
 
     def plan_orphan_closures(self, stacks: Iterable[GitHubStack], allowed: set[int]) -> list[OrphanedPullRequest]:
         blockers = self.orphan_blockers(stacks, allowed)
@@ -1228,7 +1214,7 @@ class GitHubAdapter(GitAdapter):
         message = "can't rebuild GitHub stacks containing other open pull requests: " + ", ".join(
             f"#{n}" for n in sorted(blockers)
         )
-        if self.confirm_orphan_closures is None:
+        if not self.close_orphaned_prs:
             raise StackError(message)
         try:
             return self.orphan_details(blockers)
@@ -1256,7 +1242,7 @@ class GitHubAdapter(GitAdapter):
         )
         prs = self.pr_selections(sorted(blockers), fields)
         heads = {expected.number: expected.head} if expected is not None else {}
-        # A post-confirmation check already knows the head. Check its live
+        # A final closure check already knows the head. Check its live
         # details, viewer and dependents in one request immediately before closing.
         query = self.repository_query(f"{prs} {self.dependent_selections(heads)}", heads, viewer=True)
         repo = field(query, "repository", dict)
@@ -1331,18 +1317,11 @@ class GitHubAdapter(GitAdapter):
             f"d{n}: pullRequests(baseRefName: $base{n}, states: OPEN, first: 1) {{ nodes {{ number }} }}" for n in heads
         )
 
-    def confirm_orphans(self, candidates: list[OrphanedPullRequest]) -> None:
-        if candidates:
-            assert self.confirm_orphan_closures is not None
-            if not self.confirm_orphan_closures(candidates):
-                raise StackError("rebuilding stopped because closing the blocking drafts wasn't confirmed")
-
     def close_orphans(
         self,
         candidates: list[OrphanedPullRequest],
         *,
         dry_run: bool = False,
-        confirmed: bool = False,
         edits: dict[int, str | None] | None = None,
     ) -> None:
         if not candidates:
@@ -1351,10 +1330,8 @@ class GitHubAdapter(GitAdapter):
             for pr in candidates:
                 self.core.emit(events.OrphanedPullRequestClosure(pr.number, pr.url, pr.head, pr.base, closed=False))
             return
-        if not confirmed:
-            self.confirm_orphans(candidates)
         if self.orphan_details({pr.number: pr.stack for pr in candidates}) != candidates:
-            raise StackError("a blocking pull request changed during confirmation; retry the command")
+            raise StackError("a blocking pull request changed before closure; retry the command")
         closing = {pr.number for pr in candidates}
         affected = dict.fromkeys(
             n for pr in candidates for n, state in pr.stack.entries if state is GitHubState.OPEN and n not in closing
@@ -1379,7 +1356,7 @@ class GitHubAdapter(GitAdapter):
         *,
         new_base: str | None = None,
         after_closures: bool = False,
-        allow_closure_prompt: bool = True,
+        allow_new_closures: bool = True,
     ) -> None:
         """Take the unmerged pull requests of pull request number's stack on
         GitHub out of it. Merged ones stay in it. Closed ones outside allowed are
@@ -1391,7 +1368,7 @@ class GitHubAdapter(GitAdapter):
                 return
             raise StackError(f"GitHub no longer reports #{number} in a stack; retry the command")
         github_stack = GitHubStack.from_json(stack_field)
-        if (after_closures or not allow_closure_prompt) and self.orphan_blockers([github_stack], allowed):
+        if (after_closures or not allow_new_closures) and self.orphan_blockers([github_stack], allowed):
             raise StackError("the GitHub stack gained other open pull requests; retry the command")
         closures = self.plan_orphan_closures([github_stack], allowed)
         if closures:

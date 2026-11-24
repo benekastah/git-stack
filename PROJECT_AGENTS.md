@@ -12,6 +12,12 @@ Bump the patch component relative to the current version on `main` unless the
 change warrants a minor or major bump. Include the bump in the commit that
 lands on `main` so each merged build has a distinct version in performance logs.
 
+## Command interaction
+
+Commands must run without interactive user input. Do not prompt or read
+stdin for user input. Use explicit arguments to authorize changes and
+offer a preview or actionable diagnostic when a user needs to inspect them.
+
 ## GitHub access
 
 The CLI starts `gh` only when an option explicitly enables GitHub access,
@@ -35,10 +41,10 @@ writes still check live PR state.
   updates independently. PR body updates use
   bounded GraphQL batches and send the body data on stdin. Run the dry push
   before applying those edits so stale leases leave the PR bases alone.
-  Close blocking drafts only with explicit interactive confirmation and a
-  fresh check of authorship, stack membership, PR protection and open dependents.
+  Close blocking drafts only with explicit authorization from `--pr-rebuild`
+  and a fresh check of authorship, stack membership, PR protection and open dependents.
   Batch the orphan checks and do read-only rebuild preflight before the live
-  push protection checks. Keep live protection ahead of confirmation and writes.
+  push protection checks. Keep live protection ahead of writes.
   Push scopes PR discovery to the selection, including group members needed
   for full PR descriptions. For an integration push, run the status check
   alongside initial GitHub discovery and join before preparing the push.

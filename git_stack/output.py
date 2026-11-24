@@ -149,9 +149,7 @@ def message(event: events.Event) -> str:  # noqa: C901
             return f"unstacked stack {event.stack} on GitHub (including #{event.number})"
         case events.OrphanedPullRequestClosure():
             action = "closed" if event.closed else "would close"
-            details = f"{event.url}, {event.head} → {event.base}"
-            confirmation = "" if event.closed else " after confirmation"
-            return f"{action} draft PR #{event.number} ({details}){confirmation}, keeping its branch"
+            return f"{action} draft PR #{event.number} (branch kept)\n  {event.url}"
         case events.GitHubStackRebuildPlanned():
             stacks = ", ".join(map(str, event.github_stacks))
             if not stacks:

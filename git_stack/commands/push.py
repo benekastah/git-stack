@@ -8,7 +8,6 @@ from git_stack.commands import (
     add_stack_arguments,
     named_stacks,
     pr_protection,
-    rebuild_confirmation,
 )
 from git_stack.commands.info import print_tree
 from git_stack.commands.prs import show_steps
@@ -47,7 +46,7 @@ def register(subparsers: Subparsers) -> None:
         "--prs",
         "--pr",
         action="store_true",
-        help="then open pull requests for them, as `git stack prs` does",
+        help="then open pull requests for them, as `git stack prs` does (implied by --pr-rebuild)",
     )
     add_allow_shared_argument(p)
     add_rebuild_stack_argument(p)
@@ -63,11 +62,11 @@ def run(stack: StackClient, args: Args) -> PushResult:
         remote=args.remote or DEFAULT_REMOTE,
         only_remote=args.remote is not None,
         force=args.force,
-        prs=args.prs,
+        prs=args.prs or args.rebuild_stack,
         allow_shared=args.allow_shared,
         rebuild_stack=args.rebuild_stack,
         no_verify=args.no_verify,
-        confirm_orphan_closures=rebuild_confirmation(args.rebuild_stack),
+        close_orphaned_prs=args.rebuild_stack,
         **pr_protection(args),
     )
 

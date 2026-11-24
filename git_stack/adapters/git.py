@@ -29,10 +29,7 @@ class PullRequestLink:
     state: PullRequestState
 
 
-@dataclass(frozen=True)
-class PushRetargets:
-    confirm: Callable[[], None]
-    apply: Callable[[Callable[[], None]], None]
+type ApplyPushRetargets = Callable[[Callable[[], None]], None]
 
 
 class GitAdapter:
@@ -259,7 +256,7 @@ class GitAdapter:
         rebuild_stack: bool = False,
         scope: list[str] | None = None,
         opening: bool = False,
-    ) -> PushRetargets | None:
+    ) -> ApplyPushRetargets | None:
         """Validate any PR changes and return the edits needed before the push."""
         return None
 
