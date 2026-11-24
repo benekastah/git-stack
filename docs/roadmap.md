@@ -63,6 +63,15 @@ git-stack itself. The README is too long to hand over whole. A `git stack docs
 skills point at the right part of it. How the sections are named, and whether
 the man page and this command share one source, is undecided.
 
+## Open an interactive stack view from `git stack`
+
+Explore opening a terminal UI when `git stack` runs without a subcommand in
+an interactive terminal. Start by showing the stack tree, branch status, and
+the current branch. Let users move through the tree and select a branch to
+check out. Consider rearranging stacks from the same view, with a preview
+of the changes before applying them. Keep named subcommands scriptable and
+preserve the existing command-line behavior outside an interactive terminal.
+
 ## Get rid of the performance tests' tables of counts
 
 `tests/test_operations_*.py` and `tests/large/test_distance.py` allot git processes and `gh` commands
