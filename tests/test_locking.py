@@ -1,5 +1,6 @@
 """Commands running at once: the git-stack lock, and git config's."""
 
+import json
 import os
 import pathlib
 import subprocess
@@ -12,6 +13,7 @@ import pytest
 
 from git_stack import core, events, git
 from git_stack.errors import StackError
+from git_stack.file_lock import file_lock
 from git_stack.git import GitClient
 from git_stack.stack import BranchStatus, StackClient
 from tests.helpers import Repo
@@ -152,33 +154,69 @@ def main_moves_on(repo: Repo) -> None:
     repo.git("switch", "--quiet", "pr1")
 
 
-def test_command_waits_for_another_holding_the_lock(repo: Repo, client: StackClient) -> None:
+@contextmanager
+def lock_held_by_another_command(repo: Repo) -> Generator[None]:
+    """Hold git-stack's lock, as another git-stack process would."""
+    with file_lock(repo.path / ".git" / core.LOCK_FILE, lambda: None):
+        yield
+
+
+def start_waiting_command(repo: Repo, *args: str) -> subprocess.Popen[str]:
+    """Start `git stack <args>` as a process, while the caller holds the lock,
+    and return it once it says on stderr that it's waiting for the lock."""
+    command = subprocess.Popen(
+        [sys.executable, "-m", "tests.stack_entry", "-C", str(repo.path), *args],
+        cwd=repo.tmp,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        encoding="utf-8",
+        # Unbuffered, so it prints that it's waiting as it starts to.
+        env={**os.environ, "PYTHONUNBUFFERED": "1"},
+    )
+    stderr = command.stderr
+    assert stderr is not None
+    # Read in a thread, to give up if it never says it's waiting.
+    first_line: list[str] = []
+    reader = threading.Thread(target=lambda: first_line.append(stderr.readline()), daemon=True)
+    reader.start()
+    reader.join(timeout=60)
+    assert first_line == ["waiting for another git stack command in this repository to finish\n"]
+    assert command.poll() is None
+    return command
+
+
+def test_command_waits_for_another_holding_the_lock(repo: Repo) -> None:
     repo.make_stack()
     main_moves_on(repo)
-    with client.exclusive():
-        restack = subprocess.Popen(
-            [sys.executable, "-m", "tests.stack_entry", "-C", str(repo.path), "restack", "--latest"],
-            cwd=repo.tmp,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            encoding="utf-8",
-            # Unbuffered, so it prints that it's waiting as it starts to.
-            env={**os.environ, "PYTHONUNBUFFERED": "1"},
-        )
-        stdout = restack.stdout
-        assert stdout is not None
-        # Read in a thread, to give up if it never says it's waiting.
-        first_line: list[str] = []
-        reader = threading.Thread(target=lambda: first_line.append(stdout.readline()), daemon=True)
-        reader.start()
-        reader.join(timeout=60)
-        assert first_line == ["waiting for another git stack command in this repository to finish\n"]
-        assert restack.poll() is None
+    with lock_held_by_another_command(repo):
+        restack = start_waiting_command(repo, "restack", "--latest")
     out, err = restack.communicate(timeout=60)
 
     assert restack.returncode == 0, err
     assert "restacking pr1 onto main" in out
     repo.assert_stacked("pr1", "main", ["pr1 c2", "pr1 c1"])
+
+
+def test_parent_prints_only_the_parent_after_waiting_for_the_lock(repo: Repo) -> None:
+    """Saying it's waiting goes to stderr, so `$(git stack parent)` still
+    gets the branch alone."""
+    restack_finished_by_hand(repo)
+    with lock_held_by_another_command(repo):
+        parent = start_waiting_command(repo, "parent")
+    out, err = parent.communicate(timeout=60)
+
+    assert parent.returncode == 0, err
+    assert out == "pr1\n"
+
+
+def test_info_json_prints_only_its_list_after_waiting_for_the_lock(repo: Repo) -> None:
+    restack_finished_by_hand(repo)
+    with lock_held_by_another_command(repo):
+        info = start_waiting_command(repo, "info", "--json")
+    out, err = info.communicate(timeout=60)
+
+    assert info.returncode == 0, err
+    assert [branch["name"] for branch in json.loads(out)] == ["main", "pr1", "pr2", "pr3"]
 
 
 def test_lock_is_shared_by_every_worktree(repo: Repo) -> None:

@@ -2077,7 +2077,7 @@ up to 5 seconds.
 Commands that change stack metadata hold \f[CR].git/git\-stack.lock\f[R]
 while they run, so two of them never interleave their writes: one
 started while another is running (in any worktree of the repository)
-says it\(aqs waiting, and waits for it to finish.
+says on stderr that it\(aqs waiting, and waits for it to finish.
 Read\-only commands like \f[CR]info\f[R] take it only to record a
 restack or pull you finished by hand (see Scripting), and only while
 they record it.

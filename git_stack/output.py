@@ -192,6 +192,10 @@ def event_json(event: events.Event) -> dict[str, Any]:
 def print_event(event: events.Event) -> None:
     if isinstance(event, WARNINGS):
         print(f"warning: {message(event)}", file=sys.stderr)
+    elif isinstance(event, events.WaitingForLock):
+        # Any command can wait for the lock, including those whose stdout a
+        # script reads, e.g. `$(git stack parent)` or `info --json`'s list.
+        print(message(event), file=sys.stderr, flush=True)
     else:
         print(message(event), flush=True)
 
