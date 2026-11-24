@@ -6,7 +6,9 @@ github also asks GitHub about each branch's pull request.
 
 import enum
 import shutil
-from collections.abc import Iterable
+from collections.abc import Generator, Iterable
+from contextlib import contextmanager
+from contextvars import ContextVar
 
 from git_stack.adapters.git import GitAdapter
 from git_stack.adapters.github import GitHubAdapter, github_repo
@@ -21,6 +23,31 @@ class Adapter(enum.Enum):
 
     GIT = "git"
     GITHUB = "github"
+
+
+class GitHubAccess(enum.Enum):
+    """Whether a CLI invocation opts in to GitHub or explicitly chooses Git alone."""
+
+    REQUIRED_OPT_IN = enum.auto()
+    ENABLED = enum.auto()
+    GIT_ONLY = enum.auto()
+
+
+# The CLI sets a policy per invocation. Library callers retain their adapter behavior.
+_github_access = ContextVar("github_access", default=GitHubAccess.ENABLED)
+
+
+def github_access() -> GitHubAccess:
+    return _github_access.get()
+
+
+@contextmanager
+def use_github_access(access: GitHubAccess) -> Generator[None]:
+    token = _github_access.set(access)
+    try:
+        yield
+    finally:
+        _github_access.reset(token)
 
 
 def make_adapter(
@@ -38,6 +65,8 @@ def make_adapter(
     commands that otherwise don't fetch (info and restack). Mixed-remote
     restack can fall back to local evidence for non-GitHub remotes.
     """
+    if github_access() is not GitHubAccess.ENABLED:
+        return GitAdapter(core)
     value = core.git.config_value(ADAPTER_SETTING)
     try:
         setting = Adapter(value) if value else None

@@ -56,10 +56,20 @@ def pr_identifier(value: str) -> int | str:
     raise argparse.ArgumentTypeError("expected a positive PR number or OWNER/REPO#NUMBER")
 
 
+def add_github_arguments(parser: argparse.ArgumentParser, *, writes: bool = False) -> None:
+    parser.add_argument("--github", "--gh", action="store_true", help="enable GitHub pull request lookups")
+    if writes:
+        parser.add_argument(
+            "--git-only", action="store_true", help="allow GitHub ref changes without checking pull requests"
+        )
+
+
 def add_pr_protection_arguments(parser: argparse.ArgumentParser, *, add_force: bool = False) -> None:
     if add_force:
         parser.add_argument("--force", action="store_true", help="allow updates to queued pull requests")
-    parser.add_argument("--protect-prs", action="store_true", help="protect approved and queued pull requests")
+    parser.add_argument(
+        "--protect-prs", action="store_true", help="check GitHub and protect approved, ready, and queued pull requests"
+    )
     parser.add_argument(
         "--allow-pr-update",
         metavar="PR",

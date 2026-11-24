@@ -1,6 +1,6 @@
 import argparse
 
-from git_stack.commands import Subparsers, add_allow_shared_argument
+from git_stack.commands import Subparsers, add_allow_shared_argument, add_github_arguments
 from git_stack.stack import StackClient, Unreverted
 
 
@@ -39,6 +39,7 @@ def register(subparsers: Subparsers) -> None:
     )
     p.add_argument("--remote")
     add_allow_shared_argument(p)
+    add_github_arguments(p)
     p.set_defaults(run=run, show=show)
 
 

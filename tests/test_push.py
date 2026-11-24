@@ -575,7 +575,7 @@ def test_pr_protection_on_head_updates(
     )
     repo.commit("c", "update\n", "advance pr3")
 
-    result = repo.stack(command, *options, expect_success=error is None)
+    result = repo.stack(command, "--github", *options, expect_success=error is None)
 
     if error:
         assert error in result.stderr
@@ -728,7 +728,7 @@ def test_queue_protection_follows_ref_pagination(repo: Repo, gh: FakeGitHub) -> 
         )
     repo.commit("c", "advance\n", "update pr3")
 
-    result = repo.stack("push", expect_success=False)
+    result = repo.stack("push", "--github", expect_success=False)
 
     assert "PR #1: it is in the merge queue" in result.stderr
     assert repo.remote_subject("pr3") == "pr3 c1"
@@ -749,7 +749,7 @@ def test_commands_keep_the_remote_base_of_a_queued_pr(repo: Repo, gh: FakeGitHub
         isInMergeQueue=True,
     )
 
-    result = repo.stack(command, "-d", "remote", expect_success=False)
+    result = repo.stack(command, "--github", "-d", "remote", expect_success=False)
 
     assert "the base of PR #7: it is in the merge queue" in result.stderr
     assert repo.remote_subject("pr1") == "pr1 c2"

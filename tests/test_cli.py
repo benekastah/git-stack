@@ -751,7 +751,7 @@ def test_sync_shows_the_stacks_then_lists_branches_left_to_push(stack: Any, caps
     main(["sync"], stack=stack)
 
     assert capsys.readouterr().out == STACK_TREE + (
-        "note: run `git stack push` to update the remote branches and pull requests of:\n  pr2\n  pr3\n"
+        "note: run `git stack push --github` to update the remote branches and pull requests of:\n  pr2\n  pr3\n"
     )
 
 

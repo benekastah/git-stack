@@ -12,6 +12,18 @@ Bump the patch component relative to the current version on `main` unless the
 change warrants a minor or major bump. Include the bump in the commit that
 lands on `main` so each merged build has a distinct version in performance logs.
 
+## GitHub access
+
+The CLI starts `gh` only when an option explicitly enables GitHub access,
+such as `--prs` or `--protect-prs`, or invokes a GitHub-specific command such
+as `git stack prs`. A GitHub remote or adapter setting alone does not opt in.
+Ordinary Git fetches and pushes can still contact their configured remotes.
+
+Preserve merge-queue protection. Before updating or deleting an existing GitHub
+ref, require an opt-in to live PR checks or an explicit `--git-only` override.
+Test that commands without opt-in launch zero `gh` processes and that protected
+writes still check live PR state.
+
 ## Shape of the code
 
 - `git_stack/stack.py` (`StackClient`) and `git_stack/core.py` (`StackCore`) do
@@ -46,14 +58,16 @@ lands on `main` so each merged build has a distinct version in performance logs.
   reuse a detached worktree. A conflict in an existing integration keeps the
   cache only if the failed step aborts and leaves a clean detached worktree. Existing stopped operations are recoverable. Sync records merged
   source tips and stack selectors before untracking
-  them so a retry can recover the inputs, group scope and remote. Queued remote deletions
+  them so a retry can recover the inputs, group scope and remote. Cleanup keeps
+  newly verified landing proof in the retirement metadata until a rebuild records
+  the new inputs. Queued remote deletions
   retain their dependent branches and leases. The checkout recovery marker
   survives worktree cleanup.
   The refresh commands order selected source stacks before the integration builds, then
   use the ordinary single-parent rebase path for the work above each integration.
   Local restack adds each integration's tracked sources and their ancestors to its selection.
   Restack consults GitHub merge evidence only with `--prs`. The initial PR lookup
-  for restack, pull and sync is scoped to their selected work. Live push protection
+  for restack, pull and sync, when enabled, is scoped to their selected work. Live push protection
   also checks PRs that target a ref being changed.
 - Each command is a module in `git_stack/commands/` with `register`, `run` and
   `show`: `run` does the command and returns a dataclass result, and `show`

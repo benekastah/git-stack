@@ -247,7 +247,7 @@ def test_sync_verified_ssh_uses_githubs_default_with_protocol_one(
     monkeypatch.setattr(GitClient, "direct_remote_url", lambda _git, _remote: "git@github-protocol1:acme/widgets.git")
     git_calls.clear()
 
-    result = repo.stack("-C", "nested", "sync", expect_success=False)
+    result = repo.stack("-C", "nested", "sync", "--github", expect_success=False)
 
     assert "rerun `git stack sync --force`" in result.stderr
     assert not any(call[0] == "ls-remote" for call in git_calls)

@@ -27,7 +27,7 @@ git stack import                # track your open PRs, each on the branch it mer
 After that, day to day:
 
 ```sh
-git stack sync                  # catch up: drop merged PRs, rebase what's left, push
+git stack sync --github         # catch up: drop merged PRs, rebase what's left, push
 ```
 
 ## Cheat sheet
@@ -36,10 +36,10 @@ git stack sync                  # catch up: drop merged PRs, rebase what's left,
 | --- | --- |
 | start a PR | `git stack create <name>`, from `main` or from the PR it builds on |
 | see my stacks and what needs doing | `git stack info --all` |
-| update the PRs above one I just changed | `git stack restack`, then `git stack push` |
-| catch up after a PR merged, or `main` changed | `git stack sync` |
-| also delete merged branches | `git stack sync -d local` |
-| put the stack on the latest `main` | `git stack sync --latest` |
+| update the PRs above one I just changed | `git stack restack`, then `git stack push --github` |
+| catch up after a PR merged, or `main` changed | `git stack sync --github` |
+| also delete merged branches | `git stack sync --github -d local` |
+| put the stack on the latest `main` | `git stack sync --github --latest` |
 | move to the next or previous branch in the stack | `git stack next` / `git stack prev` |
 | build a PR on a different parent | `git stack restack --onto <parent>` |
 | use git-stack with branches I already have | `git stack track main <branch>...` |
@@ -47,8 +47,8 @@ git stack sync                  # catch up: drop merged PRs, rebase what's left,
 | build on a coworker's stack | `git stack import -n --author <login>`, then `git stack import -f --author <login> <branch>` |
 | open draft PRs for my stack | `git stack push --prs` |
 | rename a branch in a stack | `git stack rename <new>` |
-| sync several stacks at once | `git stack group add <name> <branch-or-glob>...`, then `git stack sync -g <name>` |
-| clean up merged branches in every stack | `git stack clean` |
+| sync several stacks at once | `git stack group add <name> <branch-or-glob>...`, then `git stack sync --github -g <name>` |
+| clean up merged branches in every stack | `git stack clean --github` |
 | bring back a PR whose merge was reverted | `git stack unrevert <new branch> <revert> --stack <branch>` |
 | teach my coding agents git-stack | `git stack install-skills` |
 | read all of this in the terminal | `git stack --help` |
@@ -93,13 +93,13 @@ git stack info
 # └── add-api *
 #     └── use-api (needs restack)
 git stack restack               # rebase use-api onto the new add-api
-git stack push
+git stack push --github
 ```
 
 Once PR 1 is merged:
 
 ```sh
-git stack sync -d local         # delete add-api, rebase use-api onto main, switch to it, push
+git stack sync --github -d local # delete add-api, rebase use-api onto main, switch to it, push
 ```
 
 `sync` only touches the current stack. To untrack (or delete) merged branches
@@ -199,7 +199,7 @@ their stacks, and doesn't take `-g`. Quote a glob, so the shell doesn't
 expand it:
 
 ```sh
-git stack sync pr2b                     # pr2b's stack
+git stack sync --github pr2b                     # pr2b's stack
 git stack restack -g search 'fix-*'     # the search group, and every fix-* branch's stack
 ```
 
@@ -277,7 +277,7 @@ entry, it's their merge-base.
 - Nothing is written unless every branch can be tracked, so a bad argument
   doesn't leave the stack half-tracked.
 
-### `git stack integrate <name> <source> <source>... [--root <branch>] [--adopt]`
+### `git stack integrate <name> <source> <source>... [--root <branch>] [--adopt] [--github]`
 
 Build a local integration branch by merging source tips in the given order,
 starting from `main` or the ordinary untracked branch named by `--root`.
@@ -311,8 +311,10 @@ their ancestors before rebuilding the integration. It skips sources whose
 exact tips are already proven to have landed. Untracked sources contribute
 their local tips. For `pull` and `sync`, include the source
 stacks in the selection, for example with a group selector, to update
-them before rebuilding. These commands also fetch and fast-forward the
-configured root when possible.
+them before rebuilding. Before deleting a local source of a fixed-source
+integration, git-stack requires proof that its exact tip landed. Pass
+`--github` to check for that proof in a squash-merged PR. Pull and sync
+also fetch and fast-forward the configured root when possible.
 `push` refreshes the integration from local source tips and restacks the
 selected work on it. It publishes the integration and work in the same
 atomic push with leases. `sync` also publishes the integration atomically
@@ -347,7 +349,7 @@ For integrations with a fixed list of sources, a deleted source requires proof f
 again if that tip has no recorded proof. If there's no proof, replace the source list with `git stack integrate
 <name> <source>...`. When all sources land, the integration follows the
 configured root. To promote the work, switch to the bottom work branch,
-run `git stack restack --onto main`, then `git stack push` to update open
+run `git stack restack --onto main`, then `git stack push --github` to update open
 PRs. Once no stack or PR uses the integration, delete its local and remote
 branches with Git.
 `git stack rename` updates the names of local sources and configured roots
@@ -702,7 +704,7 @@ git stack restack --latest              # also move the stack onto main's latest
 - A branch checked out in another worktree is skipped, with a warning; see
   [Branches checked out in other worktrees](#branches-checked-out-in-other-worktrees).
 
-### `git stack sync [<branch|glob>...] [-g [<group>]] [--remote <name>] [-d local|remote|both] [-l] [--force] [--no-verify] [--ignore-revert <branch>] [--allow-shared] [--pull-tracked-upstream] [--rewritten-upstream] [--rebuild-stack]`
+### `git stack sync [<branch|glob>...] [-g [<group>]] [--remote <name>] [-d local|remote|both] [-l] [--force] [--no-verify] [--ignore-revert <branch>] [--allow-shared] [--pull-tracked-upstream] [--rewritten-upstream] [--rebuild-stack] [--github | --git-only] [--protect-prs]`
 
 Bring the current stack (or the ones named, see [Groups](#groups)) up to date
 with the remote:
@@ -727,9 +729,9 @@ pushes at the end, so there's nothing to follow it with. To catch up locally
 without touching the remote, use `restack` or `pull`.
 
 ```sh
-git stack sync
-git stack sync -d local         # also delete merged branches locally
-git stack sync -d both          # ...and their remote branches
+git stack sync --github
+git stack sync --github -d local # also delete merged branches locally
+git stack sync --github -d both  # ...and their remote branches
 ```
 
 - Only the current stack is synced; to untrack merged branches in every stack,
@@ -741,7 +743,7 @@ git stack sync -d both          # ...and their remote branches
 - After tracking a branch with `--base`, `sync` refuses to pull unseen commits
   that were already on its upstream at that point: they could be old copies of
   rewritten commits. Inspect them, then use `--pull-tracked-upstream` if you
-  want them, or `git stack push --force` if they are obsolete and should be
+  want them, or `git stack push --github --force` if they are obsolete and should be
   replaced. The usual force-push lease still applies.
 - It ends by showing the stacks it synced, as `info` does.
 - Merged branches are kept unless `-d`/`--delete` says to delete their local
@@ -804,7 +806,7 @@ git stack sync -d both          # ...and their remote branches
   for that reason.
 - Needs a clean worktree, and refuses to run outside a stack.
 
-### `git stack pull [<branch|glob>...] [-g [<group>]] [--remote <name>] [-d local] [-l] [--ignore-revert <branch>] [--allow-shared] [--pull-tracked-upstream] [--rewritten-upstream]`
+### `git stack pull [<branch|glob>...] [-g [<group>]] [--remote <name>] [-d local] [-l] [--ignore-revert <branch>] [--allow-shared] [--pull-tracked-upstream] [--rewritten-upstream] [--github]`
 
 Fetch and update the selected stacks locally. It can
 fast-forward local roots, untrack merged branches, and restack or pull into
@@ -815,9 +817,9 @@ When the upstream has unseen commits and its history was rewritten (or its
 previous tip is unknown), `pull` and `sync` refuse to guess whether those
 commits are new work or old copies. Inspect the histories, then pass
 `--rewritten-upstream` to replay the unseen commits, or use
-`git stack push --force` to explicitly replace the remote with local history.
+`git stack push --github --force` to explicitly replace the remote with local history.
 
-### `git stack clean [--remote <name>] [-d local|remote|both] [--no-verify] [--ignore-revert <branch>] [--allow-shared]`
+### `git stack clean [--remote <name>] [-d local|remote|both] [--no-verify] [--ignore-revert <branch>] [--allow-shared] [--github | --git-only] [--protect-prs]`
 
 Fetch with `--prune`, fast-forward every stack's root, and stop tracking merged
 branches in every stack, moving their children onto their parent.
@@ -842,9 +844,13 @@ git stack clean -d local
 
 #### Protecting open pull requests
 
-`git stack push`, `git stack sync`, `git stack prs`, and remote deletions
-from `git stack clean` require `--force` to change a GitHub pull request in the
-merge queue. Updates to approved PRs are allowed by default.
+Before updating or deleting an existing GitHub branch, `push`, `sync` and
+`clean` require an explicit choice. Use `--github` for GitHub merge evidence
+and merge-queue checks, or `--protect-prs` for stronger protection. Use
+`--git-only` to proceed without PR checks when you have handled them separately.
+A bare `--force` does not opt into GitHub or waive the requirement.
+When GitHub is enabled, updates to queued PRs require `--force`.
+Updates to approved PRs are allowed unless `--protect-prs` is set.
 
 Use `--protect-prs` when automating these commands. It refuses updates to
 approved or queued PRs and to merge-ready PRs on `main`. When you intend to
@@ -860,7 +866,7 @@ PR edits made by git-stack, including changes to GitHub stack membership. Review
 the affected branches and PRs before publishing a stack. A remote PR's status
 can change between a check and the update.
 
-### `git stack push [<branch|glob>...] [-g [<group>]] [--remote <name>] [--force] [--no-verify] [--prs] [--allow-shared] [--rebuild-stack]`
+### `git stack push [<branch|glob>...] [-g [<group>]] [--remote <name>] [--force] [--no-verify] [--prs] [--allow-shared] [--rebuild-stack] [--github | --git-only] [--protect-prs]`
 
 Force-push (with lease) every branch in the current stack (or the ones named,
 see [Groups](#groups)), and set each one's upstream.
@@ -873,11 +879,11 @@ requests pointed at the right base, and records what it pushed, so `sync` won't
 pull the old copies of your rebased commits back in.
 
 ```sh
-git stack push
-git stack push use-api          # push use-api's stack from anywhere
-git stack push 'search-*'       # the stacks of every search-* branch
-git stack push --force          # drop commits on the remote you didn't pull
-git stack push --no-verify      # skip the local pre-push hook
+git stack push --github
+git stack push --github use-api          # push use-api's stack from anywhere
+git stack push --github 'search-*'       # the stacks of every search-* branch
+git stack push --github --force          # drop commits on the remote you didn't pull
+git stack push --github --no-verify # skip the local pre-push hook
 git stack push --prs            # then open pull requests, as `git stack prs` does
 ```
 
@@ -953,7 +959,7 @@ group `sync` made after a merge.
 
 ```sh
 git stack group add search 'search-*'   # the stacks of every search-* branch
-git stack sync -g search                # from anywhere
+git stack sync --github -g search                # from anywhere
 git stack group rename search find      # or, from one of its stacks, `group rename find`
 git stack ungroup search-ui             # take search-ui's stack back out
 ```
@@ -980,7 +986,7 @@ to open their pull requests with the right bases. `git stack push --prs`
 pushes and opens them in one go.
 
 ```sh
-git stack push
+git stack push --github
 git stack prs -n                # see what it would open
 git stack prs
 # main
@@ -1085,7 +1091,7 @@ git stack prs
 - `-n`/`--dry-run` shows the stacks with the pull requests it would open, with
   their titles, in place of their links, without opening them.
 
-### `git stack unrevert <name> <revert>... [--from <branch>] [--stack <branch>...] [--remote <name>] [--allow-shared]`
+### `git stack unrevert <name> <revert>... [--from <branch>] [--stack <branch>...] [--remote <name>] [--allow-shared] [--github]`
 
 Create `<name>` on `--from`, with commits that revert the given reverts, to
 bring back the changes of a merged branch they reverted, and move the
@@ -1426,11 +1432,15 @@ so resolving it never waits on anything.
 
 ## GitHub
 
-If your repository is on github.com and [`gh`](https://cli.github.com) is
-installed and logged in (`gh auth login`), git-stack uses GitHub automatically;
-there's nothing to set up. The rest of this section is the details.
+The CLI uses Git evidence by default and starts [`gh`](https://cli.github.com)
+only when explicitly requested. Use `--prs` with `info` or `restack`.
+Use `--github` (alias `--gh`) with `pull`, `sync`, `clean`, `push`, `integrate`
+or `unrevert`. `--protect-prs`,
+`--rebuild-stack`, `push --prs`, and the GitHub-specific commands `prs` and
+`import` also opt in. Ordinary Git fetches and pushes still contact the
+configured remotes.
 
-git-stack works out merges through an adapter, chosen by the `stack.adapter`
+When GitHub is requested, git-stack chooses a merge adapter through the `stack.adapter`
 setting:
 
 - `git`: looks only at the repository.
@@ -1492,8 +1502,8 @@ With the GitHub adapter:
 ## When does `sync` consider a branch merged?
 
 `sync`, `clean`, `restack`, `push`, `prs` and `info` check whether a branch's
-changes landed. By default, `info` and `restack` use the local checks below.
-With `--prs` they use the configured adapter, as the other commands do.
+changes landed. They use the local checks below unless the command or an
+option opts into GitHub.
 
 With the [GitHub adapter](#github), a branch with an open pull request whose
 stack parent corresponds to the remote's default branch still counts as
@@ -1543,7 +1553,7 @@ name. Changes already in the stack parent aren't replayed.
 If a pull stops on a conflict and you abort it (or skip some of the commits),
 the commits you didn't take aren't counted as pulled: the next `sync` offers
 them again, and `push` refuses to drop them. To drop them anyway, run
-`git stack push --force`.
+`git stack push --github --force`.
 
 ### Known limitation: old copies of your own commits
 
@@ -1561,7 +1571,7 @@ two branches have diverged, until you rerun them with `--rewritten-upstream`.
 But if the old copies were added on top of a remote branch that still has
 that tip, nothing in git's history tells them apart from commits someone else
 pushed, so they're pulled in. If that happens, drop them (e.g. with
-`git rebase -i $(git stack base)`), then `git stack push --force`.
+`git rebase -i $(git stack base)`), then `git stack push --github --force`.
 
 ### Rebased on the remote
 
@@ -1580,7 +1590,7 @@ their non-merge commits.
 `push` does the same, rather than refusing. This only happens if the branch
 hasn't changed since you last pushed it, so no local commit is dropped; if
 it has, pull the remote branch's commits in by hand, or push over them with
-`git stack push --force`.
+`git stack push --github --force`.
 
 ## Which git it runs
 

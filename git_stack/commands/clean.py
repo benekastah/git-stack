@@ -5,6 +5,7 @@ from git_stack.commands import (
     Subparsers,
     add_allow_shared_argument,
     add_delete_argument,
+    add_github_arguments,
     add_ignore_revert_argument,
     add_pr_protection_arguments,
     pr_protection,
@@ -32,6 +33,7 @@ def register(subparsers: Subparsers) -> None:
     add_ignore_revert_argument(p)
     add_allow_shared_argument(p)
     add_pr_protection_arguments(p, add_force=True)
+    add_github_arguments(p, writes=True)
     p.set_defaults(run=run, show=show)
 
 

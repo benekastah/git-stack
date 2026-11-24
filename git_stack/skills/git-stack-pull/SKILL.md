@@ -13,7 +13,8 @@ Follow the open-PR checks in `git-stack` before publishing the result.
 
 - Use `git stack pull` for the current stack or `git stack pull <branch>` for a
   named stack. Pass `-g` to include its group. Use `--remote <name>` to select
-  a remote when branches track several.
+  a remote when branches track several. Use `git stack pull --github` when
+  you need GitHub merge evidence or PR information.
 - Use `git stack pull --latest` to bring the stack onto the updated root even
   when it merges cleanly. Use `git stack pull -d local` to delete merged
   local branches as they are untracked.

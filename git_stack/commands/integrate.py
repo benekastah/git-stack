@@ -1,6 +1,6 @@
 import argparse
 
-from git_stack.commands import Subparsers
+from git_stack.commands import Subparsers, add_github_arguments
 from git_stack.stack import Integrated, StackClient
 
 
@@ -27,6 +27,7 @@ def register(subparsers: Subparsers) -> None:
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--adopt", action="store_true", help="register an existing snapshot and rebuild it on refresh")
     mode.add_argument("--abort", action="store_true", help="discard a stalled build or release its cached worktree")
+    add_github_arguments(parser)
     parser.set_defaults(run=run, show=show)
 
 

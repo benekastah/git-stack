@@ -510,6 +510,76 @@ class Integrations:
         source["landing"] = tip if self.git.rev(tip) and self.git.is_ancestor(tip, root_tip) else None
         return source["landing"] is not None
 
+    def evidence_remote(self, root: str, fallback: str) -> str:
+        upstream = self.git.config_get(root, "remote")
+        return upstream if upstream and upstream != "." else fallback
+
+    def check_source_deletion(
+        self,
+        name: str,
+        root: str,
+        source: Source,
+        remote: str,
+        deleting_locally: bool,
+        *,
+        recorded: Source | None = None,
+    ) -> bool:
+        """Require exact landing before deletion and say whether GitHub proved it."""
+        if not deleting_locally:
+            return False
+        root_tip = self.git.tip(root)
+        if self.local_landing(source, root_tip):
+            return False
+        candidates = [source]
+        if recorded is not None and recorded["tip"] == source["tip"]:
+            previous = recorded.copy()
+            # The upstream can change without invalidating proof for this tip.
+            if self.local_landing(previous, root_tip):
+                source.update(previous)
+                return False
+            if (previous["remote"], previous["head"]) != (source["remote"], source["head"]):
+                candidates.append(previous)
+        self.look_up_landings(candidates, self.evidence_remote(root, remote), root_tip, fetch=True, prs=True)
+        if landed := next((candidate for candidate in candidates if candidate["landing"]), None):
+            source.update(landed)
+            return True
+        raise StackError(
+            f"can't delete {source['name']}: its exact tip has not been proven to land on {root} "
+            f"for integration {name}. Retry without local deletion, or use --github with the GitHub adapter for PR evidence."
+        )
+
+    def check_unselected_source_deletion(
+        self, branch: str, remote: str, deleting_locally: bool, retiring_in: Iterable[str] = ()
+    ) -> None:
+        """Check the recorded source that a fixed integration will use after deletion."""
+        if not deleting_locally:
+            return
+        for name in sorted(self.names().difference(retiring_in)):
+            config = self.read(name)
+            if config is None or "group" in config:
+                continue
+            source = next((source for source in config["sources"] if source["name"] == branch), None)
+            if source is None:
+                continue
+            retired = config.get("retired_sources", {}).get(branch)
+            included = (self.retired_input(source, retired["source"], None) if retired else source).copy()
+            self.save_source_deletion_proof(name, config, included, remote, retired)
+
+    def save_source_deletion_proof(
+        self, name: str, config: Integration, included: Source, remote: str, retired: RetiredSource | None
+    ) -> None:
+        branch = included["name"]
+        current = (
+            self.source(branch, included["tip"], included) if self.git.tip(branch) == included["tip"] else included
+        )
+        if self.check_source_deletion(name, config["root"], current, remote, True, recorded=included):
+            # The saved sources still describe the generated tip. A refresh
+            # must see the change in active inputs even if the root didn't move.
+            entry = retired or RetiredSource(source=current, parent=None, group=None, members=[])
+            entry["source"] = current
+            config.setdefault("retired_sources", {})[branch] = entry
+            self.save(name, config)
+
     @staticmethod
     def same_evidence(old: Source, source: Source, fetch: bool) -> bool:
         return (

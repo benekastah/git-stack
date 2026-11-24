@@ -54,7 +54,7 @@ def test_push_reuses_github_default_only_for_a_direct_remote(
     monkeypatch.setattr(GitClient, "passthrough", unexpected_push)
     before = repo.remote_subject("main")
 
-    result = repo.stack("push", expect_success=False)
+    result = repo.stack("push", "--github", expect_success=False)
 
     assert "rerun `git stack push --force`" in result.stderr
     assert repo.remote_subject("main") == before
@@ -414,7 +414,7 @@ def stack_whose_pull_requests_push_retargets_first(repo: Repo, gh: FakeGitHub) -
             mergeCommit=None,
         )
     repo.squash_merge_on_forge("pr1")
-    repo.stack("pull")
+    repo.stack("pull", "--github")
     repo.git("switch", "--quiet", "pr3")
     repo.commit("c", "pr3 again\n", "pr3 c2")
 
@@ -429,7 +429,7 @@ def test_push_reports_retargets_it_left_when_the_push_fails(repo: Repo, gh: Fake
     # only the real push finds out.
     repo.add_hook(repo.origin, "pre-receive", "#!/bin/sh\nexit 1\n")
 
-    result = repo.stack("push", expect_success=False)
+    result = repo.stack("push", "--github", expect_success=False)
 
     assert "push failed, so nothing was pushed" in result.stderr
     assert bases(gh) == {1: "main", 2: "pr2"}
@@ -442,7 +442,7 @@ def test_push_reports_retargets_it_left_when_a_later_one_fails(repo: Repo, gh: F
     gh.fail_editing(2)
     pr3 = repo.git("rev-parse", "pr3", cwd=repo.origin)
 
-    result = repo.stack("push", expect_success=False)
+    result = repo.stack("push", "--github", expect_success=False)
 
     assert "updating pull requests failed, so nothing was pushed" in result.stderr
     assert bases(gh) == {1: "main", 2: "main"}
@@ -471,7 +471,7 @@ def test_push_runs_the_pre_push_hook_once(repo: Repo, gh: FakeGitHub) -> None:
     runs = repo.tmp / "pre-push-runs"
     repo.add_hook(repo.path, "pre-push", f'#!/bin/sh\necho run >> "{runs.as_posix()}"\n')
 
-    repo.stack("push")
+    repo.stack("push", "--github")
 
     assert runs.read_text().splitlines() == ["run"]
 
@@ -481,7 +481,7 @@ def test_push_changes_no_pull_request_when_the_push_would_fail(repo: Repo, gh: F
     # Someone pushes to pr3 after we last fetched.
     repo.commit_on_forge("pr3", "d", "theirs\n", "theirs")
 
-    result = repo.stack("push", expect_success=False)
+    result = repo.stack("push", "--github", expect_success=False)
 
     assert "push would fail, so nothing was pushed or changed" in result.stderr
     assert "pr3 -> pr3 (stale info)" in result.stderr
@@ -631,7 +631,7 @@ def test_info_does_not_fetch_head_of_merged_pr(repo: Repo, gh: FakeGitHub, clien
     assert client.git.rev(updated_head) is None
 
 
-@pytest.mark.parametrize("command", [("restack",), ("restack", "--prs"), ("sync",), ("pull",)])
+@pytest.mark.parametrize("command", [("restack",), ("restack", "--prs"), ("sync", "--github"), ("pull", "--github")])
 @pytest.mark.parametrize("selector", [(), ("pr2",), ("-g", "selected")])
 def test_refresh_queries_only_selected_pull_requests(
     repo: Repo, gh: FakeGitHub, command: tuple[str, ...], selector: tuple[str, ...]
@@ -740,7 +740,7 @@ def test_sync_keeps_merged_pr_whose_branch_has_a_merge_with_changes_of_its_own(
         repo.merge_with_an_edit("origin/main", "d", "resolved\n", cwd=repo.forge)
         repo.git("push", "--quiet", "origin", "pr1", cwd=repo.forge)
 
-    result = repo.stack("sync", "-d", "both")
+    result = repo.stack("sync", "--github", "-d", "both")
 
     assert "skipping pr1: it was merged into main, but it or its remote branch has commits" in result.stderr
     assert repo.config("pr1", "stackParent") == "main"
@@ -776,7 +776,7 @@ def test_sync_untracks_merged_pr_whose_later_merge_added_nothing_its_parent_lack
     repo.git("commit", "--quiet", "--no-edit")
     repo.git("switch", "--quiet", "pr3")
 
-    result = repo.stack("sync", "-d", "both")
+    result = repo.stack("sync", "--github", "-d", "both")
 
     assert "skipping pr1" not in result.stderr
     assert repo.git("branch", "--list", "pr1") == ""
@@ -797,7 +797,7 @@ def test_sync_deletes_a_squash_merged_pr_whose_branch_was_kept(repo: Repo, gh: F
         mergeCommit={"oid": repo.git("rev-parse", "HEAD", cwd=repo.forge)},
     )
 
-    repo.stack("sync", "-d", "both")
+    repo.stack("sync", "--github", "-d", "both")
 
     assert repo.git("branch", "--list", "pr1") == ""
     assert repo.git("branch", "--list", "pr1", cwd=repo.origin) == ""

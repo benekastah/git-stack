@@ -8,7 +8,13 @@ from itertools import takewhile
 from typing import Concatenate
 
 from git_stack import events
-from git_stack.adapters import ADAPTER_SETTING, make_adapter
+from git_stack.adapters import (
+    ADAPTER_SETTING,
+    Adapter,
+    GitHubAccess,
+    github_access,
+    make_adapter,
+)
 from git_stack.adapters.git import GitAdapter, PullRequestLink
 from git_stack.adapters.github import (
     GitHubAdapter,
@@ -1619,8 +1625,7 @@ class StackClient(StackCore):
         prior: Integration | None = None,
     ) -> tuple[Integration, dict[str, str | None]]:
         root = config["root"]
-        root_remote = self.git.config_get(root, "remote")
-        evidence_remote = root_remote if root_remote and root_remote != "." else remote
+        evidence_remote = integrations.evidence_remote(root, remote)
         if prior is not None:
             evidence = {source["name"]: source for source in prior["sources"]}
             sources = [evidence.get(source["name"], source) for source in sources]
@@ -2336,7 +2341,13 @@ class StackClient(StackCore):
     ) -> dict[str, dict[str, str | None]]:
         """Sync selected sources first, then refresh roots before touching their work branches."""
         sources, remaining = selection.ordered(state.stacks)
-        preserve_source = self.source_retirement(selection, sources, state.stacks, state.remote)
+        preserve_source = self.source_retirement(
+            selection,
+            sources,
+            state.stacks,
+            state.remote,
+            delete_local=bool(state.delete and state.delete.deletes_local),
+        )
         for branch in sources:
             self.sync_branch(branch, adapter, state, preserve_source)
         if selection.integrations:
@@ -2346,12 +2357,18 @@ class StackClient(StackCore):
             raise StackError(f"couldn't update selected integration source stacks: {', '.join(failed)}")
         verified = self.refresh_integrations(selection, state.remote, expected, fetch=True)
         for branch in remaining:
-            self.sync_branch(branch, adapter, state)
+            self.sync_branch(branch, adapter, state, preserve_source)
         return verified
 
     def source_retirement(
-        self, selection: RefreshSelection, branches: Sequence[str], stacks: Stacks, remote: str
-    ) -> Callable[[str], None]:
+        self,
+        selection: RefreshSelection,
+        branches: Sequence[str],
+        stacks: Stacks,
+        remote: str,
+        *,
+        delete_local: bool,
+    ) -> Callable[[str, bool], None]:
         """Capture merged sources and the selectors for their surviving stacks."""
         integrations = Integrations(self)
         # A selected, merged source may be deleted while syncing. Preserve the
@@ -2373,8 +2390,12 @@ class StackClient(StackCore):
 
         source_members = {branch: members_by_bottom[stacks.bottom(branch)] for branch in inputs}
 
-        def preserve_source(branch: str) -> None:
-            entries = inputs.get(branch)
+        def preserve_source(branch: str, confirmed: bool) -> None:
+            entries = inputs.get(branch, ())
+            deleting_locally = delete_local and confirmed and self.git.other_worktree_of(branch) is None
+            integrations.check_unselected_source_deletion(
+                branch, remote, deleting_locally, (name for name, _ in entries)
+            )
             if not entries:
                 return
             tip = self.git.tip(branch)
@@ -2390,8 +2411,12 @@ class StackClient(StackCore):
                 refresh_groups = groups_by_root.get(name, set()) | (
                     selection.selected_groups & {config.get("group", "")}
                 )
+                captured = integrations.source(branch, tip, source)
+                integrations.check_source_deletion(
+                    name, config["root"], captured, remote, deleting_locally and "group" not in config, recorded=source
+                )
                 config.setdefault("retired_sources", {})[branch] = RetiredSource(
-                    source=integrations.source(branch, tip, source),
+                    source=captured,
                     parent=bottom if parent in stacks else None,
                     group=group,
                     members=source_members[branch],
@@ -2518,7 +2543,11 @@ class StackClient(StackCore):
         selection.integrations.update(added.integrations)
 
     def sync_branch(
-        self, branch: str, adapter: GitAdapter, state: SyncState, preserve_source: Callable[[str], None] | None = None
+        self,
+        branch: str,
+        adapter: GitAdapter,
+        state: SyncState,
+        preserve_source: Callable[[str, bool], None] | None = None,
     ) -> None:
         """Untrack branch if it was merged, and otherwise bring it up to date (see
         sync_unmerged), unless its parent was skipped."""
@@ -2548,7 +2577,7 @@ class StackClient(StackCore):
         parent: str,
         adapter: GitAdapter,
         state: SyncState,
-        preserve_source: Callable[[str], None] | None,
+        preserve_source: Callable[[str, bool], None] | None,
     ) -> None:
         outside = [b for b in state.stacks.children(branch) if b not in state.scope]
         if outside:
@@ -2562,7 +2591,7 @@ class StackClient(StackCore):
             else None
         )
         if preserve_source is not None:
-            preserve_source(branch)
+            preserve_source(branch, confirmed)
         if not self.untrack_merged(
             branch,
             state.stacks,
@@ -2667,6 +2696,8 @@ class StackClient(StackCore):
             self.ensure_clean_worktree_for_clean(stacks, delete)
         self.fast_forward_trunks(stacks.roots())
         protected_deletes = self.integration_deletion_refs(delete, stacks.roots(), remote)
+        integrations = Integrations(self)
+        delete_local = bool(delete and delete.deletes_local)
 
         # Parent-before-child, so a branch whose parent was merged is checked
         # against its new parent.
@@ -2679,6 +2710,9 @@ class StackClient(StackCore):
             state = adapter.merge_state(branch, parent, ignore_revert=branch in ignore_reverts)
             if state is MergeState.MERGED:
                 confirmed = adapter.merge_confirmed(branch, parent)
+                integrations.check_unselected_source_deletion(
+                    branch, remote, delete_local and confirmed and git.other_worktree_of(branch) is None
+                )
                 if (
                     self.untrack_merged(
                         branch,
@@ -2979,8 +3013,6 @@ class StackClient(StackCore):
         protection: PRProtection,
         urls: tuple[str, ...],
     ) -> None:
-        if protection.force and not protection.protect:
-            return
         changed = set[str]()
         for lease, refspec in zip(leases, refspecs, strict=True):
             _, _, old = lease.rpartition(":")
@@ -3003,9 +3035,18 @@ class StackClient(StackCore):
         *,
         primary_remote: bool = True,
     ) -> None:
-        if not heads or (protection.force and not protection.protect):
+        access = github_access()
+        if not heads or access is GitHubAccess.GIT_ONLY:
+            return
+        if access is GitHubAccess.ENABLED and protection.force and not protection.protect:
             return
         repositories = self.github_push_adapters(remote, adapter, urls)
+        if repositories and access is GitHubAccess.REQUIRED_OPT_IN:
+            refs = ", ".join(sorted(heads))
+            raise StackError(
+                f"changing existing GitHub refs ({refs}) requires --protect-prs or --github to check open pull "
+                "requests, or --git-only to proceed without PR checks"
+            )
         hosts = {github.host for github in repositories}
         if isinstance(adapter, GitHubAdapter):
             hosts.add(adapter.host)
@@ -3028,16 +3069,22 @@ class StackClient(StackCore):
         hosts = {"github.com"}
         if isinstance(adapter, GitHubAdapter):
             hosts.add(adapter.host)
-        repositories = self.github_push_repositories(urls, hosts)
-        if not repositories:
-            repositories = self.github_push_repositories(self.git.configured_push_urls(remote), hosts)
+        # An explicit GitHub adapter also covers Enterprise push destinations
+        # on a different host from the fetch repository.
+        github_hosts = None if self.git.config_value(ADAPTER_SETTING) == Adapter.GITHUB.value else hosts
+        repositories = self.github_push_repositories(urls, github_hosts)
+        if len(repositories) < len(set(urls)) or not urls:
+            repositories.update(self.github_push_repositories(self.git.configured_push_urls(remote), github_hosts))
         return [GitHubAdapter(self, remote, *repo, fetch=False) for repo in sorted(repositories)]
 
     @staticmethod
-    def github_push_repositories(urls: Iterable[str], hosts: set[str]) -> set[tuple[str, str, str]]:
+    def github_push_repositories(urls: Iterable[str], hosts: set[str] | None) -> set[tuple[str, str, str]]:
         repositories: set[tuple[str, str, str]] = set()
         for url in urls:
-            if (repo := github_repo_from_url(url)) is not None and repo[0] in hosts:
+            # Local paths can also have three slash-separated components.
+            if ":" not in url.partition("/")[0] or url.startswith("file:"):
+                continue
+            if (repo := github_repo_from_url(url)) is not None and (hosts is None or repo[0] in hosts):
                 host, owner, name = repo
                 repositories.add((host, owner.casefold(), name.casefold()))
         return repositories
