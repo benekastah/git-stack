@@ -963,6 +963,69 @@ def test_push_batches_retargets_to_published_bases(repo: Repo, gh: FakeGitHub, f
         assert "#3's base was changed from main to pr2" in result.stderr
 
 
+@pytest.mark.parametrize("queued", [False, True], ids=["partial-failure", "live-protection"])
+def test_push_batches_retargets_after_publishing_their_new_bases(
+    repo: Repo,
+    client: StackClient,
+    gh: FakeGitHub,
+    emitted: list[events.Event],
+    monkeypatch: pytest.MonkeyPatch,
+    queued: bool,
+) -> None:
+    work_branches = ["work-1", "work-2"]
+    for number, branch in enumerate(work_branches, start=1):
+        repo.git("switch", "--quiet", "main")
+        client.branch(f"base-{number}")
+        repo.commit("a", f"base {number}\n", f"base {number}")
+        client.branch(branch)
+        repo.commit("b", f"work {number}\n", f"work {number}")
+        # The existing PR was opened on main before its new parent was published.
+        repo.git("push", "--quiet", "--set-upstream", "origin", f"refs/heads/{branch}")
+        gh.add_pr(
+            number=number,
+            state="OPEN",
+            headRefName=branch,
+            baseRefName="main",
+            headRefOid=repo.git("rev-parse", f"refs/heads/{branch}"),
+            mergeCommit=None,
+        )
+
+    passthrough = client.git.passthrough
+
+    def publish(*args: str) -> bool:
+        assert not gh.calls("pr", "edit")
+        assert not any("--input" in call for call in gh.calls("api", "graphql"))
+        succeeded = passthrough(*args)
+        if succeeded and queued:
+            state = gh.load()
+            state["prs"][1]["isInMergeQueue"] = True
+            gh.save(state)
+        return succeeded
+
+    monkeypatch.setattr(client.git, "passthrough", publish)
+    if not queued:
+        gh.fail_editing(1)
+
+    with pytest.raises(StackError, match="pushed, but updating pull requests failed") as error:
+        client.push(work_branches)
+
+    assert [repo.remote_subject(f"base-{i}") for i in (1, 2)] == ["base 1", "base 2"]
+    assert not gh.calls("pr", "edit")
+    batches = [call for call in gh.calls("api", "graphql") if "--input" in call]
+    retargeted = [event for event in emitted if isinstance(event, events.PullRequestRetargeted)]
+    bases = [pr["baseRefName"] for pr in gh.load()["prs"]]
+    if queued:
+        assert "PR #2: it is in the merge queue" in str(error.value)
+        assert batches == []
+        assert retargeted == []
+        assert bases == ["main", "main"]
+    else:
+        assert "couldn't retarget #1" in str(error.value)
+        assert len(batches) == 1
+        assert retargeted == [events.PullRequestRetargeted("work-2", 2, "base-2")]
+        assert bases == ["main", "base-2"]
+
+
 def test_protected_push_preserves_an_individual_approval(repo: Repo, gh: FakeGitHub) -> None:
     repo.make_stack()
     repo.stack("push")
