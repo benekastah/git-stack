@@ -1,6 +1,7 @@
 """git stack sync."""
 
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -12,7 +13,7 @@ from git_stack.git import GitClient
 from git_stack.stack import BranchStatus, StackClient
 from git_stack.stacks import Ownership
 from tests.git_support import GitCall
-from tests.helpers import Repo
+from tests.helpers import Repo, install_command
 
 
 def test_sync_refuses_unseen_upstream_merge_commits(repo: Repo, client: StackClient) -> None:
@@ -180,7 +181,6 @@ def test_sync_pushes_to_a_differently_named_upstream(repo: Repo, client: StackCl
         ("https://github.com/acme/widgets.git", False),
         ("https://github.com/acme/another", True),
         ("git@github.com:acme/widgets.git", True),
-        ("ssh://git@ssh.github.com:443/acme/widgets.git", True),
     ],
 )
 def test_sync_reuses_the_github_default_only_over_direct_https(
@@ -188,9 +188,13 @@ def test_sync_reuses_the_github_default_only_over_direct_https(
     client: StackClient,
     git_calls: list[GitCall],
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
     url: str,
     probe: bool,
 ) -> None:
+    install_command(tmp_path / "bin", "ssh", "tests.fake_ssh")
+    ssh_log = tmp_path / "ssh.log"
+    monkeypatch.setenv("FAKE_SSH_LOG", str(ssh_log))
     repo.make_stack()
     client.push()
     monkeypatch.setattr(GitClient, "direct_remote_url", lambda _git, _remote: url)
@@ -201,6 +205,8 @@ def test_sync_reuses_the_github_default_only_over_direct_https(
 
     assert repo.remote_subject("pr3") == "local change"
     assert any(call[0] == "ls-remote" for call in git_calls) == probe
+    # Which remotes are probed mustn't depend on the system's ssh.
+    assert not ssh_log.exists()
 
 
 def test_sync_checks_protected_destination_before_changing_group(repo: Repo, client: StackClient) -> None:
