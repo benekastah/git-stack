@@ -2,18 +2,36 @@
 
 import json
 import re
+from contextlib import AbstractContextManager
 from threading import Event, get_ident
 
 import pytest
 
-from git_stack import events
+from git_stack import events, git
 from git_stack.adapters.github import GitHubAdapter
+from git_stack.commands import info
 from git_stack.core import CURRENT_GROUP
 from git_stack.errors import StackError
 from git_stack.git import GitClient
 from git_stack.stack import BranchInfo, BranchStatus, StackClient
 from tests.git_support import GitCall
 from tests.helpers import FakeGitHub, Repo
+
+
+def test_info_checks_native_graph_safety_once_per_snapshot(repo: Repo, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo.make_stack()
+    measured = git.measure_native
+    calls: list[str] = []
+
+    def record(name: str) -> AbstractContextManager[None]:
+        calls.append(name)
+        return measured(name)
+
+    monkeypatch.setattr(git, "measure_native", record)
+    repo.stack("info", "--json")
+    assert calls.count("graph") == 1
+    repo.stack("info", "--json")
+    assert calls.count("graph") == 2
 
 
 @pytest.mark.parametrize("native", [True, False])
@@ -337,6 +355,29 @@ def test_info_reads_its_settings_with_the_config(repo: Repo, git_calls: list[Git
         ["config", "--list"],
         ["config", "--get-colorbool"],
     ]
+
+
+def test_info_overlaps_color_lookup_with_collecting_branches(repo: Repo, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo.make_stack()
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    collecting, checking_color = Event(), Event()
+    original = StackClient.info
+
+    def color(_stack: StackClient) -> bool:
+        checking_color.set()
+        assert collecting.wait(timeout=3)
+        return True
+
+    def collect(
+        stack: StackClient, branches: list[str], groups: list[str], *, offline: bool, current: bool
+    ) -> list[BranchInfo]:
+        collecting.set()
+        assert checking_color.wait(timeout=3)
+        return original(stack, branches, groups, offline=offline, current=current)
+
+    monkeypatch.setattr(info, "use_color", color)
+    monkeypatch.setattr(StackClient, "info", collect)
+    assert "\033[" in repo.stack("info").stdout
 
 
 @pytest.mark.parametrize("no_color", [None, "1"])

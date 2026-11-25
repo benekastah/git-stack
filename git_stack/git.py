@@ -158,7 +158,12 @@ def git_errors() -> Generator[None]:
 class _NativeReads(threading.local):
     # Each worker owns its libgit2 repository handle, including its caches.
     repository: pygit2.Repository | None = None
-    graph_usable: bool | None = None
+
+
+class _GraphSafety:
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.usable: bool | None = None
 
 
 class LineCountTrees(NamedTuple):
@@ -193,6 +198,7 @@ class GitClient:
         self._ancestry: dict[tuple[str, str], bool] = {}
         self._merged_trees: dict[tuple[str, str], str | None] = {}
         self._native = _NativeReads()
+        self._graph_safety = _GraphSafety()
         # See branch_config: whether it has read the config file, and the
         # file's contents when it did (None if there was no file).
         self._config_read = False
@@ -260,6 +266,7 @@ class GitClient:
         with self._refs_lock:
             self._refs = None
             self._native = _NativeReads()
+            self._graph_safety = _GraphSafety()
             self._objects = {}
             self._reflogs = {}
             if worktrees:
@@ -465,31 +472,37 @@ class GitClient:
         repo = self._open_repository()
         if repo is None:
             return None
-        usable = self._native.graph_usable if self._snapshot_depth else None
-        if usable is None:
-            try:
-                with measure_native("graph"):
-                    common = git_read.common_directory(repo)
-                    has_replacements = (
-                        self._has_replacements
-                        if self._refs is not None
-                        else any(ref.startswith("refs/replace/") for ref in repo.listall_references())
+        if not self._snapshot_depth:
+            return repo if self._check_graph_safety(repo) else None
+        safety = self._graph_safety
+        with safety.lock:
+            if safety.usable is None:
+                safety.usable = self._check_graph_safety(repo)
+            return repo if safety.usable else None
+
+    def _check_graph_safety(self, repo: pygit2.Repository) -> bool:
+        """Check the graph semantics once for all workers in a ref snapshot."""
+
+        try:
+            with measure_native("graph"):
+                common = git_read.common_directory(repo)
+                has_replacements = (
+                    self._has_replacements
+                    if self._refs is not None
+                    else any(ref.startswith("refs/replace/") for ref in repo.listall_references())
+                )
+                config = repo.config
+                return (
+                    not repo.is_shallow
+                    and not has_replacements
+                    and not (common / "info" / "grafts").exists()
+                    and "extensions.partialclone" not in config
+                    and not any(
+                        entry.name.endswith(".promisor") for entry in config if entry.name.startswith("remote.")
                     )
-                    config = repo.config
-                    usable = (
-                        not repo.is_shallow
-                        and not has_replacements
-                        and not (common / "info" / "grafts").exists()
-                        and "extensions.partialclone" not in config
-                        and not any(
-                            entry.name.endswith(".promisor") for entry in config if entry.name.startswith("remote.")
-                        )
-                    )
-            except pygit2.GitError, ValueError, OSError:
-                usable = False
-            if self._snapshot_depth:
-                self._native.graph_usable = usable
-        return repo if usable else None
+                )
+        except pygit2.GitError, ValueError, OSError:
+            return False
 
     def common_dir(self) -> pathlib.Path:
         """Where all worktrees share Git metadata."""

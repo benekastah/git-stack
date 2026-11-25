@@ -65,6 +65,8 @@ GitHub-specific. The Git adapter never starts `gh`. Protected writes require
   for each invocation. Git-stack uses pygit2 for local object and ancestry queries,
   discovery, and worktree state. The snapshot also owns the library's cache for
   Git metadata queries. Per-command reference and graph caches live in `GitClient`.
+  Workers share the graph safety decision for a snapshot and keep separate libgit2
+  repository handles. Text `info` overlaps the color query with collecting branches.
   GitClient uses py-git-client's descriptor isolation for every launch, including
   branch-status workers, integration pushes, snapshots and temporary patch readers.
 - `git_stack/stacks.py` (`Stacks`) holds the tracked branches as trees, with

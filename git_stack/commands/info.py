@@ -6,6 +6,8 @@ import shutil
 import sys
 import unicodedata
 from collections.abc import Callable, Mapping
+from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
 from dataclasses import dataclass
 
 from git_stack.adapters.git import PullRequestState
@@ -183,14 +185,23 @@ class Info:
     """The stacks, as info() lists them."""
 
     stacks: list[BranchInfo]
+    color: bool = False
 
 
 def run(stack: StackClient, args: Args) -> Info:
-    if args.all:
-        if args.branches or args.groups:
-            raise StackError("--all cannot be combined with branches or groups")
-        return Info(stack.info(offline=not args.prs))
-    return Info(stack.info(args.branches, args.groups, offline=not args.prs, current=True))
+    if args.all and (args.branches or args.groups):
+        raise StackError("--all cannot be combined with branches or groups")
+
+    def collect() -> list[BranchInfo]:
+        if args.all:
+            return stack.info(offline=not args.prs)
+        return stack.info(args.branches, args.groups, offline=not args.prs, current=True)
+
+    if args.json or os.environ.get("NO_COLOR"):
+        return Info(collect())
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        color = pool.submit(copy_context().run, use_color, stack)
+        return Info(collect(), color.result())
 
 
 def show(stack: StackClient, args: Args, result: Info) -> None:
@@ -199,7 +210,7 @@ def show(stack: StackClient, args: Args, result: Info) -> None:
     elif not result.stacks:
         print("no tracked branches")
     else:
-        print_tree(stack, result.stacks)
+        print_tree(stack, result.stacks, color=result.color)
 
 
 def tree_children(branches: list[BranchInfo]) -> dict[str | GroupHeader, list[BranchInfo | GroupHeader]]:
@@ -224,12 +235,15 @@ def print_tree(
     stack: StackClient,
     branches: list[BranchInfo],
     new_links: Mapping[str, str] = {},
+    *,
+    color: bool | None = None,
 ) -> None:
     """Print branches, which isn't empty, as a tree for each stack, with each
     branch's pull request linked beside or below its label. new_links is
     {branch: text}, shown in NEW_LINK's color in place of its link, for pull
     requests that were just opened, or would be."""
-    color = use_color(stack)
+    if color is None:
+        color = use_color(stack)
     paint = painter(color)
     flip = orientation(stack) is Orientation.ROOT_AT_BOTTOM
     children = tree_children(branches)
