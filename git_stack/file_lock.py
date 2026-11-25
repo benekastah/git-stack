@@ -55,7 +55,9 @@ else:
 @contextmanager
 def file_lock(path: pathlib.Path, on_wait: Callable[[], None]) -> Generator[None]:
     """Hold an exclusive lock on path (created if missing), calling on_wait
-    first if another process has it and it has to wait. The system releases
+    first if another process has it and it has to wait. To only try for the
+    lock, without waiting, on_wait raises instead: the exception propagates
+    from entering the block, with the lock not taken. The system releases
     the lock when the process ends, however it ends."""
     fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
     try:

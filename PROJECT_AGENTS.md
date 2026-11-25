@@ -109,7 +109,9 @@ writes still check live PR state.
   or a write, and takes the lock only while it records one, which forgets
   what the snapshot read before (see `StackCore.exclusive`). Under the lock,
   `GIT_STACK_LOCK_HELD` (`LOCK_HELD_ENV`) tells the processes a command starts,
-  e.g. a hook running git-stack, not to wait for it. Run git through `GitClient` so the snapshot is forgotten when a git command
+  e.g. a hook running git-stack, not to wait for it: `StackCore.exclusive`
+  then raises `LockHeldByCaller` when the lock is taken, which a reading
+  command takes as a reason to leave settling for later. Run git through `GitClient` so the snapshot is forgotten when a git command
   may change refs, and only add a command to `READ_ONLY_COMMANDS` if it never
   does. The stale-trunk-base check reuses results from the check cache when
   its commit IDs describe an unmodified history graph.
@@ -189,6 +191,12 @@ Text meant for people (messages, `info`'s tree) can change.
   `tests.stack_entry` installs that config for libgit2 in child processes.
   Code that names `ROOT` (`dev.py`, `dev_project.py`) still runs there.
   `git_calls` records git-stack's subprocesses. Fixture setup uses `Repo.git`.
+- A test that hangs fails rather than hold up the run. A process a test starts and
+  waits for goes through `tests/helpers.py`'s `run_process` (or `start_process` and
+  `kill_tree`), which kills it with what it started, its process group or (on Windows)
+  its tree, past its timeout. `tests/conftest.py`'s `fail_hung_test` prints every
+  thread's traceback and ends the test's process past `HANG_TIMEOUT`, for what has no
+  timeout of its own, like a thread waiting for git-stack's lock.
 - Performance tests declare how many git processes and `gh` commands they may run, with
   `tests/operations.py`'s `expect_operations(git=N, gh=M)`: as a decorator for the whole test
   body, or as a `with` target for a block (e.g. one stack size in a loop). It counts what git-stack

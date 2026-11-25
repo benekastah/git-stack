@@ -46,7 +46,7 @@ from git_stack.core import (
     TrunkUpstream,
     is_glob,
 )
-from git_stack.errors import BrokenStackError, StackError
+from git_stack.errors import BrokenStackError, LockHeldByCaller, StackError
 from git_stack.git import DEFAULT_REMOTE, SWITCH
 from git_stack.integrations import Integration, Integrations, RetiredSource, Source
 from git_stack.json_fields import json_name
@@ -1067,12 +1067,17 @@ class StackClient(StackCore):
         lock (waiting for another command that has it) only while it
         records it, checking again under the lock, since that command may
         have recorded it meanwhile. Started by a process that holds the
-        lock (see lock_held_by_caller), it leaves it for a later command,
+        lock (see lock_held_by_caller), it doesn't wait for it: it records it
+        if the lock is free, and otherwise leaves it for a later command,
         rather than wait for that process, which is waiting for it."""
-        if not self.lock_held_by_caller() and self.settle_waiting():
-            with self.exclusive():
-                if not self.git.operation_in_progress():
-                    self.settle_all(forget_unfinished=False)
+        if self.settle_waiting():
+            try:
+                with self.exclusive():
+                    if not self.git.operation_in_progress():
+                        self.settle_all(forget_unfinished=False)
+            # Only taking the lock raises it: nothing in the block takes it again.
+            except LockHeldByCaller:
+                pass
         return self.stacks()
 
     def stacked_branch(self, branch: str | None, stacks: Stacks) -> str:
