@@ -190,8 +190,8 @@ git switch add\-api
 \f[I]# ...commit...\f[R]
 git stack info
 \f[I]# main\f[R]
-\f[I]# └── add\-api * +42 \-7\f[R]
-\f[I]#     └── use\-api (needs restack) +18 \-3\f[R]
+\f[I]# └── add\-api *                   +42/\-7\f[R]
+\f[I]#     └── use\-api (needs restack) +18/\-3\f[R]
 git stack restack               \f[I]# rebase use\-api onto the new add\-api\f[R]
 git stack push \-\-prs
 .EE
@@ -728,9 +728,9 @@ with the GitHub adapter.
 .EX
 git stack info \-\-prs
 \f[I]# main\f[R]
-\f[I]# └── add\-api * +42 \-7                     https://github.com/acme/widgets/pull/12\f[R]
-\f[I]#     ├── use\-api (needs restack) +18 \-3   https://github.com/acme/widgets/pull/13\f[R]
-\f[I]#     └── docs (merged) +9 \-2              https://github.com/acme/widgets/pull/14\f[R]
+\f[I]# └── add\-api *                   +42/\-7  https://github.com/acme/widgets/pull/12\f[R]
+\f[I]#     ├── use\-api (needs restack) +18/\-3  https://github.com/acme/widgets/pull/13\f[R]
+\f[I]#     └── docs (merged)            +9/\-2  https://github.com/acme/widgets/pull/14\f[R]
 .EE
 .IP \(bu 2
 \f[CR]*\f[R] marks the current branch.
@@ -749,9 +749,9 @@ The default is \f[CR]root\-at\-top\f[R].
 .RS 2
 .IP
 .EX
-    ┌── docs (merged) +9 \-2
-    ├── use\-api (needs restack) +18 \-3
-┌── add\-api * +42 \-7
+    ┌── docs (merged)            +9/\-2
+    ├── use\-api (needs restack) +18/\-3
+┌── add\-api *                   +42/\-7
 main
 .EE
 .RE

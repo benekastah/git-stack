@@ -35,7 +35,7 @@ def test_info_counts_each_branch_from_its_recorded_base(
     assert (branches["first"]["additions"], branches["first"]["deletions"]) == (3, 2)
     assert (branches["second"]["additions"], branches["second"]["deletions"]) == (1, 1)
     assert branches["main"]["additions"] is branches["main"]["deletions"] is None
-    assert "second (needs restack) +1 -1" in repo.stack("info").stdout
+    assert "second (needs restack) +1/-1" in repo.stack("info").stdout
 
 
 def test_info_counts_net_text_changes_and_handles_missing_base(repo: Repo, client: StackClient) -> None:
@@ -48,12 +48,12 @@ def test_info_counts_net_text_changes_and_handles_missing_base(repo: Repo, clien
 
     branch = repo.branch_info("feature")
     assert (branch.additions, branch.deletions) == (0, 0)
-    assert "feature * +0 -0" in repo.stack("info").stdout
+    assert "feature * +0/-0" in repo.stack("info").stdout
 
     repo.git("config", "--unset", "branch.feature.stackBase")
     branch = repo.branch_info("feature")
     assert branch.additions is branch.deletions is None
-    assert "+0 -0" not in repo.stack("info").stdout
+    assert "+0/-0" not in repo.stack("info").stdout
 
 
 def test_info_skips_patch_comparison_when_branch_already_contains_parent(
@@ -326,7 +326,9 @@ def test_info_reads_its_settings_with_the_config(repo: Repo, git_calls: list[Git
     repo.git("config", "stack.orientation", "root-at-bottom")
     git_calls.clear()
 
-    assert repo.stack("info").stdout == "        ┌── pr3 * +1 -1\n    ┌── pr2 +1 -1\n┌── pr1 +1 -1\nmain\n"
+    assert (
+        repo.stack("info").stdout == "        ┌── pr3 * +1/-1\n    ┌── pr2       +1/-1\n┌── pr1           +1/-1\nmain\n"
+    )
 
     assert [call[:2] for call in git_calls if call[0] == "config"] == [
         ["config", "--list"],

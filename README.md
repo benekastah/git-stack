@@ -90,8 +90,8 @@ git switch add-api
 # ...commit...
 git stack info
 # main
-# └── add-api * +42 -7
-#     └── use-api (needs restack) +18 -3
+# └── add-api *                   +42/-7
+#     └── use-api (needs restack) +18/-3
 git stack restack               # rebase use-api onto the new add-api
 git stack push --prs
 ```
@@ -508,9 +508,9 @@ links and merge status with the [GitHub adapter](#github).
 ```sh
 git stack info --prs
 # main
-# └── add-api * +42 -7                     https://github.com/acme/widgets/pull/12
-#     ├── use-api (needs restack) +18 -3   https://github.com/acme/widgets/pull/13
-#     └── docs (merged) +9 -2              https://github.com/acme/widgets/pull/14
+# └── add-api *                   +42/-7  https://github.com/acme/widgets/pull/12
+#     ├── use-api (needs restack) +18/-3  https://github.com/acme/widgets/pull/13
+#     └── docs (merged)            +9/-2  https://github.com/acme/widgets/pull/14
 ```
 
 - `*` marks the current branch.
@@ -524,9 +524,9 @@ git stack info --prs
   `root-at-top`.
 
   ```
-      ┌── docs (merged) +9 -2
-      ├── use-api (needs restack) +18 -3
-  ┌── add-api * +42 -7
+      ┌── docs (merged)            +9/-2
+      ├── use-api (needs restack) +18/-3
+  ┌── add-api *                   +42/-7
   main
   ```
 - `(needs restack)`: it's missing its parent's latest commits (or, for a

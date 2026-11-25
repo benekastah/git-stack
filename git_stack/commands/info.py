@@ -175,8 +175,6 @@ def label(branch: BranchInfo | GroupHeader, paint: Paint, color: bool, sources_b
         note = NOTES[branch.status]
         if note and not (color and branch.status is BranchStatus.NEEDS_RESTACK):
             parts.append(paint(note, STATUS_COLORS[branch.status]))
-    if branch.additions is not None and branch.deletions is not None:
-        parts.append(f"+{branch.additions} -{branch.deletions}")
     return " ".join(parts)
 
 
@@ -261,13 +259,26 @@ def print_tree(
     }
     plain = painter(False)
     widths = [len(tree) + display_width(label(row, plain, color, sources_by_root)) for tree, row in rows]
+    counts = [
+        f"+{row.additions}/-{row.deletions}"
+        if isinstance(row, BranchInfo) and row.additions is not None and row.deletions is not None
+        else ""
+        for _, row in rows
+    ]
+    count_column = max((width for width, count in zip(widths, counts, strict=True) if count), default=0)
+    count_width = max(map(len, counts), default=0)
+    suffixes = [
+        " " * (count_column - width + 1) + count.rjust(count_width) if count else ""
+        for width, count in zip(widths, counts, strict=True)
+    ]
+    widths = [width + len(suffix) for width, suffix in zip(widths, suffixes, strict=True)]
     links = [link_of(row, new_links) for _, row in rows]
     link_widths = [display_width(link[0]) if link else 0 for link in links]
     label_width = max((width for width, link in zip(widths, links, strict=True) if link), default=0)
     link_width = max(link_widths, default=0)
     columns = shutil.get_terminal_size().columns if sys.stdout.isatty() else None
-    for (tree, row), width, link, link_cells in zip(rows, widths, links, link_widths, strict=True):
-        line = paint(tree, TREE) + label(row, paint, color, sources_by_root)
+    for (tree, row), width, suffix, link, link_cells in zip(rows, widths, suffixes, links, link_widths, strict=True):
+        line = paint(tree, TREE) + label(row, paint, color, sources_by_root) + suffix
         if link:
             text, link_color = link
             if columns is None or label_width + 2 + link_width <= columns:
