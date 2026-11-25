@@ -111,7 +111,8 @@ class BranchInfo:
     root (e.g. main), which isn't tracked. pull_request is None for a root and
     for a branch without a pull request the adapter knows of. group is the
     group of a branch on a stack's root, if another branch on a stack's root (this one or
-    another) is in it too (see GROUP_KEY)."""
+    another) is in it too (see GROUP_KEY). Line counts are for the change from
+    the recorded base, when requested and available."""
 
     name: str
     parent: str | None
@@ -121,6 +122,8 @@ class BranchInfo:
     group: str | None = None
     integration_sources: tuple[tuple[str, bool], ...] | None = None
     integration_needs_restack: bool = False
+    additions: int | None = None
+    deletions: int | None = None
 
 
 @dataclass(frozen=True)
@@ -1165,7 +1168,9 @@ class StackClient(StackCore):
             if offline
             else make_adapter(self, self.default_remote(stacks, stacks), fetch=False, lookup_branches=stacks)
         )
-        return self.branch_infos(stacks, adapter, integration_roots, show_single_groups=True, overlap_root_info=True)
+        return self.branch_infos(
+            stacks, adapter, integration_roots, show_single_groups=True, overlap_root_info=True, count_lines=True
+        )
 
     def branch_infos(
         self,
@@ -1175,6 +1180,7 @@ class StackClient(StackCore):
         *,
         show_single_groups: bool = False,
         overlap_root_info: bool = False,
+        count_lines: bool = False,
     ) -> list[BranchInfo]:
         """The branches in stacks, as info() lists them, checked with adapter,
         so a command that already has one (and its pull requests) can show
@@ -1183,26 +1189,11 @@ class StackClient(StackCore):
         git = self.git
         current = git.current_branch()
 
-        def status(branch: str) -> BranchStatus:
-            parent = stacks.parent(branch)
-            parent_tip = git.rev(f"refs/heads/{parent}")
-            if parent_tip is None:
-                return BranchStatus.PARENT_MISSING
-            # Worked out before merge_state, which may wait for the adapter's
-            # lookup, so the two overlap. It's wasted on merged branches.
-            needs_restack = self.needs_restack(
-                branch, parent, git.config_get(branch, BASE_KEY), parent_tip, latest=False
-            )
-            state = adapter.merge_state(branch, parent)
-            if state is MergeState.MERGED:
-                return BranchStatus.MERGED
-            if state is MergeState.MERGED_WITH_NEW_COMMITS:
-                return BranchStatus.MERGED_WITH_NEW_COMMITS
-            if state is MergeState.REVERTED:
-                return BranchStatus.REVERTED
-            if self.stale_trunk_base(branch):
-                return BranchStatus.STALE_BASE
-            return BranchStatus.NEEDS_RESTACK if needs_restack else BranchStatus.UP_TO_DATE
+        def branch_details(branch: str) -> tuple[BranchStatus, int | None, int | None]:
+            branch_status = self._branch_status(branch, stacks.parent(branch), adapter)
+            counts = git.line_changes(git.config_get(branch, BASE_KEY), f"refs/heads/{branch}") if count_lines else None
+            additions, deletions = counts or (None, None)
+            return branch_status, additions, deletions
 
         roots = sorted(set(stacks.roots()) | set(extra_roots))
 
@@ -1220,7 +1211,7 @@ class StackClient(StackCore):
             prefetched = pool.submit(adapter.prefetch)
             root_results = pool.submit(root_infos) if overlap_root_info else None
             branches = list(stacks)
-            statuses = dict(zip(branches, pool.map(status, branches), strict=True))
+            details = dict(zip(branches, pool.map(branch_details, branches), strict=True))
             prefetched.result()
         shown_groups = {
             b: g
@@ -1233,18 +1224,40 @@ class StackClient(StackCore):
             self.emit(warning)
         for root, root_info in zip(roots, root_rows, strict=True):
             result.append(root_info)
-            result.extend(
-                BranchInfo(
-                    b,
-                    stacks.parent(b),
-                    statuses[b],
-                    b == current,
-                    adapter.pull_request_link(b),
-                    shown_groups.get(b),
+            for branch in stacks.descendants(root):
+                branch_status, additions, deletions = details[branch]
+                result.append(
+                    BranchInfo(
+                        branch,
+                        stacks.parent(branch),
+                        branch_status,
+                        branch == current,
+                        adapter.pull_request_link(branch),
+                        shown_groups.get(branch),
+                        additions=additions,
+                        deletions=deletions,
+                    )
                 )
-                for b in stacks.descendants(root)
-            )
         return result
+
+    def _branch_status(self, branch: str, parent: str, adapter: GitAdapter) -> BranchStatus:
+        git = self.git
+        parent_tip = git.rev(f"refs/heads/{parent}")
+        if parent_tip is None:
+            return BranchStatus.PARENT_MISSING
+        # Worked out before merge_state, which may wait for the adapter's
+        # lookup, so the two overlap. It's wasted on merged branches.
+        needs_restack = self.needs_restack(branch, parent, git.config_get(branch, BASE_KEY), parent_tip, latest=False)
+        state = adapter.merge_state(branch, parent)
+        if state is MergeState.MERGED:
+            return BranchStatus.MERGED
+        if state is MergeState.MERGED_WITH_NEW_COMMITS:
+            return BranchStatus.MERGED_WITH_NEW_COMMITS
+        if state is MergeState.REVERTED:
+            return BranchStatus.REVERTED
+        if self.stale_trunk_base(branch):
+            return BranchStatus.STALE_BASE
+        return BranchStatus.NEEDS_RESTACK if needs_restack else BranchStatus.UP_TO_DATE
 
     def integration_root_info(
         self,

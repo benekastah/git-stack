@@ -155,7 +155,10 @@ so these are interfaces:
   its dataclass fields, under the names `git_stack/json_fields.py` gives them
   (e.g. `json_name("stacks")`). So renaming or removing a field of an event or
   result, or an `event_type`, breaks scripts, even when it's only a refactor.
-- **`info --json`**, which prints a single list, for compatibility.
+- **`info --json`**, which prints a single list, for compatibility. Line counts
+  compare each tracked tip's tree with its recorded base, using native diff
+  statistics when possible. Other commands that list stacks omit the counts
+  in text and return `null` for them in JSON.
 - **The scripting commands** (`parent`, `base`, `show-stack`), which print one
   thing per line, and `show-stack --quiet`'s exit status.
 - **Exit statuses**: 0 on success, 1 when a command fails, and 2 (from

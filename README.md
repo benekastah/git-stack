@@ -90,8 +90,8 @@ git switch add-api
 # ...commit...
 git stack info
 # main
-# └── add-api *
-#     └── use-api (needs restack)
+# └── add-api * +42 -7
+#     └── use-api (needs restack) +18 -3
 git stack restack               # rebase use-api onto the new add-api
 git stack push --with-prs
 ```
@@ -508,21 +508,24 @@ links and merge status with the [GitHub adapter](#github).
 ```sh
 git stack info --prs
 # main
-# └── add-api *                   https://github.com/acme/widgets/pull/12
-#     ├── use-api (needs restack) https://github.com/acme/widgets/pull/13
-#     └── docs (merged)           https://github.com/acme/widgets/pull/14
+# └── add-api * +42 -7                     https://github.com/acme/widgets/pull/12
+#     ├── use-api (needs restack) +18 -3   https://github.com/acme/widgets/pull/13
+#     └── docs (merged) +9 -2              https://github.com/acme/widgets/pull/14
 ```
 
 - `*` marks the current branch.
+- `+N -N` counts text lines added and deleted between the branch's recorded
+  base and its committed tip. The counts exclude binary files and submodules.
+  Roots and branches without a usable recorded base have no counts.
 - To draw each stack upside down, with its root at the bottom (as
   `git log --graph` and other stacking tools do), run
   `git config --global stack.orientation root-at-bottom`. The default is
   `root-at-top`.
 
   ```
-      ┌── docs (merged)
-      ├── use-api (needs restack)
-  ┌── add-api *
+      ┌── docs (merged) +9 -2
+      ├── use-api (needs restack) +18 -3
+  ┌── add-api * +42 -7
   main
   ```
 - `(needs restack)`: it's missing its parent's latest commits (or, for a
@@ -576,6 +579,8 @@ git stack info --prs
   `integration_sources` lists each configured source name and whether its
   included tip landed on the root, or is `null` for other branches.
   `integration_needs_restack` says whether the integration needs refreshing.
+  `additions` and `deletions` are the branch's line counts, or `null` when
+  the counts are unavailable.
   `pr` is the branch's pull request's `number`, `url` and `state` (`open`,
   `draft` or `merged`) when requested with `--prs`. It is `null` for roots and
   when no pull request information is available.
@@ -1321,7 +1326,8 @@ What each command's result has, besides `type` and `events`:
 | `install-skills` | `installed`: each skill's `agent`, `skill`, link `path`, and `action`: `linked`, `replaced` or `unchanged` |
 | `show-stack` | `branches`, bottom first (`--quiet` can't be combined with `--json`) |
 
-`stacks` is the stacks the command covered, as `info --json` lists them.
+`stacks` is the stacks the command covered, as `info --json` lists them, with
+`additions` and `deletions` set to `null`.
 
 ## Conflicts
 

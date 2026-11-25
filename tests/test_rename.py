@@ -20,9 +20,9 @@ def test_rename_keeps_branch_and_children_in_stack(repo: Repo, client: StackClie
     assert repo.config("pr3", "stackParent") == "middle"
     assert client.info() == [
         BranchInfo("main", None, None, current=False),
-        BranchInfo("pr1", "main", BranchStatus.UP_TO_DATE, current=False),
-        BranchInfo("middle", "pr1", BranchStatus.UP_TO_DATE, current=True),
-        BranchInfo("pr3", "middle", BranchStatus.UP_TO_DATE, current=False),
+        BranchInfo("pr1", "main", BranchStatus.UP_TO_DATE, current=False, additions=1, deletions=1),
+        BranchInfo("middle", "pr1", BranchStatus.UP_TO_DATE, current=True, additions=1, deletions=1),
+        BranchInfo("pr3", "middle", BranchStatus.UP_TO_DATE, current=False, additions=1, deletions=1),
     ]
 
 

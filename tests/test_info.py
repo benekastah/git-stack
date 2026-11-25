@@ -10,9 +10,50 @@ from git_stack import events
 from git_stack.adapters.github import GitHubAdapter
 from git_stack.core import CURRENT_GROUP
 from git_stack.errors import StackError
+from git_stack.git import GitClient
 from git_stack.stack import BranchInfo, BranchStatus, StackClient
 from tests.git_support import GitCall
 from tests.helpers import FakeGitHub, Repo
+
+
+@pytest.mark.parametrize("native", [True, False])
+def test_info_counts_each_branch_from_its_recorded_base(
+    repo: Repo, client: StackClient, monkeypatch: pytest.MonkeyPatch, native: bool
+) -> None:
+    client.branch("first")
+    repo.commit("a", "one\ntwo\n", "first")
+    client.branch("second")
+    repo.commit("a", "one\nthree\n", "second")
+    repo.git("switch", "--quiet", "first")
+    repo.commit("b", "later\n", "parent moves")
+
+    if not native:
+        monkeypatch.setattr(GitClient, "_graph_repository", lambda _git: None)
+
+    rows = json.loads(repo.stack("info", "--json").stdout)
+    branches = {row["name"]: row for row in rows}
+    assert (branches["first"]["additions"], branches["first"]["deletions"]) == (3, 2)
+    assert (branches["second"]["additions"], branches["second"]["deletions"]) == (1, 1)
+    assert branches["main"]["additions"] is branches["main"]["deletions"] is None
+    assert "second (needs restack) +1 -1" in repo.stack("info").stdout
+
+
+def test_info_counts_net_text_changes_and_handles_missing_base(repo: Repo, client: StackClient) -> None:
+    client.branch("feature")
+    repo.commit("a", "temporary\n", "temporary work")
+    repo.git("revert", "--no-edit", "HEAD")
+    (repo.path / "binary").write_bytes(b"\x00\xff\n")
+    repo.git("add", "binary")
+    repo.git("commit", "--quiet", "-m", "add binary")
+
+    branch = repo.branch_info("feature")
+    assert (branch.additions, branch.deletions) == (0, 0)
+    assert "feature * +0 -0" in repo.stack("info").stdout
+
+    repo.git("config", "--unset", "branch.feature.stackBase")
+    branch = repo.branch_info("feature")
+    assert branch.additions is branch.deletions is None
+    assert "+0 -0" not in repo.stack("info").stdout
 
 
 def test_info_skips_patch_comparison_when_branch_already_contains_parent(
@@ -40,10 +81,10 @@ def test_info_lists_every_stack_parent_before_child(repo: Repo, client: StackCli
 
     assert client.info() == [
         BranchInfo("main", None, None, current=False),
-        BranchInfo("pr1", "main", BranchStatus.UP_TO_DATE, current=False),
-        BranchInfo("pr2", "pr1", BranchStatus.NEEDS_RESTACK, current=False),
-        BranchInfo("pr2b", "pr1", BranchStatus.NEEDS_RESTACK, current=False),
-        BranchInfo("solo", "main", BranchStatus.UP_TO_DATE, current=True),
+        BranchInfo("pr1", "main", BranchStatus.UP_TO_DATE, current=False, additions=1, deletions=1),
+        BranchInfo("pr2", "pr1", BranchStatus.NEEDS_RESTACK, current=False, additions=1, deletions=1),
+        BranchInfo("pr2b", "pr1", BranchStatus.NEEDS_RESTACK, current=False, additions=1, deletions=1),
+        BranchInfo("solo", "main", BranchStatus.UP_TO_DATE, current=True, additions=0, deletions=0),
     ]
 
 
@@ -285,7 +326,7 @@ def test_info_reads_its_settings_with_the_config(repo: Repo, git_calls: list[Git
     repo.git("config", "stack.orientation", "root-at-bottom")
     git_calls.clear()
 
-    assert repo.stack("info").stdout == "        ┌── pr3 *\n    ┌── pr2\n┌── pr1\nmain\n"
+    assert repo.stack("info").stdout == "        ┌── pr3 * +1 -1\n    ┌── pr2 +1 -1\n┌── pr1 +1 -1\nmain\n"
 
     assert [call[:2] for call in git_calls if call[0] == "config"] == [
         ["config", "--list"],

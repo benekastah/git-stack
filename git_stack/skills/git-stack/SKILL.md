@@ -25,8 +25,8 @@ From an ordinary untracked branch such as `main`, plain `git stack info` shows a
 ## Rules
 
 1. **Look first.** Run `git stack info --all` before changing anything: it shows each stack
-   and which branches need a restack. Add `--prs` for PR links and GitHub's view of which
-   branches merged.
+   with line counts from each branch's recorded base and which branches need a restack.
+   Add `--prs` for PR links and GitHub's view of which branches merged.
 2. **Never use plain git on a tracked branch** for what a git-stack command does. It moves the branch
    without updating the recorded base, and the next restack then replays the wrong commits.
    - New branch: `git stack create <name>`, not `git switch -c`.

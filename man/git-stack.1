@@ -191,8 +191,8 @@ git switch add\-api
 \f[I]# ...commit...\f[R]
 git stack info
 \f[I]# main\f[R]
-\f[I]# └── add\-api *\f[R]
-\f[I]#     └── use\-api (needs restack)\f[R]
+\f[I]# └── add\-api * +42 \-7\f[R]
+\f[I]#     └── use\-api (needs restack) +18 \-3\f[R]
 git stack restack               \f[I]# rebase use\-api onto the new add\-api\f[R]
 git stack push \-\-with\-prs
 .EE
@@ -730,12 +730,17 @@ with the GitHub adapter.
 .EX
 git stack info \-\-prs
 \f[I]# main\f[R]
-\f[I]# └── add\-api *                   https://github.com/acme/widgets/pull/12\f[R]
-\f[I]#     ├── use\-api (needs restack) https://github.com/acme/widgets/pull/13\f[R]
-\f[I]#     └── docs (merged)           https://github.com/acme/widgets/pull/14\f[R]
+\f[I]# └── add\-api * +42 \-7                     https://github.com/acme/widgets/pull/12\f[R]
+\f[I]#     ├── use\-api (needs restack) +18 \-3   https://github.com/acme/widgets/pull/13\f[R]
+\f[I]#     └── docs (merged) +9 \-2              https://github.com/acme/widgets/pull/14\f[R]
 .EE
 .IP \(bu 2
 \f[CR]*\f[R] marks the current branch.
+.IP \(bu 2
+\f[CR]+N \-N\f[R] counts text lines added and deleted between the
+branch\(aqs recorded base and its committed tip.
+The counts exclude binary files and submodules.
+Roots and branches without a usable recorded base have no counts.
 .IP \(bu 2
 To draw each stack upside down, with its root at the bottom (as
 \f[CR]git log \-\-graph\f[R] and other stacking tools do), run
@@ -744,9 +749,9 @@ The default is \f[CR]root\-at\-top\f[R].
 .RS 2
 .IP
 .EX
-    ┌── docs (merged)
-    ├── use\-api (needs restack)
-┌── add\-api *
+    ┌── docs (merged) +9 \-2
+    ├── use\-api (needs restack) +18 \-3
+┌── add\-api * +42 \-7
 main
 .EE
 .RE
@@ -836,6 +841,8 @@ whether its included tip landed on the root, or is \f[CR]null\f[R] for
 other branches.
 \f[CR]integration_needs_restack\f[R] says whether the integration needs
 refreshing.
+\f[CR]additions\f[R] and \f[CR]deletions\f[R] are the branch\(aqs line
+counts, or \f[CR]null\f[R] when the counts are unavailable.
 \f[CR]pr\f[R] is the branch\(aqs pull request\(aqs \f[CR]number\f[R],
 \f[CR]url\f[R] and \f[CR]state\f[R] (\f[CR]open\f[R], \f[CR]draft\f[R]
 or \f[CR]merged\f[R]) when requested with \f[CR]\-\-prs\f[R].
@@ -1911,7 +1918,8 @@ T}
 .TE
 .PP
 \f[CR]stacks\f[R] is the stacks the command covered, as
-\f[CR]info \-\-json\f[R] lists them.
+\f[CR]info \-\-json\f[R] lists them, with \f[CR]additions\f[R] and
+\f[CR]deletions\f[R] set to \f[CR]null\f[R].
 .SH CONFLICTS
 If a rebase, cherry\-pick or revert stops on a conflict, resolve it and
 run \f[CR]git rebase \-\-continue\f[R] /

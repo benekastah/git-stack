@@ -417,7 +417,9 @@ def test_conflict_resolved_with_rebase_continue_records_new_base(repo: Repo, cli
     repo.write("b", "resolved\n")
     repo.git("add", "b")
     repo.git("rebase", "--continue")
-    assert repo.branch_info("pr2") == BranchInfo("pr2", "pr1", BranchStatus.UP_TO_DATE, current=True)
+    assert repo.branch_info("pr2") == BranchInfo(
+        "pr2", "pr1", BranchStatus.UP_TO_DATE, current=True, additions=1, deletions=1
+    )
     client.restack()
 
     repo.assert_stacked("pr1", "main", ["pr1 touches b", "pr1 c2", "pr1 c1"])
@@ -507,7 +509,9 @@ def test_aborted_restack_keeps_previous_base(repo: Repo, client: StackClient) ->
         client.restack()
     repo.git("rebase", "--abort")
 
-    assert repo.branch_info("pr1") == BranchInfo("pr1", "main", BranchStatus.NEEDS_RESTACK, current=True)
+    assert repo.branch_info("pr1") == BranchInfo(
+        "pr1", "main", BranchStatus.NEEDS_RESTACK, current=True, additions=1, deletions=1
+    )
     assert repo.config("pr1", "stackBase") == old_base
 
 

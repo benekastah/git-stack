@@ -674,6 +674,46 @@ class GitClient:
         commit = self.rev(rev)
         return self._object(commit, "tree") if commit is not None else None
 
+    def line_changes(self, base: str | None, ref: str) -> tuple[int, int] | None:
+        """Added and deleted text lines from a recorded base to its branch tip."""
+        if not base or (tip := self.rev(ref)) is None or not self.is_ancestor(base, tip):
+            return None
+        if base == tip:
+            return 0, 0
+        if (repo := self._graph_repository()) is not None:
+            try:
+                with measure_native("diff-stats"):
+                    before = repo[base].peel(pygit2.Tree)
+                    after = repo[tip].peel(pygit2.Tree)
+                    flags = pygit2.enums.DiffOption.IGNORE_SUBMODULES | pygit2.enums.DiffOption.INDENT_HEURISTIC
+                    stats = before.diff_to_tree(after, flags=flags).stats
+                    return stats.insertions, stats.deletions
+            except KeyError, pygit2.GitError, ValueError:
+                pass
+
+        before_tree, after_tree = self.tree(base), self.tree(tip)
+        if before_tree is None or after_tree is None:
+            return None
+        changes = self.run(
+            "diff",
+            "--numstat",
+            "--no-renames",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--no-relative",
+            "--ignore-submodules=all",
+            before_tree,
+            after_tree,
+            "--",
+        )
+        additions = deletions = 0
+        for row in changes.split("\n"):
+            added, _, rest = row.partition("\t")
+            if added and added != "-":
+                additions += int(added)
+                deletions += int(rest.partition("\t")[0])
+        return additions, deletions
+
     def first_subject(self, base: str, branch: str) -> str | None:
         """The first subject Git displays for commits on branch since base."""
         ref = f"refs/heads/{branch}"

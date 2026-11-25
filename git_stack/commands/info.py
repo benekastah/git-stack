@@ -175,6 +175,8 @@ def label(branch: BranchInfo | GroupHeader, paint: Paint, color: bool, sources_b
         note = NOTES[branch.status]
         if note and not (color and branch.status is BranchStatus.NEEDS_RESTACK):
             parts.append(paint(note, STATUS_COLORS[branch.status]))
+    if branch.additions is not None and branch.deletions is not None:
+        parts.append(f"+{branch.additions} -{branch.deletions}")
     return " ".join(parts)
 
 

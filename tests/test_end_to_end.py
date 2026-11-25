@@ -25,7 +25,7 @@ def test_stack_through_squash_merge(repo: Repo) -> None:
     assert "pr1 was merged into main; deleted it" in result.stdout
     assert "restacking pr2 onto main" in result.stdout
     assert result.stdout.endswith("pull requests of:\n  pr2\n")
-    assert repo.stack_process("info").stdout == "main\n└── group pr1\n    └── pr2 *\n"
+    assert repo.stack_process("info").stdout == "main\n└── group pr1\n    └── pr2 * +1 -1\n"
 
 
 def test_non_ascii_branch_names_and_messages(repo: Repo) -> None:
@@ -42,7 +42,7 @@ def test_non_ascii_branch_names_and_messages(repo: Repo) -> None:
     repo.git("switch", "--quiet", "über")
 
     assert repo.git("log", "--format=%s", "-2", "née").splitlines() == ["naïve fix ✓", "café ☕"]
-    assert repo.stack_process("info").stdout == "main\n└── née\n    └── über *\n"
+    assert repo.stack_process("info").stdout == "main\n└── née +2 -2\n    └── über * +0 -0\n"
     assert repo.stack_process("parent").stdout == "née\n"
 
 
