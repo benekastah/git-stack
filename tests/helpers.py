@@ -21,7 +21,7 @@ from git_stack import cli, events
 from git_stack.git import GitClient
 from git_stack.stack import BranchInfo, StackClient
 from tests import fake_gh, operations
-from tests.git_support import CLOSE_FDS, real_git
+from tests.git_support import real_git
 
 
 def start_process(args: list[str], **kwargs: Any) -> subprocess.Popen[str]:
@@ -151,7 +151,6 @@ class Repo:
             [real_git(), "-C", str(cwd or self.path), *args],
             capture_output=True,
             encoding="utf-8",
-            close_fds=CLOSE_FDS,
             check=False,
         )
         if result.returncode != 0:
@@ -329,7 +328,6 @@ class Repo:
             subprocess.run(
                 [real_git(), "-C", str(self.path), "config", f"branch.{branch}.{key}"],
                 capture_output=True,
-                close_fds=CLOSE_FDS,
                 check=False,
             ).returncode
             == 0

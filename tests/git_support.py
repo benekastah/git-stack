@@ -2,7 +2,6 @@
 
 import os
 import subprocess
-import sys
 from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from functools import cache
@@ -12,9 +11,6 @@ import pygit2
 from pygit2.enums import ConfigLevel
 
 from git_stack.git_command import find_git
-
-# Keep the POSIX spawn fast path and avoid inheriting handles on Windows.
-CLOSE_FDS = sys.platform == "win32"
 
 
 @cache
