@@ -1,3 +1,4 @@
+import faulthandler
 import os
 import pathlib
 import shutil
@@ -41,10 +42,42 @@ os.environ[GIT_VARIABLE] = real_git()
 GIT_EXEC_PATH = pathlib.Path(real_git()).parent
 
 
+HANG_TIMEOUT = 90
+"""Seconds after which fail_hung_test ends a test: comfortably over how long the slowest takes,
+and over the 60 seconds the tests give a process they start (see helpers.run_process), whose
+failure says more."""
+LARGE_HANG_TIMEOUT = 25 * 60
+"""HANG_TIMEOUT for the tests marked large, under large.yml's job limit."""
+
+_hang_report: list[int] = []
+"""A file descriptor for the process's stderr as it was before pytest captured it."""
+
+
 def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line(
         "markers", "large: a test of a large repository (tests/large); run by `dev.py large-tests`, never by default"
     )
+    # pytest doesn't capture stderr while it configures, but does during each test, when what
+    # fail_hung_test wrote to it would be lost as the process exits.
+    _hang_report.append(os.dup(2))
+
+
+def pytest_unconfigure(config: pytest.Config) -> None:
+    while _hang_report:
+        os.close(_hang_report.pop())
+
+
+@pytest.fixture(autouse=True)
+def fail_hung_test(request: pytest.FixtureRequest) -> Iterator[None]:
+    """Past HANG_TIMEOUT, print every thread's traceback, and end the process running the test
+    (pytest-xdist's worker, which it replaces, reporting the test as failed): a test that
+    deadlocks, e.g. on git-stack's lock, then fails, and says where, rather than hang the run
+    until CI's time limit. The fixtures that a test uses with a wider scope, which may take
+    longer, are set up before it starts."""
+    timeout = LARGE_HANG_TIMEOUT if request.node.get_closest_marker("large") else HANG_TIMEOUT
+    faulthandler.dump_traceback_later(timeout, exit=True, file=_hang_report[-1])
+    yield
+    faulthandler.cancel_dump_traceback_later()
 
 
 def pytest_ignore_collect(collection_path: pathlib.Path, config: pytest.Config) -> bool | None:

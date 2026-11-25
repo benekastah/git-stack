@@ -58,16 +58,6 @@ stacks that still need to sync.
 Passing the variable only to the processes git-stack itself starts, rather
 than through `os.environ`, would avoid both.
 
-## A test that deadlocks can hang the suite
-
-`Repo.stack_process`'s timeout kills only its direct child, so a grandchild
-holding the pipes open keeps it waiting, and the in-process paths (e.g.
-`Repo.stack`, a thread waiting for the lock) have no timeout at all. A
-regression to a deadlock, like the one `GIT_STACK_LOCK_HELD` prevents, then
-hangs until CI's job limit instead of failing. Start test processes in their
-own process group and kill the group on timeout, and add a fixture that calls
-`faulthandler.dump_traceback_later` so a hung test prints where it's stuck.
-
 ## Commands start processes for every branch, many of them one at a time
 
 The operation tests exercise stacks of 1, 3 and 10 branches. On the largest,

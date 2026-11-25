@@ -6,7 +6,7 @@ import pathlib
 import subprocess
 import sys
 import threading
-from collections.abc import Callable, Generator
+from collections.abc import Callable, Generator, Iterator
 from contextlib import contextmanager
 
 import pytest
@@ -16,7 +16,7 @@ from git_stack.errors import LockHeldByCaller, StackError
 from git_stack.file_lock import file_lock
 from git_stack.git import GitClient
 from git_stack.stack import BranchStatus, StackClient
-from tests.helpers import Repo
+from tests.helpers import Repo, kill_tree, start_process
 
 # The commands that only read, each run on pr2 of make_stack's stack (see
 # settled_stacks).
@@ -302,35 +302,51 @@ def lock_held_by_another_command(repo: Repo) -> Generator[None]:
         yield
 
 
-def start_waiting_command(repo: Repo, *args: str) -> subprocess.Popen[str]:
-    """Start `git stack <args>` as a process, while the caller holds the lock,
-    and return it once it says on stderr that it's waiting for the lock."""
-    command = subprocess.Popen(
-        [sys.executable, "-m", "tests.stack_entry", "-C", str(repo.path), *args],
-        cwd=repo.tmp,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        encoding="utf-8",
-        # Unbuffered, so it prints that it's waiting as it starts to.
-        env={**os.environ, "PYTHONUNBUFFERED": "1"},
-    )
-    stderr = command.stderr
-    assert stderr is not None
-    # Read in a thread, to give up if it never says it's waiting.
-    first_line: list[str] = []
-    reader = threading.Thread(target=lambda: first_line.append(stderr.readline()), daemon=True)
-    reader.start()
-    reader.join(timeout=60)
-    assert first_line == ["waiting for another git stack command in this repository to finish\n"]
-    assert command.poll() is None
-    return command
+@pytest.fixture
+def start_waiting_command(repo: Repo) -> Iterator[Callable[..., subprocess.Popen[str]]]:
+    """A function that starts `git stack <args>` as a process, while the
+    caller holds the lock, and returns it once it says on stderr that it's
+    waiting for the lock. One still running when the test ends (e.g. because
+    it failed) is killed, with what it started, so it can't hold the lock or
+    keep the test waiting."""
+    started: list[subprocess.Popen[str]] = []
+
+    def start(*args: str) -> subprocess.Popen[str]:
+        command = start_process(
+            [sys.executable, "-m", "tests.stack_entry", "-C", str(repo.path), *args],
+            cwd=repo.tmp,
+            # Unbuffered, so it prints that it's waiting as it starts to.
+            env={**os.environ, "PYTHONUNBUFFERED": "1"},
+        )
+        started.append(command)
+        stderr = command.stderr
+        assert stderr is not None
+        # Read in a thread, to give up if it never says it's waiting.
+        first_line: list[str] = []
+        reader = threading.Thread(target=lambda: first_line.append(stderr.readline()), daemon=True)
+        reader.start()
+        reader.join(timeout=60)
+        assert first_line == ["waiting for another git stack command in this repository to finish\n"]
+        assert command.poll() is None
+        return command
+
+    yield start
+
+    for command in started:
+        if command.poll() is None:
+            kill_tree(command)
+        # Closes its pipes, once it's gone.
+        with command:
+            pass
 
 
-def test_command_waits_for_another_holding_the_lock(repo: Repo) -> None:
+def test_command_waits_for_another_holding_the_lock(
+    repo: Repo, start_waiting_command: Callable[..., subprocess.Popen[str]]
+) -> None:
     repo.make_stack()
     main_moves_on(repo)
     with lock_held_by_another_command(repo):
-        restack = start_waiting_command(repo, "restack", "--latest")
+        restack = start_waiting_command("restack", "--latest")
     out, err = restack.communicate(timeout=60)
 
     assert restack.returncode == 0, err
@@ -338,22 +354,26 @@ def test_command_waits_for_another_holding_the_lock(repo: Repo) -> None:
     repo.assert_stacked("pr1", "main", ["pr1 c2", "pr1 c1"])
 
 
-def test_parent_prints_only_the_parent_after_waiting_for_the_lock(repo: Repo) -> None:
+def test_parent_prints_only_the_parent_after_waiting_for_the_lock(
+    repo: Repo, start_waiting_command: Callable[..., subprocess.Popen[str]]
+) -> None:
     """Saying it's waiting goes to stderr, so `$(git stack parent)` still
     gets the branch alone."""
     restack_finished_by_hand(repo)
     with lock_held_by_another_command(repo):
-        parent = start_waiting_command(repo, "parent")
+        parent = start_waiting_command("parent")
     out, err = parent.communicate(timeout=60)
 
     assert parent.returncode == 0, err
     assert out == "pr1\n"
 
 
-def test_info_json_prints_only_its_list_after_waiting_for_the_lock(repo: Repo) -> None:
+def test_info_json_prints_only_its_list_after_waiting_for_the_lock(
+    repo: Repo, start_waiting_command: Callable[..., subprocess.Popen[str]]
+) -> None:
     restack_finished_by_hand(repo)
     with lock_held_by_another_command(repo):
-        info = start_waiting_command(repo, "info", "--json")
+        info = start_waiting_command("info", "--json")
     out, err = info.communicate(timeout=60)
 
     assert info.returncode == 0, err

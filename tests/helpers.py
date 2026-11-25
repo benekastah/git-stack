@@ -5,12 +5,13 @@ import json
 import os
 import pathlib
 import re
+import signal
 import subprocess
 import sys
 import tempfile
 import threading
 from collections.abc import Generator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -21,6 +22,51 @@ from git_stack.git import GitClient
 from git_stack.stack import BranchInfo, StackClient
 from tests import fake_gh, operations
 from tests.git_support import CLOSE_FDS, real_git
+
+
+def start_process(args: list[str], **kwargs: Any) -> subprocess.Popen[str]:
+    """Start args with its output piped, as text, so that kill_tree can kill it and what it
+    starts: on Linux and macOS, in a session (and so a process group) of its own."""
+    if sys.platform != "win32":
+        kwargs["start_new_session"] = True
+    return subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding="utf-8", **kwargs)
+
+
+def kill_tree(process: subprocess.Popen[str]) -> None:
+    """Kill process, started by start_process, and what it started: its process group on Linux
+    and macOS, and on Windows its tree (taskkill /F /T), which taskkill finds through process,
+    so it's killed only if process still runs."""
+    if sys.platform == "win32":
+        # By its full path, not whichever taskkill PATH or the current directory has.
+        taskkill = pathlib.Path(os.environ.get("SYSTEMROOT", r"C:\Windows")) / "System32" / "taskkill.exe"
+        subprocess.run(
+            [str(taskkill), "/F", "/T", "/PID", str(process.pid)],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+    else:
+        # Gone already, or (on macOS) only zombies left in its group.
+        with suppress(ProcessLookupError, PermissionError):
+            os.killpg(process.pid, signal.SIGKILL)
+    process.kill()
+
+
+def run_process(args: list[str], *, timeout: float, **kwargs: Any) -> subprocess.CompletedProcess[str]:
+    """subprocess.run(args, capture_output=True, encoding="utf-8"), but past timeout, it kills
+    what the process started too (see kill_tree), not only the process, and fails the test with
+    what it printed. A process left running, e.g. deadlocked on git-stack's lock, would
+    otherwise hold the lock, or the output's pipes, for good."""
+    with start_process(args, **kwargs) as process:
+        try:
+            out, err = process.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            kill_tree(process)
+            # Whatever else holds the pipes open is gone too, so this ends.
+            out, err = process.communicate(timeout=timeout)
+            pytest.fail(f"{args} didn't finish in {timeout} seconds:\n{out}{err}")
+    return subprocess.CompletedProcess(args, process.returncode, out, err)
 
 
 @contextmanager
@@ -134,14 +180,11 @@ class Repo:
         (see tests/operations.py), by tracing git in the new process only; without one, the
         process gets this process's environment as it is."""
         with operations.traced_subprocess() as environment:
-            result = subprocess.run(
+            result = run_process(
                 [sys.executable, "-m", "tests.stack_entry", "-C", str(self.path), *args],
-                cwd=self.tmp,
-                capture_output=True,
-                encoding="utf-8",
-                env=environment,
                 timeout=60,
-                check=False,
+                cwd=self.tmp,
+                env=environment,
             )
         return self._check_result(args, result, expect_success)
 
