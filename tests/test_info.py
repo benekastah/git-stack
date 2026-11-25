@@ -18,7 +18,7 @@ from tests.helpers import FakeGitHub, Repo
 
 @pytest.mark.parametrize("native", [True, False])
 def test_info_counts_each_branch_from_its_recorded_base(
-    repo: Repo, client: StackClient, monkeypatch: pytest.MonkeyPatch, native: bool
+    repo: Repo, client: StackClient, monkeypatch: pytest.MonkeyPatch, native: bool, git_calls: list[GitCall]
 ) -> None:
     client.branch("first")
     repo.commit("a", "one\ntwo\n", "first")
@@ -36,6 +36,9 @@ def test_info_counts_each_branch_from_its_recorded_base(
     assert (branches["second"]["additions"], branches["second"]["deletions"]) == (1, 1)
     assert branches["main"]["additions"] is branches["main"]["deletions"] is None
     assert "second (needs restack) +1/-1" in repo.stack("info").stdout
+    stats_calls = [call for call in git_calls if "--numstat" in call]
+    assert len(stats_calls) == (0 if native else 2)
+    assert all(call[:2] == ["diff-tree", "-r"] for call in stats_calls)
 
 
 def test_info_counts_net_text_changes_and_handles_missing_base(repo: Repo, client: StackClient) -> None:

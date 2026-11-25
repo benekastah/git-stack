@@ -45,7 +45,7 @@ from git_stack.core import (
     is_glob,
 )
 from git_stack.errors import BrokenStackError, LockHeldByCaller, StackError
-from git_stack.git import DEFAULT_REMOTE, SWITCH
+from git_stack.git import DEFAULT_REMOTE, SWITCH, LineCountTrees
 from git_stack.integrations import Integration, Integrations, RetiredSource, Source
 from git_stack.json_fields import json_name
 from git_stack.performance import active_timeline
@@ -1188,11 +1188,10 @@ class StackClient(StackCore):
         git = self.git
         current = git.current_branch()
 
-        def branch_details(branch: str) -> tuple[BranchStatus, int | None, int | None]:
+        def branch_details(branch: str) -> tuple[BranchStatus, tuple[int, int] | LineCountTrees | None]:
             branch_status = self._branch_status(branch, stacks.parent(branch), adapter)
             counts = git.line_changes(git.config_get(branch, BASE_KEY), f"refs/heads/{branch}") if count_lines else None
-            additions, deletions = counts or (None, None)
-            return branch_status, additions, deletions
+            return branch_status, counts
 
         roots = sorted(set(stacks.roots()) | set(extra_roots))
 
@@ -1212,6 +1211,9 @@ class StackClient(StackCore):
             branches = list(stacks)
             details = dict(zip(branches, pool.map(branch_details, branches), strict=True))
             prefetched.result()
+        fallback_counts = git.batch_line_changes(
+            count for _, count in details.values() if isinstance(count, LineCountTrees)
+        )
         shown_groups = {
             b: g
             for b, g in stacks.groups().items()
@@ -1224,7 +1226,11 @@ class StackClient(StackCore):
         for root, root_info in zip(roots, root_rows, strict=True):
             result.append(root_info)
             for branch in stacks.descendants(root):
-                branch_status, additions, deletions = details[branch]
+                branch_status, counts = details[branch]
+                additions, deletions = (fallback_counts[counts] if isinstance(counts, LineCountTrees) else counts) or (
+                    None,
+                    None,
+                )
                 result.append(
                     BranchInfo(
                         branch,

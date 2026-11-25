@@ -60,7 +60,8 @@ GitHub-specific. The Git adapter never starts `gh`. Protected writes require
   publication. Branch containment uses local trees and ancestry when it can
   prove a fast-forward result and uses Git for the remaining merge checks.
 - `GitClient` uses py-git-client for Git subprocesses and bulk ref and config
-  operations. `git_stack/git_command.py` selects `$GIT_STACK_GIT` or Git on PATH
+  operations. Info batches fallback line counts for all selected branches in one
+  `git diff-tree --stdin` invocation. `git_stack/git_command.py` selects `$GIT_STACK_GIT` or Git on PATH
   for each invocation. Git-stack uses pygit2 for local object and ancestry queries,
   discovery, and worktree state. The snapshot also owns the library's cache for
   Git metadata queries. Per-command reference and graph caches live in `GitClient`.

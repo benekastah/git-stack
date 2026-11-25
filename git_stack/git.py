@@ -9,7 +9,7 @@ from collections import Counter
 from collections.abc import Collection, Generator, Iterable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
-from typing import TextIO
+from typing import NamedTuple, TextIO
 
 import git_client
 import pygit2
@@ -45,6 +45,7 @@ READ_ONLY_COMMANDS = frozenset(
     {
         "cat-file",
         "diff",
+        "diff-tree",
         "for-each-ref",
         "log",
         "ls-remote",
@@ -158,6 +159,13 @@ class _NativeReads(threading.local):
     # Each worker owns its libgit2 repository handle, including its caches.
     repository: pygit2.Repository | None = None
     graph_usable: bool | None = None
+
+
+class LineCountTrees(NamedTuple):
+    """Tree IDs whose line counts need Git's diff engine."""
+
+    before: str
+    after: str
 
 
 class GitClient:
@@ -674,8 +682,8 @@ class GitClient:
         commit = self.rev(rev)
         return self._object(commit, "tree") if commit is not None else None
 
-    def line_changes(self, base: str | None, ref: str) -> tuple[int, int] | None:
-        """Added and deleted text lines from a recorded base to its branch tip."""
+    def line_changes(self, base: str | None, ref: str) -> tuple[int, int] | LineCountTrees | None:
+        """Count text changes natively, or return the trees for a batched Git diff."""
         if not base or (tip := self.rev(ref)) is None or not self.is_ancestor(base, tip):
             return None
         if base == tip:
@@ -694,25 +702,41 @@ class GitClient:
         before_tree, after_tree = self.tree(base), self.tree(tip)
         if before_tree is None or after_tree is None:
             return None
+        return LineCountTrees(before_tree, after_tree)
+
+    def batch_line_changes(self, trees: Iterable[LineCountTrees]) -> dict[LineCountTrees, tuple[int, int]]:
+        """Count every remaining tree pair with one Git process."""
+        requests = {f"{pair.before} {pair.after}": pair for pair in trees}
+        if not requests:
+            return {}
         changes = self.run(
-            "diff",
+            "diff-tree",
+            "-r",
+            "--stdin",
             "--numstat",
             "--no-renames",
             "--no-ext-diff",
             "--no-textconv",
             "--no-relative",
             "--ignore-submodules=all",
-            before_tree,
-            after_tree,
-            "--",
+            input="".join(header + "\n" for header in requests),
         )
-        additions = deletions = 0
+        counts: dict[LineCountTrees, tuple[int, int]] = {}
+        current = None
+        # Git echoes each tree pair on its own line before its numstat records.
+        # Without -z it quotes filenames containing tabs or line breaks.
         for row in changes.split("\n"):
-            added, _, rest = row.partition("\t")
-            if added and added != "-":
-                additions += int(added)
-                deletions += int(rest.partition("\t")[0])
-        return additions, deletions
+            if row in requests:
+                current = requests[row]
+                counts[current] = (0, 0)
+            elif current is not None:
+                added, _, rest = row.partition("\t")
+                if added and added != "-":
+                    additions, deletions = counts[current]
+                    counts[current] = additions + int(added), deletions + int(rest.partition("\t")[0])
+        if len(counts) != len(requests):
+            raise StackError("Git did not return line counts for every requested tree pair")
+        return counts
 
     def first_subject(self, base: str, branch: str) -> str | None:
         """The first subject Git displays for commits on branch since base."""
