@@ -6,10 +6,7 @@ from git_stack.commands import (
     add_ignore_revert_argument,
     add_latest_argument,
     add_pr_access_arguments,
-    add_pr_protection_arguments,
-    add_rebuild_stack_argument,
     add_stack_arguments,
-    pr_protection,
 )
 from git_stack.commands.info import print_tree
 from git_stack.core import Delete
@@ -29,7 +26,7 @@ class Args(PRProtectionArgs):
     allow_shared: bool
     pull_tracked_upstream: bool
     rewritten_upstream: bool
-    rebuild_stack: bool
+    prs: bool
     no_verify: bool
 
 
@@ -51,7 +48,6 @@ def register(subparsers: Subparsers) -> None:
     add_latest_argument(p)
     add_ignore_revert_argument(p)
     add_allow_shared_argument(p)
-    add_rebuild_stack_argument(p)
     p.add_argument(
         "--pull-tracked-upstream",
         action="store_true",
@@ -60,8 +56,7 @@ def register(subparsers: Subparsers) -> None:
     p.add_argument(
         "--rewritten-upstream", action="store_true", help="pull unseen commits from rewritten upstream history"
     )
-    add_pr_protection_arguments(p)
-    add_pr_access_arguments(p, writes=True)
+    add_pr_access_arguments(p)
     p.set_defaults(run=run, show=show)
 
 
@@ -79,10 +74,10 @@ def run(stack: StackClient, args: Args) -> SyncResult:
         pull_tracked_upstream=args.pull_tracked_upstream,
         rewritten_upstream=args.rewritten_upstream,
         force=args.force,
-        rebuild_stack=args.rebuild_stack,
+        prs=args.prs,
+        rebuild_stack=args.prs and args.force,
         no_verify=args.no_verify,
-        close_orphaned_prs=args.rebuild_stack,
-        **pr_protection(args),
+        close_orphaned_prs=args.prs and args.force,
     )
 
 
@@ -90,6 +85,6 @@ def show(stack: StackClient, args: Args, result: SyncResult) -> None:
     if result.branches:
         print_tree(stack, result.branches)
     if result.unpushed:
-        print("note: run `git stack push --with-prs` to update the remote branches and pull requests of:")
+        print("note: run `git stack push --prs` to update the remote branches and pull requests of:")
         for branch in result.unpushed:
             print(f"  {branch}")

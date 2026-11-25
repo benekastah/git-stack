@@ -2,7 +2,6 @@ from git_stack.commands import (
     PRProtectionArgs,
     Subparsers,
     add_pr_protection_arguments,
-    add_rebuild_stack_argument,
     add_stack_arguments,
     named_stacks,
     pr_protection,
@@ -18,7 +17,6 @@ class Args(PRProtectionArgs):
     groups: list[str]
     remote: str | None
     dry_run: bool
-    rebuild_stack: bool
 
 
 def register(subparsers: Subparsers) -> None:
@@ -30,11 +28,10 @@ def register(subparsers: Subparsers) -> None:
     )
     add_stack_arguments(p, "open pull requests for", optional_group=True)
     p.add_argument("--remote")
-    add_rebuild_stack_argument(p)
     p.add_argument(
         "-n", "--dry-run", action="store_true", help="print the pull requests it would open, without opening them"
     )
-    add_pr_protection_arguments(p, add_force=True)
+    add_pr_protection_arguments(p)
     p.set_defaults(run=run, show=show)
 
 
@@ -44,9 +41,9 @@ def run(stack: StackClient, args: Args) -> PrsResult:
         args.groups,
         remote=args.remote,
         dry_run=args.dry_run,
-        rebuild_stack=args.rebuild_stack,
-        close_orphaned_prs=args.rebuild_stack,
-        **pr_protection(args, separate_force=True),
+        rebuild_stack=args.force,
+        close_orphaned_prs=args.force,
+        **pr_protection(args),
     )
 
 

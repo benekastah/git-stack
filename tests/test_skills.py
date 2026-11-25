@@ -69,11 +69,11 @@ def test_every_git_stack_command_in_a_skill_parses(path: pathlib.Path) -> None:
 
 
 @pytest.mark.parametrize("path", SKILL_FILES, ids=lambda p: p.parent.name)
-def test_skill_publication_commands_protect_prs(path: pathlib.Path) -> None:
+def test_skill_publication_commands_use_current_flags(path: pathlib.Path) -> None:
     for command in stack_commands(path.read_text(encoding="utf-8")):
         parts = shlex.split(command)
         if parts[0] in ("push", "sync", "prs", "pr"):
-            assert "--protect-prs" in parts, f"{path}: git stack {command}"
+            assert not {"--protect-prs", "--with-prs", "--git-only", "--allow-pr-update", "--pr-rebuild"} & set(parts)
 
 
 @pytest.mark.parametrize("path", sorted(SKILLS.glob("*/SKILL.md")), ids=lambda p: p.parent.name)

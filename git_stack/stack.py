@@ -17,8 +17,6 @@ from git_stack import events
 from git_stack.adapters import (
     ADAPTER_SETTING,
     Adapter,
-    GitHubAccess,
-    github_access,
     make_adapter,
 )
 from git_stack.adapters.git import GitAdapter, PullRequestLink
@@ -393,6 +391,7 @@ class SyncState:
     protected: frozenset[str] = frozenset()
     command: SyncCommand = SyncCommand.SYNC
     no_verify: bool = False
+    prs: bool = False
     skipped: set[str] = field(default_factory=set)
     blocked: list[str] = field(default_factory=list)
     broken: list[str] = field(default_factory=list)
@@ -2057,6 +2056,7 @@ class StackClient(StackCore):
         no_verify: bool = False,
         protection: PRProtection = DEFAULT_PR_PROTECTION,
         close_orphaned_prs: bool = False,
+        prs: bool = False,
     ) -> SyncResult:
         """Fetch, untrack the merged branches in the current stack, or in the
         stacks of the branches that branches and groups name (see named), deleting what
@@ -2166,6 +2166,7 @@ class StackClient(StackCore):
             command,
             no_verify,
         )
+        state.prs = prs
         state.protected_deletes = self.integration_deletion_refs(delete, roots, push_remote)
         state.check_delete = lambda deletion: self.protect_deletion(deletion, adapter, protection, push_remote)
         self.refresh_and_push(selection, expected, adapter, state, integration_leases, rebuild_stack, protection)
@@ -2269,6 +2270,7 @@ class StackClient(StackCore):
                 state.stacks,
                 adapter,
                 state.remote,
+                opening=state.prs,
                 rebuild_stack=rebuild_stack,
                 scope=selection.branches,
                 use_upstreams=True,
@@ -2278,6 +2280,10 @@ class StackClient(StackCore):
                 deletions=deletions,
                 protection=protection,
             )
+            if state.prs and isinstance(adapter, GitHubAdapter) and state.pushable:
+                self.open_pull_requests(
+                    state.pushable, state.stacks, adapter, state.remote, rebuild_stack=rebuild_stack, preflight=False
+                )
             if not (state.blocked or state.broken) and len(deletions) == len(pending):
                 integrations.clear_retired_sources(leases, state.stacks, state.scope)
         finally:
@@ -2883,7 +2889,7 @@ class StackClient(StackCore):
             integration_pushes=integration_pushes,
         )
         steps = (
-            self.open_pull_requests(pushed, stacks, github, push_remote, rebuild_stack=rebuild_stack)
+            self.open_pull_requests(pushed, stacks, github, push_remote, rebuild_stack=rebuild_stack, preflight=False)
             if github and pushed
             else None
         )
@@ -3081,7 +3087,8 @@ class StackClient(StackCore):
             )
         self.record_pushed(branches, integration_pushes, deletions, remote, work_tips)
         try:
-            adapter.after_push(branches, stacks, opening, rebuild_stack, scope)
+            if opening:
+                adapter.after_push(branches, stacks, opening, rebuild_stack, scope)
         except StackError as e:
             raise StackError(f"pushed, but updating pull requests failed\n{e}") from e
         return branches
@@ -3217,26 +3224,11 @@ class StackClient(StackCore):
         *,
         primary_remote: bool = True,
     ) -> None:
-        access = github_access()
-        if not heads or access is GitHubAccess.GIT_ONLY:
-            return
-        if access is GitHubAccess.ENABLED and protection.force and not protection.protect:
+        if not heads or not isinstance(adapter, GitHubAdapter):
             return
         repositories = self.github_push_adapters(remote, adapter, urls)
-        if repositories and access is GitHubAccess.REQUIRED_OPT_IN:
-            refs = ", ".join(sorted(heads))
-            raise StackError(
-                f"changing existing GitHub refs ({refs}) requires --protect-prs or --with-prs to check open pull "
-                "requests, or --git-only to proceed without PR checks"
-            )
-        hosts = {github.host for github in repositories}
-        if isinstance(adapter, GitHubAdapter):
-            hosts.add(adapter.host)
-            number_repo = adapter.repo.casefold()
-        else:
-            number_repo = repositories[0].repo if len(repositories) == 1 else None
-        if protection.allowed and len(hosts) > 1:
-            raise StackError("--allow-pr-update requires one GitHub host; PR identifiers can refer to different PRs")
+        number_repo = adapter.repo.casefold()
+        errors: list[str] = []
         for github in repositories:
             # Bare PR numbers refer to the selected repository, even if Git
             # pushes to a different repository or clean deletes other refs.
@@ -3245,6 +3237,10 @@ class StackClient(StackCore):
                 github.protect_ref_updates(heads, allow_number=primary_remote and github.repo == number_repo)
             except FileNotFoundError as error:
                 raise StackError(f"checking the pull requests on {github.repo} requires gh on PATH") from error
+            except StackError as error:
+                errors.append(str(error))
+        if errors:
+            raise StackError("\n".join(errors))
 
     def github_push_adapters(self, remote: str, adapter: GitAdapter, urls: tuple[str, ...]) -> list[GitHubAdapter]:
         """Find GitHub repositories behind the push URLs, which can differ from fetch."""
@@ -3283,7 +3279,7 @@ class StackClient(StackCore):
             primary_remote=deletion.remote == primary_remote,
         )
 
-    def retarget_before_push(
+    def retarget_before_push(  # noqa: C901 -- preflight aggregates independent protection failures
         self,
         branches: list[str],
         stacks: Stacks,
@@ -3301,10 +3297,35 @@ class StackClient(StackCore):
     ) -> None:
         """Run PR protections before applying pre-push retargets."""
         try:
-            retarget = adapter.prepare_push_retargets(branches, stacks, rebuild_stack, scope, opening)
-            self.protect_push(leases, refspecs, remote, adapter, protection, push_urls)
+            problems: list[str] = []
+            retarget = None
+            try:
+                retarget = (
+                    adapter.prepare_push_retargets(branches, stacks, rebuild_stack, scope, opening) if opening else None
+                )
+            except StackError as error:
+                problems.append(str(error))
+            if opening and not rebuild_stack and isinstance(adapter, GitHubAdapter):
+                try:
+                    adapter.update_stack_sections(
+                        [branch for branch in (scope or branches) if branch in stacks],
+                        stacks,
+                        rebuild_stack=False,
+                        dry_run=True,
+                    )
+                except StackError as error:
+                    problems.append(str(error))
+            try:
+                self.protect_push(leases, refspecs, remote, adapter, protection, push_urls)
+            except StackError as error:
+                problems.append(str(error))
             if opening and isinstance(adapter, GitHubAdapter):
-                self.protect_pr_opening(branches, stacks, adapter)
+                try:
+                    self.protect_pr_opening(branches, stacks, adapter)
+                except StackError as error:
+                    problems.append(str(error))
+            if problems:
+                raise StackError("\n\n".join(dict.fromkeys(problems)))
             if integration and (retarget is not None or len(push_urls) > 1):
                 self.emit(events.CheckingPush(remote))
             if retarget is not None:
@@ -3514,6 +3535,8 @@ class StackClient(StackCore):
         remote: str,
         dry_run: bool = False,
         rebuild_stack: bool = False,
+        *,
+        preflight: bool = True,
     ) -> list[PullRequestStep]:
         """Do what prs does for branches, which must be unmerged,
         parent-before-child. Returns a PullRequestStep for each."""
@@ -3524,6 +3547,11 @@ class StackClient(StackCore):
         if not dry_run:
             adapter.protect_retargets(branches, stacks)
             self.protect_pr_opening(branches, stacks, adapter)
+            if preflight and not rebuild_stack:
+                changes = {number: base for number, base in adapter.retarget_edits(branches, stacks).items() if base}
+                if changes:
+                    adapter.validate_push_retargets(changes, False, allowed)
+                adapter.update_stack_sections(branches, stacks, rebuild_stack=False, dry_run=True)
         steps: dict[str, PullRequestStep] = {}
         opening: list[tuple[str, str, str]] = []
         for b in branches:

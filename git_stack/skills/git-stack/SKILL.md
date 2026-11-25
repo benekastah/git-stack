@@ -30,8 +30,8 @@ From an ordinary untracked branch such as `main`, plain `git stack info` shows a
 2. **Never use plain git on a tracked branch** for what a git-stack command does. It moves the branch
    without updating the recorded base, and the next restack then replays the wrong commits.
    - New branch: `git stack create <name>`, not `git switch -c`.
-   - Rebase onto the parent or main: `git stack restack` or `git stack sync --protect-prs`, not `git rebase`.
-   - Push: `git stack push --protect-prs`, not `git push`. Update from remote: `git stack pull` or `git stack sync --protect-prs`,
+   - Rebase onto the parent or main: `git stack restack` or `git stack sync`, not `git rebase`.
+   - Push: `git stack push`, not `git push`. Update from remote: `git stack pull` or `git stack sync`,
      not `git pull`.
    - Rename: `git stack rename <new>`, not `git branch -m`. Stop tracking: `git stack untrack`.
    - After amending a branch's own commits, restack so the branches above it
@@ -74,25 +74,20 @@ that already happened before deciding whether to retry.
 
 - Use `--prs` with `info` or `restack` for PR information. With `push`,
   `--prs` also opens missing draft PRs.
-- Use `--with-prs` for PR access with `pull`, `sync`, `clean`, `push`,
-  `integrate`, or `unrevert`. The `--protect-prs` option already enables PR
-  access on commands that accept it.
-- Use `--pr-rebuild` with `push`, `sync`, or `prs` only after the user
+- Use `--prs` for PR access with `pull`, `sync`, `clean`, `push`,
+  `integrate`, or `unrevert`. GitHub-backed publication checks PR protection
+  even without `--prs`.
+- Use `--force` with `push`, `sync`, or `prs` only after the user
   approves rebuilding the remote PR stack. Review the diagnostic or run
-  `git stack prs --protect-prs --dry-run --pr-rebuild` to preview changes
+  `git stack prs --dry-run --force` to preview changes
   involving existing PRs. Show the user any draft PRs listed for closure and
   get approval to close them before running the rebuild. The flag authorizes
   eligible draft closures without a prompt.
 
-Use `--protect-prs` for every `push`, `sync`, and `prs`, and for
-`git stack clean` with `-d remote` or `-d both`. If protection stops a change, tell the user
-which PR and what would change. Get explicit approval before adding
-`--allow-pr-update <number>` for that PR. Repeat the option only for PRs
-the user approved updating. For a PR from a fork, use
-`--allow-pr-update 'OWNER/REPO#NUMBER'` with the base repository. A queued PR
-also requires `--force`, which you may pass only with the user's explicit permission. Always keep
-`--protect-prs` on these retries. Leave a merge-ready PR targeting `main`
-on that base.
+If protection stops a change, tell the user which PRs and what would change.
+Get explicit approval before adding `--force`, which can update every affected
+PR and rebuild the remote stack. Leave a merge-ready PR targeting `main` on
+that base.
 
 ## Approval for rearranging existing stacks
 
@@ -118,7 +113,7 @@ git stack create add-api --from main   # PR 1, on main
 # ...commit...
 git stack create use-api       # PR 2, on add-api
 # ...commit...
-git stack push --protect-prs --prs  # push both, open draft PRs, each into its parent's branch
+git stack push --prs  # push both, open draft PRs, each into its parent's branch
 ```
 
 | Task | Command |
@@ -128,8 +123,8 @@ git stack push --protect-prs --prs  # push both, open draft PRs, each into its p
 | Track existing branches | `git stack track <parent> <branch>...` (`--base <sha>` if the parent moved) |
 | Track open PRs, e.g. new clone | `git stack import` (`-n` previews) |
 | Move through the stack | `git stack next`, `git stack prev` |
-| Push without opening PRs | `git stack push --protect-prs` |
-| Open or update PRs and their stack sections | `git stack prs --protect-prs` |
+| Push without opening PRs | `git stack push` |
+| Open or update PRs and their stack sections | `git stack prs` |
 | Rename | `git stack rename <new>` |
 | Stop tracking | `git stack untrack <branch>` |
 | Group stacks to act on them together | `git stack group add <name> <branch>...` |

@@ -705,14 +705,9 @@ def test_prs_falls_back_when_github_stack_ends_in_a_merged_pr(
     client.untrack(["pr2"])
     repo.git("config", "branch.pr3.stackParent", "pr1")
 
-    client.prs()
-
+    with pytest.raises(StackError, match="--force"):
+        client.prs()
     assert gh.stacks() == [[1, 2]]
-    assert any(
-        isinstance(event, events.GitHubStackMismatch) and event.numbers == (1, 3) and event.github_stacks == (1000,)
-        for event in emitted
-    )
-    assert stack_section.START in body(gh, 3)
 
     before = gh.load()
     client.prs(rebuild_stack=True, dry_run=True)
@@ -1033,7 +1028,7 @@ def test_push_unstacks_a_github_stack_that_no_longer_fits_a_branching_stack(
     repo.git("switch", "--quiet", "pr3")
     client.restack(onto="pr2b")
 
-    with pytest.raises(StackError, match="--pr-rebuild"):
+    with pytest.raises(StackError, match="--force"):
         client.push(prs=True)
     assert gh.stacks() == [[1, 2, 3]]
 
@@ -1088,14 +1083,9 @@ def test_prs_warns_when_a_stack_on_github_doesnt_match(
     client.prs()
     gh.enable_stacks([2, 1])  # linked by hand, in the wrong order
 
-    client.prs()
-
+    with pytest.raises(StackError, match="--force"):
+        client.prs()
     assert gh.stacks() == [[2, 1]]
-    assert any(
-        isinstance(event, events.GitHubStackMismatch) and event.numbers == (1, 2, 3) and event.github_stacks == (1000,)
-        for event in emitted
-    )
-    assert stack_section.START in body(gh, 3)
 
 
 def test_prs_warns_when_a_stack_on_github_is_in_another_order(
@@ -1103,15 +1093,12 @@ def test_prs_warns_when_a_stack_on_github_is_in_another_order(
 ) -> None:
     repo.make_stack()
     client.push()
+    client.prs()
     gh.enable_stacks([1, 3, 2])
 
-    client.prs()
-
-    assert any(
-        isinstance(event, events.GitHubStackMismatch) and event.numbers == (1, 2, 3) and event.github_stacks == (1000,)
-        for event in emitted
-    )
-    assert stack_section.START in body(gh, 1)
+    with pytest.raises(StackError, match="--force"):
+        client.prs()
+    assert gh.stacks() == [[1, 3, 2]]
 
 
 def test_prs_works_where_github_has_no_stacked_pull_requests(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
@@ -1142,16 +1129,16 @@ def test_push_requires_rebuild_stack_to_retarget_a_stacked_pull_request(
     client.restack(onto="pr1b")
 
     before = repo.git("rev-parse", "refs/remotes/origin/pr2")
-    with pytest.raises(StackError, match="--pr-rebuild"):
-        client.push()
+    with pytest.raises(StackError, match="--force"):
+        client.push(prs=True)
 
     assert gh.stacks() == [[1, 2, 3]]
     assert repo.git("rev-parse", "refs/remotes/origin/pr2") == before
-    client.push(rebuild_stack=True)
+    client.push(prs=True, rebuild_stack=True)
 
     # GitHub doesn't change the base of a pull request in a stack.
     assert events.GitHubStackUnstacked(1000, 2) in emitted
-    assert gh.stacks() == []
+    assert gh.stacks() == [[1, 4, 2, 3]]
     assert next(pr for pr in gh.load()["prs"] if pr["number"] == 2)["baseRefName"] == "pr1b"
 
     client.prs(rebuild_stack=True)
@@ -1170,7 +1157,7 @@ def test_prs_requires_rebuild_stack_to_retarget_a_stacked_pull_request(
     state["prs"][1]["baseRefName"] = "main"
     gh.save(state)
 
-    with pytest.raises(StackError, match="--pr-rebuild"):
+    with pytest.raises(StackError, match="--force"):
         client.prs()
     assert gh.stacks() == [[1, 2, 3]]
     assert gh.load()["prs"][1]["baseRefName"] == "main"
@@ -1244,12 +1231,12 @@ def test_sync_requires_rebuild_stack_before_pushing_a_retargeted_pull_request(
     repo.commit("b", "updated\n", "pr2 update")
     before = repo.git("rev-parse", "refs/remotes/origin/pr2")
 
-    with pytest.raises(StackError, match="--pr-rebuild"):
-        client.sync()
+    with pytest.raises(StackError, match="--force"):
+        client.sync(prs=True)
     assert gh.stacks() == [[1, 2, 3]]
     assert repo.git("rev-parse", "refs/remotes/origin/pr2") == before
 
-    client.sync(rebuild_stack=True)
+    client.sync(prs=True, rebuild_stack=True)
     assert gh.stacks() == []
     assert gh.load()["prs"][1]["baseRefName"] == "pr1"
 
@@ -1273,7 +1260,7 @@ def test_push_checks_unrelated_prs_before_pushing_a_new_parent(repo: Repo, gh: F
     before = repo.git("rev-parse", "refs/remotes/origin/pr2")
 
     with pytest.raises(StackError, match="other open pull requests: #99"):
-        client.push(rebuild_stack=True)
+        client.push(prs=True, rebuild_stack=True)
 
     assert gh.stacks() == [[1, 2, 3, 99]]
     assert repo.git("rev-parse", "refs/remotes/origin/pr2") == before
@@ -1299,7 +1286,7 @@ def test_push_rebuild_allows_unrelated_closed_pr_before_pushing_new_parent(
     repo.git("switch", "--quiet", "pr2")
     client.restack(onto="pr1b")
 
-    client.push(rebuild_stack=True)
+    client.push(prs=True, rebuild_stack=True)
 
     assert repo.git("rev-parse", "refs/remotes/origin/pr2") == repo.git("rev-parse", "pr2")
     assert gh.load()["prs"][1]["baseRefName"] == "pr1b"
@@ -1318,8 +1305,8 @@ def test_push_checks_protected_stack_member_before_publishing_new_parent(repo: R
     repo.git("switch", "--quiet", "pr2")
     repo.client.restack(onto="pr1b")
 
-    result = repo.stack("push", "--pr-rebuild", expect_success=False)
+    result = repo.stack("push", "--prs", expect_success=False)
 
-    assert "can't unstack PR #1: it is in the merge queue" in result.stderr
+    assert "--force" in result.stderr
     assert gh.stacks() == [[1, 2, 3]]
     assert not repo.git("branch", "--list", "pr1b", cwd=repo.origin)

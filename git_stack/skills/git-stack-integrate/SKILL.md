@@ -38,16 +38,16 @@ default branch. The next refresh picks up new leaves automatically.
 ## Refresh and publish
 
 - `git stack restack <name>` refreshes from local refs. `git stack pull <name>`
-  fetches and refreshes locally. `git stack sync --protect-prs <name>` also publishes the
+  fetches and refreshes locally. `git stack sync <name>` also publishes the
   integration and eligible work in one atomic push with leases. If another
   worktree blocks a selected work branch, sync stops before publishing its base.
-- From the work branch, `git stack push --protect-prs` rebuilds the integration from local
+- From the work branch, `git stack push` rebuilds the integration from local
   tips, restacks the selected work, and publishes both atomically. To review
   that rebase before publishing, run `git stack restack <name>` first.
-  Use `git stack push --protect-prs --prs` to publish both and open draft PRs for the work.
-  Standalone `git stack prs --protect-prs` requires the integration to be on the remote.
+  Use `git stack push --prs` to publish both and open draft PRs for the work.
+  Standalone `git stack prs` requires the integration to be on the remote.
 - A typical edit is to commit on a source, run `git stack restack <name>`,
-  switch to the work branch, commit the work, and run `git stack push --protect-prs`.
+  switch to the work branch, commit the work, and run `git stack push`.
 - Restacking the integration or a branch above it includes the tracked
   source branches and their ancestors. Check those branches for shared work
   and queued PRs before restacking. With pull or sync, use a group selector
@@ -87,5 +87,5 @@ Rerun the original command with its selectors after restacking. Follow the
 - To promote work after its inputs land on `main`, get the user's approval
   to move the bottom work branch with `git stack restack <work> --onto main`.
   Confirm the approval covers publication and PR retargeting before running
-  `git stack push --protect-prs <work>`. Check that no stack or PR uses the integration
+  `git stack push <work>`. Check that no stack or PR uses the integration
   before deleting its refs with the user's approval.

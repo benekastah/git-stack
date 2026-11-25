@@ -41,7 +41,7 @@ def orphan(repo: Repo, gh: FakeGitHub) -> None:
 
 @pytest.mark.usefixtures("orphan")
 def test_close_orphaned_prs_dry_run_previews_without_writes(repo: Repo, gh: FakeGitHub) -> None:
-    result = repo.stack("prs", "--dry-run", "--pr-rebuild")
+    result = repo.stack("prs", "--dry-run", "--force")
 
     assert "would close draft PR #2" in result.stdout
     assert "https://github.com/acme/widgets/pull/2" in result.stdout
@@ -53,7 +53,7 @@ def test_close_orphaned_prs_dry_run_previews_without_writes(repo: Repo, gh: Fake
 def test_rebuild_closes_eligible_draft_without_a_terminal(repo: Repo, gh: FakeGitHub) -> None:
     before = repo.git("rev-parse", "refs/remotes/origin/pr2")
 
-    result = repo.stack_process("prs", "--pr-rebuild")
+    result = repo.stack_process("prs", "--force")
 
     assert "closed draft PR #2" in result.stdout
     assert "Enter" not in result.stderr
@@ -76,7 +76,7 @@ def test_close_orphaned_prs_refuses_ineligible_blockers(
     state["prs"][1].update(updates)
     gh.save(state)
 
-    result = repo.stack("prs", "--pr-rebuild", expect_success=False)
+    result = repo.stack("prs", "--force", expect_success=False)
 
     assert "can't close blocking PR #2" in result.stderr
     assert gh.calls("pr", "close") == []
@@ -94,7 +94,7 @@ def test_close_orphaned_prs_refuses_if_any_open_pr_depends_on_it(repo: Repo, gh:
         mergeCommit=None,
     )
 
-    result = repo.stack("prs", "--pr-rebuild", expect_success=False)
+    result = repo.stack("prs", "--force", expect_success=False)
 
     assert "open pull requests target its head pr2" in result.stderr
     assert gh.calls("pr", "close") == []
@@ -111,7 +111,7 @@ def test_rebuild_rechecks_a_planned_blocker_before_closing(
 
     after_closure_plan(monkeypatch, change)
 
-    result = repo.stack("prs", "--pr-rebuild", expect_success=False)
+    result = repo.stack("prs", "--force", expect_success=False)
 
     assert "changed before closure" in result.stderr
     assert gh.calls("pr", "close") == []
@@ -126,7 +126,7 @@ def test_push_closes_blocker_before_retarget_and_publication(repo: Repo, gh: Fak
     repo.git("switch", "pr3")
     repo.commit("c", "updated\n", "update pr3")
 
-    repo.stack("push", "--pr-rebuild")
+    repo.stack("push", "--prs", "--force")
 
     assert gh.load()["prs"][1]["state"] == "CLOSED"
     assert gh.load()["prs"][2]["baseRefName"] == "pr1"
@@ -138,7 +138,7 @@ def test_push_closes_blocker_before_retarget_and_publication(repo: Repo, gh: Fak
 def test_close_orphaned_prs_keeps_a_draft_tracked_in_another_stack(repo: Repo, gh: FakeGitHub) -> None:
     repo.stack("track", "main", "pr2")
 
-    result = repo.stack("prs", "--pr-rebuild", expect_success=False)
+    result = repo.stack("prs", "--force", expect_success=False)
 
     assert "can't close blocking PR #2" in result.stderr
     assert gh.calls("pr", "close") == []
@@ -159,7 +159,7 @@ def test_push_reports_draft_closure_when_real_push_fails(
 
     after_closure_plan(monkeypatch, change)
 
-    result = repo.stack("push", "--pr-rebuild", expect_success=False)
+    result = repo.stack("push", "--prs", "--force", expect_success=False)
 
     assert "push failed, so nothing was pushed" in result.stderr
     assert "closed draft PR #2" in result.stderr
@@ -177,7 +177,7 @@ def test_close_orphaned_prs_keeps_a_draft_tracked_under_remote_and_branch_aliase
     repo.git("branch", "--set-upstream-to=mirror/pr2", "other-work")
     repo.stack("track", "main", "other-work")
 
-    result = repo.stack("prs", "--remote", "origin", "pr3", "--pr-rebuild", expect_success=False)
+    result = repo.stack("prs", "--remote", "origin", "pr3", "--force", expect_success=False)
 
     assert "can't close blocking PR #2" in result.stderr
     assert gh.calls("pr", "close") == []
@@ -185,7 +185,7 @@ def test_close_orphaned_prs_keeps_a_draft_tracked_under_remote_and_branch_aliase
 
 @pytest.mark.usefixtures("orphan")
 @pytest.mark.parametrize(("command", "needs_retarget"), [("push", True), ("prs", True), ("prs", False)])
-def test_selected_pull_requests_are_rechecked_after_planning(
+def test_force_allows_selected_pull_requests_queued_after_planning(
     repo: Repo, gh: FakeGitHub, monkeypatch: pytest.MonkeyPatch, command: str, needs_retarget: bool
 ) -> None:
     if needs_retarget:
@@ -199,15 +199,13 @@ def test_selected_pull_requests_are_rechecked_after_planning(
         gh.save(state)
 
     after_closure_plan(monkeypatch, change)
-    result = repo.stack(command, "--pr-rebuild", expect_success=False)
-
-    assert "merge queue" in result.stderr
-    assert gh.calls("pr", "close") == []
-    assert gh.stacks() == [[1, 2, 3]]
+    repo.stack(command, *(["--prs"] if command == "push" else []), "--force")
+    assert gh.calls("pr", "close")
+    assert gh.stacks() == [[1, 3]]
 
 
 @pytest.mark.usefixtures("orphan")
-def test_push_rechecks_queue_for_changed_refs_outside_the_rebuilt_github_stack(
+def test_force_allows_queued_refs_outside_the_rebuilt_github_stack(
     repo: Repo, gh: FakeGitHub, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     state = gh.load()
@@ -227,12 +225,9 @@ def test_push_rechecks_queue_for_changed_refs_outside_the_rebuilt_github_stack(
         gh.save(state)
 
     monkeypatch.setattr(StackClient, "protect_push", queue_after_protection)
-    result = repo.stack("push", "--pr-rebuild", expect_success=False)
-
-    assert "merge queue" in result.stderr
-    assert gh.calls("pr", "close") == []
-    assert gh.calls("pr", "edit") == []
-    assert repo.remote_subject("pr1") == before
+    repo.stack("push", "--prs", "--force")
+    assert gh.calls("pr", "close")
+    assert repo.remote_subject("pr1") != before
 
 
 @pytest.mark.usefixtures("orphan")
@@ -264,7 +259,7 @@ def test_multiple_closures_recheck_later_drafts(
 
     monkeypatch.setattr(fake_gh, "respond", close_then_change)
 
-    result = repo.stack("prs", "--pr-rebuild", expect_success=not add_dependent)
+    result = repo.stack("prs", "--force", expect_success=not add_dependent)
 
     assert [call[2] for call in gh.calls("pr", "close")] == (["2"] if add_dependent else ["2", "4"])
     assert "closed draft PR #2" in result.stdout
@@ -286,15 +281,10 @@ def test_retarget_without_rebuild_reports_stack_base_and_draft(repo: Repo, gh: F
 
     if command == "push":
         assert result.stderr.splitlines()[0] == "git stack: Nothing was pushed."
-    assert result.stderr.removeprefix("git stack: ").splitlines()[-7:] == [
-        "Retry with --pr-rebuild.",
-        "",
-        "Drafts to close (keep branches)",
-        "- https://github.com/acme/widgets/pull/2",
-        "",
-        "- Unstack GitHub stack 1000 (keep merged PRs linked)",
-        "- Retarget #3 to pr1",
-    ]
+    assert "Retry with --force." in result.stderr
+    assert "- https://github.com/acme/widgets/pull/2" in result.stderr
+    assert "- Unstack GitHub stack 1000 (keep merged PRs linked)" in result.stderr
+    assert "- Retarget #3 to pr1" in result.stderr
     assert gh.calls("pr", "close") == []
     assert gh.stacks() == [[1, 2, 3]]
 
@@ -314,9 +304,9 @@ def test_unlinked_stack_warning_lists_each_draft_on_its_own_line(repo: Repo, gh:
     state["stacks"][0]["prs"].append(4)
     gh.save(state)
 
-    result = repo.stack("prs")
+    result = repo.stack("prs", expect_success=False)
 
-    assert "--pr-rebuild" in result.stderr
+    assert "--force" in result.stderr
     assert "Unstack GitHub stack 1000" in result.stderr
     assert "Link #1, #3" in result.stderr
     assert [line.strip() for line in result.stderr.splitlines() if line.startswith("- https://")] == [
@@ -335,11 +325,11 @@ def test_unlinked_stack_warning_explains_ineligible_blocker(repo: Repo, gh: Fake
     state["prs"][1]["isDraft"] = False
     gh.save(state)
 
-    result = repo.stack("prs")
+    result = repo.stack("prs", expect_success=False)
 
     assert "can't close blocking PR #2" in result.stderr
     assert "must still be your own untracked draft" in result.stderr
-    assert "Retry with --pr-rebuild" not in result.stderr
+    assert "Retry with --force" not in result.stderr
     assert gh.calls("pr", "close") == []
 
 
@@ -361,7 +351,7 @@ def test_checks_draft_after_checking_other_prs(repo: Repo, gh: FakeGitHub, monke
     monkeypatch.setattr(fake_gh, "respond", mark_ready_during_protection)
     after_closure_plan(monkeypatch, change)
 
-    result = repo.stack("prs", "--pr-rebuild", expect_success=False)
+    result = repo.stack("prs", "--force", expect_success=False)
 
     assert "can't close blocking PR #2" in result.stderr
     assert gh.load()["prs"][1]["isDraft"] is False
@@ -383,12 +373,12 @@ def test_unlinked_stack_warning_distinguishes_eligible_and_ineligible_drafts(rep
     state["stacks"][0]["prs"].append(4)
     gh.save(state)
 
-    result = repo.stack("prs")
+    result = repo.stack("prs", expect_success=False)
 
     assert "can't close blocking PR #4" in result.stderr
     assert "No drafts will close." in result.stderr
     assert "- https://github.com/acme/widgets/pull/2" in result.stderr
-    assert "Retry with --pr-rebuild" not in result.stderr
+    assert "Retry with --force" not in result.stderr
     assert gh.calls("pr", "close") == []
 
 
@@ -410,7 +400,7 @@ def test_push_refuses_new_closure_candidates_after_protection(
 
     monkeypatch.setattr(StackClient, "protect_push", add_blocker)
 
-    result = repo.stack("push", "--pr-rebuild", expect_success=False)
+    result = repo.stack("push", "--prs", "--force", expect_success=False)
 
     assert "gained other open pull requests" in result.stderr
     assert gh.calls("pr", "close") == []
@@ -438,7 +428,7 @@ def test_push_refuses_new_blocker_after_publishing_parent(
 
     monkeypatch.setattr(fake_gh, "respond", add_blocker_at_retarget)
 
-    result = repo.stack("push", "--pr-rebuild", expect_success=False)
+    result = repo.stack("push", "--prs", "--force", expect_success=False)
 
     assert "pushed, but updating pull requests failed" in result.stderr
     assert "gained other open pull requests" in result.stderr
@@ -458,11 +448,10 @@ def test_blocked_push_diagnoses_rebuild_before_checking_write_protection(repo: R
 
     result = repo.stack("push", "--prs", expect_success=False)
 
-    assert "Retry with --pr-rebuild." in result.stderr
+    assert "Retry with --force." in result.stderr
     assert "https://github.com/acme/widgets/pull/2" in result.stderr
     calls = gh.calls("api", "graphql")
-    assert not any("ref0:" in arg for call in calls for arg in call)
+    assert any("ref0:" in arg for call in calls for arg in call)
     assert any("viewer { login }" in arg for call in calls for arg in call)
-    assert len(calls) == len(gh.calls("api")) == 4
     assert gh.calls("pr", "close") == []
     assert not repo.git("branch", "--list", "new-parent", cwd=repo.origin)

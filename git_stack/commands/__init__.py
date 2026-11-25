@@ -9,12 +9,10 @@ everything the command reports.
 """
 
 import argparse
-import re
 from typing import TypedDict
 
 from git_stack.adapters.github import PRProtection
 from git_stack.core import CURRENT_GROUP, Delete
-from git_stack.errors import StackError
 from git_stack.stack import StackClient
 
 # argparse doesn't export the type of add_subparsers()'s result.
@@ -37,63 +35,24 @@ def add_allow_shared_argument(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--allow-shared", action="store_true", help="allow rewriting a shared stack")
 
 
-def add_rebuild_stack_argument(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument(
-        "--pr-rebuild",
-        dest="rebuild_stack",
-        action="store_true",
-        help="rebuild remote PR stacks and close eligible blocking drafts",
-    )
-
-
 class PRProtectionArgs(argparse.Namespace):
     force: bool
-    protect_prs: bool
-    allow_pr_update: list[int | str]
 
 
-def pr_identifier(value: str) -> int | str:
-    if re.fullmatch(r"[1-9][0-9]*", value):
-        return int(value)
-    if re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[1-9][0-9]*", value):
-        return value.casefold()
-    raise argparse.ArgumentTypeError("expected a positive PR number or OWNER/REPO#NUMBER")
+def add_pr_access_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--prs", action="store_true", help="enable pull request integration for this command")
 
 
-def add_pr_access_arguments(parser: argparse.ArgumentParser, *, writes: bool = False) -> None:
-    parser.add_argument("--with-prs", action="store_true", help="enable pull request integration for this command")
-    if writes:
-        parser.add_argument(
-            "--git-only", action="store_true", help="allow remote ref changes without checking pull requests"
-        )
-
-
-def add_pr_protection_arguments(parser: argparse.ArgumentParser, *, add_force: bool = False) -> None:
-    if add_force:
-        parser.add_argument("--force", action="store_true", help="allow updates to queued pull requests")
-    parser.add_argument(
-        "--protect-prs", action="store_true", help="check and protect approved, ready, and queued pull requests"
-    )
-    parser.add_argument(
-        "--allow-pr-update",
-        metavar="PR",
-        type=pr_identifier,
-        action="append",
-        default=[],
-        help="allow updating this pull request with --protect-prs (repeatable; queued requests also need --force)",
-    )
+def add_pr_protection_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--force", action="store_true", help="allow updates to protected pull requests")
 
 
 class PRProtectionOptions(TypedDict, total=False):
     protection: PRProtection
 
 
-def pr_protection(args: PRProtectionArgs, *, separate_force: bool = False) -> PRProtectionOptions:
-    if args.allow_pr_update and not args.protect_prs:
-        raise StackError("--allow-pr-update needs --protect-prs")
-    if args.protect_prs or (separate_force and args.force):
-        return {"protection": PRProtection(args.force, args.protect_prs, frozenset(args.allow_pr_update))}
-    return {}
+def pr_protection(args: PRProtectionArgs) -> PRProtectionOptions:
+    return {"protection": PRProtection(force=True)} if args.force else {}
 
 
 def add_stack_arguments(

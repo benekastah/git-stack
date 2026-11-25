@@ -24,13 +24,14 @@ PUSH = {1: (9, 0), 3: (13, 0), 10: (27, 0)}
 PUSH_OPENING_PRS = {1: (9, 3), 3: (13, 7), 10: (27, 7)}
 # With every pull request open, git and gh no longer grow with the stack, and gh stays at 4
 # (2 for a stack of 1).
-PUSH_WITH_PRS_OPEN = {1: (7, 2), 3: (7, 4), 10: (7, 4)}
-PRS_ALL_OPEN = {1: (3, 2), 3: (3, 4), 10: (3, 4)}
+PUSH_WITH_PRS_OPEN = {1: (7, 3), 3: (7, 5), 10: (7, 5)}
+PRS_ALL_OPEN = {1: (3, 3), 3: (3, 5), 10: (3, 5)}
 # Nothing to do: gh is asked once, and git seven times.
 SYNC_NOTHING = {1: (7, 1), 3: (7, 1), 10: (7, 1)}
 # The bottom merged, as GitHub reports it (the merge commit and the head it had): the rest are
 # restacked onto main and pushed again. The fake supplies the GitHub merge evidence.
-SYNC_BOTTOM_MERGED = {1: (30, 1), 3: (62, 5), 10: (174, 5)}
+# With --prs, sync also updates descriptions and links the surviving PRs.
+SYNC_BOTTOM_MERGED = {1: (30, 1), 3: (62, 13), 10: (174, 13)}
 # gh is asked twice, however many pull requests there are.
 IMPORT = {1: (14, 2), 3: (28, 2), 10: (77, 2)}
 # info asks GitHub about all the branches in one request.
@@ -125,7 +126,7 @@ def test_sync_with_nothing_to_do(repo: Repo, chain: list[str]) -> None:
     git, gh = SYNC_NOTHING[len(chain)]
 
     with expect_operations(git=git, gh=gh):
-        repo.stack_process("sync", "--with-prs")
+        repo.stack_process("sync", "--prs")
 
     assert chain_tips(repo, chain) == before
     assert_chain_stacked(repo, chain)
@@ -149,7 +150,7 @@ def test_sync_after_the_bottom_pull_request_was_merged(repo: Repo, gh: FakeGitHu
     git, gh_commands = SYNC_BOTTOM_MERGED[len(chain)]
 
     with expect_operations(git=git, gh=gh_commands):
-        repo.stack_process("sync", "--with-prs")
+        repo.stack_process("sync", "--prs")
 
     # The merged branch isn't tracked, and the rest are on main now.
     assert not repo.config_exists("chain1", "stackParent")

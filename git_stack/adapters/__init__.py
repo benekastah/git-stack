@@ -26,11 +26,10 @@ class Adapter(enum.Enum):
 
 
 class GitHubAccess(enum.Enum):
-    """Whether a CLI invocation opts in to GitHub or explicitly chooses Git alone."""
+    """Whether a CLI invocation enables GitHub access."""
 
     REQUIRED_OPT_IN = enum.auto()
     ENABLED = enum.auto()
-    GIT_ONLY = enum.auto()
 
 
 # The CLI sets a policy per invocation. Library callers retain their adapter behavior.

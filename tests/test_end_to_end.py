@@ -90,13 +90,13 @@ def test_cli_logs_performance_without_printing_the_report(repo: Repo, performanc
     assert "Performance timeline\n" in performance_log.read_text(encoding="utf-8")
 
 
-def test_push_says_to_open_pull_requests_with_prs(repo: Repo, gh: FakeGitHub) -> None:
+def test_push_with_prs_shows_the_opened_pull_request(repo: Repo, gh: FakeGitHub) -> None:
     repo.stack_process("branch", "pr1")
     repo.commit("a", "pr1\n", "pr1 c1")
 
-    result = repo.stack_process("push", "--with-prs")
+    result = repo.stack_process("push", "--prs")
 
-    assert "pr1 has no pull request; open drafts with `git stack prs`" in result.stdout
+    assert "https://github.com/acme/widgets/pull/1" in result.stdout
 
 
 def test_each_directory_is_relative_to_the_one_before(repo: Repo) -> None:

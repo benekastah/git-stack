@@ -201,8 +201,7 @@ class PRProtection:
     """Consent for changes to existing pull requests on this invocation."""
 
     force: bool = False
-    protect: bool = False
-    allowed: frozenset[int | str] = frozenset()
+    protect: bool = True
 
     @property
     def fields(self) -> str:
@@ -215,23 +214,21 @@ class PRProtection:
         queued = field(pr, "isInMergeQueue", bool)
         on_main = self.protect and not field(pr, "isDraft", bool) and field(pr, "baseRefName", str) == "main"
         ready = on_main and field(pr, "mergeStateStatus", str) in ("CLEAN", "HAS_HOOKS")
-        if on_main and (ready or queued) and new_base is not None and new_base != "main":
+        if not self.force and on_main and (ready or queued) and new_base is not None and new_base != "main":
             reason = "in the merge queue" if queued else "ready to merge"
-            raise StackError(f"can't retarget PR #{number} away from main: it is {reason}")
-        qualified = f"{repo.casefold()}#{number}"
-        approval = qualified if foreign else str(number)
+            raise StackError(
+                f"can't retarget PR #{number} away from main: it is {reason}; retry with --force if authorized"
+            )
         label = f"{repo}#{number}" if foreign else f"#{number}"
-        allowed = qualified in self.allowed or (number in self.allowed and not foreign)
-        consent = self.protect and not allowed
-        if queued and (not self.force or consent):
-            options = f"--force --allow-pr-update {approval}" if consent else "--force"
-            raise StackError(f"can't {action} PR {label}: it is in the merge queue; retry with {options} if authorized")
+        consent = self.protect and not self.force
+        if queued and not self.force:
+            raise StackError(f"can't {action} PR {label}: it is in the merge queue; retry with --force if authorized")
         if consent:
             status = "approved" if self.has_approvals(pr) else "ready to merge" if ready else None
             if status is not None:
                 raise StackError(
                     f"can't {action} PR {label}: it is {status} and the change may clear reviews; "
-                    f"get permission, then pass --allow-pr-update {approval}"
+                    "retry with --force if authorized"
                 )
 
     @staticmethod
@@ -303,10 +300,15 @@ class GitHubAdapter(GitAdapter):
         if self.protection.force and not self.protection.protect:
             return
         targets = [(ref, side) for ref in sorted(set(refs)) for side in ("head", "base")]
+        errors: list[str] = []
         for start in range(0, len(targets), REF_PROTECTION_BATCH_SIZE):
-            self.protect_ref_batch(targets[start : start + REF_PROTECTION_BATCH_SIZE], allow_number=allow_number)
+            self.protect_ref_batch(
+                targets[start : start + REF_PROTECTION_BATCH_SIZE], allow_number=allow_number, errors=errors
+            )
+        if errors:
+            raise StackError("\n".join(dict.fromkeys(errors)))
 
-    def protect_ref_batch(self, targets: list[tuple[str, str]], *, allow_number: bool) -> None:
+    def protect_ref_batch(self, targets: list[tuple[str, str]], *, allow_number: bool, errors: list[str]) -> None:
         """Check a bounded batch of ref connections, following their independent cursors."""
         pending: dict[tuple[str, str], str | None] = dict.fromkeys(targets)
         seen: set[tuple[str, str, str]] = set()
@@ -357,12 +359,7 @@ class GitHubAdapter(GitAdapter):
                 for pr in field(page, "nodes", list):
                     repo = field(field(pr, "repository", dict), "nameWithOwner", str)
                     own_repo = repo.casefold() == f"{self.owner}/{self.name}".casefold()
-                    self.protection.check(
-                        pr,
-                        f"update {self.remote}/{ref}, the {side} of",
-                        repo=repo,
-                        foreign=not (own_repo and allow_number),
-                    )
+                    self.check_ref_pr(pr, repo, ref, side, not (own_repo and allow_number), errors)
                 info = field(page, "pageInfo", dict)
                 if field(info, "hasNextPage", bool):
                     after = field(info, "endCursor", str)
@@ -372,12 +369,24 @@ class GitHubAdapter(GitAdapter):
                     remaining[ref, side] = after
             pending = remaining
 
+    def check_ref_pr(self, pr: object, repo: str, ref: str, side: str, foreign: bool, errors: list[str]) -> None:
+        try:
+            self.protection.check(pr, f"update {self.remote}/{ref}, the {side} of", repo=repo, foreign=foreign)
+        except StackError as error:
+            errors.append(str(error))
+
     def protect_edits(self, changes: dict[int, str | None], action: str) -> None:
         """Check the live state of PRs about to be edited. A value is the new base, if any."""
         if self.protection.force and not self.protection.protect:
             return
+        errors: list[str] = []
         for number, pr in self.pull_request_fields(changes, self.protection.fields).items():
-            self.protection.check(pr, action, repo=f"{self.owner}/{self.name}", new_base=changes[number])
+            try:
+                self.protection.check(pr, action, repo=f"{self.owner}/{self.name}", new_base=changes[number])
+            except StackError as error:
+                errors.append(str(error))
+        if errors:
+            raise StackError("\n".join(errors))
 
     def protect_retargets(self, branches: Iterable[str], stacks: Stacks) -> None:
         self.protect_edits(self.retarget_edits(branches, stacks), "retarget")
@@ -976,8 +985,7 @@ class GitHubAdapter(GitAdapter):
             parent_published = self.git.rev(f"refs/remotes/{self.remote}/{base}") is not None
             if parent_published:
                 ready.append((branch, parent))
-            if rebuild_stack or not parent_published:
-                pending[pr.number] = base
+            pending[pr.number] = base
         batch_ready = len(ready) > 1
         if batch_ready and not rebuild_stack:
             pending.update(
@@ -1168,7 +1176,7 @@ class GitHubAdapter(GitAdapter):
         steps = "\n".join(f"- {step}" for step in [unstack, *actions])
         blockers = self.orphan_blockers(stacks, allowed)
         if not blockers:
-            return f"Retry with --pr-rebuild.\n\n{steps}"
+            return f"Retry with --force.\n\n{steps}"
         refusals: list[str] = []
         try:
             candidates = self.orphan_details(blockers, refusals=refusals)
@@ -1179,7 +1187,7 @@ class GitHubAdapter(GitAdapter):
             problems = "\n".join(refusals)
             eligible = f"\n\nEligible drafts\n{draft_list}" if candidates else ""
             return f"Rebuild blocked. No drafts will close.\n{problems}{eligible}\n\n{steps}"
-        return f"Retry with --pr-rebuild.\n\nDrafts to close (keep branches)\n{draft_list}\n\n{steps}"
+        return f"Retry with --force.\n\nDrafts to close (keep branches)\n{draft_list}\n\n{steps}"
 
     def plan_orphan_closures(self, stacks: Iterable[GitHubStack], allowed: set[int]) -> list[OrphanedPullRequest]:
         blockers = self.orphan_blockers(stacks, allowed)
@@ -1817,8 +1825,8 @@ class GitHubAdapter(GitAdapter):
         requests are chain's bottom ones (and whose last pull request is
         open), or their stack is made, if none is in one. Pull requests can't
         be taken out of a stack, so if they're in several, or in one that
-        doesn't fit, they're left alone, with a warning, unless rebuild_stack
-        is set, which unstacks those stacks and makes chain's. A repository
+        doesn't fit, the operation fails unless rebuild_stack is set, which unstacks those
+        stacks and makes chain's. A repository
         without stacked pull requests is left alone too.
         """
         found = {stack.number: stack for stack in stacks.values() if stack is not None}
@@ -1849,8 +1857,7 @@ class GitHubAdapter(GitAdapter):
             hint = self.rebuild_hint(
                 list(found.values()), set(chain), [f"Link {', '.join(f'#{n}' for n in chain)} in a new stack"]
             )
-            self.core.emit(events.GitHubStackMismatch(tuple(chain), tuple(sorted(found)), hint))
-            return []
+            raise StackError(f"PR stack links need rebuilding.\n{hint}")
         return chain if self._stack_creation_available and self.stacks_api("", chain) else []
 
     def rebuild_github_stack(self, chain: list[int], found: dict[int, GitHubStack], dry_run: bool) -> bool:

@@ -13,10 +13,10 @@ from tests.helpers import FakeGitHub, Repo
 def test_with_prs_is_accepted_by_every_pr_aware_command(command: tuple[str, ...]) -> None:
     parser = build_parser()
 
-    assert parser.parse_args([*command, "--with-prs"]).with_prs
+    assert parser.parse_args([*command, "--prs"]).prs
 
 
-@pytest.mark.parametrize("command", ["info", "restack", "pull", "sync", "clean", "push", "integrate"])
+@pytest.mark.parametrize("command", ["info", "restack", "pull", "clean", "integrate"])
 def test_default_commands_launch_no_gh(repo: Repo, gh: FakeGitHub, command: str) -> None:
     repo.make_stack()
     repo.git("push", "--set-upstream", "origin", "pr1", "pr2", "pr3")
@@ -29,7 +29,7 @@ def test_default_commands_launch_no_gh(repo: Repo, gh: FakeGitHub, command: str)
 
 
 @pytest.mark.parametrize("command", ["push", "sync"])
-def test_existing_github_ref_requires_explicit_choice(repo: Repo, gh: FakeGitHub, command: str) -> None:
+def test_existing_github_ref_checks_prs_by_default(repo: Repo, gh: FakeGitHub, command: str) -> None:
     repo.make_stack()
     repo.git("push", "--set-upstream", "origin", "pr1", "pr2", "pr3")
     repo.commit("c", "new local work\n", "update pr3")
@@ -43,25 +43,18 @@ def test_existing_github_ref_requires_explicit_choice(repo: Repo, gh: FakeGitHub
         isInMergeQueue=True,
     )
 
-    for flags in ((), ("--force",)):
-        denied = repo.stack_process(command, *flags, expect_success=False)
-        assert "--protect-prs" in denied.stderr
-        assert "--git-only" in denied.stderr
-        assert repo.remote_subject("pr3") == "pr3 c1"
-        assert gh.calls() == []
-
-    denied = repo.stack_process(command, "--protect-prs", expect_success=False)
+    denied = repo.stack_process(command, expect_success=False)
     assert "merge queue" in denied.stderr
+    assert "--force" in denied.stderr
     assert repo.remote_subject("pr3") == "pr3 c1"
     assert gh.calls("api", "graphql")
 
     gh.clear_calls()
-    repo.stack_process(command, "--git-only")
+    repo.stack_process(command, "--force")
     assert repo.remote_subject("pr3") == "update pr3"
-    assert gh.calls() == []
 
 
-def test_clean_refuses_remote_delete_without_opt_in(repo: Repo, gh: FakeGitHub) -> None:
+def test_clean_checks_prs_before_remote_delete(repo: Repo, gh: FakeGitHub) -> None:
     repo.client.branch("landed")
     repo.commit("a", "landed\n", "landed")
     repo.git("push", "--set-upstream", "origin", "landed")
@@ -69,15 +62,9 @@ def test_clean_refuses_remote_delete_without_opt_in(repo: Repo, gh: FakeGitHub) 
     repo.git("merge", "--ff-only", "refs/heads/landed")
     repo.git("push", "origin", "main")
 
-    denied = repo.stack_process("clean", "-d", "remote", expect_success=False)
-    assert "--protect-prs" in denied.stderr
-    assert repo.remote_subject("landed") == "landed"
-    assert repo.config("landed", "stackParent") == "main"
-    assert gh.calls() == []
-
-    repo.stack_process("clean", "-d", "remote", "--git-only")
+    repo.stack_process("clean", "-d", "remote")
     assert repo.git("ls-remote", "origin", "refs/heads/landed") == ""
-    assert gh.calls() == []
+    assert gh.calls("api", "graphql")
 
 
 def squash_fixed_integration_source(repo: Repo, *, upstream: str = "one", build_after_merge: bool = False) -> str:
@@ -110,15 +97,15 @@ def test_deletion_requires_exact_integration_source_landing(
         repo.git("config", "stack.adapter", "git")
     elif mode == "git-remote":
         repo.git("remote", "set-url", "origin", str(repo.origin))
-    flags = () if mode == "default" else ("--with-prs",)
+    flags = () if mode == "default" else ("--prs",)
 
     denied = repo.stack(*command, *flags, "-d", "local", expect_success=False)
 
     assert "can't delete one" in denied.stderr
-    assert "--with-prs" in denied.stderr
+    assert "--prs" in denied.stderr
     assert repo.git("rev-parse", "refs/heads/one") == original
     assert repo.config("one", "stackParent") == "main"
-    assert bool(gh.calls()) is (mode == "no-merged-pr")
+    assert bool(gh.calls()) is (mode == "no-merged-pr" or (mode == "default" and command[0] == "sync"))
 
 
 @pytest.mark.parametrize("command", [("clean",), ("pull", "one")])
@@ -137,7 +124,7 @@ def test_cleanup_saves_github_landing_proof_for_later_local_refresh(
         mergeCommit={"oid": repo.git("rev-parse", "refs/heads/main", cwd=repo.origin)},
     )
 
-    repo.stack(*command, "--with-prs", "-d", "local")
+    repo.stack(*command, "--prs", "-d", "local")
     assert repo.git("branch", "--list", "one") == ""
     assert gh.calls("api", "graphql")
     gh.clear_calls()
@@ -161,11 +148,11 @@ def test_local_clean_can_untrack_source_held_by_other_worktree(repo: Repo, gh: F
     assert gh.calls() == []
 
 
-@pytest.mark.parametrize("opt_in", ["--with-prs", "--prs", "--protect-prs", "--pr-rebuild"])
-def test_git_only_conflicts_with_github_opt_in(repo: Repo, gh: FakeGitHub, opt_in: str) -> None:
-    result = repo.stack("push", "--git-only", opt_in, expect_success=False)
+@pytest.mark.parametrize("option", ["--git-only", "--with-prs", "--protect-prs", "--allow-pr-update", "--pr-rebuild"])
+def test_removed_pr_options_are_rejected(repo: Repo, gh: FakeGitHub, option: str) -> None:
+    result = repo.stack("push", option, expect_success=False)
     assert result.returncode == 2
-    assert "--git-only cannot be combined with pull request options" in result.stderr
+    assert "unrecognized arguments" in result.stderr
     assert gh.calls() == []
 
 
@@ -173,7 +160,7 @@ def test_github_opt_in_does_not_carry_to_next_invocation(repo: Repo, gh: FakeGit
     repo.make_stack()
     repo.git("push", "--set-upstream", "origin", "pr1", "pr2", "pr3")
 
-    repo.stack("pull", "--with-prs")
+    repo.stack("pull", "--prs")
     assert gh.calls("api", "graphql")
     gh.clear_calls()
     repo.stack("pull")
@@ -205,7 +192,7 @@ def test_default_first_push_launches_no_gh(repo: Repo, gh: FakeGitHub) -> None:
 def test_push_rebuild_opens_missing_prs(repo: Repo, gh: FakeGitHub) -> None:
     repo.make_stack()
 
-    repo.stack("push", "--pr-rebuild")
+    repo.stack("push", "--prs", "--force")
 
     assert [(pr["headRefName"], pr["baseRefName"], pr["isDraft"]) for pr in gh.load()["prs"]] == [
         ("pr1", "main", True),
@@ -268,10 +255,6 @@ def test_clean_checks_queue_on_a_second_github_enterprise_host(
     )
     clean = ("clean", "--remote", "origin", "-d", "remote")
     denied = repo.stack(*clean, expect_success=False)
-    assert "--protect-prs" in denied.stderr
-    assert gh.calls() == []
-
-    denied = repo.stack(*clean, "--protect-prs", expect_success=False)
 
     assert "merge queue" in denied.stderr
     assert repo.git("ls-remote", str(mirror), "refs/heads/landed").split()[0] == landed
@@ -301,7 +284,7 @@ def test_cleanup_does_not_trust_landing_after_integration_root_moves_back(repo: 
         baseRefName="main",
         mergeCommit={"oid": landed},
     )
-    repo.stack("integrate", "combined", "one", "two", "--root", "integration-base", "--with-prs")
+    repo.stack("integrate", "combined", "one", "two", "--root", "integration-base", "--prs")
     repo.git("branch", "--force", "integration-base", original_root)
     repo.git("config", "branch.one.merge", "refs/heads/review-one")
     gh.clear_calls()
@@ -325,7 +308,7 @@ def test_selected_sync_can_retire_source_landed_under_recorded_upstream(repo: Re
     )
     repo.git("config", "branch.one.merge", "refs/heads/review-one")
 
-    repo.stack("sync", "combined", "one", "--with-prs", "-d", "local")
+    repo.stack("sync", "combined", "one", "--prs", "-d", "local")
 
     assert repo.git("branch", "--list", "one") == ""
     assert original not in repo.git("rev-list", "refs/heads/combined").splitlines()
@@ -344,7 +327,7 @@ def test_cleanup_keeps_valid_landing_proof_after_switch_to_local_upstream(repo: 
         baseRefName="main",
         mergeCommit={"oid": landed},
     )
-    repo.stack("integrate", "combined", "one", "two", "--root", "integration-base", "--with-prs")
+    repo.stack("integrate", "combined", "one", "two", "--root", "integration-base", "--prs")
     repo.git("switch", "main")
     repo.git("merge", "--ff-only", "refs/heads/one")
     repo.git("branch", "--set-upstream-to=main", "one")

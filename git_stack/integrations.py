@@ -545,7 +545,7 @@ class Integrations:
             return True
         raise StackError(
             f"can't delete {source['name']}: its exact tip has not been proven to land on {root} "
-            f"for integration {name}. Retry without local deletion, or use --with-prs with the GitHub adapter for PR evidence."
+            f"for integration {name}. Retry without local deletion, or use --prs with the GitHub adapter for PR evidence."
         )
 
     def check_unselected_source_deletion(

@@ -20,15 +20,10 @@ offer a preview or actionable diagnostic when a user needs to inspect them.
 
 ## GitHub access
 
-The CLI starts `gh` only when an option explicitly enables GitHub access,
-such as `--with-prs`, `--prs` or `--protect-prs`, or invokes a GitHub-specific command such
-as `git stack prs`. A GitHub remote or adapter setting alone does not opt in.
-Ordinary Git fetches and pushes can still contact their configured remotes.
-
-Preserve merge-queue protection. Before updating or deleting an existing GitHub
-ref, require an opt-in to live PR checks or an explicit `--git-only` override.
-Test that commands without opt-in launch zero `gh` processes and that protected
-writes still check live PR state.
+GitHub-backed `push`, `sync`, and remote `clean` consult live PR state before
+changing refs. Other commands access GitHub only with `--prs` or when they are
+GitHub-specific. The Git adapter never starts `gh`. Protected writes require
+`--force`, and tests must cover approved and queued PRs and unavailable checks.
 
 ## Shape of the code
 
@@ -51,7 +46,7 @@ writes still check live PR state.
   requests on stdin. Check live PR protection before mutating existing PRs.
   Record confirmed creations and retargets even if another mutation failed. The
   first draft uses the repository's default-branch template even on first push.
-  Close blocking drafts only with explicit authorization from `--pr-rebuild`
+  Close blocking drafts only with explicit authorization from `--force`
   and a fresh check of authorship, stack membership, PR protection and open dependents.
   Batch the orphan checks and do read-only rebuild preflight before the live
   push protection checks. Keep live protection ahead of writes.

@@ -32,8 +32,8 @@ def register(subparsers: Subparsers) -> None:
     add_delete_argument(p)
     add_ignore_revert_argument(p)
     add_allow_shared_argument(p)
-    add_pr_protection_arguments(p, add_force=True)
-    add_pr_access_arguments(p, writes=True)
+    add_pr_protection_arguments(p)
+    add_pr_access_arguments(p)
     p.set_defaults(run=run, show=show)
 
 
@@ -52,7 +52,7 @@ def run(stack: StackClient, args: Args) -> Cleaned:
             ignore_reverts=args.ignore_reverts,
             allow_shared=args.allow_shared,
             no_verify=args.no_verify,
-            **pr_protection(args, separate_force=True),
+            **pr_protection(args),
         )
     )
 

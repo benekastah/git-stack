@@ -2,12 +2,8 @@ from git_stack.commands import (
     PRProtectionArgs,
     Subparsers,
     add_allow_shared_argument,
-    add_pr_access_arguments,
-    add_pr_protection_arguments,
-    add_rebuild_stack_argument,
     add_stack_arguments,
     named_stacks,
-    pr_protection,
 )
 from git_stack.commands.info import print_tree
 from git_stack.commands.prs import show_steps
@@ -23,7 +19,6 @@ class Args(PRProtectionArgs):
     remote: str | None
     prs: bool
     allow_shared: bool
-    rebuild_stack: bool
     no_verify: bool
 
 
@@ -46,12 +41,9 @@ def register(subparsers: Subparsers) -> None:
         "--prs",
         "--pr",
         action="store_true",
-        help="then open pull requests for them, as `git stack prs` does (implied by --pr-rebuild)",
+        help="then open and update pull requests for them",
     )
     add_allow_shared_argument(p)
-    add_rebuild_stack_argument(p)
-    add_pr_protection_arguments(p)
-    add_pr_access_arguments(p, writes=True)
     p.set_defaults(run=run, show=show, error=lambda result: result.error)
 
 
@@ -62,12 +54,11 @@ def run(stack: StackClient, args: Args) -> PushResult:
         remote=args.remote or DEFAULT_REMOTE,
         only_remote=args.remote is not None,
         force=args.force,
-        prs=args.prs or args.rebuild_stack,
+        prs=args.prs,
         allow_shared=args.allow_shared,
-        rebuild_stack=args.rebuild_stack,
+        rebuild_stack=args.prs and args.force,
         no_verify=args.no_verify,
-        close_orphaned_prs=args.rebuild_stack,
-        **pr_protection(args),
+        close_orphaned_prs=args.prs and args.force,
     )
 
 

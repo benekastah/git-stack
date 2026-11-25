@@ -27,6 +27,61 @@ def publication_calls(calls: list[GitCall]) -> list[list[str]]:
     return [[command, *args] for command, args in commands if command == "push"]
 
 
+@pytest.mark.parametrize("queued", [False, True])
+def test_push_protects_approved_and_queued_prs_without_prs_flag(repo: Repo, gh: FakeGitHub, queued: bool) -> None:
+    repo.make_stack()
+    repo.stack("push", "--prs")
+    state = gh.load()
+    state["prs"][-1].update(isInMergeQueue=queued, reviewDecision="APPROVED")
+    gh.save(state)
+    repo.commit("c", "updated\n", "new change")
+    blocked = repo.stack("push", expect_success=False)
+    assert "#3" in blocked.stderr
+    assert "--force" in blocked.stderr
+    assert repo.remote_subject("pr3") != "new change"
+    repo.stack("push", "--force")
+    assert repo.remote_subject("pr3") == "new change"
+
+
+def test_git_adapter_push_does_not_query_github(repo: Repo, gh: FakeGitHub) -> None:
+    repo.make_stack()
+    repo.git("config", "stack.adapter", "git")
+    gh.clear_calls()
+    repo.stack("push")
+    assert not gh.calls()
+
+
+def test_plain_push_checks_prs_without_editing_them(repo: Repo, gh: FakeGitHub) -> None:
+    repo.make_stack()
+    repo.stack("push", "--prs")
+    before = gh.load()["prs"]
+    gh.clear_calls()
+    repo.commit("c", "more\n", "update work")
+    repo.stack("push")
+    assert gh.load()["prs"] == before
+    assert gh.calls("api", "graphql")
+    assert not gh.calls("pr", "edit")
+
+
+def test_push_lists_all_protected_prs_before_updating_refs(repo: Repo, gh: FakeGitHub) -> None:
+    repo.make_stack()
+    repo.stack("push", "--prs")
+    state = gh.load()
+    for pr in state["prs"]:
+        pr.update(reviewDecision="APPROVED")
+    gh.save(state)
+    repo.git("switch", "--quiet", "pr1")
+    repo.commit("a", "new parent\n", "updated first")
+    repo.git("switch", "--quiet", "pr3")
+    repo.commit("c", "new leaf\n", "updated third")
+    result = repo.stack("push", expect_success=False)
+    assert "#1" in result.stderr
+    assert "#3" in result.stderr
+    assert "--force" in result.stderr
+    assert repo.remote_subject("pr1") != "updated first"
+    assert repo.remote_subject("pr3") != "updated third"
+
+
 def test_deep_stack_publishes_every_branch_with_one_atomic_push(
     repo: Repo, gh: FakeGitHub, git_calls: list[GitCall]
 ) -> None:
@@ -261,7 +316,7 @@ def test_partial_push_configuration_error_reports_retained_pr_retarget(
     monkeypatch.setattr(GitClient, "addressable_push_urls", read_config)
     git_calls.clear()
 
-    result = repo.stack("push", "--with-prs", expect_success=False)
+    result = repo.stack("push", "--prs", expect_success=False)
 
     assert "#2's base was changed from main to pr1" in result.stderr
     assert "Git config unavailable" in result.stderr
@@ -852,14 +907,9 @@ def test_push_skips_reverted_branch_and_its_children(
     ("queued", "options", "error"),
     [
         (True, (), "merge queue"),
-        (True, ("--protect-prs", "--force"), "merge queue"),
-        (True, ("--protect-prs", "--allow-pr-update", "3"), "merge queue"),
-        (True, ("--protect-prs", "--force", "--allow-pr-update", "2"), "merge queue"),
-        (True, ("--protect-prs", "--force", "--allow-pr-update", "3"), None),
         (True, ("--force",), None),
-        (False, (), None),
-        (False, ("--protect-prs",), "approved"),
-        (False, ("--protect-prs", "--allow-pr-update", "3"), None),
+        (False, (), "approved"),
+        (False, ("--force",), None),
     ],
 )
 def test_pr_protection_on_head_updates(
@@ -879,7 +929,7 @@ def test_pr_protection_on_head_updates(
     )
     repo.commit("c", "update\n", "advance pr3")
 
-    result = repo.stack(command, "--with-prs", *options, expect_success=error is None)
+    result = repo.stack(command, *options, expect_success=error is None)
 
     if error:
         assert error in result.stderr
@@ -908,7 +958,7 @@ def test_protected_prs_keeps_ready_or_queued_pr_targeting_main(
         body="",
     )
 
-    result = repo.stack("prs", "--protect-prs", "--force", "--allow-pr-update", "2", expect_success=False)
+    result = repo.stack("prs", expect_success=False)
 
     assert "#2" in result.stderr
     assert reason in result.stderr
@@ -930,7 +980,7 @@ def test_protected_push_only_checks_prs_whose_heads_would_change(repo: Repo, gh:
     )
     repo.commit("c", "updated\n", "advance pr3")
 
-    repo.stack("push", "--protect-prs")
+    repo.stack("push")
 
     assert repo.remote_subject("pr3") == "advance pr3"
     assert repo.remote_subject("pr1") == "pr1 c2"
@@ -953,10 +1003,10 @@ def test_push_batches_retargets_to_published_bases(repo: Repo, gh: FakeGitHub, f
         gh.fail_editing(2)
     repo.commit("c", "advance\n", "advance pr3")
 
-    result = repo.stack("push", "--with-prs", expect_success=not failed)
+    result = repo.stack("push", "--prs", expect_success=not failed)
 
     assert not gh.calls("pr", "edit")
-    assert [pr["baseRefName"] for pr in gh.load()["prs"]] == ["main" if failed else "pr1", "pr2"]
+    assert [pr["baseRefName"] for pr in gh.load()["prs"][:2]] == ["main" if failed else "pr1", "pr2"]
     assert repo.remote_subject("pr3") == ("pr3 c1" if failed else "advance pr3")
     if failed:
         assert "couldn't retarget #2" in result.stderr
@@ -1007,7 +1057,7 @@ def test_push_batches_retargets_after_publishing_their_new_bases(
         gh.fail_editing(1)
 
     with pytest.raises(StackError, match="pushed, but updating pull requests failed") as error:
-        client.push(work_branches)
+        client.push(work_branches, prs=True)
 
     assert [repo.remote_subject(f"base-{i}") for i in (1, 2)] == ["base 1", "base 2"]
     assert not gh.calls("pr", "edit")
@@ -1015,7 +1065,7 @@ def test_push_batches_retargets_after_publishing_their_new_bases(
     retargeted = [event for event in emitted if isinstance(event, events.PullRequestRetargeted)]
     bases = [pr["baseRefName"] for pr in gh.load()["prs"]]
     if queued:
-        assert "PR #2: it is in the merge queue" in str(error.value)
+        assert "PR #2" in str(error.value) and "merge queue" in str(error.value)
         assert batches == []
         assert retargeted == []
         assert bases == ["main", "main"]
@@ -1041,7 +1091,7 @@ def test_protected_push_preserves_an_individual_approval(repo: Repo, gh: FakeGit
     )
     repo.commit("c", "update\n", "advance pr3")
 
-    result = repo.stack("push", "--protect-prs", expect_success=False)
+    result = repo.stack("push", expect_success=False)
 
     assert "PR #3: it is approved" in result.stderr
     assert repo.remote_subject("pr3") == "pr3 c1"
@@ -1054,7 +1104,7 @@ def test_protected_prs_leaves_queued_description_alone(repo: Repo, gh: FakeGitHu
     state["prs"][0].update(isInMergeQueue=True, body="")
     gh.save(state)
 
-    result = repo.stack("prs", "--protect-prs", expect_success=False)
+    result = repo.stack("prs", expect_success=False)
 
     assert "merge queue" in result.stderr
     assert gh.load()["prs"][0]["body"] == ""
@@ -1075,7 +1125,7 @@ def test_protected_push_preserves_approved_pr_on_a_changed_base(repo: Repo, gh: 
     )
     repo.commit("a", "base rewritten\n", "update base")
 
-    result = repo.stack("push", "--protect-prs", expect_success=False)
+    result = repo.stack("push", expect_success=False)
 
     assert "the base of PR #7" in result.stderr
     assert repo.remote_subject("base") == "publish base"
@@ -1097,12 +1147,12 @@ def test_fork_pr_requires_consent_scoped_to_its_base_repo(repo: Repo, gh: FakeGi
         isInMergeQueue=True,
     )
     repo.commit("c", "advance\n", "update fork")
-    result = repo.stack("push", "--protect-prs", "--force", "--allow-pr-update", "7", expect_success=False)
+    result = repo.stack("push", expect_success=False)
 
     assert "upstream/widgets#7" in result.stderr
     assert repo.remote_subject("pr3") == "pr3 c1"
 
-    repo.stack("push", "--protect-prs", "--force", "--allow-pr-update", "upstream/widgets#7")
+    repo.stack("push", "--force")
 
     assert repo.remote_subject("pr3") == "update fork"
 
@@ -1122,7 +1172,7 @@ def test_queue_protection_follows_ref_pagination(repo: Repo, gh: FakeGitHub) -> 
         )
     repo.commit("c", "advance\n", "update pr3")
 
-    result = repo.stack("push", "--with-prs", expect_success=False)
+    result = repo.stack("push", expect_success=False)
 
     assert "PR #1: it is in the merge queue" in result.stderr
     assert repo.remote_subject("pr3") == "pr3 c1"
@@ -1143,7 +1193,7 @@ def test_commands_keep_the_remote_base_of_a_queued_pr(repo: Repo, gh: FakeGitHub
         isInMergeQueue=True,
     )
 
-    result = repo.stack(command, "--with-prs", "-d", "remote", expect_success=False)
+    result = repo.stack(command, "--prs", "-d", "remote", expect_success=False)
 
     assert "the base of PR #7: it is in the merge queue" in result.stderr
     assert repo.remote_subject("pr1") == "pr1 c2"
@@ -1166,7 +1216,7 @@ def test_push_does_not_check_a_github_fetch_repository_that_isnt_pushed(repo: Re
     repo.git("config", "remote.origin.pushurl", str(mirror))
     repo.commit("c", "advance\n", "update mirror")
 
-    repo.stack("push", "--protect-prs")
+    repo.stack("push")
 
     assert repo.git("log", "-1", "--format=%s", "pr3", cwd=mirror) == "update mirror"
     assert repo.remote_subject("pr3") == "pr3 c1"
@@ -1192,11 +1242,11 @@ def test_bare_pr_consent_cannot_authorize_a_different_push_repository(repo: Repo
     )
     repo.commit("c", "advance\n", "update mirror")
 
-    rejected = repo.stack("push", "--protect-prs", "--allow-pr-update", "3", expect_success=False)
+    rejected = repo.stack("push", expect_success=False)
     assert "acme/mirror#3" in rejected.stderr
     assert repo.git("log", "-1", "--format=%s", "pr3", cwd=mirror) == "pr3 c1"
 
-    repo.stack("push", "--protect-prs", "--allow-pr-update", "acme/mirror#3")
+    repo.stack("push", "--force")
 
     assert repo.git("log", "-1", "--format=%s", "pr3", cwd=mirror) == "update mirror"
     assert repo.remote_subject("pr3") == "pr3 c1"
@@ -1210,7 +1260,7 @@ def test_nine_changed_refs_fit_one_protection_query(repo: Repo, gh: FakeGitHub) 
         repo.commit(f"{branch}.txt", "updated\n", "update branch")
     gh.clear_calls()
 
-    repo.stack("push", "--with-prs")
+    repo.stack("push")
 
     checks = [call for call in gh.calls("api", "graphql") if any("ref0:" in arg for arg in call)]
     assert len(checks) == 1

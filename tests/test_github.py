@@ -57,7 +57,7 @@ def test_push_reuses_github_default_only_for_a_direct_remote(
     monkeypatch.setattr(GitClient, "passthrough", unexpected_push)
     before = repo.remote_subject("main")
 
-    result = repo.stack("push", "--with-prs", expect_success=False)
+    result = repo.stack("push", "--prs", expect_success=False)
 
     assert "rerun `git stack push --force`" in result.stderr
     assert repo.remote_subject("main") == before
@@ -84,11 +84,6 @@ def merge_pr1_on_forge_with_a_tweak(repo: Repo, gh: FakeGitHub) -> None:
         mergeCommit={"oid": repo.git("rev-parse", "HEAD", cwd=repo.forge)},
     )
     gh.clear_calls()
-
-
-def without_prs(emitted: list[events.Event]) -> list[str]:
-    """The branches push said have no pull request."""
-    return [b for e in emitted if isinstance(e, events.NoPullRequests) for b in e.branches]
 
 
 def test_lookup_finds_open_pr_after_newer_closed_and_fork_prs(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
@@ -190,12 +185,12 @@ def test_sync_wont_guess_a_pr_base_from_another_remote(repo: Repo, gh: FakeGitHu
     before = repo.git("rev-parse", "pr2", cwd=repo.origin)
 
     with pytest.raises(StackError, match="parent pr1 tracks other"):
-        client.sync(remote="origin", only_remote=True)
+        client.sync(remote="origin", only_remote=True, prs=True)
     assert repo.git("rev-parse", "pr2", cwd=repo.origin) == before
     assert not gh.calls("pr", "edit")
 
 
-def test_push_says_which_branches_have_no_pr(
+def test_plain_push_does_not_report_missing_pull_requests(
     repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event]
 ) -> None:
     repo.make_stack()
@@ -203,9 +198,7 @@ def test_push_says_which_branches_have_no_pr(
 
     client.push()
 
-    assert [e for e in emitted if isinstance(e, events.NoPullRequests)] == [
-        events.NoPullRequests(("pr1", "pr2", "pr3"))
-    ]
+    assert not [e for e in emitted if isinstance(e, events.NoPullRequests)]
     assert gh.calls("pr") == []
 
 
@@ -224,16 +217,13 @@ def test_push_retargets_pr_opened_elsewhere(
         mergeCommit=None,
     )
 
-    client.push()
+    client.push(prs=True)
 
     assert events.PullRequestRetargeted("pr2", 7, "pr1") in emitted
     assert gh.load()["prs"][0]["baseRefName"] == "pr1"
-    assert without_prs(emitted) == ["pr1", "pr3"]
 
 
-def test_push_counts_branch_whose_pr_was_closed_as_without_one(
-    repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event]
-) -> None:
+def test_push_opens_a_new_pr_for_a_branch_whose_pr_was_closed(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
     repo.make_stack()
     gh.add_pr(
         number=7,
@@ -244,15 +234,13 @@ def test_push_counts_branch_whose_pr_was_closed_as_without_one(
         mergeCommit=None,
     )
 
-    client.push()
+    client.push(prs=True)
 
-    assert "pr3" in without_prs(emitted)
+    assert any(pr["headRefName"] == "pr3" and pr["number"] != 7 for pr in gh.load()["prs"])
     assert gh.calls("pr", "edit") == []
 
 
-def test_push_ignores_pr_from_fork_with_same_branch_name(
-    repo: Repo, gh: FakeGitHub, client: StackClient, emitted: list[events.Event]
-) -> None:
+def test_push_ignores_pr_from_fork_with_same_branch_name(repo: Repo, gh: FakeGitHub, client: StackClient) -> None:
     repo.make_stack()
     gh.add_pr(
         number=7,
@@ -264,9 +252,9 @@ def test_push_ignores_pr_from_fork_with_same_branch_name(
         mergeCommit=None,
     )
 
-    client.push()
+    client.push(prs=True)
 
-    assert "pr3" in without_prs(emitted)
+    assert any(pr["headRefName"] == "pr3" and pr["number"] != 7 for pr in gh.load()["prs"])
     assert gh.calls("pr", "edit") == []
 
 
@@ -295,7 +283,6 @@ def test_merged_pr_of_earlier_branch_with_same_name_is_ignored(
 
     assert not any(isinstance(event, events.MergedWithNewCommits) for event in emitted)
     repo.assert_stacked("pr1", "main", ["pr1 c2", "pr1 c1"])
-    assert "pr1" in without_prs(emitted)
 
 
 def test_merged_pr_from_someone_elses_branch_with_same_name_is_ignored(
@@ -347,7 +334,7 @@ def test_push_retargets_pr_whose_parent_changed(
     repo.squash_merge_on_forge("pr1")
     client.sync()
 
-    client.push()
+    client.push(prs=True)
 
     assert events.PullRequestRetargeted("pr2", 1, "main") in emitted
     assert gh.load()["prs"][0]["baseRefName"] == "main"
@@ -394,7 +381,7 @@ def test_push_retargets_pr_before_pushing_when_parent_was_merged(
     client.sync(push=False)
     order = record_retargets_and_pushes(repo, monkeypatch)
 
-    client.push()
+    client.push(prs=True)
 
     assert order == ["retarget pr2", "push"]
     assert gh.load()["prs"][0]["baseRefName"] == "main"
@@ -417,7 +404,7 @@ def stack_whose_pull_requests_push_retargets_first(repo: Repo, gh: FakeGitHub) -
             mergeCommit=None,
         )
     repo.squash_merge_on_forge("pr1")
-    repo.stack("pull", "--with-prs")
+    repo.stack("pull", "--prs")
     repo.git("switch", "--quiet", "pr3")
     repo.commit("c", "pr3 again\n", "pr3 c2")
 
@@ -432,7 +419,7 @@ def test_push_reports_retargets_it_left_when_the_push_fails(repo: Repo, gh: Fake
     # only the real push finds out.
     repo.add_hook(repo.origin, "pre-receive", "#!/bin/sh\nexit 1\n")
 
-    result = repo.stack("push", "--with-prs", expect_success=False)
+    result = repo.stack("push", "--prs", expect_success=False)
 
     assert "push failed, so nothing was pushed" in result.stderr
     assert bases(gh) == {1: "main", 2: "pr2"}
@@ -445,7 +432,7 @@ def test_push_reports_retargets_it_left_when_a_later_one_fails(repo: Repo, gh: F
     gh.fail_editing(2)
     pr3 = repo.git("rev-parse", "pr3", cwd=repo.origin)
 
-    result = repo.stack("push", "--with-prs", expect_success=False)
+    result = repo.stack("push", "--prs", expect_success=False)
 
     assert "Nothing was pushed." in result.stderr
     assert bases(gh) == {1: "main", 2: "main"}
@@ -460,7 +447,7 @@ def test_push_reports_github_stacks_it_left_unstacked_when_the_push_fails(repo: 
     gh.enable_stacks([1, 2])
     repo.add_hook(repo.origin, "pre-receive", "#!/bin/sh\nexit 1\n")
 
-    result = repo.stack("push", "--pr-rebuild", expect_success=False)
+    result = repo.stack("push", "--prs", "--force", expect_success=False)
 
     assert gh.stacks() == []
     assert (
@@ -480,7 +467,7 @@ def test_rebuild_unstacks_before_batching_ready_retargets(
     gh.clear_calls()
     git_calls.clear()
 
-    result = repo.stack("push", "--pr-rebuild", expect_success=not fail)
+    result = repo.stack("push", "--prs", "--force", expect_success=not fail)
 
     pushes = [call for call in git_calls if call[0] == "push"]
     assert len(pushes) == (0 if fail else 1)
@@ -511,7 +498,7 @@ def test_rebuild_rechecks_later_retarget_batches(repo: Repo, gh: FakeGitHub, mon
     monkeypatch.setattr(github, "PR_UPDATE_BATCH_SIZE", 1)
     monkeypatch.setattr(fake_gh, "update_pull_requests", change_base_after_first_update)
 
-    result = repo.stack("push", "--pr-rebuild", expect_success=False)
+    result = repo.stack("push", "--prs", "--force", expect_success=False)
 
     assert "PR #2 changed while preparing to retarget it" in result.stderr
     assert "#1's base was changed from pr1 to main" in result.stderr
@@ -524,7 +511,7 @@ def test_push_runs_the_pre_push_hook_once(repo: Repo, gh: FakeGitHub) -> None:
     runs = repo.tmp / "pre-push-runs"
     repo.add_hook(repo.path, "pre-push", f'#!/bin/sh\necho run >> "{runs.as_posix()}"\n')
 
-    repo.stack("push", "--with-prs")
+    repo.stack("push", "--prs")
 
     assert runs.read_text().splitlines() == ["run"]
 
@@ -538,7 +525,7 @@ def test_stale_lease_preserves_remote_refs_and_reports_pre_push_pr_edits(
     before = repo.git("show-ref", cwd=repo.origin)
     git_calls.clear()
 
-    result = repo.stack("push", "--with-prs", expect_success=False)
+    result = repo.stack("push", "--prs", expect_success=False)
 
     assert "push failed, so nothing was pushed" in result.stderr
     assert "pr3 -> pr3 (stale info)" in result.stderr
@@ -574,7 +561,7 @@ def test_push_retargets_pr_after_pushing_new_parent(
     client.restack(onto="other")
     order = record_retargets_and_pushes(repo, monkeypatch)
 
-    client.push()
+    client.push(prs=True)
 
     assert order == ["push", "retarget pr2"]
     assert gh.load()["prs"][0]["baseRefName"] == "other"
@@ -694,7 +681,7 @@ def test_info_does_not_fetch_head_of_merged_pr(repo: Repo, gh: FakeGitHub, clien
 
 @pytest.mark.parametrize(
     "command",
-    [("restack",), ("restack", "--prs"), ("sync", "--with-prs"), ("pull", "--with-prs"), ("push", "--with-prs")],
+    [("restack",), ("restack", "--prs"), ("sync", "--prs"), ("pull", "--prs"), ("push", "--prs")],
 )
 @pytest.mark.parametrize("selector", [(), ("pr2",), ("-g", "selected")])
 def test_refresh_queries_only_selected_pull_requests(
@@ -714,7 +701,7 @@ def test_refresh_queries_only_selected_pull_requests(
     if command == ("restack",):
         assert gh.calls() == []
     else:
-        (lookup,) = gh.calls("api", "graphql")
+        lookup = gh.calls("api", "graphql")[0]
         assert sorted(
             arg.split("=", 1)[1] for arg in lookup if arg.startswith("b") and arg.partition("=")[0][1:].isdigit()
         ) == ["pr1", "pr2", "pr3"]
@@ -804,7 +791,7 @@ def test_sync_keeps_merged_pr_whose_branch_has_a_merge_with_changes_of_its_own(
         repo.merge_with_an_edit("origin/main", "d", "resolved\n", cwd=repo.forge)
         repo.git("push", "--quiet", "origin", "pr1", cwd=repo.forge)
 
-    result = repo.stack("sync", "--with-prs", "-d", "both")
+    result = repo.stack("sync", "--prs", "-d", "both")
 
     assert "skipping pr1: it was merged into main, but it or its remote branch has commits" in result.stderr
     assert repo.config("pr1", "stackParent") == "main"
@@ -840,7 +827,7 @@ def test_sync_untracks_merged_pr_whose_later_merge_added_nothing_its_parent_lack
     repo.git("commit", "--quiet", "--no-edit")
     repo.git("switch", "--quiet", "pr3")
 
-    result = repo.stack("sync", "--with-prs", "-d", "both")
+    result = repo.stack("sync", "--prs", "-d", "both")
 
     assert "skipping pr1" not in result.stderr
     assert repo.git("branch", "--list", "pr1") == ""
@@ -861,7 +848,7 @@ def test_sync_deletes_a_squash_merged_pr_whose_branch_was_kept(repo: Repo, gh: F
         mergeCommit={"oid": repo.git("rev-parse", "HEAD", cwd=repo.forge)},
     )
 
-    repo.stack("sync", "--with-prs", "-d", "both")
+    repo.stack("sync", "--prs", "-d", "both")
 
     assert repo.git("branch", "--list", "pr1") == ""
     assert repo.git("branch", "--list", "pr1", cwd=repo.origin) == ""
