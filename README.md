@@ -516,7 +516,8 @@ git stack info --prs
 - `*` marks the current branch.
 - `+N/-N` counts text lines added and deleted between the branch's recorded
   base and its committed tip. The slashes align across branches. The counts
-  exclude binary diffs and changes to existing submodules.
+  exclude binary diffs and changes to existing submodules. For detected file
+  renames, only edits within the file count.
   When a file changes type to or from a submodule, Git may count the gitlink as one line.
   Roots and branches without a usable recorded base have no counts.
 - To draw each stack upside down, with its root at the bottom (as

@@ -707,7 +707,9 @@ class GitClient:
                     before = repo[base].peel(pygit2.Tree)
                     after = repo[tip].peel(pygit2.Tree)
                     flags = pygit2.enums.DiffOption.IGNORE_SUBMODULES | pygit2.enums.DiffOption.INDENT_HEURISTIC
-                    stats = before.diff_to_tree(after, flags=flags).stats
+                    diff = before.diff_to_tree(after, flags=flags)
+                    diff.find_similar(flags=pygit2.enums.DiffFind.FIND_RENAMES)
+                    stats = diff.stats
                     return stats.insertions, stats.deletions
             except KeyError, pygit2.GitError, ValueError:
                 pass
@@ -727,7 +729,7 @@ class GitClient:
             "-r",
             "--stdin",
             "--numstat",
-            "--no-renames",
+            "--find-renames",
             "--no-ext-diff",
             "--no-textconv",
             "--no-relative",

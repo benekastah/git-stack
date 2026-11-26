@@ -62,6 +62,21 @@ def test_info_counts_each_branch_from_its_recorded_base(
     assert all(call[:2] == ["diff-tree", "-r"] for call in stats_calls)
 
 
+@pytest.mark.parametrize("native", [True, False])
+def test_info_counts_only_edits_to_renamed_files(repo: Repo, monkeypatch: pytest.MonkeyPatch, native: bool) -> None:
+    original = "".join(f"line {i} contains unchanged text\n" for i in range(20))
+    repo.commit("a", original, "add source")
+    repo.client.branch("rename")
+    repo.git("mv", "a", "new name")
+    repo.commit("new name", original.replace("line 10 contains unchanged text", "an edited line"), "rename source")
+
+    if not native:
+        monkeypatch.setattr(GitClient, "_graph_repository", lambda _git: None)
+
+    branch = repo.branch_info("rename")
+    assert (branch.additions, branch.deletions) == (1, 1)
+
+
 def test_info_counts_net_text_changes_and_handles_missing_base(repo: Repo, client: StackClient) -> None:
     client.branch("feature")
     repo.commit("a", "temporary\n", "temporary work")
