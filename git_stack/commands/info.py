@@ -128,8 +128,8 @@ def display_width(text: str) -> int:
 
 def link_continuation(tree: str) -> str:
     """Carry the tree guides onto the link line and align it with the branch name."""
-    guide = "│   " if tree.endswith(("├── ", "┌── ")) else "    "
-    return tree[:-4] + guide if tree else ""
+    guide = "│  " if tree.endswith(("├─ ", "┌─ ")) else "   "
+    return tree[:-3] + guide if tree else ""
 
 
 def compact_link(row: BranchInfo | GroupHeader, text: str) -> str:
@@ -255,8 +255,8 @@ def print_tree(
         kids = children.get(branch if isinstance(branch, GroupHeader) else branch.name, [])
         for i, kid in enumerate(kids):
             last = i == len(kids) - 1
-            drawn.append((f"{prefix}{('┌── ' if flip else '└── ') if last else '├── '}", kid))
-            add(kid, prefix + ("    " if last else "│   "), drawn)
+            drawn.append((f"{prefix}{('┌─ ' if flip else '└─ ') if last else '├─ '}", kid))
+            add(kid, prefix + ("   " if last else "│  "), drawn)
 
     for branch in branches:
         if branch.parent is None:

@@ -90,9 +90,9 @@ def test_info_runs_the_same_for_any_stack_size_once_its_branches_are_checked(
 @pytest.mark.parametrize(
     ("output", "branch", "found"),
     [
-        ("└── chain10 *\n", "chain1", False),
-        ("└── chain1 *\n", "chain1", True),
-        ("main\n└── chain1\n    └── chain10\n", "chain10", True),
+        ("└─ chain10 *\n", "chain1", False),
+        ("└─ chain1 *\n", "chain1", True),
+        ("main\n└─ chain1\n   └─ chain10\n", "chain10", True),
         ("feature-chain1\n", "chain1", False),
     ],
 )
