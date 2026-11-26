@@ -39,7 +39,7 @@ def test_info_counts_each_branch_from_its_recorded_base(
     repo: Repo, client: StackClient, monkeypatch: pytest.MonkeyPatch, native: bool, git_calls: list[GitCall]
 ) -> None:
     client.branch("first")
-    repo.commit("a", "one\ntwo\n", "first")
+    repo.commit("a", "one\n" + "two\n" * 11, "first")
     client.branch("second")
     repo.commit("a", "one\nthree\n", "second")
     repo.git("switch", "--quiet", "first")
@@ -50,10 +50,13 @@ def test_info_counts_each_branch_from_its_recorded_base(
 
     rows = json.loads(repo.stack("info", "--json").stdout)
     branches = {row["name"]: row for row in rows}
-    assert (branches["first"]["additions"], branches["first"]["deletions"]) == (3, 2)
-    assert (branches["second"]["additions"], branches["second"]["deletions"]) == (1, 1)
+    assert (branches["first"]["additions"], branches["first"]["deletions"]) == (13, 2)
+    assert (branches["second"]["additions"], branches["second"]["deletions"]) == (1, 11)
     assert branches["main"]["additions"] is branches["main"]["deletions"] is None
-    assert "second (needs restack) +1/-1" in repo.stack("info").stdout
+    _, first, second = repo.stack("info").stdout.splitlines()
+    assert first.endswith("+13/-2")
+    assert second.endswith("+1/-11")
+    assert first.rindex("/") == second.rindex("/")
     stats_calls = [call for call in git_calls if "--numstat" in call]
     assert len(stats_calls) == (0 if native else 2)
     assert all(call[:2] == ["diff-tree", "-r"] for call in stats_calls)

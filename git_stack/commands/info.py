@@ -280,9 +280,9 @@ def print_tree(
         for _, row in rows
     ]
     count_column = max((width for width, count in zip(widths, counts, strict=True) if count), default=0)
-    count_width = max(map(len, counts), default=0)
+    additions_width = max((count.index("/") for count in counts if count), default=0)
     suffixes = [
-        " " * (count_column - width + 1) + count.rjust(count_width) if count else ""
+        " " * (count_column - width + 1 + additions_width - count.index("/")) + count if count else ""
         for width, count in zip(widths, counts, strict=True)
     ]
     widths = [width + len(suffix) for width, suffix in zip(widths, suffixes, strict=True)]
