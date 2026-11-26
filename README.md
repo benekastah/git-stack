@@ -90,8 +90,8 @@ git switch add-api
 # ...commit...
 git stack info
 # main
-# └── add-api *                   +42/-7
-#     └── use-api (needs restack) +18/-3
+# └─ add-api *                  +42/-7
+#    └─ use-api (needs restack) +18/-3
 git stack restack               # rebase use-api onto the new add-api
 git stack push --prs
 ```
@@ -113,10 +113,10 @@ from `pr2b` restacks `pr1`, `pr2a`, `pr2b` and `pr3`:
 
 ```
 main
-└── pr1
-    ├── pr2a
-    │   └── pr3
-    └── pr2b *
+└─ pr1
+   ├─ pr2a
+   │  └─ pr3
+   └─ pr2b *
 ```
 
 Commands that take `--remote` work with the remote it names. Without it, they
@@ -158,10 +158,10 @@ after the merged branch. Here, `restack -g` from `pr2b` restacks `pr2a`,
 
 ```
 main
-└── group pr1
-    ├── pr2a
-    │   └── pr3
-    └── pr2b *
+└─ group pr1
+   ├─ pr2a
+   │  └─ pr3
+   └─ pr2b *
 ```
 
 - A group's stacks stay in it however many of their branches merge later;
@@ -387,8 +387,8 @@ coworker's stack.
 git stack import -n             # see what it would do
 git stack import
 # main
-# └── add-api     https://github.com/acme/widgets/pull/12
-#     └── use-api https://github.com/acme/widgets/pull/13
+# └─ add-api    https://github.com/acme/widgets/pull/12
+#    └─ use-api https://github.com/acme/widgets/pull/13
 
 git stack import -n --author alice        # alice's stacks
 git stack import -f --author alice search # the one with her search branch
@@ -490,6 +490,7 @@ git stack rename add-api api-v2
 
 Show the current stack (or the ones named, see [Groups](#groups)) as a tree,
 with its root (e.g. `main`) on top and the branches built on it below.
+Each level of indentation uses three columns.
 Use `--all` (or `-a`) to show every tracked stack, including in JSON output.
 It cannot be combined with branch or group selectors. Without selectors,
 `info` shows every stack from an ordinary untracked branch such as `main`.
@@ -508,9 +509,9 @@ links and merge status with the [GitHub adapter](#github).
 ```sh
 git stack info --prs
 # main
-# └── add-api *                   +42/-7  https://github.com/acme/widgets/pull/12
-#     ├── use-api (needs restack) +18/-3  https://github.com/acme/widgets/pull/13
-#     └── docs (merged)            +9/-2  https://github.com/acme/widgets/pull/14
+# └─ add-api *                  +42/-7  https://github.com/acme/widgets/pull/12
+#    ├─ use-api (needs restack) +18/-3  https://github.com/acme/widgets/pull/13
+#    └─ docs (merged)            +9/-2  https://github.com/acme/widgets/pull/14
 ```
 
 - `*` marks the current branch.
@@ -526,9 +527,9 @@ git stack info --prs
   `root-at-top`.
 
   ```
-      ┌── docs (merged)            +9/-2
-      ├── use-api (needs restack) +18/-3
-  ┌── add-api *                   +42/-7
+     ┌─ docs (merged)            +9/-2
+     ├─ use-api (needs restack) +18/-3
+  ┌─ add-api *                  +42/-7
   main
   ```
 - `(needs restack)`: it's missing its parent's latest commits (or, for a
@@ -1001,8 +1002,8 @@ git stack push --prs
 git stack prs -n                # see what it would open
 git stack prs
 # main
-# └── add-api *       https://github.com/acme/widgets/pull/12
-#     └── use-api     https://github.com/acme/widgets/pull/13
+# └─ add-api *      https://github.com/acme/widgets/pull/12
+#    └─ use-api     https://github.com/acme/widgets/pull/13
 ```
 
 - It ends by showing the stacks, as `info` does, with the links of the pull

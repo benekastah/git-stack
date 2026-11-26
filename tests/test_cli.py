@@ -42,7 +42,7 @@ STACK = [
     BranchInfo("main", None, None, current=False),
     BranchInfo("pr1", "main", BranchStatus.UP_TO_DATE, current=True),
 ]
-STACK_TREE = "main\n└── pr1 *\n"
+STACK_TREE = "main\n└─ pr1 *\n"
 
 
 @pytest.fixture(scope="session")
@@ -360,8 +360,8 @@ def test_import_shows_the_stacks_with_what_it_tracked_in_green(stack: Any, capsy
         PARENT_DIFFERS,
         "skipping pr5 (#5): theirs isn't a local branch",
         "\033[1mmain\033[m",
-        "\033[2m└── \033[mpr1      \033[32mhttps://github.com/acme/widgets/pull/1\033[m",
-        "\033[2m    └── \033[mpr2  \033[32mhttps://github.com/acme/widgets/pull/2\033[m",
+        "\033[2m└─ \033[mpr1     \033[32mhttps://github.com/acme/widgets/pull/1\033[m",
+        "\033[2m   └─ \033[mpr2  \033[32mhttps://github.com/acme/widgets/pull/2\033[m",
     ]
 
 
@@ -420,9 +420,9 @@ def test_prs_shows_the_stack_with_new_pull_requests_in_green(
     assert capsys.readouterr().out.splitlines() == [
         "skipping pr3: it has no commits of its own",
         "\033[1mmain\033[m",
-        f"\033[2m└── \033[mpr1      \033[32m{new.rjust(width)}\033[m",
-        f"\033[2m    └── \033[mpr2  \033[34m{existing.url.rjust(width)}\033[m",
-        "\033[2m        └── \033[mpr3",
+        f"\033[2m└─ \033[mpr1     \033[32m{new.rjust(width)}\033[m",
+        f"\033[2m   └─ \033[mpr2  \033[34m{existing.url.rjust(width)}\033[m",
+        "\033[2m      └─ \033[mpr3",
     ]
 
 
@@ -430,7 +430,7 @@ def test_prs_fits_colored_dry_run_text_by_display_width(
     stack: Any, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
-    monkeypatch.setenv("COLUMNS", "28")
+    monkeypatch.setenv("COLUMNS", "27")
     monkeypatch.delenv("NO_COLOR", raising=False)
     stack.git.run.side_effect = lambda *args, check=True: "true" if "--get-colorbool" in args else ""
     stack.prs.return_value = PrsResult(
@@ -444,8 +444,8 @@ def test_prs_fits_colored_dry_run_text_by_display_width(
     assert main(["prs", "--dry-run"], stack=stack) == 0
     assert capsys.readouterr().out.splitlines() == [
         "\033[1mmain\033[m",
-        "\033[2m└── \033[mfeature",
-        "\033[2m    \033[m\033[32mwould open: 機能\033[m",
+        "\033[2m└─ \033[mfeature",
+        "\033[2m   \033[m\033[32mwould open: 機能\033[m",
     ]
 
 
@@ -524,24 +524,24 @@ def test_info_draws_each_stack_as_a_tree(stack: Any, capsys: pytest.CaptureFixtu
 
     assert capsys.readouterr().out == (
         "main\n"
-        "├── pr1                       https://github.com/acme/widgets/pull/9\n"
-        "│   ├── pr2 (needs restack)  https://github.com/acme/widgets/pull/13\n"
-        "│   └── pr2b (merged)\n"
-        "├── solo * (merged, with new commits)\n"
-        "└── undone (merged, then reverted)\n"
+        "├─ pr1                      https://github.com/acme/widgets/pull/9\n"
+        "│  ├─ pr2 (needs restack)  https://github.com/acme/widgets/pull/13\n"
+        "│  └─ pr2b (merged)\n"
+        "├─ solo * (merged, with new commits)\n"
+        "└─ undone (merged, then reverted)\n"
         "release\n"
-        "└── hotfix (parent release missing)\n"
+        "└─ hotfix (parent release missing)\n"
     )
 
 
 @pytest.mark.parametrize(
     ("columns", "tty", "expected"),
     [
-        (80, True, ["├── short               URL1", "│   ├── longer-feature  URL2"]),
-        (50, False, ["├── short               URL1", "│   ├── longer-feature  URL2"]),
-        (50, True, ["├── short", "│   URL1", "│   ├── longer-feature", "│   │   URL2"]),
-        (45, True, ["├── short", "│   URL1", "│   ├── longer-feature", "│   │   #2"]),
-        (41, True, ["├── short", "│   #1", "│   ├── longer-feature", "│   │   #2"]),
+        (80, True, ["├─ short              URL1", "│  ├─ longer-feature  URL2"]),
+        (50, False, ["├─ short              URL1", "│  ├─ longer-feature  URL2"]),
+        (50, True, ["├─ short", "│  URL1", "│  ├─ longer-feature", "│  │  URL2"]),
+        (43, True, ["├─ short", "│  URL1", "│  ├─ longer-feature", "│  │  #2"]),
+        (40, True, ["├─ short", "│  #1", "│  ├─ longer-feature", "│  │  #2"]),
     ],
 )
 def test_info_fits_full_pr_links_to_terminal_width(
@@ -578,7 +578,7 @@ def test_info_fits_full_pr_links_to_terminal_width(
     assert main(["info"], stack=stack) == 0
 
     lines = [line.replace("URL1", urls[0]).replace("URL2", urls[1]) for line in expected]
-    assert capsys.readouterr().out.splitlines() == ["main", *lines, "│   └── sibling", "└── other"]
+    assert capsys.readouterr().out.splitlines() == ["main", *lines, "│  └─ sibling", "└─ other"]
 
 
 def test_narrow_info_keeps_the_root_at_bottom_tree_connected(
@@ -600,7 +600,7 @@ def test_narrow_info_keeps_the_root_at_bottom_tree_connected(
     ]
 
     assert main(["info"], stack=stack) == 0
-    assert capsys.readouterr().out.splitlines() == ["┌── second", "│   #2", "├── first", "main"]
+    assert capsys.readouterr().out.splitlines() == ["┌─ second", "│  #2", "├─ first", "main"]
 
 
 def test_info_integration_heading_does_not_pad_pr_links(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
@@ -631,9 +631,9 @@ def test_info_integration_heading_does_not_pad_pr_links(stack: Any, capsys: pyte
 
     assert capsys.readouterr().out.splitlines() == [
         "main",
-        f"└── short   {url}1",
+        f"└─ short   {url}1",
         f"combined (of {', '.join(sources)})",
-        f"└── longer  {url}2",
+        f"└─ longer  {url}2",
     ]
 
 
@@ -699,7 +699,29 @@ def test_info_can_draw_each_stack_with_its_root_at_the_bottom(stack: Any, capsys
 
     main(["info"], stack=stack)
 
-    assert capsys.readouterr().out == ("    ┌── pr2b\n    ├── pr2 *\n┌── pr1\nmain\n")
+    assert capsys.readouterr().out == ("   ┌─ pr2b\n   ├─ pr2 *\n┌─ pr1\nmain\n")
+
+
+def test_info_compacts_deep_tree_connectors(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
+    stack.info.return_value = [
+        BranchInfo("main", None, None, current=False),
+        BranchInfo("first", "main", BranchStatus.UP_TO_DATE, current=False),
+        BranchInfo("second", "first", BranchStatus.UP_TO_DATE, current=False),
+        BranchInfo("third", "second", BranchStatus.UP_TO_DATE, current=False),
+        BranchInfo("fourth", "third", BranchStatus.UP_TO_DATE, current=False),
+        BranchInfo("sibling", "second", BranchStatus.UP_TO_DATE, current=False),
+    ]
+
+    main(["info"], stack=stack)
+
+    assert capsys.readouterr().out.splitlines() == [
+        "main",
+        "└─ first",
+        "   └─ second",
+        "      ├─ third",
+        "      │  └─ fourth",
+        "      └─ sibling",
+    ]
 
 
 def test_info_refuses_an_unknown_orientation(stack: Any, capsys: pytest.CaptureFixture[str]) -> None:
@@ -1066,7 +1088,7 @@ def test_info_draws_a_header_above_the_stacks_in_a_group(stack: Any, capsys: pyt
 
     main(["info"], stack=stack)
 
-    assert capsys.readouterr().out == ("main\n├── group a\n│   ├── b\n│   │   └── b2\n│   └── c *\n└── solo\n")
+    assert capsys.readouterr().out == ("main\n├─ group a\n│  ├─ b\n│  │  └─ b2\n│  └─ c *\n└─ solo\n")
 
 
 def test_info_draws_a_group_header_on_each_root_it_has_stacks_on(
@@ -1081,7 +1103,7 @@ def test_info_draws_a_group_header_on_each_root_it_has_stacks_on(
 
     main(["info"], stack=stack)
 
-    assert capsys.readouterr().out == ("main\n└── group a\n    └── b\nrelease\n└── group a\n    └── c\n")
+    assert capsys.readouterr().out == ("main\n└─ group a\n   └─ b\nrelease\n└─ group a\n   └─ c\n")
 
 
 @pytest.mark.parametrize("argv", [["--json", "info", "--prs"], ["info", "--json", "--prs"]])

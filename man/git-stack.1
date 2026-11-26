@@ -190,8 +190,8 @@ git switch add\-api
 \f[I]# ...commit...\f[R]
 git stack info
 \f[I]# main\f[R]
-\f[I]# └── add\-api *                   +42/\-7\f[R]
-\f[I]#     └── use\-api (needs restack) +18/\-3\f[R]
+\f[I]# └─ add\-api *                  +42/\-7\f[R]
+\f[I]#    └─ use\-api (needs restack) +18/\-3\f[R]
 git stack restack               \f[I]# rebase use\-api onto the new add\-api\f[R]
 git stack push \-\-prs
 .EE
@@ -213,10 +213,10 @@ In this stack, running \f[CR]restack\f[R] from \f[CR]pr2b\f[R] restacks
 .IP
 .EX
 main
-└── pr1
-    ├── pr2a
-    │   └── pr3
-    └── pr2b *
+└─ pr1
+   ├─ pr2a
+   │  └─ pr3
+   └─ pr2b *
 .EE
 .PP
 Commands that take \f[CR]\-\-remote\f[R] work with the remote it names.
@@ -266,10 +266,10 @@ merges:
 .IP
 .EX
 main
-└── group pr1
-    ├── pr2a
-    │   └── pr3
-    └── pr2b *
+└─ group pr1
+   ├─ pr2a
+   │  └─ pr3
+   └─ pr2b *
 .EE
 .IP \(bu 2
 A group\(aqs stacks stay in it however many of their branches merge
@@ -567,8 +567,8 @@ Or to build on a coworker\(aqs stack.
 git stack import \-n             \f[I]# see what it would do\f[R]
 git stack import
 \f[I]# main\f[R]
-\f[I]# └── add\-api     https://github.com/acme/widgets/pull/12\f[R]
-\f[I]#     └── use\-api https://github.com/acme/widgets/pull/13\f[R]
+\f[I]# └─ add\-api    https://github.com/acme/widgets/pull/12\f[R]
+\f[I]#    └─ use\-api https://github.com/acme/widgets/pull/13\f[R]
 
 git stack import \-n \-\-author alice        \f[I]# alice\(aqs stacks\f[R]
 git stack import \-f \-\-author alice search \f[I]# the one with her search branch\f[R]
@@ -703,6 +703,7 @@ Delete the old remote branch yourself
 Show the current stack (or the ones named, see Groups) as a tree, with
 its root (e.g.
 \f[CR]main\f[R]) on top and the branches built on it below.
+Each level of indentation uses three columns.
 Use \f[CR]\-\-all\f[R] (or \f[CR]\-a\f[R]) to show every tracked stack,
 including in JSON output.
 It cannot be combined with branch or group selectors.
@@ -728,9 +729,9 @@ with the GitHub adapter.
 .EX
 git stack info \-\-prs
 \f[I]# main\f[R]
-\f[I]# └── add\-api *                   +42/\-7  https://github.com/acme/widgets/pull/12\f[R]
-\f[I]#     ├── use\-api (needs restack) +18/\-3  https://github.com/acme/widgets/pull/13\f[R]
-\f[I]#     └── docs (merged)            +9/\-2  https://github.com/acme/widgets/pull/14\f[R]
+\f[I]# └─ add\-api *                  +42/\-7  https://github.com/acme/widgets/pull/12\f[R]
+\f[I]#    ├─ use\-api (needs restack) +18/\-3  https://github.com/acme/widgets/pull/13\f[R]
+\f[I]#    └─ docs (merged)            +9/\-2  https://github.com/acme/widgets/pull/14\f[R]
 .EE
 .IP \(bu 2
 \f[CR]*\f[R] marks the current branch.
@@ -751,9 +752,9 @@ The default is \f[CR]root\-at\-top\f[R].
 .RS 2
 .IP
 .EX
-    ┌── docs (merged)            +9/\-2
-    ├── use\-api (needs restack) +18/\-3
-┌── add\-api *                   +42/\-7
+   ┌─ docs (merged)            +9/\-2
+   ├─ use\-api (needs restack) +18/\-3
+┌─ add\-api *                  +42/\-7
 main
 .EE
 .RE
@@ -1382,8 +1383,8 @@ git stack push \-\-prs
 git stack prs \-n                \f[I]# see what it would open\f[R]
 git stack prs
 \f[I]# main\f[R]
-\f[I]# └── add\-api *       https://github.com/acme/widgets/pull/12\f[R]
-\f[I]#     └── use\-api     https://github.com/acme/widgets/pull/13\f[R]
+\f[I]# └─ add\-api *      https://github.com/acme/widgets/pull/12\f[R]
+\f[I]#    └─ use\-api     https://github.com/acme/widgets/pull/13\f[R]
 .EE
 .IP \(bu 2
 It ends by showing the stacks, as \f[CR]info\f[R] does, with the links

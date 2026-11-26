@@ -365,9 +365,7 @@ def test_info_reads_its_settings_with_the_config(repo: Repo, git_calls: list[Git
     repo.git("config", "stack.orientation", "root-at-bottom")
     git_calls.clear()
 
-    assert (
-        repo.stack("info").stdout == "        ┌── pr3 * +1/-1\n    ┌── pr2       +1/-1\n┌── pr1           +1/-1\nmain\n"
-    )
+    assert repo.stack("info").stdout == "      ┌─ pr3 * +1/-1\n   ┌─ pr2      +1/-1\n┌─ pr1         +1/-1\nmain\n"
 
     assert [call[:2] for call in git_calls if call[0] == "config"] == [
         ["config", "--list"],
