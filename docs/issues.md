@@ -71,9 +71,9 @@ holder's process ID (e.g. a token the lock file holds).
 ## Commands start processes for every branch, many of them one at a time
 
 The operation tests exercise stacks of 1, 3 and 10 branches. On the largest,
-an up-to-date `restack` starts three Git processes, `untrack` starts 32, and
-replaying the branches above a change takes 92. The replay and metadata writes
-still run one branch at a time.
+an up-to-date `restack` starts three Git processes, and replaying the branches
+above a change takes 26 (one rebase for the chain, and a `git config` to record
+each base), but `untrack` starts 32, one branch at a time.
 
 ## Syncing, importing and opening pull requests start many processes for a long stack
 
@@ -89,9 +89,11 @@ tested stack sizes.
 
 ## An older git-stack can't finish a restack this one stopped
 
-A restack that stops on a conflict is recorded in one setting,
-`stackPendingRestack`, which versions before it don't read. Finishing the
-rebase with an older git-stack leaves that record behind, and the next run
-of a newer one may then apply it over what the older one did since (e.g. a
-`track` onto another parent). Finish a stopped restack with the version
+A restack that stops on a conflict is recorded in one setting for a branch,
+`stackPendingRestack`, or, for a chain of branches restacked in one rebase,
+one setting on the chain's first, `stackPendingRestackBatch`, which versions
+before them don't read. Finishing the rebase with an older git-stack leaves
+that record behind, and the next run of a newer one may then apply it over
+what the older one did since (e.g. a `track` onto another parent, which a
+batch record would put back). Finish a stopped restack with the version
 that started it, or a newer one.

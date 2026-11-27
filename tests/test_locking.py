@@ -62,7 +62,9 @@ def restack_finished_by_hand(repo: Repo) -> str:
     repo.write("b", "resolved\n")
     repo.git("add", "b")
     repo.git("-c", "core.editor=true", "rebase", "--continue")
-    assert repo.config_exists("pr2", core.PENDING_RESTACK_KEY)
+    # The rebase of pr3, which was stopped at pr2's conflict, finished on pr3.
+    repo.git("switch", "--quiet", "pr2")
+    assert repo.config_exists("pr2", core.PENDING_BATCH_KEY)
     return repo.git("rev-parse", "pr1")
 
 
@@ -91,7 +93,7 @@ def test_reading_command_settles_under_the_lock(
     command(client)
 
     assert locks_taken == [client.git.common_dir() / core.LOCK_FILE]
-    assert not repo.config_exists("pr2", core.PENDING_RESTACK_KEY)
+    assert not repo.config_exists("pr2", core.PENDING_BATCH_KEY)
     assert repo.config("pr2", core.BASE_KEY) == new_base
 
 
@@ -205,14 +207,14 @@ def test_reading_command_under_another_holding_the_lock_records_nothing(
     git command that a git-stack command holding the lock started."""
     restack_finished_by_hand(repo)
     old_base = repo.git("rev-parse", "pr1~1")
-    pending = repo.config("pr2", core.PENDING_RESTACK_KEY)
+    pending = repo.config("pr2", core.PENDING_BATCH_KEY)
     monkeypatch.setenv(core.LOCK_HELD_ENV, str(os.getpid() + 1))
 
     with lock_held_by_another_command(repo):
         assert client.base("pr2") == old_base
 
     assert not any(isinstance(event, events.WaitingForLock) for event in repo.emitted)
-    assert repo.config("pr2", core.PENDING_RESTACK_KEY) == pending
+    assert repo.config("pr2", core.PENDING_BATCH_KEY) == pending
 
 
 def test_reading_command_told_the_lock_is_held_settles_if_its_free(
@@ -225,7 +227,7 @@ def test_reading_command_told_the_lock_is_held_settles_if_its_free(
 
     assert client.base("pr2") == new_base
 
-    assert not repo.config_exists("pr2", core.PENDING_RESTACK_KEY)
+    assert not repo.config_exists("pr2", core.PENDING_BATCH_KEY)
 
 
 def test_reading_command_started_by_one_holding_the_lock_doesnt_wait_for_it(repo: Repo, client: StackClient) -> None:
@@ -304,12 +306,12 @@ def test_reading_command_waits_for_the_lock_to_settle(repo: Repo, client: StackC
     with client.exclusive():
         thread, result = start_waiting_for_lock(repo, lambda reader: reader.base("pr2"))
         # Nothing's recorded while another command has the lock.
-        assert repo.config_exists("pr2", core.PENDING_RESTACK_KEY)
+        assert repo.config_exists("pr2", core.PENDING_BATCH_KEY)
         assert thread.is_alive()
     thread.join(timeout=60)
 
     assert result == [new_base]
-    assert not repo.config_exists("pr2", core.PENDING_RESTACK_KEY)
+    assert not repo.config_exists("pr2", core.PENDING_BATCH_KEY)
 
 
 def test_reading_command_finds_under_the_lock_what_another_settled(repo: Repo, client: StackClient) -> None:
@@ -330,7 +332,7 @@ def test_reading_command_reads_refs_again_under_the_lock(repo: Repo, client: Sta
     """The refs it read before waiting may have moved meanwhile."""
     restack_finished_by_hand(repo)
     old_base = repo.git("rev-parse", "pr1~1")
-    pending = repo.config("pr2", core.PENDING_RESTACK_KEY)
+    pending = repo.config("pr2", core.PENDING_BATCH_KEY)
 
     with client.exclusive():
         thread, result = start_waiting_for_lock(repo, lambda reader: reader.base("pr2"))
@@ -342,14 +344,14 @@ def test_reading_command_reads_refs_again_under_the_lock(repo: Repo, client: Sta
 
     assert result == [old_base]
     assert repo.config("pr2", core.BASE_KEY) == old_base
-    assert repo.config("pr2", core.PENDING_RESTACK_KEY) == pending
+    assert repo.config("pr2", core.PENDING_BATCH_KEY) == pending
 
 
 def test_reading_command_records_nothing_once_an_operation_stops(repo: Repo, client: StackClient) -> None:
     """Another command may have stopped on a conflict while it waited."""
     restack_finished_by_hand(repo)
     old_base = repo.git("rev-parse", "pr1~1")
-    pending = repo.config("pr2", core.PENDING_RESTACK_KEY)
+    pending = repo.config("pr2", core.PENDING_BATCH_KEY)
     repo.git("switch", "--quiet", "-c", "side", "pr2~1")
     repo.commit("b", "side\n", "side c1")
     repo.git("switch", "--quiet", "pr2")
@@ -361,7 +363,7 @@ def test_reading_command_records_nothing_once_an_operation_stops(repo: Repo, cli
     thread.join(timeout=60)
 
     assert result == [old_base]
-    assert repo.config("pr2", core.PENDING_RESTACK_KEY) == pending
+    assert repo.config("pr2", core.PENDING_BATCH_KEY) == pending
 
 
 def test_next_goes_on_from_the_branch_checked_out_once_it_has_the_lock(repo: Repo, client: StackClient) -> None:

@@ -19,8 +19,9 @@ SIZES = [1, 3, 10]
 # The number of git processes by the number of branches: the same however far behind main the
 # stack is, which each test checks at every distance.
 INFO_FIRST = {1: 16, 3: 18, 10: 25}
-RESTACK = {1: 17, 3: 21, 10: 35}
-RESTACK_LATEST = {1: 26, 3: 49, 10: 133}
+RESTACK = {1: 11, 3: 11, 10: 11}
+# One rebase for the whole chain (see restack_chain), and a write for each branch of it.
+RESTACK_LATEST = {1: 19, 3: 21, 10: 28}
 SYNC = {1: 14, 3: 16, 10: 23}
 
 

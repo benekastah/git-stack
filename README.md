@@ -1432,6 +1432,20 @@ Restacking runs `git rebase --onto <parent> <stackBase> <branch>`, which
 replays only the branch's own commits, so PR 1's original commits never
 collide with the squashed version in `main`.
 
+Branches that follow one another, each stacked on the one before and based on
+its tip, are restacked with one `git rebase --update-refs --onto <parent>
+<stackBase of the first> <the last>`, which moves each of them as it passes
+(so a stack of ten is one rebase, not ten). Git moves them only when the rebase
+finishes, so aborting it leaves every branch as it was, and one rebase resolves
+every conflict. If you were on one of them but the last, a stopped rebase leaves
+you on the last, where git has to start it. Where several branches are stacked
+on one, the chain follows the first, and the others are restacked after it, on
+the branch once it has moved. A branch checked out in another worktree, with
+merge commits, with no commits of its own, whose base isn't where the one before
+it was, or that another branch points into the range of (a backup of one of
+them, say, which `--update-refs` would move too), isn't part of a chain and is
+restacked on its own, one at a time.
+
 A branch stacked directly on a stack's root (e.g. `main`) is only restacked
 when it conflicts with the root's latest commit (or with `--latest`), not
 every time the root moves. A pull request only shows the branch's own

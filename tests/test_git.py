@@ -803,7 +803,7 @@ def test_snapshot_doesnt_keep_a_rebase_read_while_it_was_forgotten(repo: Repo, m
     read = git._read_rebasing  # pyright: ignore[reportPrivateUsage]
     reads: list[pathlib.Path] = []
 
-    def forgetting_meanwhile(worktree: pathlib.Path) -> str | None:
+    def forgetting_meanwhile(worktree: pathlib.Path) -> frozenset[str]:
         """As if another thread moved a branch while it was read."""
         reads.append(worktree)
         git._forget_refs()  # pyright: ignore[reportPrivateUsage]

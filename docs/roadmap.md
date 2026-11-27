@@ -115,11 +115,9 @@ What a command runs that isn't its own work comes from a few things that repeat 
    generated files and values. Writing less is the other lever, and should come first where it's enough.
 5. **Don't read what a command doesn't use.** `parent` and `base` have no need of the refs.
 
-A chain of branches is one `git rebase --update-refs`: branches follow one another when each is stacked
-on the one before and based on its tip, and the rest are rebased on their own, so a restack costs a
-rebase for the chain, not for each branch. `sync` restacks branch by branch, interleaved with merging
-and pulling each, so it needs to be split into passes (classify, restack together through the same
-code `restack` uses, pull) before it can follow.
+`restack` rebases a chain of branches in one `git rebase --update-refs`. `sync` restacks branch by
+branch, interleaved with merging and pulling each, so it needs to be split into passes (classify,
+restack together through the same code `restack` uses, pull) before it can follow.
 
 ## Consider storing stack state in refs
 
