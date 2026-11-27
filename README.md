@@ -1864,7 +1864,7 @@ request with a merge commit rather than squashing it.
 ### Generating the man page
 
 `man/git-stack.1` is generated from this README by `dev.py man` (the
-template's), with pandoc (from the `pypandoc_binary` dev dependency), leaving
+template's), with pandoc (`dev.py` downloads the pinned version and checks its checksum), leaving
 out the Install and Development sections; its SYNOPSIS is in
 `dev_project.py`. The pre-commit hook keeps it up to date; without the hook,
 regenerate it with `python3 dev.py man`. `dev.py static` (so the pre-push hook
