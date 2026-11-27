@@ -1458,7 +1458,8 @@ is running (in any worktree of the repository) says on stderr that it's
 waiting, or as a `--json` event, and waits for it to finish. Read-only commands like `info` take it only to record a
 restack or pull you finished by hand (see [Scripting](#scripting)), and only
 while they record it. While a command holds the lock, what it starts (e.g.
-git's hooks) has `GIT_STACK_LOCK_HELD` set, and a command started with it set
+git's hooks) has `GIT_STACK_LOCK_HELD` set (its own environment, and that of a
+program using git-stack as a library, stays as it is), and a command started with it set
 doesn't wait for the lock its caller holds: it takes the lock if it's free,
 but if it's taken, a read-only one leaves such a restack or pull to a later
 command, and one that changes stack metadata (e.g.

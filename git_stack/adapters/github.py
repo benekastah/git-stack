@@ -285,7 +285,11 @@ class GitHubAdapter(GitAdapter):
         # request's description) into \r\n.
         with measure_gh(args):
             result = subprocess.run(
-                ["gh", *args], capture_output=True, input=None if input is None else input.encode("utf-8"), check=False
+                ["gh", *args],
+                capture_output=True,
+                input=None if input is None else input.encode("utf-8"),
+                env=self.git.process_env.environ(),
+                check=False,
             )
         if result.returncode:
             error = result.stderr.decode("utf-8", "replace").strip()
@@ -1897,6 +1901,7 @@ class GitHubAdapter(GitAdapter):
                 capture_output=True,
                 encoding="utf-8",
                 input=json.dumps({"pull_requests": numbers}),
+                env=self.git.process_env.environ(),
                 check=False,
             )
         if result.returncode == 0:

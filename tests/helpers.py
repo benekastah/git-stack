@@ -373,7 +373,9 @@ class InProcessGh:
     ) -> Any:
         if args[0] != "gh":
             return subprocess.run(args, input=input, encoding=encoding, check=check, **kwargs)
-        # Only the ways git-stack runs gh: its output captured, with or without input.
+        # Only the ways git-stack runs gh: its output captured, with or without input, and
+        # with its environment (which fake_gh, run here, doesn't read), or os.environ as it is.
+        kwargs.pop("env", None)
         assert kwargs == {"capture_output": True}, kwargs
         stdin = input.encode(encoding or "utf-8") if isinstance(input, str) else input or b""
         with InProcessGh._lock:

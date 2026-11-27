@@ -3,15 +3,18 @@
 import json
 import os
 import pathlib
+import shlex
 import subprocess
 import sys
 import threading
+import types
 from collections.abc import Callable, Generator, Iterator
 from contextlib import contextmanager
 
 import pytest
 
 from git_stack import core, events, git
+from git_stack.adapters import github
 from git_stack.errors import LockHeldByCaller, StackError
 from git_stack.file_lock import file_lock
 from git_stack.git import GitClient
@@ -97,12 +100,100 @@ def test_base_gives_the_base_it_settles(repo: Repo, client: StackClient) -> None
     assert client.base("pr2") == new_base
 
 
+def lock_held_seen_by_git(git_client: GitClient) -> str:
+    """LOCK_HELD_ENV as a process that git, run by git_client, starts (as it
+    starts its hooks) sees it, or "" if it isn't set."""
+    return git_client.run("-c", f'alias.lock-held=!echo "${core.LOCK_HELD_ENV}"', "lock-held")
+
+
 def test_processes_started_under_the_lock_are_told_it_is_held(repo: Repo, client: StackClient) -> None:
-    """They inherit our environment, so git's hooks see it."""
-    assert core.LOCK_HELD_ENV not in os.environ
     with client.exclusive():
-        assert os.environ[core.LOCK_HELD_ENV] == str(os.getpid())
-    assert core.LOCK_HELD_ENV not in os.environ
+        assert lock_held_seen_by_git(client.git) == str(os.getpid())
+    assert lock_held_seen_by_git(client.git) == ""
+
+
+def test_holding_the_lock_leaves_this_processs_environment_alone(repo: Repo, client: StackClient) -> None:
+    """Changing it would race with C code reading it in other threads of a
+    host process using git-stack, and tell what they start that the lock is
+    held."""
+    with client.exclusive():
+        assert core.LOCK_HELD_ENV not in os.environ
+
+
+def test_another_client_isnt_told_the_lock_is_held(repo: Repo, client: StackClient) -> None:
+    """E.g. one in another thread of a host process using git-stack: its
+    commands wait for the lock, as another process's would."""
+    other = StackClient(GitClient(repo.path))
+
+    with client.exclusive():
+        assert lock_held_seen_by_git(other.git) == ""
+
+
+def test_the_commands_threads_are_told_the_lock_is_held(repo: Repo, client: StackClient) -> None:
+    """Such as info's, which check branches in parallel."""
+    seen: list[str] = []
+
+    with client.exclusive():
+        thread = threading.Thread(target=lambda: seen.append(lock_held_seen_by_git(client.git)))
+        thread.start()
+        thread.join(timeout=60)
+
+    assert seen == [str(os.getpid())]
+
+
+def test_the_commands_clients_for_other_worktrees_are_told_the_lock_is_held(repo: Repo, client: StackClient) -> None:
+    """Such as an integration's, whose merges run git's hooks."""
+    worktree = repo.tmp / "elsewhere"
+    repo.git("worktree", "add", "--quiet", "--detach", str(worktree))
+
+    with client.exclusive():
+        assert lock_held_seen_by_git(client.git.at(worktree)) == str(os.getpid())
+    assert lock_held_seen_by_git(client.git.at(worktree)) == ""
+
+
+def test_gh_started_under_the_lock_is_told_it_is_held(
+    repo: Repo, client: StackClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: list[str | None] = []
+
+    def run(
+        args: list[str], *, env: dict[str, str] | None = None, **kwargs: object
+    ) -> subprocess.CompletedProcess[bytes]:
+        seen.append((os.environ if env is None else env).get(core.LOCK_HELD_ENV))
+        return subprocess.CompletedProcess(args, 0, b"", b"")
+
+    monkeypatch.setattr(github, "subprocess", types.SimpleNamespace(run=run))
+    adapter = github.GitHubAdapter(client, "origin", "github.com", "acme", "widgets", fetch=False)
+
+    with client.exclusive():
+        adapter.gh("api", "user")
+    adapter.gh("api", "user")
+
+    assert seen == [str(os.getpid()), None]
+
+
+def run_by_hook(repo: Repo, client: StackClient, branch: str, *args: str) -> subprocess.CompletedProcess[str]:
+    """Run `git stack <args>` from a post-checkout hook of `git switch
+    <branch>`, which this process runs through client holding the lock, as a
+    git-stack command runs git, and return what it printed and its exit
+    status."""
+    out, err, status = (repo.tmp / f"hook.{name}" for name in ("out", "err", "status"))
+    command = shlex.join(
+        [pathlib.Path(sys.executable).as_posix(), "-m", "tests.stack_entry", "-C", repo.path.as_posix(), *args]
+    )
+    repo.add_hook(
+        repo.path,
+        "post-checkout",
+        f"#!/bin/sh\n{command} > '{out.as_posix()}' 2> '{err.as_posix()}'\necho $? > '{status.as_posix()}'\n",
+    )
+    with client.exclusive():
+        client.git.run(*git.SWITCH, branch)
+    return subprocess.CompletedProcess(
+        args,
+        int(status.read_text(encoding="utf-8")),
+        out.read_text(encoding="utf-8"),
+        err.read_text(encoding="utf-8"),
+    )
 
 
 def test_reading_command_under_another_holding_the_lock_records_nothing(
@@ -126,8 +217,7 @@ def test_reading_command_told_the_lock_is_held_settles_if_its_free(
     repo: Repo, client: StackClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The variable may be stale, e.g. in a process its holder started that
-    outlived the lock, or foreign, e.g. inherited from another thread of a
-    host process using git-stack."""
+    outlived the lock."""
     new_base = restack_finished_by_hand(repo)
     monkeypatch.setenv(core.LOCK_HELD_ENV, str(os.getpid() + 1))
 
@@ -140,21 +230,19 @@ def test_reading_command_started_by_one_holding_the_lock_doesnt_wait_for_it(repo
     restack_finished_by_hand(repo)
     old_base = repo.git("rev-parse", "pr1~1")
 
-    with client.exclusive():
-        # It would wait for this process, its parent here, forever.
-        base = repo.stack_process("base")
+    # It would wait for this process, which holds the lock, forever.
+    base = run_by_hook(repo, client, "pr1", "base", "pr2")
 
+    assert base.returncode == 0, base.stderr
     assert base.stdout == f"{old_base}\n"
 
 
 def test_writing_command_started_by_one_holding_the_lock_fails_at_once(repo: Repo, client: StackClient) -> None:
     """E.g. `git stack track` in a post-checkout hook of `git stack branch`:
-    waiting for this process, its parent here, would wait forever."""
+    waiting for this process, which holds the lock, would wait forever."""
     repo.git("branch", "side")
-    repo.git("switch", "--quiet", "side")
 
-    with client.exclusive():
-        track = repo.stack_process("track", "main", expect_success=False)
+    track = run_by_hook(repo, client, "side", "track", "main")
 
     assert track.returncode == 1
     assert f"the git stack command that started this one (process {os.getpid()}) holds" in track.stderr

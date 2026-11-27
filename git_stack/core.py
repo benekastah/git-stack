@@ -57,7 +57,7 @@ CHECK_CACHE_FILE = "git-stack-cache.json"
 # Held (see StackCore.exclusive) by each command that changes stack metadata, so
 # two never interleave their writes.
 LOCK_FILE = "git-stack.lock"
-# Set, to the holder's process ID, in the environment of what a process
+# Set, to the holder's process ID, in the environment of what a command
 # holding the lock starts, so a git-stack that one of git's hooks runs then
 # knows not to wait for the lock (see StackCore.exclusive).
 LOCK_HELD_ENV = "GIT_STACK_LOCK_HELD"
@@ -207,9 +207,12 @@ class StackCore:
         branch config cache read before, which another command may have
         changed until then.
 
-        While it's held, it sets LOCK_HELD_ENV (GIT_STACK_LOCK_HELD) in this
-        process's environment (os.environ), so every process this one starts
-        meanwhile has it. Started with it set (see lock_held_by_caller), a
+        While it's held, every process the command starts (through its git
+        client's process_env, see ProcessEnv) has LOCK_HELD_ENV
+        (GIT_STACK_LOCK_HELD) set, but not this process's environment
+        (os.environ), so another command, e.g. in another thread of a host
+        process using git-stack, isn't told. Started with it set (see
+        lock_held_by_caller), a
         command that finds the lock taken raises LockHeldByCaller rather than
         wait for the process that started it, which waits for it. With the
         lock free, it takes it as ever, so a stale value costs nothing then.
@@ -234,15 +237,10 @@ class StackCore:
         with file_lock(self.git.common_dir() / LOCK_FILE, on_wait):
             self.git.forget_snapshot()
             self._exclusive_depth = 1
-            held_before = os.environ.get(LOCK_HELD_ENV)
-            os.environ[LOCK_HELD_ENV] = str(os.getpid())
             try:
-                yield
+                with self.git.process_env.adding({LOCK_HELD_ENV: str(os.getpid())}):
+                    yield
             finally:
-                if held_before is None:
-                    del os.environ[LOCK_HELD_ENV]
-                else:
-                    os.environ[LOCK_HELD_ENV] = held_before
                 self._exclusive_depth = 0
 
     @staticmethod
