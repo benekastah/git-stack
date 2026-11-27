@@ -51,8 +51,8 @@ class Integration(TypedDict):
     group: NotRequired[str]
     retired_sources: NotRequired[dict[str, RetiredSource]]
     # Each selected group whose work above the integration a sync untracked
-    # before publishing, with that sync's remote, so a retry of the group
-    # still selects the integration.
+    # and that stopped before publishing, with that sync's remote, so a retry
+    # of the group still selects the integration.
     retry_groups: NotRequired[dict[str, str]]
     automatic: NotRequired[bool]
     tip: str
@@ -140,6 +140,15 @@ class Integrations:
                     del config["retired_sources"]
                 changed = True
             if changed:
+                self.save(name, config)
+
+    def add_retry_groups(self, retry_groups: dict[str, dict[str, str]]) -> None:
+        """Record groups that must still select these integrations on a retry."""
+        for name, groups in retry_groups.items():
+            config = self.read(name)
+            assert config is not None
+            if not groups.items() <= config.get("retry_groups", {}).items():
+                config["retry_groups"] = {**config.get("retry_groups", {}), **groups}
                 self.save(name, config)
 
     def replace_group(self, new: str, old: str | None = None) -> None:

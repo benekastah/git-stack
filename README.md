@@ -369,8 +369,9 @@ interrupted for another reason. Release the cached worktree before deleting
 the integration branch.
 Sync records a selected source's tip and stack before removing the merged
 branch. Rerun the original command with the same selectors.
-A group sync that removes a group's last work on an integration also keeps
-the group selecting that integration until a sync publishes it. Sync keeps the
+If a group sync removes the group's work on an integration and stops before
+publishing the integration, the group keeps selecting it until a sync
+publishes it. Sync keeps the
 surviving work selected and can reuse recorded squash-merge proof without
 GitHub, including when the source branch still exists locally.
 

@@ -375,7 +375,9 @@ class SyncState:
     can't include. pushable are the branches to push, and unpushed those that
     differ from their remote branch but won't be pushed. ignore_reverts are
     the branches whose reverts to ignore (see StackClient.sync). command is
-    sync or pull, for messages saying what to rerun.
+    sync or pull, for messages saying what to rerun. retry_groups are, for
+    each integration, the selected groups whose work on it was untracked, with
+    the remote, to record if the sync stops before publishing it.
     """
 
     original: str
@@ -401,6 +403,7 @@ class SyncState:
     protected_deletes: frozenset[tuple[str, str]] = frozenset()
     pushable: list[str] = field(default_factory=list)
     unpushed: list[str] = field(default_factory=list)
+    retry_groups: dict[str, dict[str, str]] = field(default_factory=dict)
 
 
 class StackClient(StackCore):
@@ -2277,6 +2280,7 @@ class StackClient(StackCore):
                 pending[deletion.ref] = entry
 
             state.defer_delete = defer
+        published = False
         try:
             verified = self.sync_selected(selection, expected, adapter, state)
             self.restore_checkout(state.original)
@@ -2309,7 +2313,10 @@ class StackClient(StackCore):
                 )
             if not (state.blocked or state.broken) and len(deletions) == len(pending):
                 integrations.clear_retired_sources(leases, state.stacks, state.scope)
+                published = True
         finally:
+            if not published:
+                integrations.add_retry_groups(state.retry_groups)
             for entry in pending.values():
                 deletion = entry.deletion
                 if self.git.rev(f"refs/remotes/{deletion.upstream}") is None:
@@ -2431,6 +2438,7 @@ class StackClient(StackCore):
             sources,
             state.stacks,
             state.remote,
+            state.retry_groups,
             delete_local=bool(state.delete and state.delete.deletes_local),
         )
         for branch in sources:
@@ -2451,6 +2459,7 @@ class StackClient(StackCore):
         branches: Sequence[str],
         stacks: Stacks,
         remote: str,
+        retry_groups: dict[str, dict[str, str]],
         *,
         delete_local: bool,
     ) -> Callable[[str, bool], None]:
@@ -2482,7 +2491,7 @@ class StackClient(StackCore):
                 branch, remote, deleting_locally, (name for name, _ in entries)
             )
             if not entries:
-                self.remember_retry_group(integrations, selection, branch, stacks, remote)
+                self.note_retry_group(selection, branch, stacks, remote, retry_groups)
                 return
             tip = self.git.tip(branch)
             parent = stacks.parent(branch)
@@ -2513,22 +2522,21 @@ class StackClient(StackCore):
 
         return preserve_source
 
-    def remember_retry_group(
-        self, integrations: Integrations, selection: RefreshSelection, branch: str, stacks: Stacks, remote: str
+    @staticmethod
+    def note_retry_group(
+        selection: RefreshSelection,
+        branch: str,
+        stacks: Stacks,
+        remote: str,
+        retry_groups: dict[str, dict[str, str]],
     ) -> None:
-        """Keep a selected group selecting the integration its work is on: once
-        that work is untracked, a retry of the group has nothing else that leads to it."""
+        """Note the selected group of branch's work on an integration: once that
+        work is untracked, a retry of the group has nothing else that leads to
+        the integration (see SyncState.retry_groups)."""
         bottom = stacks.bottom(branch)
-        group = stacks.group(bottom)
-        root = stacks.root(bottom)
-        if group is None or group not in selection.selected_groups or root not in selection.integrations:
-            return
-        config = integrations.read(root)
-        assert config is not None
-        retry_groups = config.setdefault("retry_groups", {})
-        if retry_groups.get(group) != remote:
-            retry_groups[group] = remote
-            integrations.save(root, config)
+        group, root = stacks.group(bottom), stacks.root(bottom)
+        if group is not None and group in selection.selected_groups and root in selection.integrations:
+            retry_groups.setdefault(root, {})[group] = remote
 
     def integration_leases(
         self, selection: RefreshSelection, remote: str, force: bool, roots: set[str]
