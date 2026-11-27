@@ -1,14 +1,13 @@
 """tests/operations.py: declaring how many git and gh operations a test (or a block of it) runs."""
 
 import os
-import subprocess
 import threading
 import warnings
 from typing import Any
 
 import pytest
 
-from tests import operations
+from tests import helpers, operations
 from tests.helpers import FakeGitHub, InProcessGh, Repo
 from tests.operations import (
     TRACE_PARENT_VARIABLE,
@@ -253,16 +252,17 @@ def test_a_block_that_ends_first_doesnt_end_an_equal_one_around_it(repo: Repo) -
 def test_only_the_git_stack_process_gets_the_trace_variable(repo: Repo, monkeypatch: pytest.MonkeyPatch) -> None:
     repo.make_stack()
     environments: list[dict[str, str] | None] = []
-    run: Any = subprocess.run
+    start: Any = helpers.start_process
 
     def spy(*args: Any, **kwargs: Any) -> Any:
         # As the process starts, when it would inherit this process's environment: a variable set
         # here for the length of the call and restored after would be caught by nothing later.
         assert TRACE_VARIABLE not in os.environ
         environments.append(kwargs.get("env"))
-        return run(*args, **kwargs)
+        return start(*args, **kwargs)
 
-    monkeypatch.setattr(subprocess, "run", spy)
+    # What `stack_process` starts the process with (see tests/helpers.py's run_process).
+    monkeypatch.setattr(helpers, "start_process", spy)
 
     with expect_operations(git=2):
         repo.stack_process("parent")
