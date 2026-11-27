@@ -222,6 +222,19 @@ class RemoteBranchDeleteFailed:
 
 
 @dataclass(frozen=True)
+class RetryGroupNotRecorded:
+    """A sync or pull untracked group's work on integration and didn't publish
+    it, but couldn't record that group should still select it the next time
+    the group is synced."""
+
+    event_type: ClassVar[str] = "retry-group-not-recorded"
+
+    integration: str
+    group: str
+    error: str
+
+
+@dataclass(frozen=True)
 class RemoteBranchKept:
     """A merged branch was untracked, but its remote branch still exists."""
 
@@ -456,6 +469,7 @@ type Event = (
     | Untracked
     | RemoteBranchDeleted
     | RemoteBranchDeleteFailed
+    | RetryGroupNotRecorded
     | RemoteBranchKept
     | NotDeletedUnconfirmedMerge
     | ParentSkipped

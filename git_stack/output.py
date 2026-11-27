@@ -17,6 +17,7 @@ WARNINGS = (
     events.NotDeletedInOtherWorktree,
     events.SkippedMerged,
     events.RemoteBranchDeleteFailed,
+    events.RetryGroupNotRecorded,
     events.NotDeletedUnconfirmedMerge,
     events.ParentSkipped,
     events.MergedWithNewCommits,
@@ -97,6 +98,11 @@ def message(event: events.Event) -> str:  # noqa: C901
             return f"deleted {event.upstream}"
         case events.RemoteBranchDeleteFailed():
             return f"couldn't delete {event.upstream}; leaving {event.branch} alone"
+        case events.RetryGroupNotRecorded():
+            return (
+                f"couldn't record that group {event.group} should select {event.integration} the next time "
+                f"it's synced ({event.error}); run `git stack sync {event.integration}` to publish it"
+            )
         case events.RemoteBranchKept():
             return (
                 f"note: {event.upstream} still exists; delete it with "

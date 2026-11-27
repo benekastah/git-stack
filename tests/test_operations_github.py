@@ -157,6 +157,30 @@ def test_sync_after_the_bottom_pull_request_was_merged(repo: Repo, gh: FakeGitHu
     assert_chain_stacked(repo, chain[1:])
 
 
+def test_group_sync_after_its_work_on_an_integration_landed(repo: Repo) -> None:
+    for name in ("one", "two", "work"):
+        repo.git("switch", "--quiet", "combined" if name == "work" else "main")
+        repo.client.branch(name)
+        repo.write(f"{name}.txt", f"{name}\n")
+        repo.git("add", f"{name}.txt")
+        repo.git("commit", "--quiet", "-m", name)
+        if name == "two":
+            repo.client.integrate("combined", ["one", "two"])
+    repo.client.group_add("topic", ["work"])
+    repo.client.push(["work"])
+    # The work lands in a source, so the rebuilt integration has it and sync untracks it.
+    landed = repo.git("rev-parse", "work")
+    repo.git("switch", "--quiet", "two")
+    repo.git("cherry-pick", landed)
+
+    # What a retry of the group would need is recorded only if the sync stops before publishing.
+    with expect_operations(git=53, gh=4):
+        repo.stack_process("sync", "-g", "topic", "--delete", "local")
+
+    assert not repo.config_exists("work", "stackParent")
+    assert repo.git("rev-parse", "combined", cwd=repo.origin) == repo.git("rev-parse", "combined")
+
+
 def test_import_tracks_each_open_pull_request(repo: Repo, chain: list[str]) -> None:
     open_pull_requests(repo)
     # Forget the stack, keeping its pull requests, which is what `import` is for: tracking them
