@@ -17,9 +17,11 @@ from collections.abc import Callable
 from dev import ROOT, run, run_code, tool, venv
 
 VERSION_FILE = ROOT / "version.txt"
-VERSION = re.compile(r"\d+\.\d+\.\d+((?:a|b|rc)\d+)?")
+NUMBER = r"(?:0|[1-9][0-9]*)"
+VERSION = re.compile(rf"{NUMBER}\.{NUMBER}\.{NUMBER}((?:a|b|rc){NUMBER})?", re.ASCII)
 """What version.txt has: MAJOR.MINOR.PATCH, and, for a pre-release, a suffix as PEP 440 spells it
-(0.3.0rc1, 0.3.0a2, 0.3.0b1), since setuptools reads the file as a Python version."""
+(0.3.0rc1, 0.3.0a2, 0.3.0b1), since setuptools reads the file as a Python version. No leading
+zeros, which Python's normalization would drop from the version but not from the tag."""
 
 MAN_SYNOPSIS = {"git-stack": "**git stack** [**-C** *path*] [`--json`] *command* [*args*]"}
 """man/git-stack.1's SYNOPSIS (dev.py man makes the page from README.md)."""
@@ -107,7 +109,7 @@ def release(_: list[str]) -> None:
             ["git", "rev-parse", "HEAD"], capture_output=True, encoding="utf-8", check=True, cwd=ROOT
         ).stdout.strip()
     except FileNotFoundError as error:
-        sys.exit(f"release needs {error.args[0]}, which isn't installed")
+        sys.exit(f"release needs {error.filename}, which isn't installed")
     if view.returncode == 0:
         print(f"{tag} is already released")
         return

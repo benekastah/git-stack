@@ -13,9 +13,10 @@ on:
 permissions:
   contents: write
 
-# Two pushes in a row (or a re-run) don't race to make the same release: the second waits, and finds it.
+# A re-run of a push waits for the first, and finds its release. The group has the commit in it, since
+# a group keeps one pending run and cancels the rest: a shared one could drop a version's release.
 concurrency:
-  group: release
+  group: release-${{ github.sha }}
   cancel-in-progress: false
 
 jobs:

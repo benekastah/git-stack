@@ -1,5 +1,6 @@
 """dev_project.py: git-stack's additions to dev.py's install."""
 
+import errno
 import os
 import re
 import subprocess
@@ -240,6 +241,10 @@ def test_release_leaves_a_version_that_is_already_released_alone(
         "0.3.0-rc.1\n",
         "0.3.0-1\n",
         "0.3.0beta\n",
+        "01.2.3\n",
+        "1.02.3\n",
+        "1.2.3rc01\n",
+        "١.٢.٣\n",
         "0.3.0rc\n",
     ],
 )
@@ -271,12 +276,12 @@ def test_release_says_when_gh_isnt_installed(
     monkeypatch: pytest.MonkeyPatch, dev_project: ModuleType, release_commands: FakeCommands
 ) -> None:
     def missing(args: list[str], **kwargs: object) -> object:
-        raise FileNotFoundError(args[0])
+        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), args[0])
 
     monkeypatch.setattr(dev_project.subprocess, "run", missing)
     write_version(dev_project, "0.2.0\n")
 
-    with pytest.raises(SystemExit, match="gh"):
+    with pytest.raises(SystemExit, match="release needs gh, which isn't installed"):
         dev_project.release([])
 
 
