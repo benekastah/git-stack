@@ -155,6 +155,7 @@ def test_the_commands_clients_for_other_worktrees_are_told_the_lock_is_held(repo
 def test_gh_started_under_the_lock_is_told_it_is_held(
     repo: Repo, client: StackClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Every gh command starts through GitHubAdapter.run_gh, which gh uses."""
     seen: list[str | None] = []
 
     def run(

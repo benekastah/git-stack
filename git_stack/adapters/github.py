@@ -280,17 +280,22 @@ class GitHubAdapter(GitAdapter):
         self.protection = PRProtection()
         self.close_orphaned_prs = False
 
-    def gh(self, *args: str, input: str | None = None, partial_errors: list[str] | None = None) -> str:
+    def run_gh(self, args: tuple[str, ...], input: str | None = None) -> subprocess.CompletedProcess[bytes]:
+        """Run `gh <args>`, as every gh command git-stack runs starts, with
+        the command's process_env, whatever its exit status."""
         # As bytes, so Windows doesn't turn the \n in input (e.g. a pull
         # request's description) into \r\n.
         with measure_gh(args):
-            result = subprocess.run(
+            return subprocess.run(
                 ["gh", *args],
                 capture_output=True,
                 input=None if input is None else input.encode("utf-8"),
                 env=self.git.process_env.environ(),
                 check=False,
             )
+
+    def gh(self, *args: str, input: str | None = None, partial_errors: list[str] | None = None) -> str:
+        result = self.run_gh(args, input)
         if result.returncode:
             error = result.stderr.decode("utf-8", "replace").strip()
             if partial_errors is None or not result.stdout:
@@ -1895,24 +1900,17 @@ class GitHubAdapter(GitAdapter):
         False if the repository doesn't have stacked pull requests."""
         self.protect_edits(dict.fromkeys([*existing, *numbers]), "change the stack of")
         args = ("api", "--hostname", self.host, "-X", "POST", f"{self.stacks_path()}{path}", "--input", "-")
-        with measure_gh(args):
-            result = subprocess.run(
-                ["gh", *args],
-                capture_output=True,
-                encoding="utf-8",
-                input=json.dumps({"pull_requests": numbers}),
-                env=self.git.process_env.environ(),
-                check=False,
-            )
+        result = self.run_gh(args, json.dumps({"pull_requests": numbers}))
         if result.returncode == 0:
             self.core.emit(events.GitHubStackLinked(tuple(numbers)))
             return True
-        if "(HTTP 404)" in result.stderr:
+        error = result.stderr.decode("utf-8", "replace")
+        if "(HTTP 404)" in error:
             if not path:
                 self._stack_creation_available = False
             return False
         raise StackError(
-            f"linking {', '.join(f'#{n}' for n in numbers)} into a stack on GitHub failed:\n{result.stderr.strip()}"
+            f"linking {', '.join(f'#{n}' for n in numbers)} into a stack on GitHub failed:\n{error.strip()}"
         )
 
 

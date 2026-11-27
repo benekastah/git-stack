@@ -1,6 +1,7 @@
 """Integration roots and the ordinary stacks that use them."""
 
 import json
+import os
 import pathlib
 import shutil
 import threading
@@ -2540,3 +2541,21 @@ def test_push_recovers_new_work_upstream_after_publication(repo: Repo, monkeypat
     repo.stack("push")
 
     assert repo.config("work", "remote") == "origin"
+
+
+def test_integration_builds_tell_their_hooks_the_lock_is_held(repo: Repo) -> None:
+    """So a hook running git-stack doesn't wait for the command building it."""
+    integration(repo)
+    repo.git("switch", "--quiet", "one")
+    repo.commit("a", "later change\n", "later change")
+    seen = repo.tmp / "hooks-seen"
+    for hook in ("post-merge", "post-commit"):
+        repo.add_hook(repo.path, hook, f"#!/bin/sh\necho \"{hook} $GIT_STACK_LOCK_HELD\" >> '{seen.as_posix()}'\n")
+
+    # A new commit on one, cherry-picked onto the build; then a new build, merged.
+    repo.stack("restack", "combined")
+    repo.stack("integrate", "fresh", "one", "two")
+
+    lines = seen.read_text(encoding="utf-8").splitlines()
+    assert {line.split(" ")[0] for line in lines} == {"post-merge", "post-commit"}
+    assert all(line.split(" ")[1:] == [str(os.getpid())] for line in lines), lines
