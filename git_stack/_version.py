@@ -14,12 +14,15 @@ from git_stack.git_read import GIT_REPOSITORY_ENV
 
 
 def read_version(checkout: Path) -> str:
-    """The version in the version.txt of a checkout (or an editable install of one), else the one
-    the installed package's metadata has, which setuptools took from that file when it was built."""
-    try:
-        return (checkout / "version.txt").read_text(encoding="utf-8").strip()
-    except OSError:
-        pass
+    """The version in the version.txt of a checkout (or an editable install of one: a pyproject.toml
+    beside it says so, since an installed package's directory above is site-packages, where another
+    package may leave a version.txt of its own), else the one the installed package's metadata has,
+    which setuptools took from that file when it was built."""
+    if (checkout / "pyproject.toml").is_file():
+        try:
+            return (checkout / "version.txt").read_text(encoding="utf-8").strip()
+        except OSError:
+            pass
     try:
         return installed_version("git-stack")
     except PackageNotFoundError:

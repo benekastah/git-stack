@@ -13,6 +13,11 @@ on:
 permissions:
   contents: write
 
+# Two pushes in a row (or a re-run) don't race to make the same release: the second waits, and finds it.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: ubuntu-latest

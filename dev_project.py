@@ -17,8 +17,9 @@ from collections.abc import Callable
 from dev import ROOT, run, run_code, tool, venv
 
 VERSION_FILE = ROOT / "version.txt"
-VERSION = re.compile(r"\d+\.\d+\.\d+(-[0-9A-Za-z][0-9A-Za-z.-]*)?")
-"""What version.txt has: MAJOR.MINOR.PATCH, and, for a pre-release, a suffix (0.3.0-rc.1)."""
+VERSION = re.compile(r"\d+\.\d+\.\d+((?:a|b|rc)\d+)?")
+"""What version.txt has: MAJOR.MINOR.PATCH, and, for a pre-release, a suffix as PEP 440 spells it
+(0.3.0rc1, 0.3.0a2, 0.3.0b1), since setuptools reads the file as a Python version."""
 
 MAN_SYNOPSIS = {"git-stack": "**git stack** [**-C** *path*] [`--json`] *command* [*args*]"}
 """man/git-stack.1's SYNOPSIS (dev.py man makes the page from README.md)."""
@@ -91,19 +92,29 @@ def large_tests(pytest_args: list[str]) -> None:
 def release(_: list[str]) -> None:
     """Make the GitHub release of the version in version.txt, v<version>, at HEAD, with notes
     generated from the pull requests since the last release, unless there's one already. A
-    version with a suffix (0.3.0-rc.1) is a pre-release. The release workflow runs this when a
+    version with a suffix (0.3.0rc1) is a pre-release. The release workflow runs this when a
     change to version.txt lands on main; gh must be logged in (in CI, with GH_TOKEN)."""
     version = VERSION_FILE.read_text(encoding="utf-8").strip()
-    if VERSION.fullmatch(version) is None:
-        sys.exit(f"{VERSION_FILE.name} has {version!r}, which isn't a version like 1.2.3 or 1.2.3-rc.1")
+    match = VERSION.fullmatch(version)
+    if match is None:
+        sys.exit(f"{VERSION_FILE.name} has {version!r}, which isn't a version like 1.2.3 or 1.2.3rc1")
     tag = f"v{version}"
-    if subprocess.run(["gh", "release", "view", tag], capture_output=True, check=False).returncode == 0:
+    try:
+        view = subprocess.run(
+            ["gh", "release", "view", tag], capture_output=True, encoding="utf-8", check=False, cwd=ROOT
+        )
+        commit = subprocess.run(
+            ["git", "rev-parse", "HEAD"], capture_output=True, encoding="utf-8", check=True, cwd=ROOT
+        ).stdout.strip()
+    except FileNotFoundError as error:
+        sys.exit(f"release needs {error.args[0]}, which isn't installed")
+    if view.returncode == 0:
         print(f"{tag} is already released")
         return
-    commit = subprocess.run(
-        ["git", "rev-parse", "HEAD"], capture_output=True, encoding="utf-8", check=True, cwd=ROOT
-    ).stdout.strip()
-    prerelease = ["--prerelease"] if "-" in version else []
+    if "release not found" not in view.stderr.lower():
+        # Not that there's none: gh couldn't ask (not logged in, no network), and making one would fail too.
+        sys.exit(f"gh release view {tag} failed:\n{view.stderr.strip()}")
+    prerelease = ["--prerelease"] if match[1] else []
     run("gh", "release", "create", tag, "--target", commit, "--title", tag, "--generate-notes", *prerelease)
 
 

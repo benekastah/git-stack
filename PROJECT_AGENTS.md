@@ -11,8 +11,8 @@ man page is generated from it.
 `git_stack/_version.py` in a checkout. A pull request doesn't change it: a version is released by
 changing it, in a pull request of its own, and when that lands on `main`,
 `.github/workflows/release.yml` makes the GitHub release `v<version>` at that commit, with notes
-generated from the pull requests since the last (`dev.py release`; a suffix, as in `0.3.0-rc.1`, makes
-it a pre-release). Builds between releases report the last release and the commit they're built
+generated from the pull requests since the last (`dev.py release`; a suffix, as PEP 440 spells it in
+`0.3.0rc1`, makes it a pre-release, since setuptools reads the file as a Python version). Builds between releases report the last release and the commit they're built
 from (see `build_version`), which is what tells them apart in performance logs.
 
 ## Command interaction
