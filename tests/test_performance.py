@@ -13,6 +13,7 @@ from git_client import CatFile, Git, PerformanceEvent, PerformanceRecorder
 from git_stack import _version, performance
 from git_stack.cli import build_parser
 from git_stack.git import GitClient
+from git_stack.git_command import ProcessEnv
 from git_stack.performance import Timeline
 from tests.conftest import ROOT
 from tests.git_support import GitCall, real_git
@@ -411,7 +412,7 @@ def test_native_reads_are_timed_without_counting_cache_hits(repo: Repo) -> None:
     tip = repo.git("rev-parse", "HEAD")
     timeline = Timeline()
     with timeline.activate():
-        git = GitClient(repo.path)
+        git = GitClient(repo.path, process_env=ProcessEnv())
         with git.snapshot():
             assert git.rev(tip) == tip
             assert git.rev(tip) == tip

@@ -58,22 +58,14 @@ py-git-client e599be1, which only documents it. git-stack never passes
 `--quiet` to `git push`, so the related problem the library also documents
 (Git leaving successful destinations out of the report) doesn't apply.
 
-## GIT_STACK_LOCK_HELD is set in the whole process's environment
+## A hook's long-lived descendant inherits GIT_STACK_LOCK_HELD
 
-`StackCore.exclusive` sets it in `os.environ`, which costs:
-
-- Setting the environment races with C code calling `getenv` in other threads
-  of a host process that uses git-stack as a library.
-- A git-stack started with a stale or foreign value (inherited from another
-  thread of such a host process while that thread holds the lock, or by a
-  long-lived descendant, e.g. a daemon a hook starts) doesn't wait if it
-  finds the lock taken, by a command that would have finished: a reading
-  command skips settling, and one that changes metadata fails. With the lock
-  free, it takes it as usual, so this only matters while another command
-  runs.
-
-Passing the variable only to the processes git-stack itself starts, rather
-than through `os.environ`, would avoid both.
+A process a hook starts that outlives the command (e.g. a daemon) keeps the
+variable, so a git-stack it starts later doesn't wait if it finds the lock
+taken, by another command that would have finished: a reading command skips
+settling, and one that changes metadata fails. With the lock free, it takes
+it as usual. Telling a stale value from a live one would need more than the
+holder's process ID (e.g. a token the lock file holds).
 
 ## Commands start processes for every branch, many of them one at a time
 

@@ -15,6 +15,7 @@ from git_stack.adapters.git import GitAdapter
 from git_stack.core import StackCore
 from git_stack.errors import StackError
 from git_stack.git import GIT_VARIABLE, GitClient, changes_refs, changes_worktrees, same_file
+from git_stack.git_command import ProcessEnv
 from tests.git_support import GitCall, real_git
 from tests.helpers import Repo, install_command
 
@@ -29,7 +30,7 @@ def test_git_stack_runs_git_through_the_shared_client(repo: Repo, monkeypatch: p
 
     monkeypatch.setattr(Git, "process", record)
 
-    assert GitClient(repo.path).run("branch", "--show-current") == "main"
+    assert GitClient(repo.path, process_env=ProcessEnv()).run("branch", "--show-current") == "main"
     assert commands == [("branch", "--show-current")]
 
 
@@ -85,7 +86,7 @@ def test_cli_runner_uses_configured_git_executable(
     program = os.path.join(os.path.dirname(real_git()), ".", os.path.basename(real_git()))
     monkeypatch.setenv(GIT_VARIABLE, program)
 
-    GitClient(repo.path).run("status")
+    GitClient(repo.path, process_env=ProcessEnv()).run("status")
 
     assert [call.program for call in git_calls] == [program]
 
@@ -96,7 +97,7 @@ def test_cli_runner_uses_configured_git_executable(
 
 
 def test_resolving_an_object_outside_a_repository_is_a_stack_error(tmp_path: pathlib.Path) -> None:
-    git = GitClient(tmp_path)
+    git = GitClient(tmp_path, process_env=ProcessEnv())
     with pytest.raises(StackError, match="not a git repository"), git.snapshot():
         git.tree("0" * 40)
 
@@ -107,7 +108,7 @@ def test_failing_to_read_the_refs_is_a_stack_error(repo: Repo, monkeypatch: pyte
         raise GitError(command, 128, "fatal: refs broke")
 
     monkeypatch.setattr(git_client, "refs", failing)
-    git = GitClient(repo.path)
+    git = GitClient(repo.path, process_env=ProcessEnv())
     with pytest.raises(StackError, match="refs broke"), git.snapshot():
         git.local_branches()
 
@@ -117,7 +118,7 @@ def test_missing_git_answer_is_a_stack_error(repo: Repo, monkeypatch: pytest.Mon
         raise GitTimeoutError(("for-each-ref",), None, "")
 
     monkeypatch.setattr(git_client, "refs", timed_out)
-    git = GitClient(repo.path)
+    git = GitClient(repo.path, process_env=ProcessEnv())
     with pytest.raises(StackError, match="timed out"), git.snapshot():
         git.local_branches()
 
@@ -127,7 +128,7 @@ def test_operation_paths_are_cached_only_inside_a_snapshot(
 ) -> None:
     git_dir = repo.path / ".git"
     monkeypatch.setenv("GIT_DIR", str(git_dir))
-    git = GitClient(repo.path)
+    git = GitClient(repo.path, process_env=ProcessEnv())
 
     with git.snapshot():
         assert not git.operation_in_progress()
@@ -140,7 +141,7 @@ def test_operation_paths_are_cached_only_inside_a_snapshot(
 
 
 def test_a_broken_config_is_a_stack_error(repo: Repo) -> None:
-    git = GitClient(repo.path)
+    git = GitClient(repo.path, process_env=ProcessEnv())
     # Found before the config breaks, as git can't find it after.
     git.common_dir()
     (repo.path / ".git" / "config").write_text("[broken\n", encoding="utf-8")
@@ -151,11 +152,11 @@ def test_a_broken_config_is_a_stack_error(repo: Repo) -> None:
 
 def test_failing_to_read_patch_ids_is_a_stack_error(repo: Repo) -> None:
     with pytest.raises(StackError, match="nope"):
-        GitClient(repo.path).commit_patch_ids(("log", "-p", "nope"))
+        GitClient(repo.path, process_env=ProcessEnv()).commit_patch_ids(("log", "-p", "nope"))
 
 
 def test_config_get_sees_changes_made_by_other_processes(repo: Repo) -> None:
-    git = GitClient(repo.path)
+    git = GitClient(repo.path, process_env=ProcessEnv())
     assert git.config_get("main", "stackParent") is None
 
     repo.git("config", "branch.main.stackParent", "trunk")
@@ -167,7 +168,7 @@ def test_config_get_sees_a_change_that_leaves_the_files_metadata_alone(repo: Rep
     """As when a filesystem reuses the inode and two writes of the same size
     land in the same timestamp tick."""
     repo.git("config", "branch.main.stackParent", "aaaa")
-    git = GitClient(repo.path)
+    git = GitClient(repo.path, process_env=ProcessEnv())
     assert git.config_get("main", "stackParent") == "aaaa"
     config = repo.path / ".git" / "config"
     before = config.stat()
@@ -193,7 +194,7 @@ def test_config_get_sees_our_own_write_to_another_config_file(
     other = repo.tmp / "other-config"
     other.write_text('[branch "main"]\n\tstackParent = base\n', encoding="utf-8")
     monkeypatch.setenv("GIT_CONFIG", str(other))
-    git = GitClient(repo.path)
+    git = GitClient(repo.path, process_env=ProcessEnv())
     assert git.config_get("main", "stackParent") == "base"
 
     if value is None:
@@ -222,7 +223,7 @@ def test_an_unset_that_changes_nothing_keeps_the_caches(
     """Reading the config or the refs again would be wasted."""
     for value in values:
         repo.git("config", "--add", f"branch.main.{key}", value)
-    git = GitClient(repo.path)
+    git = GitClient(repo.path, process_env=ProcessEnv())
     before = git.config_get("main", key)
     with git.snapshot():
         assert git.rev("main@{upstream}") == git.tip("main")
@@ -242,7 +243,7 @@ def test_unsetting_a_setting_another_process_removed_rereads_the_config(
     other = repo.tmp / "other-config"
     other.write_text('[branch "main"]\n\tstackParent = base\n\tstackPulled = abc\n', encoding="utf-8")
     monkeypatch.setenv("GIT_CONFIG", str(other))
-    git = GitClient(repo.path)
+    git = GitClient(repo.path, process_env=ProcessEnv())
     assert git.config_get("main", "stackPulled") == "abc"
     repo.git("config", "--file", str(other), "--unset", "branch.main.stackPulled")
     repo.git("config", "--file", str(other), "branch.main.stackParent", "trunk")
@@ -260,7 +261,7 @@ def test_push_destinations_see_changes_in_an_included_config(repo: Repo, explici
     repo.git("config", "include.path", str(included))
     if explicit:
         repo.git("config", "--file", str(included), "remote.origin.pushurl", str(repo.origin))
-    git = GitClient(repo.path)
+    git = GitClient(repo.path, process_env=ProcessEnv())
     with git.snapshot():
         assert tuple(map(pathlib.Path, git.push_urls("origin"))) == (repo.origin,)
         if not explicit:
@@ -272,11 +273,11 @@ def test_push_destinations_see_changes_in_an_included_config(repo: Repo, explici
 def test_config_get_handles_dots_in_branch_names_and_any_key_case(repo: Repo) -> None:
     repo.git("config", "branch.release.1.2.stackParent", "main")
 
-    assert GitClient(repo.path).config_get("release.1.2", "STACKPARENT") == "main"
+    assert GitClient(repo.path, process_env=ProcessEnv()).config_get("release.1.2", "STACKPARENT") == "main"
 
 
 def test_snapshot_reads_refs_once(repo: Repo, git_calls: list[GitCall]) -> None:
-    git = GitClient(repo.path)
+    git = GitClient(repo.path, process_env=ProcessEnv())
     main = repo.git("rev-parse", "main")
     # As a command has, to know which upstreams to read.
     git.branch_config()
@@ -298,7 +299,7 @@ def test_snapshot_asks_git_about_refs_it_doesnt_have(repo: Repo, git_calls: list
     """On a case-insensitive filesystem, git can find a ref under a name that
     differs in case, which the snapshot can't."""
     repo.git("branch", "feature")
-    git = GitClient(repo.path)
+    git = GitClient(repo.path, process_env=ProcessEnv())
     outside = (git.local_branch_exists("Feature"), git.rev("refs/heads/Feature"))
 
     with git.snapshot():
@@ -309,7 +310,7 @@ def test_snapshot_asks_git_about_refs_it_doesnt_have(repo: Repo, git_calls: list
 
 def test_snapshot_isnt_read_for_refs_it_cant_answer(repo: Repo, git_calls: list[GitCall]) -> None:
     """HEAD is native; Git parses the two revision expressions."""
-    git = GitClient(repo.path)
+    git = GitClient(repo.path, process_env=ProcessEnv())
     main = repo.git("rev-parse", "main")
     with git.snapshot():
         assert git.rev("HEAD") == main
@@ -320,7 +321,7 @@ def test_snapshot_isnt_read_for_refs_it_cant_answer(repo: Repo, git_calls: list[
 
 
 def test_snapshot_can_resolve_a_branch_it_did_not_list(repo: Repo, git_calls: list[GitCall]) -> None:
-    git = GitClient(repo.path)
+    git = GitClient(repo.path, process_env=ProcessEnv())
     with git.snapshot():
         git.local_branches()
         repo.git("branch", "later")
@@ -333,7 +334,7 @@ def test_snapshot_can_resolve_a_branch_it_did_not_list(repo: Repo, git_calls: li
 
 
 def test_snapshot_reads_refs_again_after_git_changes_them(repo: Repo) -> None:
-    git = GitClient(repo.path)
+    git = GitClient(repo.path, process_env=ProcessEnv())
     with git.snapshot():
         assert not git.local_branch_exists("new")
 
@@ -348,7 +349,7 @@ def test_snapshot_reads_refs_again_after_git_changes_them(repo: Repo) -> None:
 
 
 def test_snapshot_outlives_stack_metadata_writes_but_not_upstream_changes(repo: Repo, git_calls: list[GitCall]) -> None:
-    git = GitClient(repo.path)
+    git = GitClient(repo.path, process_env=ProcessEnv())
     repo.git("branch", "--no-track", "new")
     git.branch_config()
     git_calls.clear()
@@ -370,7 +371,7 @@ def test_snapshot_ends_with_the_outermost_block(repo: Repo) -> None:
     repo.commit("a", "more\n", "more")
     moved = repo.git("rev-parse", "main")
     repo.git("update-ref", "refs/heads/main", main)
-    git = GitClient(repo.path)
+    git = GitClient(repo.path, process_env=ProcessEnv())
     with git.snapshot():
         with git.snapshot():
             assert git.tip("main") == main
@@ -385,7 +386,7 @@ def test_forget_snapshot_sees_changes_other_processes_made(repo: Repo, git_calls
     repo.commit("a", "more\n", "more")
     moved = repo.git("rev-parse", "main")
     repo.git("update-ref", "refs/heads/main", main)
-    git = GitClient(repo.path)
+    git = GitClient(repo.path, process_env=ProcessEnv())
     with git.snapshot():
         assert git.tip("main") == main
         git.branch_config()
@@ -401,7 +402,7 @@ def test_forget_snapshot_sees_changes_other_processes_made(repo: Repo, git_calls
 
 def test_snapshot_leaves_revisions_to_git(repo: Repo) -> None:
     repo.commit("a", "more\n", "more")
-    git = GitClient(repo.path)
+    git = GitClient(repo.path, process_env=ProcessEnv())
     with git.snapshot():
         assert git.rev("refs/heads/main~1") == repo.git("rev-parse", "main~1")
         assert git.rev("main") == repo.git("rev-parse", "main")
@@ -413,7 +414,7 @@ def test_snapshot_sees_a_deleted_upstream(repo: Repo) -> None:
     repo.git("push", "--quiet", "-u", "origin", "feature")
     repo.git("push", "--quiet", "origin", ":feature")
     repo.git("fetch", "--quiet", "--prune")
-    git = GitClient(repo.path)
+    git = GitClient(repo.path, process_env=ProcessEnv())
 
     with git.snapshot():
         assert git.upstream_gone("feature")
@@ -459,7 +460,7 @@ def test_a_repository_without_a_config_file_works(repo: Repo) -> None:
     result = repo.stack("info", "--all", "--json")
 
     assert json.loads(result.stdout.splitlines()[-1]) == []
-    git = GitClient(repo.path)
+    git = GitClient(repo.path, process_env=ProcessEnv())
     assert git.branch_config() == {}
     git.config_set("main", "stackParent", "trunk")
     assert git.config_get("main", "stackParent") == "trunk"
@@ -470,7 +471,7 @@ def test_snapshot_reads_only_the_remote_branches_upstreams_are(repo: Repo, git_c
     asked of git as they're needed."""
     repo.git("push", "--quiet", "origin", "main:other")
     repo.git("fetch", "--quiet")
-    git = GitClient(repo.path)
+    git = GitClient(repo.path, process_env=ProcessEnv())
     with git.snapshot():
         assert git.rev("refs/remotes/origin/other") == git.tip("main")
         assert git.rev("main@{upstream}") == git.tip("main")
@@ -494,7 +495,7 @@ def test_snapshot_reads_every_remote_branch_when_upstreams_are_too_many_to_name(
     )
     with (repo.path / ".git" / "config").open("a", encoding="utf-8", newline="\n") as f:
         f.writelines(f'[branch "{n}"]\n\tremote = origin\n\tmerge = refs/heads/{n}\n' for n in names)
-    git = GitClient(repo.path)
+    git = GitClient(repo.path, process_env=ProcessEnv())
 
     with git.snapshot():
         assert all(git.rev(f"{n}@{{upstream}}") == main for n in names)
@@ -505,14 +506,14 @@ def test_snapshot_reads_every_remote_branch_when_upstreams_are_too_many_to_name(
 
 
 def test_snapshot_can_validate_a_branch_upstream(repo: Repo, git_calls: list[GitCall]) -> None:
-    git = GitClient(repo.path)
+    git = GitClient(repo.path, process_env=ProcessEnv())
     with git.snapshot():
         assert git.has_branch_upstream("main", "origin")
     assert [call[0] for call in git_calls] == ["config", "for-each-ref"]
 
 
 def test_snapshot_does_not_validate_an_upstream_after_the_fetch_refspec_changes(repo: Repo) -> None:
-    git = GitClient(repo.path)
+    git = GitClient(repo.path, process_env=ProcessEnv())
     repo.git("update-ref", "refs/remotes/mirror/main", "refs/heads/main")
     with git.snapshot():
         assert git.has_branch_upstream("main", "origin")
@@ -525,7 +526,7 @@ def test_snapshot_rejects_missing_or_symbolic_upstream_refs(repo: Repo, symbolic
     repo.git("config", "branch.main.merge", "refs/heads/other")
     if symbolic:
         repo.git("symbolic-ref", "refs/remotes/origin/other", "refs/remotes/origin/main")
-    git = GitClient(repo.path)
+    git = GitClient(repo.path, process_env=ProcessEnv())
 
     with git.snapshot():
         assert not git.has_branch_upstream("main", "origin")
@@ -538,7 +539,7 @@ def test_snapshot_reads_an_upstream_with_an_unusual_refspec(repo: Repo) -> None:
     repo.git("config", "remote.mirror.fetch", "+refs/heads/*:refs/remotes/elsewhere/*")
     repo.git("fetch", "--quiet", "mirror")
     repo.git("branch", "--quiet", "--track", "mirrored", "refs/remotes/elsewhere/main")
-    git = GitClient(repo.path)
+    git = GitClient(repo.path, process_env=ProcessEnv())
     with git.snapshot():
         assert not git.upstream_gone("mirrored")
         assert git.rev("mirrored@{upstream}") == git.tip("main")
@@ -546,7 +547,7 @@ def test_snapshot_reads_an_upstream_with_an_unusual_refspec(repo: Repo) -> None:
 
 
 def test_snapshot_reads_worktrees_and_the_remotes_default_branch_once(repo: Repo, git_calls: list[GitCall]) -> None:
-    git = GitClient(repo.path)
+    git = GitClient(repo.path, process_env=ProcessEnv())
     with git.snapshot():
         for _ in range(3):
             assert git.other_worktree_of("main") is None
@@ -577,7 +578,7 @@ def test_changes_worktrees(args: tuple[str, ...], changes: bool) -> None:
 
 
 def test_snapshot_keeps_the_worktrees_while_no_head_moves(repo: Repo, git_calls: list[GitCall]) -> None:
-    git = GitClient(repo.path)
+    git = GitClient(repo.path, process_env=ProcessEnv())
     with git.snapshot():
         assert git.worktree_of("main") is not None
         git.run("fetch", "--quiet", "origin")
@@ -591,7 +592,7 @@ def test_snapshot_keeps_the_worktrees_while_no_head_moves(repo: Repo, git_calls:
 
 def test_switching_forgets_the_worktrees(repo: Repo) -> None:
     repo.git("branch", "other")
-    git = GitClient(repo.path)
+    git = GitClient(repo.path, process_env=ProcessEnv())
     with git.snapshot():
         assert git.worktree_of("main") is not None
         git.switch("other")
@@ -600,7 +601,7 @@ def test_switching_forgets_the_worktrees(repo: Repo) -> None:
 
 
 def test_snapshot_reads_the_current_branch_with_the_refs(repo: Repo, git_calls: list[GitCall]) -> None:
-    git = GitClient(repo.path)
+    git = GitClient(repo.path, process_env=ProcessEnv())
     # As a command has, to know which upstreams to read.
     git.branch_config()
     git_calls.clear()
@@ -612,7 +613,7 @@ def test_snapshot_reads_the_current_branch_with_the_refs(repo: Repo, git_calls: 
 
 def test_snapshot_sees_the_current_branch_change(repo: Repo) -> None:
     repo.git("branch", "other")
-    git = GitClient(repo.path)
+    git = GitClient(repo.path, process_env=ProcessEnv())
     with git.snapshot():
         assert git.current_branch() == "main"
         git.switch("other")
@@ -625,7 +626,7 @@ def test_snapshot_reads_the_current_branch_of_its_own_worktree(repo: Repo) -> No
     repo.git("worktree", "add", "--quiet", "-b", "elsewhere", str(repo.tmp / "elsewhere"))
 
     for directory, branch in ((repo.path, "main"), (repo.tmp / "elsewhere", "elsewhere")):
-        git = GitClient(directory)
+        git = GitClient(directory, process_env=ProcessEnv())
         with git.snapshot():
             assert git.current_branch() == branch
 
@@ -633,7 +634,7 @@ def test_snapshot_reads_the_current_branch_of_its_own_worktree(repo: Repo) -> No
 def test_snapshot_reads_an_unborn_current_branch(repo: Repo) -> None:
     """It has no commit yet, so it isn't a ref."""
     repo.git("switch", "--quiet", "--orphan", "new")
-    git = GitClient(repo.path)
+    git = GitClient(repo.path, process_env=ProcessEnv())
     with git.snapshot():
         assert git.current_branch() == "new"
 
@@ -666,7 +667,7 @@ def test_commit_patch_ids_reads_each_commands_patches_with_one_patch_id(repo: Re
         ("diff", "-R", base, "HEAD"),
         ("diff", "HEAD", "HEAD"),  # nothing
     ]
-    git = GitClient(repo.path)
+    git = GitClient(repo.path, process_env=ProcessEnv())
 
     result = git.commit_patch_ids(*commands)
 
@@ -693,7 +694,7 @@ def test_commit_patch_ids_ignore_log_show_root_config(repo: Repo) -> None:
     assert len(expected) == 1
     repo.git("config", "log.showRoot", "false")
 
-    assert GitClient(repo.path).commit_patch_ids(command) == [expected]
+    assert GitClient(repo.path, process_env=ProcessEnv()).commit_patch_ids(command) == [expected]
 
 
 def test_commit_patch_ids_preserve_unicode_at_end_of_patch(repo: Repo) -> None:
@@ -702,7 +703,7 @@ def test_commit_patch_ids_preserve_unicode_at_end_of_patch(repo: Repo) -> None:
     patch = subprocess.check_output([*command, "diff", "HEAD"])
     expected = subprocess.run([*command, "patch-id", "--stable"], input=patch, capture_output=True, check=True)
 
-    [[(patch_id, commit)]] = GitClient(repo.path).commit_patch_ids(("diff", "HEAD"))
+    [[(patch_id, commit)]] = GitClient(repo.path, process_env=ProcessEnv()).commit_patch_ids(("diff", "HEAD"))
 
     assert f"{patch_id} {commit}\n".encode() == expected.stdout
 
@@ -711,14 +712,14 @@ def test_commit_patch_ids_in_a_sha256_repository(tmp_path: pathlib.Path, repo: R
     sha256 = sha256_repo(tmp_path, repo)
     commands = [("log", "-p", "HEAD~1..HEAD"), ("diff", "HEAD~1", "HEAD")]
 
-    assert GitClient(sha256.path).commit_patch_ids(*commands) == [
+    assert GitClient(sha256.path, process_env=ProcessEnv()).commit_patch_ids(*commands) == [
         separate_patch_ids(sha256, *command) for command in commands
     ]
 
 
 def test_snapshot_asks_about_the_same_commits_once_but_sees_a_branch_move(repo: Repo, git_calls: list[GitCall]) -> None:
     repo.git("branch", "other")
-    git = GitClient(repo.path)
+    git = GitClient(repo.path, process_env=ProcessEnv())
     with git.snapshot():
         for _ in range(2):
             assert git.is_ancestor("refs/heads/other", "refs/heads/main")
@@ -738,7 +739,7 @@ def test_containment_of_diverged_branches_reuses_the_same_merge_tree(repo: Repo,
     repo.commit("a", "other\n", "other change")
     repo.git("switch", "--quiet", "main")
     repo.commit("b", "main\n", "main change")
-    git = GitClient(repo.path)
+    git = GitClient(repo.path, process_env=ProcessEnv())
     with git.snapshot():
         for _ in range(2):
             assert not git.contained_in("refs/heads/other", "refs/heads/main")
@@ -747,7 +748,7 @@ def test_containment_of_diverged_branches_reuses_the_same_merge_tree(repo: Repo,
 
 
 def test_nothing_is_contained_in_a_branch_that_doesnt_exist(repo: Repo) -> None:
-    git = GitClient(repo.path)
+    git = GitClient(repo.path, process_env=ProcessEnv())
     with git.snapshot():
         assert not git.contained_in("refs/heads/main", "refs/heads/nope")
 
@@ -761,11 +762,11 @@ def test_first_subject_uses_gits_format_for_unusual_message_separators(repo: Rep
     repo.git("branch", "feature", tip)
     expected = repo.git("log", "--reverse", "--format=%s", f"{base}..refs/heads/feature").splitlines()[0]
 
-    assert GitClient(repo.path).first_subject(base, "feature") == expected
+    assert GitClient(repo.path, process_env=ProcessEnv()).first_subject(base, "feature") == expected
 
 
 def test_snapshot_reads_a_reflog_once_until_its_branch_moves(repo: Repo, git_calls: list[GitCall]) -> None:
-    git = GitClient(repo.path)
+    git = GitClient(repo.path, process_env=ProcessEnv())
     with git.snapshot():
         first = git.reflog_tips("main")
         assert git.reflog_tips("main") == first
@@ -780,7 +781,7 @@ def test_snapshot_reads_a_reflog_once_until_its_branch_moves(repo: Repo, git_cal
 def test_snapshot_doesnt_keep_a_reflog_read_while_it_was_forgotten(
     repo: Repo, git_calls: list[GitCall], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    git = GitClient(repo.path)
+    git = GitClient(repo.path, process_env=ProcessEnv())
     run = git.run
 
     def forgetting_meanwhile(*args: str, **kwargs: Any) -> str:
@@ -798,7 +799,7 @@ def test_snapshot_doesnt_keep_a_reflog_read_while_it_was_forgotten(
 
 
 def test_snapshot_doesnt_keep_a_rebase_read_while_it_was_forgotten(repo: Repo, monkeypatch: pytest.MonkeyPatch) -> None:
-    git = GitClient(repo.path)
+    git = GitClient(repo.path, process_env=ProcessEnv())
     read = git._read_rebasing  # pyright: ignore[reportPrivateUsage]
     reads: list[pathlib.Path] = []
 
@@ -826,7 +827,7 @@ def test_has_conflicts_sees_one_at_the_top_from_a_subdirectory_with_diff_relativ
     (repo.path / "sub").mkdir()
     repo.git("config", "diff.relative", "true")
 
-    assert GitClient(repo.path / "sub").has_conflicts()
+    assert GitClient(repo.path / "sub", process_env=ProcessEnv()).has_conflicts()
 
 
 @pytest.mark.parametrize("relative", [False, True])
@@ -848,7 +849,7 @@ def test_is_rebased_copy_replays_every_file_from_a_subdirectory(repo: Repo, rela
     rebased = repo.git("rev-parse", "HEAD")
     repo.git("config", "diff.relative", str(relative).lower())
 
-    assert GitClient(repo.path / "sub").is_rebased_copy(base, local, new_base, rebased)
+    assert GitClient(repo.path / "sub", process_env=ProcessEnv()).is_rebased_copy(base, local, new_base, rebased)
 
 
 def test_changes_something_sees_changes_at_the_top_from_a_subdirectory_with_diff_relative(repo: Repo) -> None:
@@ -859,7 +860,7 @@ def test_changes_something_sees_changes_at_the_top_from_a_subdirectory_with_diff
     (repo.path / "sub").mkdir()
     repo.git("config", "diff.relative", "true")
 
-    assert GitAdapter(StackCore(GitClient(repo.path / "sub"))).changes_something("pr1")
+    assert GitAdapter(StackCore(GitClient(repo.path / "sub", process_env=ProcessEnv()))).changes_something("pr1")
 
 
 def test_commit_patch_ids_reads_every_file_from_a_subdirectory_with_diff_relative(repo: Repo) -> None:
@@ -869,11 +870,11 @@ def test_commit_patch_ids_reads_every_file_from_a_subdirectory_with_diff_relativ
     repo.commit("a", "changed\n", "change a")
     (repo.path / "sub").mkdir()
     commands = [("log", "-p", f"{base}..HEAD"), ("diff", base, "HEAD")]
-    from_top = GitClient(repo.path).commit_patch_ids(*commands)
+    from_top = GitClient(repo.path, process_env=ProcessEnv()).commit_patch_ids(*commands)
     repo.git("config", "diff.relative", "true")
 
     assert [len(patches) for patches in from_top] == [1, 1]
-    assert GitClient(repo.path / "sub").commit_patch_ids(*commands) == from_top
+    assert GitClient(repo.path / "sub", process_env=ProcessEnv()).commit_patch_ids(*commands) == from_top
 
 
 @pytest.mark.parametrize("relative", [False, True])
@@ -891,12 +892,12 @@ def test_changed_files_name_the_files_patch_ids_compare_from_a_subdirectory(repo
     repo.git("add", ".")
     repo.git("commit", "--quiet", "-m", "three files")
     repo.commit("b", "changed\n", "change b")
-    top = GitClient(repo.path)
+    top = GitClient(repo.path, process_env=ProcessEnv())
     [from_top] = top.commit_patch_ids(("log", "-p", f"{base}..HEAD"))
     # Only the commit that has it, and only its changes there.
     [brackets] = top.commit_patch_ids(("log", "-p", f"{base}..HEAD", "--", "[ab]"))
     repo.git("config", "diff.relative", str(relative).lower())
-    git = GitClient(repo.path / "sub")
+    git = GitClient(repo.path / "sub", process_env=ProcessEnv())
 
     files = GitAdapter(StackCore(git)).changed_files(base, "HEAD")
 
@@ -914,7 +915,12 @@ def test_commit_patch_ids_marks_paths_even_with_git_literal_pathspecs(
     repo.commit("a", "changed\n", "change a")
     monkeypatch.setenv("GIT_LITERAL_PATHSPECS", "1")
 
-    assert [len(p) for p in GitClient(repo.path).commit_patch_ids(("log", "-p", "HEAD~1..HEAD", "--", "a"))] == [1]
+    assert [
+        len(p)
+        for p in GitClient(repo.path, process_env=ProcessEnv()).commit_patch_ids(
+            ("log", "-p", "HEAD~1..HEAD", "--", "a")
+        )
+    ] == [1]
 
 
 def test_git_runs_in_the_users_locale_with_its_messages_in_english(
@@ -933,7 +939,7 @@ def test_git_runs_in_the_users_locale_with_its_messages_in_english(
         GIT_VARIABLE, str(tmp_path / "bin" / ("fake-git.exe" if sys.platform == "win32" else "fake-git"))
     )
     monkeypatch.setenv("LC_ALL", "C.UTF-8")
-    git = GitClient(repo.path)
+    git = GitClient(repo.path, process_env=ProcessEnv())
 
     git.config_set("main", "stackParent", "trunk")
     with git.snapshot():
@@ -952,14 +958,14 @@ def test_git_runs_in_the_users_locale_with_its_messages_in_english(
 def test_common_dir_at_the_top_of_a_worktree_starts_no_git(repo: Repo, git_calls: list[GitCall]) -> None:
     repo.git("worktree", "add", "--quiet", "-b", "elsewhere", str(repo.tmp / "elsewhere"))
 
-    assert same_file(GitClient(repo.tmp / "elsewhere").common_dir(), repo.path / ".git")
+    assert same_file(GitClient(repo.tmp / "elsewhere", process_env=ProcessEnv()).common_dir(), repo.path / ".git")
     assert git_calls == []
 
 
 def test_common_dir_from_a_subdirectory(repo: Repo) -> None:
     (repo.path / "sub").mkdir()
 
-    assert same_file(GitClient(repo.path / "sub").common_dir(), repo.path / ".git")
+    assert same_file(GitClient(repo.path / "sub", process_env=ProcessEnv()).common_dir(), repo.path / ".git")
 
 
 @pytest.mark.parametrize("variable", ["GIT_DIR", "GIT_COMMON_DIR"])
@@ -970,14 +976,14 @@ def test_common_dir_follows_git_dir(repo: Repo, monkeypatch: pytest.MonkeyPatch,
     repo.git("init", "--quiet", str(repo.tmp / "other"))
     monkeypatch.setenv(variable, str(repo.tmp / "other" / ".git"))
 
-    assert same_file(GitClient(repo.path).common_dir(), repo.tmp / "other" / ".git")
+    assert same_file(GitClient(repo.path, process_env=ProcessEnv()).common_dir(), repo.tmp / "other" / ".git")
 
 
 @pytest.mark.parametrize(
     "name", ["rebase-merge", "rebase-apply", "CHERRY_PICK_HEAD", "REVERT_HEAD", "sequencer", "MERGE_HEAD"]
 )
 def test_operation_in_progress_sees_each_operations_state(repo: Repo, name: str) -> None:
-    git = GitClient(repo.path)
+    git = GitClient(repo.path, process_env=ProcessEnv())
     assert not git.operation_in_progress()
     (repo.path / ".git" / name).touch()
 
@@ -989,7 +995,7 @@ def test_config_value_is_what_git_config_get_gives(repo: Repo) -> None:
     no value, which `git config --get` prints as an empty line; None if unset."""
     with (repo.path / ".git" / "config").open("a", encoding="utf-8") as f:
         f.write("[stack]\n\tAdapter = git\n\tadapter = github\n\tflag\n")
-    git = GitClient(repo.path)
+    git = GitClient(repo.path, process_env=ProcessEnv())
 
     assert git.config_value("stack.adapter") == repo.git("config", "--get", "stack.adapter") == "github"
     assert git.config_value("stack.flag") == repo.git("config", "--get", "stack.flag") == ""
@@ -1001,7 +1007,7 @@ def test_local_objects_and_ancestry_need_no_git_process(repo: Repo, git_calls: l
     repo.commit("a", "next\n", "next")
     after = repo.git("rev-parse", "HEAD")
     tree = repo.git("rev-parse", "HEAD^{tree}")
-    git = GitClient(repo.path)
+    git = GitClient(repo.path, process_env=ProcessEnv())
     with git.snapshot():
         assert git.rev("HEAD") == after
         assert git.tree(after) == tree
@@ -1015,7 +1021,7 @@ def test_replacement_commits_leave_ancestry_to_git(repo: Repo, git_calls: list[G
     repo.commit("a", "next\n", "next")
     after = repo.git("rev-parse", "HEAD")
     repo.git("replace", "--graft", after)
-    git = GitClient(repo.path)
+    git = GitClient(repo.path, process_env=ProcessEnv())
 
     with git.snapshot():
         assert not git.is_ancestor(before, after)
@@ -1026,12 +1032,12 @@ def test_current_branch_resolves_a_symbolic_branch_alias(repo: Repo, git_calls: 
     repo.git("symbolic-ref", "refs/heads/alias", "refs/heads/main")
     repo.git("symbolic-ref", "HEAD", "refs/heads/alias")
 
-    assert GitClient(repo.path).current_branch() == "main"
+    assert GitClient(repo.path, process_env=ProcessEnv()).current_branch() == "main"
     assert git_calls == [["branch", "--show-current"]]
 
 
 def test_an_out_of_range_reflog_revision_without_a_snapshot_is_missing(repo: Repo) -> None:
-    assert GitClient(repo.path).rev("HEAD@{99999}") is None
+    assert GitClient(repo.path, process_env=ProcessEnv()).rev("HEAD@{99999}") is None
 
 
 def test_missing_object_can_be_fetched_from_a_promisor_in_git_config(
@@ -1046,7 +1052,7 @@ def test_missing_object_can_be_fetched_from_a_promisor_in_git_config(
     )
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(override))
 
-    assert GitClient(repo.path).rev(commit) == commit
+    assert GitClient(repo.path, process_env=ProcessEnv()).rev(commit) == commit
 
 
 def test_operation_in_progress_cli_fallback_handles_unicode_path(repo: Repo, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1056,7 +1062,7 @@ def test_operation_in_progress_cli_fallback_handles_unicode_path(repo: Repo, mon
     (git_dir / "MERGE_HEAD").touch()
     monkeypatch.setenv("GIT_DIR", str(git_dir))
 
-    assert GitClient(unusual).operation_in_progress()
+    assert GitClient(unusual, process_env=ProcessEnv()).operation_in_progress()
 
 
 def test_toplevel_respects_a_linked_worktree_config(repo: Repo) -> None:
@@ -1067,9 +1073,9 @@ def test_toplevel_respects_a_linked_worktree_config(repo: Repo) -> None:
     repo.git("config", "extensions.worktreeConfig", "true")
     repo.git("config", "--worktree", "core.worktree", str(directory), cwd=linked)
 
-    assert same_file(GitClient(linked).toplevel(), directory)
+    assert same_file(GitClient(linked, process_env=ProcessEnv()).toplevel(), directory)
 
 
 def test_toplevel_requires_a_working_tree(repo: Repo) -> None:
     with pytest.raises(StackError, match="must be run in a work tree"):
-        GitClient(repo.path / ".git").toplevel()
+        GitClient(repo.path / ".git", process_env=ProcessEnv()).toplevel()

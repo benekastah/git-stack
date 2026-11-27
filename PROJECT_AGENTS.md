@@ -107,7 +107,14 @@ GitHub-specific. The Git adapter never starts `gh`. Protected writes require
   or a write, and takes the lock only while it records one, which forgets
   what the snapshot read before (see `StackCore.exclusive`). Under the lock,
   `GIT_STACK_LOCK_HELD` (`LOCK_HELD_ENV`) tells the processes a command starts,
-  e.g. a hook running git-stack, not to wait for it: `StackCore.exclusive`
+  e.g. a hook running git-stack, not to wait for it. It reaches them through
+  the `GitClient`'s `process_env` (`git_stack/git_command.py`), never
+  `os.environ`. `GitClient` requires one: a new `ProcessEnv()` only for a new
+  command (as `cli.py` makes), and otherwise the command's own, which
+  `GitClient.at` gives a client for another worktree. gh starts through
+  `GitHubAdapter.run_gh`, which passes it `process_env.environ()`; pass that
+  to any other process started without git that could run git-stack. `ssh -G`
+  (`ssh_hostname`) only prints ssh's configuration, so it goes without. `StackCore.exclusive`
   then raises `LockHeldByCaller` when the lock is taken, which a reading
   command takes as a reason to leave settling for later. Run git through `GitClient` so the snapshot is forgotten when a git command
   may change refs, and only add a command to `READ_ONLY_COMMANDS` if it never

@@ -711,7 +711,7 @@ class Integrations:
             return root, None
         path = self.path(name)
         # Respect the merge policy as seen by the detached build worktree.
-        if not (path / ".git").is_file() or GitClient(path).ok("config", "--get", "merge.verifySignatures"):
+        if not (path / ".git").is_file() or self.git.at(path).ok("config", "--get", "merge.verifySignatures"):
             return root, None
         if not self.disjoint_source_paths(root, inputs):
             return root, None
@@ -859,7 +859,7 @@ class Integrations:
         """Prepare the cached detached worktree once, then reopen it on retries."""
         path = self.path(name)
         path.parent.mkdir(exist_ok=True)
-        worktree = GitClient(path)
+        worktree = self.git.at(path)
         worktree.passthrough_stdout = self.git.passthrough_stdout
         cached = (path / ".git").is_file()
         if not cached:
@@ -916,7 +916,7 @@ class Integrations:
 
     def abort_conflicting_step(self, name: str, build: Build) -> bool:
         """Keep the registered integration's worktree only after a clean abort."""
-        worktree = GitClient(self.path(name))
+        worktree = self.git.at(self.path(name))
         command = "cherry-pick" if build.get("replay") else "merge"
         try:
             return (

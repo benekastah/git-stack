@@ -17,7 +17,6 @@ from git_client import (
     ConfigResult,
     ConfigSet,
     ConfigUnset,
-    Git,
     GitCache,
     GitError,
     NoAnswerError,
@@ -30,7 +29,7 @@ from git_client import (
 
 from git_stack import git_read
 from git_stack.errors import StackError
-from git_stack.git_command import PatchGit, find_git
+from git_stack.git_command import PatchGit, ProcessEnv, StackGit, find_git
 from git_stack.git_read import config_key
 from git_stack.performance import active_timeline, measure_native
 
@@ -178,13 +177,18 @@ class GitClient:
     set, otherwise the git on PATH. Local object and graph lookups use pygit2
     where it can read the graph Git uses."""
 
-    def __init__(self, directory: str | os.PathLike[str] = ".") -> None:
+    def __init__(self, directory: str | os.PathLike[str] = ".", *, process_env: ProcessEnv) -> None:
         self.directory = pathlib.Path(directory)
+        # What the processes this client starts get on top of os.environ:
+        # a new one for a new command, and the command's own for a client it
+        # makes (see at), so a hook its git runs is told the lock is held.
+        self.process_env = process_env
         try:
             timeline = active_timeline.get()
-            self._git = Git(
+            self._git: StackGit = StackGit(
                 self.directory,
                 program=find_git(GIT_VARIABLE),
+                process_env=self.process_env,
                 performance=timeline.git if timeline else None,
             )
         except (FileNotFoundError, ValueError) as e:
@@ -237,12 +241,22 @@ class GitClient:
         finally:
             self._git.performance = original
 
+    def at(self, directory: str | os.PathLike[str]) -> GitClient:
+        """A client for directory (e.g. another worktree) for the same command: its processes
+        get this one's process_env."""
+        return GitClient(directory, process_env=self.process_env)
+
     def _git_with(
-        self, client_type: type[Git] = Git, *, cache: GitCache | None = None, object_id_length: int | None = None
-    ) -> Git:
+        self,
+        client_type: type[StackGit] = StackGit,
+        *,
+        cache: GitCache | None = None,
+        object_id_length: int | None = None,
+    ) -> StackGit:
         return client_type(
             self.directory,
             program=self._git.program,
+            process_env=self.process_env,
             performance=self._git.performance,
             cache=cache,
             object_id_length=object_id_length,
@@ -946,7 +960,7 @@ class GitClient:
         return branch
 
     def _read_rebasing(self, worktree: pathlib.Path) -> str | None:
-        git_dir = GitClient(worktree).run("rev-parse", "--absolute-git-dir", check=False)
+        git_dir = self.at(worktree).run("rev-parse", "--absolute-git-dir", check=False)
         if not git_dir:  # e.g. the worktree was deleted without `git worktree remove`
             return None
         for name in ("rebase-merge", "rebase-apply"):

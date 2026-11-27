@@ -34,6 +34,7 @@ from git_stack.commands import (
 )
 from git_stack.errors import StackError
 from git_stack.git import GitClient
+from git_stack.git_command import ProcessEnv
 from git_stack.output import JsonStream, print_event
 from git_stack.performance import Timeline, append_performance_log, performance_log_settings
 from git_stack.stack import StackClient
@@ -134,7 +135,7 @@ def _run(args: argparse.Namespace, stack: StackClient | None, argv: list[str]) -
             # Joining starts over at an absolute path, as git's -C does. It
             # fails if there's no git to run.
             directory = pathlib.Path(".", *args.directories)
-            stack = StackClient(GitClient(directory))
+            stack = StackClient(GitClient(directory, process_env=ProcessEnv()))
         log_settings = performance_log_settings(stack.git)
         timeline = Timeline() if log_settings is not None else None
         if timeline is None:

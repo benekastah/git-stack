@@ -12,6 +12,7 @@ from git_stack.adapters.git import PullRequestLink, PullRequestState
 from git_stack.adapters.github import PullRequest, github_repo
 from git_stack.errors import StackError
 from git_stack.git import GitClient
+from git_stack.git_command import ProcessEnv
 from git_stack.stack import BranchStatus, StackClient
 from tests import fake_gh
 from tests.git_support import GitCall, real_git
@@ -21,7 +22,7 @@ from tests.helpers import FakeGitHub, Repo, install_command
 def test_github_repo_needs_no_git_process_for_a_configured_url(
     repo: Repo, gh: FakeGitHub, git_calls: list[GitCall]
 ) -> None:
-    assert github_repo(GitClient(repo.path), "origin") == ("github.com", "acme", "widgets")
+    assert github_repo(GitClient(repo.path, process_env=ProcessEnv()), "origin") == ("github.com", "acme", "widgets")
     assert [call[0] for call in git_calls] == ["config"]
 
 
@@ -1123,13 +1124,13 @@ def fake_ssh(repo: Repo, tmp_path: pathlib.Path) -> None:
 def test_github_repo_resolves_ssh_host_alias(repo: Repo, fake_ssh: None, url: str) -> None:
     repo.git("config", "remote.origin.url", url)
 
-    assert github_repo(GitClient(repo.path), "origin") == ("github.com", "acme", "widgets")
+    assert github_repo(GitClient(repo.path, process_env=ProcessEnv()), "origin") == ("github.com", "acme", "widgets")
 
 
 def test_github_repo_leaves_https_host_alone(repo: Repo, fake_ssh: None) -> None:
     repo.git("config", "remote.origin.url", "https://github-work/acme/widgets.git")
 
-    assert github_repo(GitClient(repo.path), "origin") == ("github-work", "acme", "widgets")
+    assert github_repo(GitClient(repo.path, process_env=ProcessEnv()), "origin") == ("github-work", "acme", "widgets")
 
 
 def test_sync_leaves_reverted_pr_alone_when_its_merge_was_tweaked(

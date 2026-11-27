@@ -9,6 +9,7 @@ from git_stack import events
 from git_stack.core import Delete
 from git_stack.errors import StackError
 from git_stack.git import GitClient
+from git_stack.git_command import ProcessEnv
 from git_stack.stack import StackClient
 from tests.helpers import Repo
 
@@ -143,7 +144,7 @@ def test_restack_stopped_in_other_worktree_is_left_to_finish_there(
     repo.commit("b", "pr1 b\n", "pr1 c3")  # conflicts with pr2 c1
     repo.git("switch", "--quiet", "pr3")
     worktree = add_worktree(repo, "pr1")
-    worktree_client = StackClient(GitClient(worktree))
+    worktree_client = StackClient(GitClient(worktree, process_env=ProcessEnv()))
     with pytest.raises(StackError, match="conflict"):
         worktree_client.restack()
 
@@ -194,7 +195,7 @@ def test_a_worktree_added_by_a_path_in_another_case_is_this_one(repo: Repo) -> N
     repo.git("branch", "feature")
     repo.git("worktree", "add", "--quiet", str(respelled / "feature-worktree"), "feature")
 
-    git = GitClient(repo.tmp / "feature-worktree")
+    git = GitClient(repo.tmp / "feature-worktree", process_env=ProcessEnv())
 
     assert git.worktree_of("feature") is not None
     assert git.other_worktree_of("feature") is None

@@ -8,9 +8,10 @@ from typing import cast
 
 from git_stack.errors import StackError
 from git_stack.git import GitClient, is_object_id
+from git_stack.git_command import ProcessEnv
 from git_stack.git_read import GIT_REPOSITORY_ENV
 
-__version__ = "0.1.47"
+__version__ = "0.1.48"
 
 
 def build_version() -> str:
@@ -27,7 +28,7 @@ def _checkout_revision(checkout: Path) -> str | None:
     if not (checkout / ".git").exists() or not (checkout / "pyproject.toml").is_file():
         return None
     try:
-        revision = GitClient(checkout).rev("HEAD")
+        revision = GitClient(checkout, process_env=ProcessEnv()).rev("HEAD")
     except StackError, OSError:
         return None
     return revision if revision is not None and is_object_id(revision) else None
