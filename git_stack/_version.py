@@ -11,7 +11,7 @@ from git_stack.git import GitClient, is_object_id
 from git_stack.git_command import ProcessEnv
 from git_stack.git_read import GIT_REPOSITORY_ENV
 
-__version__ = "0.1.47"
+__version__ = "0.1.48"
 
 
 def build_version() -> str:
