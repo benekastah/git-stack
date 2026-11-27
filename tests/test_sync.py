@@ -10,6 +10,7 @@ from git_stack import events
 from git_stack.core import Delete
 from git_stack.errors import StackError
 from git_stack.git import GitClient
+from git_stack.git_command import ProcessEnv
 from git_stack.stack import BranchStatus, StackClient
 from git_stack.stacks import Ownership
 from tests.git_support import GitCall
@@ -770,7 +771,7 @@ def test_sync_records_pull_despite_info_run_before_it(
     repo.commit("a", "pr1 third\n", "pr1 c3")
     # As an editor showing `git stack info` would, while sync has written the
     # pending pull but hasn't started cherry-picking yet.
-    editor = StackClient(GitClient(repo.path))
+    editor = StackClient(GitClient(repo.path, process_env=ProcessEnv()))
     switch = client.git.switch
 
     def run_editor_first(branch: str) -> None:

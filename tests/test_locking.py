@@ -18,6 +18,7 @@ from git_stack.adapters import github
 from git_stack.errors import LockHeldByCaller, StackError
 from git_stack.file_lock import file_lock
 from git_stack.git import GitClient
+from git_stack.git_command import ProcessEnv
 from git_stack.stack import BranchStatus, StackClient
 from tests.helpers import Repo, kill_tree, start_process
 
@@ -123,7 +124,7 @@ def test_holding_the_lock_leaves_this_processs_environment_alone(repo: Repo, cli
 def test_another_client_isnt_told_the_lock_is_held(repo: Repo, client: StackClient) -> None:
     """E.g. one in another thread of a host process using git-stack: its
     commands wait for the lock, as another process's would."""
-    other = StackClient(GitClient(repo.path))
+    other = StackClient(GitClient(repo.path, process_env=ProcessEnv()))
 
     with client.exclusive():
         assert lock_held_seen_by_git(other.git) == ""
@@ -288,7 +289,7 @@ def start_waiting_for_lock(
         if isinstance(event, events.WaitingForLock):
             waiting.set()
 
-    reader = StackClient(GitClient(repo.path), on_event=on_event)
+    reader = StackClient(GitClient(repo.path, process_env=ProcessEnv()), on_event=on_event)
     result: list[object] = []
     thread = threading.Thread(target=lambda: result.append(command(reader)), daemon=True)
     thread.start()
@@ -471,7 +472,10 @@ def test_info_json_prints_only_its_list_after_waiting_for_the_lock(
 def test_lock_is_shared_by_every_worktree(repo: Repo) -> None:
     repo.git("worktree", "add", "--quiet", "-b", "elsewhere", str(repo.tmp / "elsewhere"))
 
-    assert GitClient(repo.tmp / "elsewhere").common_dir() == GitClient(repo.path).common_dir()
+    assert (
+        GitClient(repo.tmp / "elsewhere", process_env=ProcessEnv()).common_dir()
+        == GitClient(repo.path, process_env=ProcessEnv()).common_dir()
+    )
 
 
 def test_config_write_waits_while_another_process_has_config_locked(repo: Repo, client: StackClient) -> None:

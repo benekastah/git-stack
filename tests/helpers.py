@@ -19,6 +19,7 @@ import pytest
 
 from git_stack import cli, events
 from git_stack.git import GitClient
+from git_stack.git_command import ProcessEnv
 from git_stack.stack import BranchInfo, StackClient
 from tests import fake_gh, operations
 from tests.git_support import real_git
@@ -143,7 +144,7 @@ class Repo:
     emitted: list[events.Event] = field(default_factory=list)
 
     def __post_init__(self) -> None:
-        self.client = StackClient(GitClient(self.path), on_event=self.emitted.append)
+        self.client = StackClient(GitClient(self.path, process_env=ProcessEnv()), on_event=self.emitted.append)
 
     def git(self, *args: str, cwd: pathlib.Path | None = None) -> str:
         # With -C rather than cwd, which would keep Python from using posix_spawn.

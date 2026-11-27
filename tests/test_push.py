@@ -16,6 +16,7 @@ from git_client import PushResult as GitPushResult
 from git_stack import events
 from git_stack.errors import StackError
 from git_stack.git import GIT_VARIABLE, GitClient, split_command
+from git_stack.git_command import ProcessEnv
 from git_stack.push_repair import repairable_url
 from git_stack.stack import StackClient
 from tests.git_support import GitCall, real_git
@@ -215,7 +216,7 @@ def test_partial_push_reports_status_and_prints_a_leased_rollback(
         monkeypatch.setenv(GIT_VARIABLE, program)
         monkeypatch.setenv("FAKE_GIT_LOG", str(tmp_path / "git-log.jsonl"))
         monkeypatch.setenv("REAL_GIT", real_git())
-        client = StackClient(GitClient(repo.path))
+        client = StackClient(GitClient(repo.path, process_env=ProcessEnv()))
 
     git_calls.clear()
     with pytest.raises(StackError) as error:

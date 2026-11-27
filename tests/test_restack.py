@@ -5,6 +5,7 @@ import pytest
 from git_stack import events
 from git_stack.errors import StackError
 from git_stack.git import GitClient
+from git_stack.git_command import ProcessEnv
 from git_stack.stack import BranchInfo, BranchStatus, StackClient
 from git_stack.stacks import Ownership
 from tests.git_support import GitCall
@@ -160,7 +161,7 @@ def test_stale_base_cache_uses_literal_history_if_replace_changes_during_check(r
         assert client.stale_trunk_base("feature") is None
     repo.git("replace", "-d", fork)
 
-    fresh = StackClient(GitClient(repo.path))
+    fresh = StackClient(GitClient(repo.path, process_env=ProcessEnv()))
     with fresh.git.snapshot():
         assert fresh.stale_trunk_base("feature") is None
 
@@ -299,7 +300,7 @@ def test_restack_survives_scripting_command_run_before_each_rebase(
     repo.git("switch", "--quiet", "pr3")
     # As a shell prompt would, while restack has written a branch's pending
     # parent and base but its rebase hasn't started yet.
-    prompt = StackClient(GitClient(repo.path))
+    prompt = StackClient(GitClient(repo.path, process_env=ProcessEnv()))
     passthrough = client.git.passthrough
 
     def run_prompt_first(*args: str) -> bool:

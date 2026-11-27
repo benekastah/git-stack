@@ -177,10 +177,12 @@ class GitClient:
     set, otherwise the git on PATH. Local object and graph lookups use pygit2
     where it can read the graph Git uses."""
 
-    def __init__(self, directory: str | os.PathLike[str] = ".", *, process_env: ProcessEnv | None = None) -> None:
+    def __init__(self, directory: str | os.PathLike[str] = ".", *, process_env: ProcessEnv) -> None:
         self.directory = pathlib.Path(directory)
-        # What the processes this client starts get on top of os.environ.
-        self.process_env = process_env or ProcessEnv()
+        # What the processes this client starts get on top of os.environ:
+        # a new one for a new command, and the command's own for a client it
+        # makes (see at), so a hook its git runs is told the lock is held.
+        self.process_env = process_env
         try:
             timeline = active_timeline.get()
             self._git: StackGit = StackGit(

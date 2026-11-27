@@ -13,6 +13,7 @@ from git_stack import integrations as integration_module
 from git_stack.core import RemoteDeletion
 from git_stack.errors import StackError
 from git_stack.git import GitClient
+from git_stack.git_command import ProcessEnv
 from git_stack.integrations import Integration, Integrations
 from git_stack.stack import StackClient
 from git_stack.stacks import StackNode, Stacks
@@ -672,7 +673,7 @@ def test_integration_preserves_source_merge_edits_and_aborts_native_merge_confli
     assert path.exists() == reuse
     if reuse:
         assert not repo.git("status", "--porcelain", cwd=path)
-        assert not GitClient(path).operation_in_progress()
+        assert not GitClient(path, process_env=ProcessEnv()).operation_in_progress()
 
     repo.git("switch", "two")
     repo.git("restore", "--source", good_source, "--", "a", "d")
