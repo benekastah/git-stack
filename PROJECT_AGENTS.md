@@ -86,7 +86,8 @@ GitHub-specific. The Git adapter never starts `gh`. Protected writes require
   them so a retry can recover the inputs, group scope and remote. A sync or pull that untracks a selected group's
   work above an integration keeps the group and remote in memory, and records them
   (`retry_groups`) only for the integrations it didn't publish: at its end, or as an error
-  (or Ctrl-C) passes through, so a successful sync writes nothing. A process killed outright
+  (or Ctrl-C) passes through, so a sync that publishes every integration it untracked work
+  on writes nothing. A process killed outright
   records nothing (see `docs/issues.md`). Cleanup keeps
   newly verified landing proof in the retirement metadata until a rebuild records
   the new inputs. Queued remote deletions

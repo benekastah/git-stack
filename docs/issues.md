@@ -33,13 +33,13 @@ because the setting has several values keeps the cache. So if another process
 added a second value to a setting in the file `GIT_CONFIG` names, git-stack
 keeps reading the old one.
 
-## A killed group sync can lose its integration selector
+## A killed group sync or pull can lose its integration selector
 
-A group sync records that the group should still select an integration only
-when it ends or an error passes through without publishing it. If the process
-is killed outright (e.g. SIGKILL, or a signal Python doesn't turn into an
-exception) between untracking the group's last work on the integration and the
-push, nothing is recorded, and a retry of the group sync leaves the integration
+A group sync or pull records that the group should still select an integration
+only when it ends or an error passes through without publishing it. If the
+process is killed outright (e.g. SIGKILL, or a signal Python doesn't turn into
+an exception) after untracking the group's last work on the integration, before
+that point, nothing is recorded, and a later group sync leaves the integration
 unpublished. Retry with `git stack sync <integration>`, naming it.
 
 ## A push URL that failed outright can look finished

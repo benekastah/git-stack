@@ -223,8 +223,9 @@ class RemoteBranchDeleteFailed:
 
 @dataclass(frozen=True)
 class RetryGroupNotRecorded:
-    """A sync untracked group's work on integration and didn't publish it, but
-    couldn't record that group should still select it on a retry."""
+    """A sync or pull untracked group's work on integration and didn't publish
+    it, but couldn't record that group should still select it the next time
+    the group is synced."""
 
     event_type: ClassVar[str] = "retry-group-not-recorded"
 

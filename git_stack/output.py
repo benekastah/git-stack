@@ -100,8 +100,8 @@ def message(event: events.Event) -> str:  # noqa: C901
             return f"couldn't delete {event.upstream}; leaving {event.branch} alone"
         case events.RetryGroupNotRecorded():
             return (
-                f"couldn't record that group {event.group} should select {event.integration} on a retry "
-                f"({event.error}); retry with `git stack sync {event.integration}`"
+                f"couldn't record that group {event.group} should select {event.integration} the next time "
+                f"it's synced ({event.error}); run `git stack sync {event.integration}` to publish it"
             )
         case events.RemoteBranchKept():
             return (

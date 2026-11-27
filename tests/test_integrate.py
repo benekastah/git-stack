@@ -1411,7 +1411,7 @@ def test_failing_to_record_a_retry_group_keeps_the_push_error(repo: Repo, monkey
     failure = repo.stack("sync", "-g", "both", "--delete", "local", expect_success=False)
 
     assert "push failed" in failure.stderr
-    assert "warning: couldn't record that group both should select combined on a retry" in failure.stderr
+    assert "warning: couldn't record that group both should select combined the next time" in failure.stderr
 
 
 @pytest.mark.parametrize("retire_source", [True, False])
