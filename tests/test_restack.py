@@ -889,6 +889,25 @@ def test_a_chain_interrupted_while_it_is_settled_is_finished_by_the_next_command
     assert pending_batch_keys(repo) == []
 
 
+def test_a_branch_whose_base_is_not_known_is_not_settled_again_and_again(repo: Repo, client: StackClient) -> None:
+    repo.make_stack()
+    repo.git("switch", "--quiet", "pr1")
+    repo.commit("c", "pr1 change\n", "pr1 touches c")
+    with pytest.raises(StackError, match="restacking pr3 stopped on a conflict"):
+        client.restack()
+    repo.write("c", "resolved\n")
+    repo.git("add", "c")
+    assert continue_rebase(repo)
+    # pr2 is moved by hand to a commit that isn't what pr3 was rebased onto, so the chain isn't settled
+    # as a whole; and with its reflog gone, where pr3 was rebased to isn't known.
+    repo.git("update-ref", "refs/heads/pr2", "main")
+    repo.git("reflog", "expire", "--expire=now", "--all")
+
+    client.parent("pr3")
+
+    assert not client.settle_waiting()
+
+
 def test_a_chain_finished_by_hand_settles_the_branches_that_are_still_where_it_left_them(
     repo: Repo, client: StackClient
 ) -> None:

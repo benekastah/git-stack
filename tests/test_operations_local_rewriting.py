@@ -16,10 +16,10 @@ pytestmark = pytest.mark.usefixtures("separate_processes")
 # to it, not just to the number, shows up in review.
 #
 # Restacking replays the branches above the one that changed in one `git rebase` of the last of them.
-# What's left for each branch of the chain is writing its base; 19 processes are shared: the record
+# What's left for each branch of that chain is writing its base; 20 processes are shared: the record
 # of where each was (a write before and one after, and the config read again after the first, which
-# the refs read after the rebase need), and the checks and reads of any restack (19 + branches).
-# A stack of one only checks its base.
+# the refs read after the rebase need), and the checks and reads of any restack (20 + the branches
+# above the one that changed). A stack of one only checks its base.
 RESTACK_BEHIND = {1: 3, 3: 22, 10: 29}
 # The ancestry of an up-to-date stack is checked in process.
 RESTACK_UP_TO_DATE = {1: 3, 3: 3, 10: 3}

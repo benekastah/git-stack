@@ -481,11 +481,13 @@ class StackCore:
 
     def batch_settlements(self, branch: str, forget_unfinished: bool) -> list[Settlement]:
         """What settle writes to record a restack of a chain (see restack_chain) that branch, its
-        first, has the record of (PENDING_BATCH_KEY), if it was rebased: every branch of it has
-        moved, and each then has the base to record, which is the tip its parent was rebased to,
-        found in the parent's reflog, however far the parent has moved on since (a commit on it,
-        an amend). It wasn't if the rebase was aborted: the tips are where they were. The rest is
-        as for restack_settlement."""
+        first, has the record of (PENDING_BATCH_KEY): for each branch of it that was rebased (it has
+        moved, and has in its history the base to record, which is the tip its parent was rebased
+        to, found in the parent's reflog, however far the parent has moved on since: a commit on it,
+        an amend), that base, if it isn't recorded yet. Then the record's removal, last: only once
+        every branch is settled, or, for what's left, by a command that may drop an unfinished
+        restack (an aborted rebase leaves the tips where they were), and not while a branch is in
+        another worktree. The rest is as for restack_settlement."""
         git = self.git
         record = git.config_get(branch, PENDING_BATCH_KEY)
         if record is None:
@@ -505,7 +507,11 @@ class StackCore:
             if moved and (base is None or git.is_ancestor(base, f"refs/heads/{name}")):
                 valid += 1
                 parent_of_name = chain[position - 1][0] if position else parent
-                if git.config_get(name, BASE_KEY) != base or git.config_get(name, PARENT_KEY) != parent_of_name:
+                # Only what would change something, so a branch whose base isn't known (its parent's reflog is
+                # gone) isn't settled again and again.
+                if (base is not None and git.config_get(name, BASE_KEY) != base) or (
+                    git.config_get(name, PARENT_KEY) != parent_of_name
+                ):
                     settlements.append(Settlement(name, parent_of_name, ((BASE_KEY, base),) if base else ()))
         removal = Settlement(branch, None, (), ((PENDING_BATCH_KEY, record),))
         if valid == len(chain):
