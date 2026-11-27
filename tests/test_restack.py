@@ -812,9 +812,8 @@ def test_a_chain_finished_by_hand_records_each_base_even_if_a_branch_moved_on_be
     assert client.base("pr3") == rebased_pr2
 
 
-@pytest.mark.parametrize("signal", [KeyboardInterrupt, SystemExit], ids=["ctrl-c", "terminated"])
 def test_a_chain_rebase_interrupted_while_stopped_can_be_finished_by_hand(
-    repo: Repo, client: StackClient, monkeypatch: pytest.MonkeyPatch, signal: type[BaseException]
+    repo: Repo, client: StackClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     repo.make_stack()
     repo.git("switch", "--quiet", "pr1")
@@ -822,12 +821,12 @@ def test_a_chain_rebase_interrupted_while_stopped_can_be_finished_by_hand(
     passthrough = GitClient.passthrough
 
     def interrupted(self: GitClient, *args: str, **kwargs: object) -> bool:
-        """As if the process was stopped once the rebase had stopped on its conflict."""
+        """As if the user pressed Ctrl-C once the rebase had stopped on its conflict."""
         passthrough(self, *args, **kwargs)  # type: ignore[arg-type]
-        raise signal
+        raise KeyboardInterrupt
 
     monkeypatch.setattr(GitClient, "passthrough", interrupted)
-    with pytest.raises(signal):
+    with pytest.raises(KeyboardInterrupt):
         client.restack()
     monkeypatch.undo()
     repo.write("c", "resolved\n")
@@ -836,6 +835,75 @@ def test_a_chain_rebase_interrupted_while_stopped_can_be_finished_by_hand(
 
     assert client.base("pr3") == repo.git("rev-parse", "pr2")
     assert pending_batch_keys(repo) == []
+
+
+def test_a_chain_is_recorded_before_its_rebase_starts(
+    repo: Repo, client: StackClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo.make_stack()
+    repo.git("switch", "--quiet", "pr1")
+    repo.commit("a", "pr1 review fix\n", "pr1 review fix")
+    passthrough = GitClient.passthrough
+    recorded: list[bool] = []
+
+    def checking(self: GitClient, *args: str, **kwargs: object) -> bool:
+        """What a process killed by a signal that raises nothing in Python leaves behind."""
+        recorded.append(repo.config_exists("pr2", "stackPendingRestackBatch"))
+        return passthrough(self, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(GitClient, "passthrough", checking)
+
+    client.restack()
+
+    assert recorded == [True]
+
+
+def test_a_chain_interrupted_while_it_is_settled_is_finished_by_the_next_command(
+    repo: Repo, client: StackClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo.make_stack()
+    repo.git("switch", "--quiet", "pr1")
+    repo.commit("c", "pr1 change\n", "pr1 touches c")
+    with pytest.raises(StackError, match="restacking pr3 stopped on a conflict"):
+        client.restack()
+    repo.write("c", "resolved\n")
+    repo.git("add", "c")
+    assert continue_rebase(repo)
+    config_set = GitClient.config_set
+    bases: list[str] = []
+
+    def interrupted_at_the_second_base(self: GitClient, branch: str, key: str, value: str) -> None:
+        if key == "stackBase":
+            bases.append(branch)
+            if len(bases) == 2:
+                raise KeyboardInterrupt
+        config_set(self, branch, key, value)
+
+    monkeypatch.setattr(GitClient, "config_set", interrupted_at_the_second_base)
+    with pytest.raises(KeyboardInterrupt):
+        client.base("pr2")
+    monkeypatch.undo()
+
+    # The record is removed only once every base is written, so what's left is for the next command.
+    assert client.base("pr3") == repo.git("rev-parse", "pr2")
+    assert pending_batch_keys(repo) == []
+
+
+def test_a_chain_finished_by_hand_settles_the_branches_that_are_still_where_it_left_them(
+    repo: Repo, client: StackClient
+) -> None:
+    repo.make_stack()
+    repo.git("switch", "--quiet", "pr1")
+    repo.commit("c", "pr1 change\n", "pr1 touches c")
+    with pytest.raises(StackError, match="restacking pr3 stopped on a conflict"):
+        client.restack()
+    repo.write("c", "resolved\n")
+    repo.git("add", "c")
+    assert continue_rebase(repo)
+    # pr3 is moved by hand before git-stack has seen the finished rebase.
+    repo.git("update-ref", "refs/heads/pr3", "main")
+
+    assert client.base("pr2") == repo.git("rev-parse", "pr1")
 
 
 def test_a_chain_interrupted_while_its_bases_are_written_is_finished_by_the_next_command(

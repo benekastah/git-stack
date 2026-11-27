@@ -492,29 +492,30 @@ class StackCore:
             return []
         parent, onto, *members = record.split(" ")
         chain = [(name, before) for name, _, before in (member.partition(":") for member in members)]
-        # What each branch's base would be: where its parent was rebased to, or None if that's not known.
+        # What each branch's base would be: where its parent was rebased to, or None if that's not known
+        # (its parent's reflog is gone): that base stays, and is reported when the branch is next
+        # restacked, as a rebase by hand is.
         bases: list[str | None] = [onto]
         for name, before in chain[:-1]:
             bases.append(self.rebased_tip(name, before))
-        if all(
-            git.rev(f"refs/heads/{name}") not in (None, before)
-            and (base is None or git.is_ancestor(base, f"refs/heads/{name}"))
-            for (name, before), base in zip(chain, bases, strict=True)
-        ):
-            settlements = [
-                Settlement(name, chain[position - 1][0] if position else parent, ((BASE_KEY, base),) if base else ())
-                for position, ((name, _), base) in enumerate(zip(chain, bases, strict=True))
-            ]
-            # Where the one before was rebased to isn't known where its reflog is gone: that base stays,
-            # and is reported when the branch is next restacked, as a rebase by hand is.
-            first = settlements[0]
-            settlements[0] = Settlement(first.branch, first.parent, first.sets, ((PENDING_BATCH_KEY, record),))
-            return settlements
+        settlements: list[Settlement] = []
+        valid = 0
+        for position, ((name, before), base) in enumerate(zip(chain, bases, strict=True)):
+            moved = git.rev(f"refs/heads/{name}") not in (None, before)
+            if moved and (base is None or git.is_ancestor(base, f"refs/heads/{name}")):
+                valid += 1
+                parent_of_name = chain[position - 1][0] if position else parent
+                if git.config_get(name, BASE_KEY) != base or git.config_get(name, PARENT_KEY) != parent_of_name:
+                    settlements.append(Settlement(name, parent_of_name, ((BASE_KEY, base),) if base else ()))
+        removal = Settlement(branch, None, (), ((PENDING_BATCH_KEY, record),))
+        if valid == len(chain):
+            # Removed last, once every base is written: until then it's what's left to finish.
+            return [*settlements, removal]
         if not forget_unfinished or any(git.other_worktree_of(name) is not None for name, _ in chain):
-            # Not started yet in another git-stack process, or stopped in another worktree.
-            return []
+            # What's left is not started yet in another git-stack process, or stopped in another worktree.
+            return settlements
         # Only if it's unchanged, in case another process has started a new restack since.
-        return [Settlement(branch, None, (), ((PENDING_BATCH_KEY, record),))]
+        return [*settlements, removal]
 
     def rebased_tip(self, branch: str, before: str) -> str | None:
         """The commit branch was moved to from before, the one after it in its reflog, or None if
@@ -830,6 +831,8 @@ class StackCore:
         before = {branch: git.tip(branch) for branch in chain}
         for branch in chain:
             self.emit(events.Restacking(branch, stacks.parent(branch)))
+        # Read before the record is written, which makes the config be read again.
+        reparented = [branch for branch in chain if git.config_get(branch, PARENT_KEY) != stacks.parent(branch)]
         record = " ".join([parent, parent_tip, *(f"{branch}:{before[branch]}" for branch in chain)])
         git.config_set(first, PENDING_BATCH_KEY, record)
         # git leaves a branch that's checked out alone when it updates the others a rebase passes,
@@ -845,11 +848,9 @@ class StackCore:
                 )
             # The rebase finished, so each branch has its parent's new tip in its history: that's its
             # base (settle does the same for a rebase that was stopped and then finished by hand).
-            # All of it is read before any is written, since each write makes the config be read again.
             bases = [parent_tip, *(git.tip(branch) for branch in chain[:-1])]
-            for branch in chain:
-                if git.config_get(branch, PARENT_KEY) != stacks.parent(branch):
-                    self.set_parent(branch, stacks.parent(branch))
+            for branch in reparented:
+                self.set_parent(branch, stacks.parent(branch))
             for branch, new_base in zip(chain, bases, strict=True):
                 git.config_set(branch, BASE_KEY, new_base)
             git.config_unset(first, PENDING_BATCH_KEY, record)
