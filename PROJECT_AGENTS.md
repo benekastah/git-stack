@@ -83,9 +83,11 @@ GitHub-specific. The Git adapter never starts `gh`. Protected writes require
   reuse a detached worktree. A conflict in an existing integration keeps the
   cache only if the failed step aborts and leaves a clean detached worktree. Existing stopped operations are recoverable. Sync records merged
   source tips and stack selectors before untracking
-  them so a retry can recover the inputs, group scope and remote. A sync that untracks a selected group's
-  work above an integration and stops before publishing it records the group and remote
-  (`retry_groups`) for the same reason. Cleanup keeps
+  them so a retry can recover the inputs, group scope and remote. A sync or pull that untracks a selected group's
+  work above an integration keeps the group and remote in memory, and records them
+  (`retry_groups`) only for the integrations it didn't publish: at its end, or as an error
+  (or Ctrl-C) passes through, so a successful sync writes nothing. A process killed outright
+  records nothing (see `docs/issues.md`). Cleanup keeps
   newly verified landing proof in the retirement metadata until a rebuild records
   the new inputs. Queued remote deletions
   retain their dependent branches and leases. The checkout recovery marker

@@ -2280,7 +2280,7 @@ class StackClient(StackCore):
                 pending[deletion.ref] = entry
 
             state.defer_delete = defer
-        published = False
+        published: set[str] = set()
         try:
             verified = self.sync_selected(selection, expected, adapter, state)
             self.restore_checkout(state.original)
@@ -2313,10 +2313,8 @@ class StackClient(StackCore):
                 )
             if not (state.blocked or state.broken) and len(deletions) == len(pending):
                 integrations.clear_retired_sources(leases, state.stacks, state.scope)
-                published = True
+                published = set(leases)
         finally:
-            if not published:
-                integrations.add_retry_groups(state.retry_groups)
             for entry in pending.values():
                 deletion = entry.deletion
                 if self.git.rev(f"refs/remotes/{deletion.upstream}") is None:
@@ -2324,6 +2322,20 @@ class StackClient(StackCore):
                         integrations.forget_deletion(journal, deletion)
                 else:
                     self.emit(events.RemoteBranchKept(deletion.upstream, deletion.remote, deletion.branch))
+            self.record_retry_groups(
+                integrations, {name: groups for name, groups in state.retry_groups.items() if name not in published}
+            )
+
+    def record_retry_groups(self, integrations: Integrations, retry_groups: dict[str, dict[str, str]]) -> None:
+        """Record the groups that must still select integrations this sync
+        didn't publish. Called while another error may be on its way out, so a
+        failure here is a warning rather than an error that would replace it."""
+        try:
+            integrations.add_retry_groups(retry_groups)
+        except StackError as error:
+            for name, groups in retry_groups.items():
+                for group in groups:
+                    self.emit(events.RetryGroupNotRecorded(name, group, str(error)))
 
     def retry_deletions(
         self, selection: RefreshSelection, state: SyncState, integrations: Integrations

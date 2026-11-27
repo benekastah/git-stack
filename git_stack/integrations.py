@@ -50,9 +50,9 @@ class Integration(TypedDict):
     evidence_remote: NotRequired[str]
     group: NotRequired[str]
     retired_sources: NotRequired[dict[str, RetiredSource]]
-    # Each selected group whose work above the integration a sync untracked
-    # and that stopped before publishing, with that sync's remote, so a retry
-    # of the group still selects the integration.
+    # Each selected group whose work above the integration a sync or pull
+    # untracked without publishing the integration, with its remote, so the
+    # group still selects the integration until a sync publishes it.
     retry_groups: NotRequired[dict[str, str]]
     automatic: NotRequired[bool]
     tip: str

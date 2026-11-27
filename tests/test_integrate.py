@@ -1376,6 +1376,44 @@ def test_group_retry_selects_integration_after_its_last_work_lands_without_a_ret
         assert tip(repo, "combined", remote=True) == published
 
 
+def test_group_sync_publishes_integration_after_pull_untracked_its_last_work(repo: Repo) -> None:
+    integration(repo, tracked=True)
+    work(repo)
+    landed = tip(repo, "work")
+    repo.stack("group", "add", "both", "work")
+    repo.git("switch", "two")
+    repo.git("cherry-pick", landed)
+    repo.stack("pull", "-g", "both", "--delete", "local")
+    assert "work" not in repo.client.stacks()
+
+    repo.stack("sync", "-g", "both")
+
+    assert tip(repo, "combined", remote=True) == tip(repo, "combined")
+
+
+def test_failing_to_record_a_retry_group_keeps_the_push_error(repo: Repo, monkeypatch: pytest.MonkeyPatch) -> None:
+    integration(repo, tracked=True)
+    work(repo)
+    landed = tip(repo, "work")
+    repo.stack("group", "add", "both", "work")
+    repo.git("switch", "two")
+    repo.git("cherry-pick", landed)
+    passthrough = GitClient.passthrough
+
+    def reject_push(git: GitClient, *args: str) -> bool:
+        return False if args[:2] == ("push", "--atomic") else passthrough(git, *args)
+
+    def locked(integrations: Integrations, retry_groups: dict[str, dict[str, str]]) -> None:
+        raise StackError("config is locked")
+
+    monkeypatch.setattr(GitClient, "passthrough", reject_push)
+    monkeypatch.setattr(Integrations, "add_retry_groups", locked)
+    failure = repo.stack("sync", "-g", "both", "--delete", "local", expect_success=False)
+
+    assert "push failed" in failure.stderr
+    assert "warning: couldn't record that group both should select combined on a retry" in failure.stderr
+
+
 @pytest.mark.parametrize("retire_source", [True, False])
 def test_group_retry_does_not_publish_integration_on_another_remote(
     repo: Repo, monkeypatch: pytest.MonkeyPatch, retire_source: bool
