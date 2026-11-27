@@ -166,10 +166,10 @@ def test_every_branch_of_a_chain_rebase_stopped_in_another_worktree_is_found_the
     repo.git("switch", "--quiet", "main")
     worktree = add_worktree(repo, "pr1")
     with pytest.raises(StackError, match="conflict"):
-        StackClient(GitClient(worktree)).restack()
+        StackClient(GitClient(worktree, process_env=ProcessEnv())).restack()
 
     # One `git rebase --update-refs` of pr3 is stopped there, which has pr2 to update as it passes.
-    git = GitClient(repo.path)
+    git = GitClient(repo.path, process_env=ProcessEnv())
     assert git.worktree_of("pr3", fresh=True) == worktree
     assert git.worktree_of("pr2", fresh=True) == worktree
 
