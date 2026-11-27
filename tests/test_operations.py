@@ -206,7 +206,7 @@ def test_only_what_git_stack_starts_is_counted_not_what_git_starts_for_it(repo: 
     repo.git("switch", "--quiet", "pr1")
     repo.commit("a", "pr1 third\n", "pr1 c3")
 
-    with expect_operations(git=19) as operations:
+    with expect_operations(git=22) as operations:
         repo.stack_process("restack")
 
     # pr2 and pr3 are rebased by one `git rebase`, which runs `git notes copy` itself.

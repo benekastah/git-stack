@@ -971,13 +971,13 @@ class GitClient:
                 continue
             branches: set[str] = {head} if head.startswith("refs/heads/") else set()
             try:
-                # With --update-refs, three lines for each branch it moves as it passes: the ref,
-                # the commit it was at, and (once moved) where it is now.
+                # With --update-refs, three lines for each branch it will move as it passes: the ref,
+                # the commit it was at, and where it moved to (zeros until git does, when it finishes).
                 lines = (directory / "update-refs").read_text(encoding="utf-8").splitlines()
             except OSError:
                 lines = []
             branches.update(line for line in lines if line.startswith("refs/heads/"))
-            return frozenset(branch.removeprefix("refs/heads/") for branch in branches)
+            return frozenset(ref.removeprefix("refs/heads/") for ref in branches)
         return frozenset()
 
     def other_worktree_of(self, branch: str, *, fresh: bool = False) -> pathlib.Path | None:

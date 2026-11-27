@@ -36,10 +36,11 @@ TRACK_UPSTREAM_KEY = "stackTrackUpstream"
 # don't read it, so a restack this version stopped is finished with this
 # version or a later one.
 PENDING_RESTACK_KEY = "stackPendingRestack"
-# A restack of a chain of branches in one `git rebase --update-refs` (see restack_chain) that
-# stopped, or was interrupted, as "<the branch's tip before> <its parent>": the parent's new tip
-# isn't known until the rebase has made it, and the base is where the branch now forks from the
-# parent (see batch_settlement). Written only once the rebase has stopped. Older versions don't
+# A restack of a chain of branches in one `git rebase --update-refs` (see restack_chain), in one
+# setting on the chain's first branch, written before the rebase starts and removed once the bases are
+# recorded: "<the first's parent> <the commit it's rebased onto> <branch>:<its tip before> ..." for
+# each branch of the chain. The new tips aren't known until the rebase has made them, and one that
+# was stopped or interrupted is recorded from this (see batch_settlements). Older versions don't
 # read it, so a restack this version stopped is finished with this version or a later one.
 PENDING_BATCH_KEY = "stackPendingRestackBatch"
 # How older versions recorded it, in three settings, which a restack they
@@ -421,6 +422,8 @@ class StackCore:
         branch hasn't been updated yet.
         """
         self.apply(self.restack_settlement(branch, forget_unfinished, restack_completed))
+        for settlement in self.batch_settlements(branch, forget_unfinished):
+            self.apply(settlement)
         self.apply(self.pull_settlement(branch, forget_unfinished))
 
     def apply(self, settlement: Settlement | None) -> None:
@@ -439,8 +442,6 @@ class StackCore:
         """What settle writes to record branch's restack, if anything,
         without writing it."""
         git = self.git
-        if (batch := git.config_get(branch, PENDING_BATCH_KEY)) is not None:
-            return self.batch_settlement(branch, batch, forget_unfinished)
         before: str | None
         pending_base: str | None
         if (pending := git.config_get(branch, PENDING_RESTACK_KEY)) is not None:
@@ -478,22 +479,48 @@ class StackCore:
         # restack since we read it.
         return Settlement(branch, parent, sets, tuple(recorded.items()))
 
-    def batch_settlement(self, branch: str, pending: str, forget_unfinished: bool) -> Settlement | None:
-        """What settle writes to record branch's part of a chain restack (see restack_chain), pending
-        as "<its tip before> <its parent>", if it was rebased: its tip has changed since, and it now
-        forks from its parent at the base to record, which is the tip its parent was rebased to even
-        if the parent has moved on since (a commit on it, a pull). It wasn't if the rebase was
-        aborted: the tip is where it was. The rest is as for restack_settlement."""
+    def batch_settlements(self, branch: str, forget_unfinished: bool) -> list[Settlement]:
+        """What settle writes to record a restack of a chain (see restack_chain) that branch, its
+        first, has the record of (PENDING_BATCH_KEY), if it was rebased: every branch of it has
+        moved, and each then has the base to record, which is the tip its parent was rebased to,
+        found in the parent's reflog, however far the parent has moved on since (a commit on it,
+        an amend). It wasn't if the rebase was aborted: the tips are where they were. The rest is
+        as for restack_settlement."""
         git = self.git
-        before, parent = pending.split(" ", 1)
-        forks = git.run("merge-base", "--all", f"refs/heads/{branch}", f"refs/heads/{parent}", check=False).split()
-        if len(forks) == 1 and git.tip(branch) != before and forks[0] != git.config_get(branch, BASE_KEY):
-            return Settlement(branch, parent, ((BASE_KEY, forks[0]),), ((PENDING_BATCH_KEY, pending),))
-        if not forget_unfinished or git.other_worktree_of(branch) is not None:
+        record = git.config_get(branch, PENDING_BATCH_KEY)
+        if record is None:
+            return []
+        parent, onto, *members = record.split(" ")
+        chain = [(name, before) for name, _, before in (member.partition(":") for member in members)]
+        # What each branch's base would be: where its parent was rebased to, or None if that's not known.
+        bases: list[str | None] = [onto]
+        for name, before in chain[:-1]:
+            bases.append(self.rebased_tip(name, before))
+        if all(
+            git.rev(f"refs/heads/{name}") not in (None, before)
+            and (base is None or git.is_ancestor(base, f"refs/heads/{name}"))
+            for (name, before), base in zip(chain, bases, strict=True)
+        ):
+            settlements = [
+                Settlement(name, chain[position - 1][0] if position else parent, ((BASE_KEY, base),) if base else ())
+                for position, ((name, _), base) in enumerate(zip(chain, bases, strict=True))
+            ]
+            # Where the one before was rebased to isn't known where its reflog is gone: that base stays,
+            # and is reported when the branch is next restacked, as a rebase by hand is.
+            first = settlements[0]
+            settlements[0] = Settlement(first.branch, first.parent, first.sets, ((PENDING_BATCH_KEY, record),))
+            return settlements
+        if not forget_unfinished or any(git.other_worktree_of(name) is not None for name, _ in chain):
             # Not started yet in another git-stack process, or stopped in another worktree.
-            return None
+            return []
         # Only if it's unchanged, in case another process has started a new restack since.
-        return Settlement(branch, None, (), ((PENDING_BATCH_KEY, pending),))
+        return [Settlement(branch, None, (), ((PENDING_BATCH_KEY, record),))]
+
+    def rebased_tip(self, branch: str, before: str) -> str | None:
+        """The commit branch was moved to from before, the one after it in its reflog, or None if
+        its reflog doesn't have before."""
+        tips = self.git.reflog_tips(branch)
+        return tips[tips.index(before) - 1] if before in tips and tips.index(before) > 0 else None
 
     def pull_settlement(self, branch: str, forget_unfinished: bool) -> Settlement | None:
         """What settle writes to record a pull into branch, if anything,
@@ -542,6 +569,7 @@ class StackCore:
             return False
         return any(
             self.restack_settlement(branch, forget_unfinished=False)
+            or self.batch_settlements(branch, forget_unfinished=False)
             or self.pull_settlement(branch, forget_unfinished=False)
             for branch in self.stacks()
         )
@@ -773,14 +801,15 @@ class StackCore:
         # of one of these, say), which is not ours to move: leave the chain to restack_branch.
         inside = self.git.run(
             "for-each-ref",
-            "--format=%(refname:short) %(objectname)",
+            "--format=%(refname) %(objectname)",
             "--contains",
             f"{base}",
             "--merged",
             f"refs/heads/{chain[-1]}",
             "refs/heads/",
         ).splitlines()
-        if any(name not in chain and oid != base for name, _, oid in (line.partition(" ") for line in inside)):
+        in_chain = {f"refs/heads/{name}" for name in chain}
+        if any(name not in in_chain and oid != base for name, _, oid in (line.partition(" ") for line in inside)):
             return []
         return chain
 
@@ -790,58 +819,49 @@ class StackCore:
         until then no branch has moved, so an abort leaves every one as it was, and a conflict
         is resolved in the one rebase, however many branches it's in.
 
-        Where each branch was is recorded (see record_chain_pending) only if the rebase stops,
-        or is interrupted, so settle can record the result of one finished by hand: for a rebase
-        that finishes here it would be written, and removed, for nothing."""
+        Where each was is recorded first, in one setting (see PENDING_BATCH_KEY), so that a
+        rebase that stops, or a process that's interrupted or killed at any point, is recorded by
+        settle: for the whole chain it's two writes, not two for each branch."""
         git = self.git
         first, last = chain[0], chain[-1]
         parent = stacks.parent(first)
         parent_tip = git.tip(parent)
-        base = git.config_get(first, BASE_KEY)
+        base = self.recorded_base(first, parent)
         before = {branch: git.tip(branch) for branch in chain}
         for branch in chain:
             self.emit(events.Restacking(branch, stacks.parent(branch)))
+        record = " ".join([parent, parent_tip, *(f"{branch}:{before[branch]}" for branch in chain)])
+        git.config_set(first, PENDING_BATCH_KEY, record)
         # git leaves a branch that's checked out alone when it updates the others a rebase passes,
         # so, before it starts, we can't be on one: the rebase moves to `last` anyway.
         if git.current_branch() in chain[:-1]:
             git.switch(last)
-        try:
-            finished = git.passthrough("rebase", "--update-refs", "--onto", parent_tip, base or "", last)
-        except BaseException:
-            self.record_chain_pending(chain, before, stacks)
-            raise
-        if finished:
+        if git.passthrough("rebase", "--update-refs", "--onto", parent_tip, base, last):
             if unmoved := [branch for branch in chain if git.tip(branch) == before[branch]]:
+                git.config_unset(first, PENDING_BATCH_KEY, record)
                 raise StackError(
                     f"git rebased {last} but left {', '.join(unmoved)} where it was, so they're out of step: "
                     f"restore them with `git branch -f <branch> <commit>` from `git reflog` before restacking"
                 )
             # The rebase finished, so each branch has its parent's new tip in its history: that's its
             # base (settle does the same for a rebase that was stopped and then finished by hand).
-            # Read all of it before writing any, since each write makes the config be read again.
+            # All of it is read before any is written, since each write makes the config be read again.
             bases = [parent_tip, *(git.tip(branch) for branch in chain[:-1])]
             for branch in chain:
                 if git.config_get(branch, PARENT_KEY) != stacks.parent(branch):
                     self.set_parent(branch, stacks.parent(branch))
             for branch, new_base in zip(chain, bases, strict=True):
                 git.config_set(branch, BASE_KEY, new_base)
+            git.config_unset(first, PENDING_BATCH_KEY, record)
             return
-        if self.record_chain_pending(chain, before, stacks):
+        if git.operation_in_progress():
             raise self.stopped(
                 f"restacking {self.conflicting_branch(chain, before)}",
                 "rebase",
                 "rerun this command to finish the stack",
             )
+        git.config_unset(first, PENDING_BATCH_KEY, record)
         raise StackError(f"restacking {first} onto {parent} failed; see git's output above")
-
-    def record_chain_pending(self, chain: list[str], before: dict[str, str], stacks: Stacks) -> bool:
-        """Record where each branch of chain was (see PENDING_BATCH_KEY), if its rebase has
-        stopped, and say whether it has."""
-        if not self.git.operation_in_progress():
-            return False
-        for branch in chain:
-            self.git.config_set(branch, PENDING_BATCH_KEY, f"{before[branch]} {stacks.parent(branch)}")
-        return True
 
     def conflicting_branch(self, chain: list[str], before: dict[str, str]) -> str:
         """The branch of chain whose commit the stopped rebase of it couldn't apply, or the first

@@ -99,11 +99,12 @@ GitHub-specific. The Git adapter never starts `gh`. Protected writes require
   `StackCore.restack_all` rebases branches that follow one another (`chain_to_restack`) with one
   `git rebase --update-refs` of the last (`restack_chain`): git moves none of them until the rebase
   finishes, so an abort changes nothing and one rebase resolves every conflict. Where each branch
-  was is recorded as `stackPendingRestackBatch`, "<its tip before> <its parent>", only if the
-  rebase stops or is interrupted (a parent's new tip isn't known until the rebase has made it), and
-  `batch_settlement` records the base, once the tip has changed, as where the branch now forks from
-  its parent (`merge-base`), which is the tip the parent was rebased to even if the parent has moved
-  on since. A branch git-stack can't put in a chain (merge commits, another worktree, no commits of its
+  was is recorded first, in one setting on the first branch, `stackPendingRestackBatch`, "<its
+  parent> <the commit it's rebased onto> <branch>:<tip before> ...", and removed once the bases are
+  written, so a rebase that stops, or a process that's interrupted or killed, is recorded by
+  `settle`: `batch_settlements` records each base, once every branch has moved and has it in its
+  history, as the tip its parent was rebased to, found in the parent's reflog, which is exact
+  however far the parent has moved on since (a commit on it, an amend). A branch git-stack can't put in a chain (merge commits, another worktree, no commits of its
   own, another branch pointing into the range, which `--update-refs` would move) goes through
   `restack_branch` one at a time.
   Restack consults GitHub merge evidence only with `--prs`. The initial PR lookup

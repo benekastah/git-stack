@@ -703,7 +703,7 @@ def test_restack_of_a_chain_says_it_is_restacking_each_branch(
     assert restacking == [events.Restacking("pr2", "pr1"), events.Restacking("pr3", "pr2")]
 
 
-def test_a_chain_that_restacks_without_stopping_records_nothing_pending(
+def test_a_chain_records_where_it_was_in_one_setting_for_all_of_it_and_removes_it(
     repo: Repo, client: StackClient, git_calls: list[GitCall]
 ) -> None:
     repo.make_stack()
@@ -713,8 +713,10 @@ def test_a_chain_that_restacks_without_stopping_records_nothing_pending(
 
     client.restack()
 
-    # Where each was is only needed to finish a rebase that stopped, so it's not written for one that didn't.
-    assert not any("stackPendingRestackBatch" in " ".join(call) for call in git_calls)
+    # Written before the rebase, so a process that dies during it leaves it to be finished, and removed
+    # once the bases are recorded: two writes for the whole chain, not for each branch.
+    writes = [call for call in git_calls if "stackPendingRestackBatch" in " ".join(call)]
+    assert len(writes) == 2
     assert pending_batch_keys(repo) == []
     assert repo.config("pr3", "stackBase") == repo.git("rev-parse", "pr2")
 
@@ -810,8 +812,9 @@ def test_a_chain_finished_by_hand_records_each_base_even_if_a_branch_moved_on_be
     assert client.base("pr3") == rebased_pr2
 
 
-def test_a_chain_rebase_interrupted_while_stopped_is_recorded_so_it_can_be_finished_by_hand(
-    repo: Repo, client: StackClient, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("signal", [KeyboardInterrupt, SystemExit], ids=["ctrl-c", "terminated"])
+def test_a_chain_rebase_interrupted_while_stopped_can_be_finished_by_hand(
+    repo: Repo, client: StackClient, monkeypatch: pytest.MonkeyPatch, signal: type[BaseException]
 ) -> None:
     repo.make_stack()
     repo.git("switch", "--quiet", "pr1")
@@ -819,12 +822,12 @@ def test_a_chain_rebase_interrupted_while_stopped_is_recorded_so_it_can_be_finis
     passthrough = GitClient.passthrough
 
     def interrupted(self: GitClient, *args: str, **kwargs: object) -> bool:
-        """As if the user pressed Ctrl-C once the rebase had stopped on its conflict."""
+        """As if the process was stopped once the rebase had stopped on its conflict."""
         passthrough(self, *args, **kwargs)  # type: ignore[arg-type]
-        raise KeyboardInterrupt
+        raise signal
 
     monkeypatch.setattr(GitClient, "passthrough", interrupted)
-    with pytest.raises(KeyboardInterrupt):
+    with pytest.raises(signal):
         client.restack()
     monkeypatch.undo()
     repo.write("c", "resolved\n")
@@ -832,6 +835,68 @@ def test_a_chain_rebase_interrupted_while_stopped_is_recorded_so_it_can_be_finis
     assert continue_rebase(repo)
 
     assert client.base("pr3") == repo.git("rev-parse", "pr2")
+    assert pending_batch_keys(repo) == []
+
+
+def test_a_chain_interrupted_while_its_bases_are_written_is_finished_by_the_next_command(
+    repo: Repo, client: StackClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo.make_stack()
+    repo.git("switch", "--quiet", "pr1")
+    repo.commit("a", "pr1 review fix\n", "pr1 review fix")
+    config_set = GitClient.config_set
+
+    def interrupted(self: GitClient, branch: str, key: str, value: str) -> None:
+        if key == "stackBase":
+            raise KeyboardInterrupt
+        config_set(self, branch, key, value)
+
+    monkeypatch.setattr(GitClient, "config_set", interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        client.restack()
+    monkeypatch.undo()
+
+    # The branches have moved and no base was recorded: the record says where each was.
+    assert client.base("pr3") == repo.git("rev-parse", "pr2")
+    assert client.base("pr2") == repo.git("rev-parse", "pr1")
+    assert pending_batch_keys(repo) == []
+
+
+def test_a_chain_finished_by_hand_records_the_tip_each_branch_was_rebased_to_even_if_one_was_amended(
+    repo: Repo, client: StackClient
+) -> None:
+    repo.make_stack()
+    repo.git("switch", "--quiet", "pr1")
+    repo.commit("c", "pr1 change\n", "pr1 touches c")
+    with pytest.raises(StackError, match="restacking pr3 stopped on a conflict"):
+        client.restack()
+    repo.write("c", "resolved\n")
+    repo.git("add", "c")
+    assert continue_rebase(repo)
+    rebased_pr2 = repo.git("rev-parse", "pr2")
+
+    # pr2's tip is rewritten before git-stack has seen the finished rebase: pr3 was replayed onto the
+    # commit it was rebased to, which is where it forks from pr2 no longer.
+    repo.git("switch", "--quiet", "pr2")
+    repo.git("commit", "--quiet", "--amend", "-m", "pr2 c1 amended")
+
+    assert client.base("pr3") == rebased_pr2
+
+
+def test_a_tag_named_like_a_branch_of_a_chain_doesnt_stop_it_being_one(
+    repo: Repo, client: StackClient, git_calls: list[GitCall]
+) -> None:
+    repo.make_stack()
+    repo.git("tag", "pr2", "main")
+    repo.git("switch", "--quiet", "pr1")
+    repo.commit("a", "pr1 review fix\n", "pr1 review fix")
+    git_calls.clear()
+
+    client.restack()
+
+    assert len(rebase_commands(git_calls)) == 1
+    # By full name, since the bare one is the tag.
+    assert repo.config("pr3", "stackBase") == repo.git("rev-parse", "refs/heads/pr2")
 
 
 def test_a_branch_stacked_beside_a_chain_is_restacked_after_it(
