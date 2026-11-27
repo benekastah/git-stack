@@ -368,7 +368,9 @@ original command. Use `git stack integrate --abort <name>` to discard a build
 interrupted for another reason. Release the cached worktree before deleting
 the integration branch.
 Sync records a selected source's tip and stack before removing the merged
-branch. Rerun the original command with the same selectors. Sync keeps the
+branch. Rerun the original command with the same selectors.
+A group sync that removes a group's last work on an integration also keeps
+the group selecting that integration until a sync publishes it. Sync keeps the
 surviving work selected and can reuse recorded squash-merge proof without
 GitHub, including when the source branch still exists locally.
 

@@ -1494,17 +1494,7 @@ class StackClient(StackCore):
         if CURRENT_GROUP in selected_groups and current is not None and current in stacks:
             selected_groups.add(stacks.group(stacks.bottom(current)) or "")
         if groups:
-            for name in names:
-                config = integrations.read(name)
-                assert config is not None
-                for entry in config.get("retired_sources", {}).values():
-                    recovery_groups = entry.get("integration_groups", [])
-                    matching_groups = selected_groups.intersection(recovery_groups)
-                    if matching_groups:
-                        remotes = recovery_remotes.setdefault(name, set())
-                        if "refresh_remote" in entry:
-                            remotes.add(entry["refresh_remote"])
-                        retired_groups.update(matching_groups)
+            retired_groups.update(self.group_recovery(integrations, names, selected_groups, recovery_remotes))
         ordinary = [name for name in ordinary if name not in replaced]
         groups = [group for group in groups if group not in retired_groups or stacks.bottoms_in(group)]
         selected = (
@@ -1528,6 +1518,33 @@ class StackClient(StackCore):
             frozenset(selected_groups),
             recovery_remotes,
         )
+
+    def group_recovery(
+        self,
+        integrations: Integrations,
+        names: Iterable[str],
+        selected_groups: set[str],
+        recovery_remotes: dict[str, set[str]],
+    ) -> set[str]:
+        """Add the integrations an earlier sync of selected groups left to retry
+        to recovery_remotes, and return the groups that recorded them."""
+        recorded: set[str] = set()
+        for name in names:
+            config = integrations.read(name)
+            assert config is not None
+            for group, refresh_remote in config.get("retry_groups", {}).items():
+                if group in selected_groups:
+                    recovery_remotes.setdefault(name, set()).add(refresh_remote)
+                    recorded.add(group)
+            for entry in config.get("retired_sources", {}).values():
+                recovery_groups = entry.get("integration_groups", [])
+                matching_groups = selected_groups.intersection(recovery_groups)
+                if matching_groups:
+                    remotes = recovery_remotes.setdefault(name, set())
+                    if "refresh_remote" in entry:
+                        remotes.add(entry["refresh_remote"])
+                    recorded.update(matching_groups)
+        return recorded
 
     def retired_source_selectors(
         self, ordinary: Sequence[str], stacks: Stacks, integrations: Integrations, names: set[str]
@@ -2465,6 +2482,7 @@ class StackClient(StackCore):
                 branch, remote, deleting_locally, (name for name, _ in entries)
             )
             if not entries:
+                self.remember_retry_group(integrations, selection, branch, stacks, remote)
                 return
             tip = self.git.tip(branch)
             parent = stacks.parent(branch)
@@ -2494,6 +2512,23 @@ class StackClient(StackCore):
                 integrations.save(name, config)
 
         return preserve_source
+
+    def remember_retry_group(
+        self, integrations: Integrations, selection: RefreshSelection, branch: str, stacks: Stacks, remote: str
+    ) -> None:
+        """Keep a selected group selecting the integration its work is on: once
+        that work is untracked, a retry of the group has nothing else that leads to it."""
+        bottom = stacks.bottom(branch)
+        group = stacks.group(bottom)
+        root = stacks.root(bottom)
+        if group is None or group not in selection.selected_groups or root not in selection.integrations:
+            return
+        config = integrations.read(root)
+        assert config is not None
+        retry_groups = config.setdefault("retry_groups", {})
+        if retry_groups.get(group) != remote:
+            retry_groups[group] = remote
+            integrations.save(root, config)
 
     def integration_leases(
         self, selection: RefreshSelection, remote: str, force: bool, roots: set[str]

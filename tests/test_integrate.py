@@ -1337,6 +1337,44 @@ def test_retry_selects_recorded_integration_after_its_last_work_lands(
     assert tip(repo, "combined", remote=True) == tip(repo, "combined")
 
 
+@pytest.mark.parametrize(("peer", "rename_group"), [(False, False), (True, False), (True, True)])
+def test_group_retry_selects_integration_after_its_last_work_lands_without_a_retired_source(
+    repo: Repo, monkeypatch: pytest.MonkeyPatch, peer: bool, rename_group: bool
+) -> None:
+    integration(repo, tracked=True)
+    work(repo)
+    landed = tip(repo, "work")
+    if peer:
+        source(repo, "peer", "b", tracked=True)
+    repo.stack("group", "add", "both", "work", *(("peer",) if peer else ()))
+    repo.git("switch", "two")
+    repo.git("cherry-pick", landed)
+    command = ("sync", "-g", "both", "--delete", "local")
+    passthrough = GitClient.passthrough
+
+    def reject_push(git: GitClient, *args: str) -> bool:
+        return False if args[:2] == ("push", "--atomic") else passthrough(git, *args)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(GitClient, "passthrough", reject_push)
+        assert "push failed" in repo.stack(*command, expect_success=False).stderr
+        assert "work" not in repo.client.stacks()
+        # A retry that fails too keeps the integration selected.
+        assert "push failed" in repo.stack(*command, expect_success=False).stderr
+    if rename_group:
+        repo.stack("group", "rename", "both", "renamed")
+        command = ("sync", "-g", "renamed", "--delete", "local")
+
+    repo.stack(*command)
+
+    published = tip(repo, "combined")
+    assert tip(repo, "combined", remote=True) == published
+    if peer:
+        repo.commit("b", "advance two\n", "advance two")
+        repo.stack(*command)
+        assert tip(repo, "combined", remote=True) == published
+
+
 def test_group_retry_does_not_publish_integration_on_another_remote(
     repo: Repo, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1373,16 +1411,26 @@ def test_group_retry_does_not_publish_integration_on_another_remote(
     assert tip(repo, "combined", remote=True) == tip(repo, "combined")
 
 
-@pytest.mark.parametrize("method", ["add", "rename", "create", "merge", "pull"])
+@pytest.mark.parametrize(
+    ("method", "retire_source"),
+    [
+        *((method, True) for method in ("add", "rename", "create", "merge", "pull")),
+        # Without a retired source, pull's rebuild of combined conflicts: one and both both change a.
+        *((method, False) for method in ("add", "rename", "create", "merge")),
+    ],
+)
 def test_reused_group_name_does_not_inherit_integration_retry(
-    repo: Repo, monkeypatch: pytest.MonkeyPatch, method: str
+    repo: Repo, monkeypatch: pytest.MonkeyPatch, method: str, retire_source: bool
 ) -> None:
     integration(repo, tracked=True)
     work(repo)
     landed = tip(repo, "work")
-    repo.stack("group", "add", "both", "one", "work")
-    repo.git("switch", "main")
-    repo.git("merge", "--ff-only", "one")
+    if retire_source:
+        repo.stack("group", "add", "both", "one", "work")
+        repo.git("switch", "main")
+        repo.git("merge", "--ff-only", "one")
+    else:
+        repo.stack("group", "add", "both", "work")
     repo.git("switch", "two")
     repo.git("cherry-pick", landed)
     command = ("sync", "-g", "both", "--delete", "local")

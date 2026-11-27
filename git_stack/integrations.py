@@ -50,6 +50,10 @@ class Integration(TypedDict):
     evidence_remote: NotRequired[str]
     group: NotRequired[str]
     retired_sources: NotRequired[dict[str, RetiredSource]]
+    # Each selected group whose work above the integration a sync untracked
+    # before publishing, with that sync's remote, so a retry of the group
+    # still selects the integration.
+    retry_groups: NotRequired[dict[str, str]]
     automatic: NotRequired[bool]
     tip: str
 
@@ -98,8 +102,13 @@ class Integrations:
         self.git.config_set(name, INTEGRATION_KEY, json.dumps(integration))
 
     def clear_retired_sources(self, names: Iterable[str], stacks: Stacks, scope: frozenset[str]) -> None:
-        """Drop retry selectors whose surviving work was included in this push."""
-        configs = {name: config for name in names if (config := self.read(name)) and config.get("retired_sources")}
+        """Drop retry selectors whose surviving work was included in this push, and
+        the retry groups that selected these integrations."""
+        configs = {
+            name: config
+            for name in names
+            if (config := self.read(name)) and (config.get("retired_sources") or config.get("retry_groups"))
+        }
         if not configs:
             return
         outside = {stacks.bottom(branch) for branch in stacks if branch not in scope}
@@ -123,11 +132,14 @@ class Integrations:
                 for branch, entry in retired.items()
                 if has_outside_work(entry)
             }
+            changed = config.pop("retry_groups", None) is not None
             if remaining != retired:
                 if remaining:
                     config["retired_sources"] = remaining
                 else:
                     del config["retired_sources"]
+                changed = True
+            if changed:
                 self.save(name, config)
 
     def replace_group(self, new: str, old: str | None = None) -> None:
@@ -138,6 +150,7 @@ class Integrations:
             changed = old is not None and config.get("group") == old
             if changed:
                 config["group"] = new
+            changed = Integrations.replace_retry_group(config, new, old) or changed
             for entry in config.get("retired_sources", {}).values():
                 if old is not None and entry["group"] == old:
                     entry["group"] = new
@@ -156,6 +169,21 @@ class Integrations:
             build = self.pending(name)
             if build and update(build["integration"]):
                 self.journal(name, build)
+
+    @staticmethod
+    def replace_retry_group(config: Integration, new: str, old: str | None) -> bool:
+        """Carry old's retry group over to new on a rename, and drop new's
+        otherwise. Says whether config changed."""
+        retry_groups = config.get("retry_groups", {})
+        if new not in retry_groups and old not in retry_groups:
+            return False
+        retry_remote = retry_groups.pop(old, None) if old is not None else None
+        retry_groups.pop(new, None)
+        if retry_remote is not None:
+            retry_groups[new] = retry_remote
+        if not retry_groups:
+            del config["retry_groups"]
+        return True
 
     def renamed_inputs(self, old: str, new: str) -> dict[str, Integration]:  # noqa: C901
         """Prepare integration metadata for a local source or root rename."""
@@ -485,9 +513,18 @@ class Integrations:
         desired = Integration(root=root, sources=inputs, root_tip=root_tip, evidence_remote=remote, tip=root_tip)
         if group is not None:
             desired["group"] = group
-        if still_retired:
-            desired["retired_sources"] = still_retired
+        self.keep_retry_selectors(desired, still_retired, previous)
         return desired, observed
+
+    @staticmethod
+    def keep_retry_selectors(
+        desired: Integration, retired: dict[str, RetiredSource], previous: Integration | None
+    ) -> None:
+        """Keep what a retry needs to select the integration until it's published."""
+        if retired:
+            desired["retired_sources"] = retired
+        if previous and "retry_groups" in previous:
+            desired["retry_groups"] = previous["retry_groups"]
 
     @staticmethod
     def retired_input(source: Source, captured: Source, pending: Source | None) -> Source:
