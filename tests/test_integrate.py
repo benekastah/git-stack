@@ -1370,13 +1370,15 @@ def test_group_retry_selects_integration_after_its_last_work_lands_without_a_ret
     published = tip(repo, "combined")
     assert tip(repo, "combined", remote=True) == published
     if peer:
+        repo.git("switch", "two")
         repo.commit("b", "advance two\n", "advance two")
         repo.stack(*command)
         assert tip(repo, "combined", remote=True) == published
 
 
+@pytest.mark.parametrize("retire_source", [True, False])
 def test_group_retry_does_not_publish_integration_on_another_remote(
-    repo: Repo, monkeypatch: pytest.MonkeyPatch
+    repo: Repo, monkeypatch: pytest.MonkeyPatch, retire_source: bool
 ) -> None:
     integration(repo, tracked=True)
     work(repo)
@@ -1387,9 +1389,12 @@ def test_group_retry_does_not_publish_integration_on_another_remote(
     repo.git("clone", "--bare", str(repo.origin), str(other))
     repo.git("remote", "add", "other", str(other))
     repo.git("push", "--set-upstream", "other", "peer")
-    repo.stack("group", "add", "both", "one", "work", "peer")
-    repo.git("switch", "main")
-    repo.git("merge", "--ff-only", "one")
+    if retire_source:
+        repo.stack("group", "add", "both", "one", "work", "peer")
+        repo.git("switch", "main")
+        repo.git("merge", "--ff-only", "one")
+    else:
+        repo.stack("group", "add", "both", "work", "peer")
     repo.git("switch", "two")
     repo.git("cherry-pick", landed)
     command = ("sync", "-g", "both", "--delete", "local")
@@ -1401,7 +1406,8 @@ def test_group_retry_does_not_publish_integration_on_another_remote(
     with monkeypatch.context() as patch:
         patch.setattr(GitClient, "passthrough", reject_push)
         assert "push failed" in repo.stack(*command, "--remote", "origin", expect_success=False).stderr
-    assert not {"one", "work"}.intersection(repo.client.stacks())
+    assert "work" not in repo.client.stacks()
+    assert ("one" in repo.client.stacks()) is not retire_source
 
     for selectors in (("-g", "both"), ("one", "-g", "both")):
         repo.stack("sync", *selectors, "--remote", "other")
