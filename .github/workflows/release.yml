@@ -1,0 +1,35 @@
+# Makes the GitHub release of git-stack's version when a change to version.txt lands on main: a
+# release is that change and nothing else (see "Versioning" in PROJECT_AGENTS.md), so there's
+# nothing to run by hand. The release itself is `dev.py release` (dev_project.py), which leaves a
+# version that's already released alone, so a later change to the file can't make a second one.
+# git-stack's own, not the template's.
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths: [version.txt]
+
+permissions:
+  contents: write
+
+# A re-run of a push waits for the first, and finds its release. The group has the commit in it, since
+# a group keeps one pending run and cancels the rest: a shared one could drop a version's release.
+concurrency:
+  group: release-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          python-version: "3.15"
+      - run: uv run --no-project python dev.py release
+        env:
+          GH_TOKEN: ${{ github.token }}

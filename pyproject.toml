@@ -36,7 +36,7 @@ requires = ["setuptools>=84"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.dynamic]
-version = {attr = "git_stack._version.__version__"}
+version = {file = "version.txt"}
 
 [tool.setuptools.packages.find]
 include = ["git_stack*"]

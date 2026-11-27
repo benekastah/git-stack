@@ -1,5 +1,6 @@
 """dev_project.py: git-stack's additions to dev.py's install."""
 
+import errno
 import os
 import re
 import subprocess
@@ -153,3 +154,136 @@ def test_the_optional_paths_probe_says_yes_on_a_git_that_takes_them(dev_project:
     # The real probe, in this clone: a broken one would answer no, and install would set a
     # blame.ignoreRevsFile that fails on checkouts without the file.
     assert dev_project._git_has_optional_paths()  # pyright: ignore[reportPrivateUsage]
+
+
+class FakeCommands:
+    """What `release` runs: gh and git through subprocess.run (to ask whether the release exists, and
+    for HEAD), and gh through dev.py's run (to make it)."""
+
+    def __init__(self, *, released: bool = False, view_failure: str | None = None) -> None:
+        self.released = released
+        self.view_failure = view_failure
+        self.asked: list[list[str]] = []
+        self.ran: list[tuple[str, ...]] = []
+
+    def subprocess_run(self, args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        self.asked.append(args)
+        if args[:3] == ["gh", "release", "view"]:
+            if self.view_failure is not None:
+                return subprocess.CompletedProcess(args, 1, "", self.view_failure)
+            return subprocess.CompletedProcess(
+                args, 0 if self.released else 1, "", "" if self.released else "release not found"
+            )
+        assert args == ["git", "rev-parse", "HEAD"]
+        return subprocess.CompletedProcess(args, 0, "abc123\n", "")
+
+    def run(self, *args: str) -> None:
+        self.ran.append(args)
+
+
+@pytest.fixture
+def release_commands(monkeypatch: pytest.MonkeyPatch, dev_project: ModuleType, tmp_path: Path) -> FakeCommands:
+    commands = FakeCommands()
+    monkeypatch.setattr(dev_project.subprocess, "run", commands.subprocess_run)
+    monkeypatch.setattr(dev_project, "run", commands.run)
+    monkeypatch.setattr(dev_project, "VERSION_FILE", tmp_path / "version.txt")
+    return commands
+
+
+def write_version(dev_project: ModuleType, text: str) -> None:
+    dev_project.VERSION_FILE.write_text(text, encoding="utf-8")
+
+
+def test_release_makes_the_github_release_of_the_version_at_head_with_generated_notes(
+    dev_project: ModuleType, release_commands: FakeCommands
+) -> None:
+    write_version(dev_project, "0.2.0\n")
+
+    dev_project.release([])
+
+    assert release_commands.ran == [
+        ("gh", "release", "create", "v0.2.0", "--target", "abc123", "--title", "v0.2.0", "--generate-notes")
+    ]
+    assert "release" in dev_project.COMMANDS
+
+
+def test_release_marks_a_version_with_a_suffix_as_a_prerelease(
+    dev_project: ModuleType, release_commands: FakeCommands
+) -> None:
+    write_version(dev_project, "0.3.0rc1\n")
+
+    dev_project.release([])
+
+    assert release_commands.ran[0][-1] == "--prerelease"
+    assert release_commands.ran[0][3] == "v0.3.0rc1"
+
+
+def test_release_leaves_a_version_that_is_already_released_alone(
+    dev_project: ModuleType, release_commands: FakeCommands, capsys: pytest.CaptureFixture[str]
+) -> None:
+    release_commands.released = True
+    write_version(dev_project, "0.2.0\n")
+
+    dev_project.release([])
+
+    assert release_commands.ran == []
+    assert "v0.2.0 is already released" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "v0.2.0\n",
+        "0.2\n",
+        "0.2.0 and more\n",
+        "\n",
+        "0.2.0\n0.3.0\n",
+        "0.3.0-rc.1\n",
+        "0.3.0-1\n",
+        "0.3.0beta\n",
+        "01.2.3\n",
+        "1.02.3\n",
+        "1.2.3rc01\n",
+        "١.٢.٣\n",
+        "0.3.0rc\n",
+    ],
+)
+def test_release_refuses_a_version_txt_that_isnt_just_a_version(
+    dev_project: ModuleType, release_commands: FakeCommands, text: str
+) -> None:
+    write_version(dev_project, text)
+
+    with pytest.raises(SystemExit, match="version.txt"):
+        dev_project.release([])
+
+    assert release_commands.asked == []
+    assert release_commands.ran == []
+
+
+def test_release_doesnt_take_a_failure_of_gh_for_a_version_that_isnt_released_yet(
+    dev_project: ModuleType, release_commands: FakeCommands
+) -> None:
+    release_commands.view_failure = "HTTP 401: Bad credentials"
+    write_version(dev_project, "0.2.0\n")
+
+    with pytest.raises(SystemExit, match="Bad credentials"):
+        dev_project.release([])
+
+    assert release_commands.ran == []
+
+
+def test_release_says_when_gh_isnt_installed(
+    monkeypatch: pytest.MonkeyPatch, dev_project: ModuleType, release_commands: FakeCommands
+) -> None:
+    def missing(args: list[str], **kwargs: object) -> object:
+        raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), args[0])
+
+    monkeypatch.setattr(dev_project.subprocess, "run", missing)
+    write_version(dev_project, "0.2.0\n")
+
+    with pytest.raises(SystemExit, match="release needs gh, which isn't installed"):
+        dev_project.release([])
+
+
+def test_the_version_in_version_txt_is_one_release_takes(dev_project: ModuleType) -> None:
+    assert dev_project.VERSION.fullmatch((ROOT / "version.txt").read_text("utf-8").strip())

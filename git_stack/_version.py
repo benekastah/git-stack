@@ -1,8 +1,9 @@
-"""The package version and optional source revision for performance reports."""
+"""The package version, from version.txt, and optional source revision for performance reports."""
 
 import json
 import os
 from importlib.metadata import PackageNotFoundError, distribution
+from importlib.metadata import version as installed_version
 from pathlib import Path
 from typing import cast
 
@@ -11,7 +12,24 @@ from git_stack.git import GitClient, is_object_id
 from git_stack.git_command import ProcessEnv
 from git_stack.git_read import GIT_REPOSITORY_ENV
 
-__version__ = "0.1.50"
+
+def read_version(checkout: Path) -> str:
+    """The version in the version.txt of a checkout (or an editable install of one: a pyproject.toml
+    beside it says so, since an installed package's directory above is site-packages, where another
+    package may leave a version.txt of its own), else the one the installed package's metadata has,
+    which setuptools took from that file when it was built."""
+    if (checkout / "pyproject.toml").is_file():
+        try:
+            return (checkout / "version.txt").read_text(encoding="utf-8").strip()
+        except OSError:
+            pass
+    try:
+        return installed_version("git-stack")
+    except PackageNotFoundError:
+        return "0+unknown"
+
+
+__version__ = read_version(Path(__file__).resolve().parents[1])
 
 
 def build_version() -> str:
