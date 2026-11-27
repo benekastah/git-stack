@@ -1870,6 +1870,17 @@ out the Install and Development sections; its SYNOPSIS is in
 regenerate it with `python3 dev.py man`. `dev.py static` (so the pre-push hook
 and CI) fails if it's out of date.
 
+### Releasing
+
+`version.txt` holds the version and nothing else, and a pull request doesn't
+change it. To release, open a pull request that changes `version.txt` (for
+example to `0.3.0`, or `0.3.0-rc.1` for a pre-release) and nothing else. When
+it lands on `main`, the Release workflow makes the GitHub release `v0.3.0` at
+that commit, with notes generated from the pull requests since the last
+release (`python3 dev.py release` does it, and leaves a version that's
+already released alone). A clone you run from, as a developer does, reports
+the last release and its commit in the performance log (`stack.perfLog`).
+
 ### The project template
 
 The tooling (`dev.py`, the git hooks, CI's `ci.yml`, `cancel.yml` and

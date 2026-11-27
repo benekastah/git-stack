@@ -7,10 +7,13 @@ man page is generated from it.
 
 ## Versioning
 
-Every merge into `main` must update `__version__` in `git_stack/_version.py`.
-Bump the patch component relative to the current version on `main` unless the
-change warrants a minor or major bump. Include the bump in the commit that
-lands on `main` so each merged build has a distinct version in performance logs.
+`version.txt` holds git-stack's version and nothing else (`0.2.0`); setuptools reads it, and so does
+`git_stack/_version.py` in a checkout. A pull request doesn't change it: a version is released by
+changing it, in a pull request of its own, and when that lands on `main`,
+`.github/workflows/release.yml` makes the GitHub release `v<version>` at that commit, with notes
+generated from the pull requests since the last (`dev.py release`; a suffix, as in `0.3.0-rc.1`, makes
+it a pre-release). Builds between releases report the last release and the commit they're built
+from (see `build_version`), which is what tells them apart in performance logs.
 
 ## Command interaction
 
@@ -147,8 +150,8 @@ GitHub-specific. The Git adapter never starts `gh`. Protected writes require
   output and environment out of the timeline.
   The CLI writes the command line, version and timeline to `stack.perfLog`,
   capped by `stack.perfLogMaxBytes`. Tests configure their own log paths.
-- `git_stack/_version.py` defines the package version for setuptools and
-  adds the source commit to performance reports when it can identify it.
+- `git_stack/_version.py` reads the package version from `version.txt` (or, installed, from the
+  package's metadata) and adds the source commit to performance reports when it can identify it.
 - A value from a fixed set (an option's, a setting's, GitHub's) is an enum,
   converted where it's read (e.g. `Delete`, `Ownership`, `GitHubState`), so
   the code compares members rather than strings, and adding a value happens in
@@ -291,5 +294,5 @@ Keep these when resolving a `copier update`'s conflicts:
   and macOS. `ci.yml` has two edits of git-stack's, each commented: the tests
   job sets up the Windows Dev Drive (`.github/actions/fast-temp`), and the
   time limits. `tests/conftest.py`
-  gives CI 8 test workers. `.github/workflows/measure.yml` and `large.yml` are git-stack's own.
+  gives CI 8 test workers. `.github/workflows/measure.yml`, `large.yml` and `release.yml` are git-stack's own.
 - The extra lines in `.gitattributes` and `.gitignore`.

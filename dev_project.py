@@ -3,16 +3,22 @@ blame.
 
     python dev.py types-other-platforms  # basedpyright as if on Windows and macOS too
     python dev.py large-tests            # the tests of a 500,000-commit repository (minutes, a few hundred MB)
+    python dev.py release                # the GitHub release of version.txt's version, if it has none yet
 
 `install` also makes `git blame` skip the commits in .git-blame-ignore-revs, and links the agent
 skills into the directories of the coding agents it finds (`git stack install-skills`).
 """
 
+import re
 import subprocess
 import sys
 from collections.abc import Callable
 
 from dev import ROOT, run, run_code, tool, venv
+
+VERSION_FILE = ROOT / "version.txt"
+VERSION = re.compile(r"\d+\.\d+\.\d+(-[0-9A-Za-z][0-9A-Za-z.-]*)?")
+"""What version.txt has: MAJOR.MINOR.PATCH, and, for a pre-release, a suffix (0.3.0-rc.1)."""
 
 MAN_SYNOPSIS = {"git-stack": "**git stack** [**-C** *path*] [`--json`] *command* [*args*]"}
 """man/git-stack.1's SYNOPSIS (dev.py man makes the page from README.md)."""
@@ -82,7 +88,27 @@ def large_tests(pytest_args: list[str]) -> None:
         sys.exit(code)
 
 
+def release(_: list[str]) -> None:
+    """Make the GitHub release of the version in version.txt, v<version>, at HEAD, with notes
+    generated from the pull requests since the last release, unless there's one already. A
+    version with a suffix (0.3.0-rc.1) is a pre-release. The release workflow runs this when a
+    change to version.txt lands on main; gh must be logged in (in CI, with GH_TOKEN)."""
+    version = VERSION_FILE.read_text(encoding="utf-8").strip()
+    if VERSION.fullmatch(version) is None:
+        sys.exit(f"{VERSION_FILE.name} has {version!r}, which isn't a version like 1.2.3 or 1.2.3-rc.1")
+    tag = f"v{version}"
+    if subprocess.run(["gh", "release", "view", tag], capture_output=True, check=False).returncode == 0:
+        print(f"{tag} is already released")
+        return
+    commit = subprocess.run(
+        ["git", "rev-parse", "HEAD"], capture_output=True, encoding="utf-8", check=True, cwd=ROOT
+    ).stdout.strip()
+    prerelease = ["--prerelease"] if "-" in version else []
+    run("gh", "release", "create", tag, "--target", commit, "--title", tag, "--generate-notes", *prerelease)
+
+
 COMMANDS: dict[str, Callable[[list[str]], None]] = {
     "types-other-platforms": types_other_platforms,
     "large-tests": large_tests,
+    "release": release,
 }
