@@ -15,9 +15,10 @@ pytestmark = pytest.mark.usefixtures("separate_processes")
 # size and with the formula that fits all three. A formula is how the count grows, so a change
 # to it, not just to the number, shows up in review.
 #
-# Restacking replays each branch above the one that changed, at nine processes per replay.
-# Multiple replays share eight more processes. A stack of one only checks its base.
-RESTACK_BEHIND = {1: 3, 3: 29, 10: 92}
+# Restacking replays the branches above the one that changed in one `git rebase` of the last of them:
+# what's left for each is writing its base, and 16 processes are shared (16 + branches from 3 up).
+# A stack of one only checks its base.
+RESTACK_BEHIND = {1: 3, 3: 19, 10: 26}
 # The ancestry of an up-to-date stack is checked in process.
 RESTACK_UP_TO_DATE = {1: 3, 3: 3, 10: 3}
 # Pull and clean end by printing the stack, asking `git config --get-colorbool` whether to color it.

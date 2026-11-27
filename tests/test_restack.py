@@ -1,5 +1,7 @@
 """git stack restack."""
 
+import subprocess
+
 import pytest
 
 from git_stack import events
@@ -8,7 +10,7 @@ from git_stack.git import GitClient
 from git_stack.git_command import ProcessEnv
 from git_stack.stack import BranchInfo, BranchStatus, StackClient
 from git_stack.stacks import Ownership
-from tests.git_support import GitCall
+from tests.git_support import GitCall, real_git
 from tests.helpers import Repo
 
 
@@ -411,7 +413,7 @@ def test_conflict_resolved_with_rebase_continue_records_new_base(repo: Repo, cli
     repo.git("switch", "--quiet", "pr1")
     repo.commit("b", "pr1 change\n", "pr1 touches b")
 
-    # pr2 conflicts and pr3 is left for later.
+    # pr2 conflicts, in the one rebase of pr2 and pr3, which finishes on pr3.
     with pytest.raises(StackError, match="restacking pr2 stopped on a conflict"):
         client.restack()
 
@@ -419,7 +421,7 @@ def test_conflict_resolved_with_rebase_continue_records_new_base(repo: Repo, cli
     repo.git("add", "b")
     repo.git("rebase", "--continue")
     assert repo.branch_info("pr2") == BranchInfo(
-        "pr2", "pr1", BranchStatus.UP_TO_DATE, current=True, additions=1, deletions=1
+        "pr2", "pr1", BranchStatus.UP_TO_DATE, current=False, additions=1, deletions=1
     )
     client.restack()
 
@@ -432,6 +434,8 @@ def test_conflict_from_an_older_version_is_finished_by_this_one(repo: Repo, clie
     """Older versions recorded a restack in three settings, which one that
     stopped on a conflict before upgrading leaves behind."""
     repo.make_stack()
+    # Two branches, so the restack isn't a chain, which records where each was in another setting.
+    client.untrack(["pr3"])
     repo.git("switch", "--quiet", "pr1")
     repo.commit("b", "pr1 change\n", "pr1 touches b")
     with pytest.raises(StackError, match="restacking pr2 stopped on a conflict"):
@@ -447,7 +451,6 @@ def test_conflict_from_an_older_version_is_finished_by_this_one(repo: Repo, clie
     client.restack()
 
     repo.assert_stacked("pr2", "pr1", ["pr2 c1"])
-    repo.assert_stacked("pr3", "pr2", ["pr3 c1"])
     assert repo.config("pr2", "stackBase") == repo.git("rev-parse", "pr1")
     assert not any(
         key.startswith("branch.pr2.stackpending") for key in repo.git("config", "--list", "--name-only").split()
@@ -456,6 +459,8 @@ def test_conflict_from_an_older_version_is_finished_by_this_one(repo: Repo, clie
 
 def test_conflict_from_an_older_version_that_was_aborted_is_forgotten(repo: Repo, client: StackClient) -> None:
     repo.make_stack()
+    # Two branches, so the restack isn't a chain, which records where each was in another setting.
+    client.untrack(["pr3"])
     old_base = repo.config("pr2", "stackBase")
     repo.git("switch", "--quiet", "pr1")
     repo.commit("b", "pr1 change\n", "pr1 touches b")
@@ -510,8 +515,10 @@ def test_aborted_restack_keeps_previous_base(repo: Repo, client: StackClient) ->
         client.restack()
     repo.git("rebase", "--abort")
 
+    # The rebase of the chain pr1, pr2, pr3 started from pr3, where we were taken to leave pr1 alone for
+    # `--update-refs` to move.
     assert repo.branch_info("pr1") == BranchInfo(
-        "pr1", "main", BranchStatus.NEEDS_RESTACK, current=True, additions=1, deletions=1
+        "pr1", "main", BranchStatus.NEEDS_RESTACK, current=False, additions=1, deletions=1
     )
     assert repo.config("pr1", "stackBase") == old_base
 
@@ -647,3 +654,250 @@ def test_restack_refuses_outside_a_stack(repo: Repo, client: StackClient) -> Non
 
     assert repo.config("pr1", "stackBase") == repo.git("rev-parse", "main~")
     assert repo.own_commits("pr1", "main") == ["pr1 c2", "pr1 c1"]
+
+
+def rebase_commands(git_calls: list[GitCall]) -> list[GitCall]:
+    return [call for call in git_calls if call[0] == "rebase"]
+
+
+def continue_rebase(repo: Repo) -> bool:
+    """`git rebase --continue`, which stops again, with an exit status, on the next conflict."""
+    result = subprocess.run(
+        [real_git(), "-C", str(repo.path), "rebase", "--continue"], check=False, capture_output=True
+    )
+    return result.returncode == 0
+
+
+def pending_batch_keys(repo: Repo) -> list[str]:
+    return [key for key in repo.git("config", "--list", "--name-only").split() if "stackpendingrestackbatch" in key]
+
+
+def test_restack_replays_a_chain_of_branches_in_one_rebase(
+    repo: Repo, client: StackClient, git_calls: list[GitCall]
+) -> None:
+    repo.make_stack()
+    repo.git("switch", "--quiet", "pr1")
+    repo.commit("a", "pr1 review fix\n", "pr1 review fix")
+    repo.git("switch", "--quiet", "pr3")
+    git_calls.clear()
+
+    client.restack()
+
+    (rebase,) = rebase_commands(git_calls)
+    assert "--update-refs" in rebase
+    repo.assert_stacked("pr2", "pr1", ["pr2 c1"])
+    repo.assert_stacked("pr3", "pr2", ["pr3 c1"])
+    assert repo.git("branch", "--show-current") == "pr3"
+
+
+def test_restack_of_a_chain_says_it_is_restacking_each_branch(
+    repo: Repo, client: StackClient, emitted: list[events.Event]
+) -> None:
+    repo.make_stack()
+    repo.git("switch", "--quiet", "pr1")
+    repo.commit("a", "pr1 review fix\n", "pr1 review fix")
+
+    client.restack()
+
+    restacking = [e for e in emitted if isinstance(e, events.Restacking)]
+    assert restacking == [events.Restacking("pr2", "pr1"), events.Restacking("pr3", "pr2")]
+
+
+def test_a_chain_that_restacks_without_stopping_records_nothing_pending(
+    repo: Repo, client: StackClient, git_calls: list[GitCall]
+) -> None:
+    repo.make_stack()
+    repo.git("switch", "--quiet", "pr1")
+    repo.commit("a", "pr1 review fix\n", "pr1 review fix")
+    git_calls.clear()
+
+    client.restack()
+
+    # Where each was is only needed to finish a rebase that stopped, so it's not written for one that didn't.
+    assert not any("stackPendingRestackBatch" in " ".join(call) for call in git_calls)
+    assert pending_batch_keys(repo) == []
+    assert repo.config("pr3", "stackBase") == repo.git("rev-parse", "pr2")
+
+
+def test_a_conflict_in_a_chain_moves_no_branch_until_it_is_resolved_and_continued(
+    repo: Repo, client: StackClient
+) -> None:
+    repo.make_stack()
+    before = {branch: repo.git("rev-parse", branch) for branch in ("pr2", "pr3")}
+    repo.git("switch", "--quiet", "pr1")
+    repo.commit("c", "pr1 change\n", "pr1 touches c")
+
+    # pr2 replays cleanly and pr3, which also changes c, conflicts: the one rebase stops there.
+    with pytest.raises(StackError, match="restacking pr3 stopped on a conflict"):
+        client.restack()
+    assert {branch: repo.git("rev-parse", branch) for branch in ("pr2", "pr3")} == before
+
+    repo.write("c", "resolved\n")
+    repo.git("add", "c")
+    assert continue_rebase(repo)
+    assert repo.branch_info("pr2") == BranchInfo(
+        "pr2", "pr1", BranchStatus.UP_TO_DATE, current=False, additions=1, deletions=1
+    )
+    client.restack()
+
+    repo.assert_stacked("pr2", "pr1", ["pr2 c1"])
+    repo.assert_stacked("pr3", "pr2", ["pr3 c1"])
+    assert repo.config("pr3", "stackBase") == repo.git("rev-parse", "pr2")
+    assert pending_batch_keys(repo) == []
+
+
+def test_every_conflict_of_a_chain_is_resolved_in_the_one_rebase(repo: Repo, client: StackClient) -> None:
+    repo.make_stack()
+    repo.git("switch", "--quiet", "pr1")
+    repo.write("b", "pr1 change\n")
+    repo.write("c", "pr1 change\n")
+    repo.git("commit", "--quiet", "-am", "pr1 touches b and c")
+
+    with pytest.raises(StackError, match="restacking pr2 stopped on a conflict"):
+        client.restack()
+    repo.write("b", "resolved b\n")
+    repo.git("add", "b")
+    assert not continue_rebase(repo)
+    assert "pr3" in repo.git("log", "-1", "--format=%s", "REBASE_HEAD")
+    repo.write("c", "resolved c\n")
+    repo.git("add", "c")
+    assert continue_rebase(repo)
+    client.restack()
+
+    repo.assert_stacked("pr2", "pr1", ["pr2 c1"])
+    repo.assert_stacked("pr3", "pr2", ["pr3 c1"])
+
+
+def test_a_chain_rebase_that_was_aborted_changes_nothing_and_is_forgotten(repo: Repo, client: StackClient) -> None:
+    repo.make_stack()
+    before = {branch: (repo.git("rev-parse", branch), repo.config(branch, "stackBase")) for branch in ("pr2", "pr3")}
+    repo.git("switch", "--quiet", "pr1")
+    repo.commit("c", "pr1 change\n", "pr1 touches c")
+    with pytest.raises(StackError, match="restacking pr3 stopped on a conflict"):
+        client.restack()
+    repo.git("rebase", "--abort")
+    assert {branch: (repo.git("rev-parse", branch), repo.config(branch, "stackBase")) for branch in before} == before
+    # So restacking doesn't stop on the same conflict again.
+    repo.git("switch", "--quiet", "pr1")
+    repo.git("reset", "--quiet", "--hard", "HEAD~1")
+
+    client.restack()
+
+    repo.assert_stacked("pr2", "pr1", ["pr2 c1"])
+    assert not any(
+        key.startswith("branch.pr2.stackpending") for key in repo.git("config", "--list", "--name-only").split()
+    )
+
+
+def test_a_chain_finished_by_hand_records_each_base_even_if_a_branch_moved_on_before_git_stack_ran(
+    repo: Repo, client: StackClient
+) -> None:
+    repo.make_stack()
+    repo.git("switch", "--quiet", "pr1")
+    repo.commit("c", "pr1 change\n", "pr1 touches c")
+    with pytest.raises(StackError, match="restacking pr3 stopped on a conflict"):
+        client.restack()
+    repo.write("c", "resolved\n")
+    repo.git("add", "c")
+    assert continue_rebase(repo)
+    rebased_pr2 = repo.git("rev-parse", "pr2")
+
+    # A commit on pr2 before git-stack has seen the finished rebase: pr2's tip is no longer
+    # where pr3 was replayed onto.
+    repo.git("switch", "--quiet", "pr2")
+    repo.commit("a", "pr2 afterwards\n", "pr2 afterwards")
+
+    assert client.base("pr3") == rebased_pr2
+
+
+def test_a_chain_rebase_interrupted_while_stopped_is_recorded_so_it_can_be_finished_by_hand(
+    repo: Repo, client: StackClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo.make_stack()
+    repo.git("switch", "--quiet", "pr1")
+    repo.commit("c", "pr1 change\n", "pr1 touches c")
+    passthrough = GitClient.passthrough
+
+    def interrupted(self: GitClient, *args: str, **kwargs: object) -> bool:
+        """As if the user pressed Ctrl-C once the rebase had stopped on its conflict."""
+        passthrough(self, *args, **kwargs)  # type: ignore[arg-type]
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(GitClient, "passthrough", interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        client.restack()
+    monkeypatch.undo()
+    repo.write("c", "resolved\n")
+    repo.git("add", "c")
+    assert continue_rebase(repo)
+
+    assert client.base("pr3") == repo.git("rev-parse", "pr2")
+
+
+def test_a_branch_stacked_beside_a_chain_is_restacked_after_it(
+    repo: Repo, client: StackClient, git_calls: list[GitCall]
+) -> None:
+    repo.make_stack()
+    repo.git("switch", "--quiet", "pr1")
+    client.branch("pr2b")
+    repo.write("pr2b.txt", "pr2b\n")
+    repo.git("add", "pr2b.txt")
+    repo.git("commit", "--quiet", "-m", "pr2b c1")
+    repo.git("switch", "--quiet", "pr1")
+    repo.commit("a", "pr1 review fix\n", "pr1 review fix")
+    git_calls.clear()
+
+    client.restack()
+
+    # pr2 and pr3 in one rebase, and pr2b, which is on pr1 beside pr2, by itself.
+    assert len(rebase_commands(git_calls)) == 2
+    repo.assert_stacked("pr2", "pr1", ["pr2 c1"])
+    repo.assert_stacked("pr3", "pr2", ["pr3 c1"])
+    repo.assert_stacked("pr2b", "pr1", ["pr2b c1"])
+
+
+def test_a_chain_is_restacked_from_a_branch_in_the_middle_of_it(repo: Repo, client: StackClient) -> None:
+    repo.make_stack()
+    repo.git("switch", "--quiet", "pr1")
+    repo.commit("a", "pr1 review fix\n", "pr1 review fix")
+    # git doesn't move a branch that's checked out, so one in the chain that's where we are
+    # has to be left first, or its rebase is skipped and the ones above it are rebased without it.
+    repo.git("switch", "--quiet", "pr2")
+
+    client.restack()
+
+    repo.assert_stacked("pr2", "pr1", ["pr2 c1"])
+    repo.assert_stacked("pr3", "pr2", ["pr3 c1"])
+    assert repo.git("branch", "--show-current") == "pr2"
+
+
+def test_a_branch_pointing_into_a_chain_is_left_where_it_was(repo: Repo, client: StackClient) -> None:
+    repo.make_stack()
+    backup = repo.git("rev-parse", "pr2")
+    repo.git("branch", "pr2-backup", "pr2")
+    repo.git("switch", "--quiet", "pr1")
+    repo.commit("a", "pr1 review fix\n", "pr1 review fix")
+
+    client.restack()
+
+    # `git rebase --update-refs` would have moved it, which is no business of ours.
+    assert repo.git("rev-parse", "pr2-backup") == backup
+    repo.assert_stacked("pr2", "pr1", ["pr2 c1"])
+    repo.assert_stacked("pr3", "pr2", ["pr3 c1"])
+
+
+def test_a_chain_whose_first_branch_has_no_commits_of_its_own_is_restacked(repo: Repo, client: StackClient) -> None:
+    client.branch("empty")
+    client.branch("middle")
+    repo.commit("b", "middle\n", "middle c1")
+    client.branch("top")
+    repo.commit("c", "top\n", "top c1")
+    repo.git("switch", "--quiet", "main")
+    repo.commit("a", "main moved\n", "main moves")
+    repo.git("switch", "--quiet", "top")
+
+    client.restack(latest=True)
+
+    repo.git("merge-base", "--is-ancestor", "main", "top")  # fails the test if main isn't in top's history
+    repo.assert_stacked("middle", "empty", ["middle c1"])
+    repo.assert_stacked("top", "middle", ["top c1"])

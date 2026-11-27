@@ -71,9 +71,9 @@ holder's process ID (e.g. a token the lock file holds).
 ## Commands start processes for every branch, many of them one at a time
 
 The operation tests exercise stacks of 1, 3 and 10 branches. On the largest,
-an up-to-date `restack` starts three Git processes, `untrack` starts 32, and
-replaying the branches above a change takes 92. The replay and metadata writes
-still run one branch at a time.
+an up-to-date `restack` starts three Git processes, and replaying the branches
+above a change takes 26 (one rebase for the chain, and a `git config` to record
+each base), but `untrack` starts 32, one branch at a time.
 
 ## Syncing, importing and opening pull requests start many processes for a long stack
 

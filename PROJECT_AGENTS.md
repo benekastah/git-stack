@@ -96,6 +96,16 @@ GitHub-specific. The Git adapter never starts `gh`. Protected writes require
   The refresh commands order selected source stacks before the integration builds, then
   use the ordinary single-parent rebase path for the work above each integration.
   Local restack adds each integration's tracked sources and their ancestors to its selection.
+  `StackCore.restack_all` rebases branches that follow one another (`chain_to_restack`) with one
+  `git rebase --update-refs` of the last (`restack_chain`): git moves none of them until the rebase
+  finishes, so an abort changes nothing and one rebase resolves every conflict. Where each branch
+  was is recorded as `stackPendingRestackBatch`, "<its tip before> <its parent>", only if the
+  rebase stops or is interrupted (a parent's new tip isn't known until the rebase has made it), and
+  `batch_settlement` records the base, once the tip has changed, as where the branch now forks from
+  its parent (`merge-base`), which is the tip the parent was rebased to even if the parent has moved
+  on since. A branch git-stack can't put in a chain (merge commits, another worktree, no commits of its
+  own, another branch pointing into the range, which `--update-refs` would move) goes through
+  `restack_branch` one at a time.
   Restack consults GitHub merge evidence only with `--prs`. The initial PR lookup
   for restack, pull and sync, when enabled, is scoped to their selected work. Live push protection
   also checks PRs that target a ref being changed.

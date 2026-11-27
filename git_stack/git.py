@@ -222,7 +222,7 @@ class GitClient:
         self._listed_upstreams: frozenset[str] = frozenset()
         self._head: str | None = None
         self._worktrees: str | None = None
-        self._rebasing: dict[pathlib.Path, str | None] = {}
+        self._rebasing: dict[pathlib.Path, frozenset[str]] = {}
         self._reflogs: dict[str, tuple[str, ...]] = {}
         self._remote_defaults: dict[str, str | None] = {}
         self._push_defaults: dict[str, frozenset[str] | None] = {}
@@ -932,7 +932,7 @@ class GitClient:
             if line.startswith("worktree "):
                 path = pathlib.Path(line.removeprefix("worktree "))
             elif path is not None and (
-                line == f"branch refs/heads/{branch}" or (line == "detached" and self.rebasing_in(path) == branch)
+                line == f"branch refs/heads/{branch}" or (line == "detached" and branch in self.rebasing_in(path))
             ):
                 return path
         return None
@@ -946,9 +946,9 @@ class GitClient:
                 self._worktrees = self.run("worktree", "list", "--porcelain")
             return self._worktrees
 
-    def rebasing_in(self, worktree: pathlib.Path) -> str | None:
-        """The branch a rebase in progress in worktree is rebasing, if any,
-        found once per snapshot."""
+    def rebasing_in(self, worktree: pathlib.Path) -> frozenset[str]:
+        """The branches a rebase in progress in worktree is rebasing, or will move as it
+        passes them (`--update-refs`), if any, found once per snapshot."""
         rebasing = self._rebasing
         if self._snapshot_depth and worktree in rebasing:
             return rebasing[worktree]
@@ -959,17 +959,26 @@ class GitClient:
                 rebasing[worktree] = branch
         return branch
 
-    def _read_rebasing(self, worktree: pathlib.Path) -> str | None:
+    def _read_rebasing(self, worktree: pathlib.Path) -> frozenset[str]:
         git_dir = self.at(worktree).run("rev-parse", "--absolute-git-dir", check=False)
         if not git_dir:  # e.g. the worktree was deleted without `git worktree remove`
-            return None
+            return frozenset()
         for name in ("rebase-merge", "rebase-apply"):
+            directory = pathlib.Path(git_dir) / name
             try:
-                head = (pathlib.Path(git_dir) / name / "head-name").read_text(encoding="utf-8").strip()
+                head = (directory / "head-name").read_text(encoding="utf-8").strip()
             except OSError:
                 continue
-            return head.removeprefix("refs/heads/") if head.startswith("refs/heads/") else None
-        return None
+            branches: set[str] = {head} if head.startswith("refs/heads/") else set()
+            try:
+                # With --update-refs, three lines for each branch it moves as it passes: the ref,
+                # the commit it was at, and (once moved) where it is now.
+                lines = (directory / "update-refs").read_text(encoding="utf-8").splitlines()
+            except OSError:
+                lines = []
+            branches.update(line for line in lines if line.startswith("refs/heads/"))
+            return frozenset(branch.removeprefix("refs/heads/") for branch in branches)
+        return frozenset()
 
     def other_worktree_of(self, branch: str, *, fresh: bool = False) -> pathlib.Path | None:
         """The path of the worktree branch is checked out (or being rebased) in,
